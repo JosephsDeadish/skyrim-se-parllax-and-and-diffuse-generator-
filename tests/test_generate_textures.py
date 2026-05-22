@@ -24,6 +24,7 @@ from generate_textures import (
     generate_msn,
     generate_normal,
     generate_parallax,
+    generate_specular,
     recommend_generation_settings,
     run_batch_with_options,
     run_with_options,
@@ -86,6 +87,11 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(parallax.mode, "L")
         self.assertEqual(parallax.size, (8, 8))
 
+    def test_generate_parallax_produces_non_flat_height_map(self) -> None:
+        parallax = generate_parallax(_vertical_gradient_image(), strength=1.35)
+        values = set(parallax.tobytes())
+        self.assertGreater(len(values), 2)
+
     def test_generate_normal_returns_rgb_same_size(self) -> None:
         normal = generate_normal(_sample_image())
         self.assertEqual(normal.mode, "RGB")
@@ -99,6 +105,19 @@ class GenerateTexturesTests(unittest.TestCase):
         _, opengl_green, _ = opengl_normal.split()
         sample_coord = (12, 12)
         self.assertNotEqual(directx_green.getpixel(sample_coord), opengl_green.getpixel(sample_coord))
+
+    def test_generate_normal_defaults_to_directx_orientation(self) -> None:
+        gradient = _vertical_gradient_image()
+        default_normal = generate_normal(gradient, strength=1.0)
+        directx_normal = generate_normal(gradient, strength=1.0, directx=True)
+        self.assertEqual(default_normal.tobytes(), directx_normal.tobytes())
+
+    def test_generate_normal_blue_channel_stays_in_skyrim_safe_range(self) -> None:
+        gradient = _vertical_gradient_image()
+        normal = generate_normal(gradient, strength=2.0)
+        _, _, blue = normal.split()
+        minimum_blue, _ = blue.getextrema()
+        self.assertGreaterEqual(minimum_blue, 128)
 
     def test_generate_glow_returns_l_same_size(self) -> None:
         glow = generate_glow(_sample_image())
@@ -119,6 +138,16 @@ class GenerateTexturesTests(unittest.TestCase):
         msn = generate_msn(_sample_image())
         self.assertEqual(msn.mode, "RGBA")
         self.assertEqual(msn.size, (8, 8))
+
+    def test_generate_msn_rgb_matches_normal_and_alpha_matches_specular(self) -> None:
+        source = _vertical_gradient_image()
+        normal_strength = 1.8
+        specular_strength = 1.2
+        msn = generate_msn(source, normal_strength=normal_strength, specular_strength=specular_strength)
+        expected_normal = generate_normal(source, strength=normal_strength)
+        expected_specular = generate_specular(source, strength=specular_strength)
+        self.assertEqual(msn.split()[:3], expected_normal.split())
+        self.assertEqual(msn.split()[3].tobytes(), expected_specular.tobytes())
 
     def test_recommend_generation_settings_returns_valid_ranges(self) -> None:
         settings = recommend_generation_settings(_sample_image())

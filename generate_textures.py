@@ -737,6 +737,7 @@ if GUI_AVAILABLE:
 
             self.input_var = tk.StringVar()
             self.output_var = tk.StringVar()
+            self.use_custom_output_var = tk.BooleanVar(value=False)
             self.preview_source_name_var = tk.StringVar(value="No source loaded")
             self.normal_strength_var = tk.DoubleVar(value=2.0)
             self.parallax_strength_var = tk.DoubleVar(value=1.35)
@@ -795,10 +796,18 @@ if GUI_AVAILABLE:
             self.input_folder_button.grid(row=0, column=3, padx=4, pady=4)
 
             ttk.Label(file_frame, text="Output folder").grid(row=1, column=0, sticky=tk.W, pady=4)
-            ttk.Entry(file_frame, textvariable=self.output_var, width=80).grid(row=1, column=1, padx=6, pady=4, sticky=tk.EW)
+            self.output_entry = ttk.Entry(file_frame, textvariable=self.output_var, width=80)
+            self.output_entry.grid(row=1, column=1, padx=6, pady=4, sticky=tk.EW)
             self.output_button = ttk.Button(file_frame, text="Browse", command=self._pick_output)
             self.output_button.grid(row=1, column=2, padx=4, pady=4)
+            ttk.Checkbutton(
+                file_frame,
+                text="Use different output folder",
+                variable=self.use_custom_output_var,
+                command=self._toggle_custom_output_location,
+            ).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(2, 0))
             file_frame.columnconfigure(1, weight=1)
+            self._update_output_location_controls()
 
             options_frame = ttk.LabelFrame(wrapper, text="Generation Options", padding=10)
             options_frame.pack(fill=tk.X, padx=4, pady=4)
@@ -958,9 +967,34 @@ if GUI_AVAILABLE:
             self._load_input_selection(Path(selected))
 
         def _pick_output(self) -> None:
+            if not self.use_custom_output_var.get():
+                return
             selected = filedialog.askdirectory(title="Select output folder")
             if selected:
                 self.output_var.set(selected)
+
+        def _default_output_dir_for_path(self, path: Path) -> Path:
+            return path if path.is_dir() else path.parent
+
+        def _update_output_location_controls(self) -> None:
+            is_custom = self.use_custom_output_var.get()
+            can_edit = is_custom and not self.is_processing
+            self.output_entry.configure(state="normal" if can_edit else "disabled")
+            self.output_button.configure(state=tk.NORMAL if can_edit else tk.DISABLED)
+
+        def _toggle_custom_output_location(self) -> None:
+            input_value = self.input_var.get().strip()
+            if self.use_custom_output_var.get():
+                if not self.output_var.get().strip() and input_value:
+                    input_path = Path(input_value)
+                    self.output_var.set(str(self._default_output_dir_for_path(input_path)))
+                self.status_var.set("Custom output folder enabled.")
+            else:
+                if input_value:
+                    input_path = Path(input_value)
+                    self.output_var.set(str(self._default_output_dir_for_path(input_path)))
+                self.status_var.set("Output will be written next to the input.")
+            self._update_output_location_controls()
 
         def _load_input_selection(self, path: Path) -> None:
             try:
@@ -968,7 +1002,8 @@ if GUI_AVAILABLE:
                 self.selected_inputs = input_files
                 self.current_preview_index = 0
                 self._set_preview_source(0, apply_recommendations=True)
-                self.output_var.set(str(path if path.is_dir() else path.parent))
+                if not self.use_custom_output_var.get():
+                    self.output_var.set(str(self._default_output_dir_for_path(path)))
                 preview_path = self.selected_inputs[self.current_preview_index]
                 if path.is_dir():
                     self.status_var.set(
@@ -998,7 +1033,7 @@ if GUI_AVAILABLE:
             self.generate_button.configure(state=state)
             self.input_file_button.configure(state=state)
             self.input_folder_button.configure(state=state)
-            self.output_button.configure(state=state)
+            self._update_output_location_controls()
             self._update_preview_navigation_state()
 
         def _process_generation_batch(self, input_path: Path, generation_kwargs: dict[str, object]) -> None:
@@ -1251,8 +1286,16 @@ if GUI_AVAILABLE:
                 messagebox.showerror("Generation failed", str(exc))
                 return
 
+            output_dir: Path | None = None
+            if self.use_custom_output_var.get():
+                output_value = self.output_var.get().strip()
+                if not output_value:
+                    messagebox.showwarning("Missing output folder", "Choose an output folder or disable custom output location.")
+                    return
+                output_dir = Path(output_value)
+
             generation_kwargs = {
-                "output_dir": Path(self.output_var.get()) if self.output_var.get().strip() else None,
+                "output_dir": output_dir,
                 "normal_strength": self._resolve_generation_value(
                     self.normal_strength_var.get(), self.auto_normal_suggestion_var
                 ),

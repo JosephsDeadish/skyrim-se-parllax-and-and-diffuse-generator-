@@ -26,6 +26,7 @@ python generate_textures.py
 This opens a desktop interface where you can:
 - select one input texture or an entire folder of source DDS textures
 - pick an output folder
+- use a **Use different output folder** toggle to switch between writing beside the input or writing to a custom location
 - choose diffuse/normal/parallax/glow/environment mask/complex material outputs
 - preview the **Before** source image and all output types at once (diffuse/normal/parallax/glow/environment mask/complex)
 - tune normal/parallax/glow/environment mask/complex/specular strengths
@@ -78,6 +79,7 @@ Generated outputs default to `.dds` filenames regardless of the input format. Th
 
 - Normal map output (`*_n`) uses **DirectX-style tangent-space orientation** by default (green channel flipped vs OpenGL workflows), which is what Skyrim expects.
 - Neutral normal color remains centered around `RGB(128, 128, 255)` so flat areas stay visually flat in-game.
+- Parallax output (`*_p`) is generated as a grayscale height map (`L` mode), suitable for Skyrim SE parallax workflows.
 - `_msn` output still stores normal RGB with specular in alpha; `_cm` remains grayscale complex material.
 
 ## GitHub Actions
