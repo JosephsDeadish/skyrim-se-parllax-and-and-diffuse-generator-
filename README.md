@@ -27,7 +27,7 @@ This opens a desktop interface where you can:
 - select one input texture or an entire folder of source DDS textures
 - pick an output folder
 - choose diffuse/normal/parallax/glow/environment mask/complex material outputs
-- preview before/after output
+- preview the **Before** source image and all output types at once (diffuse/normal/parallax/glow/environment mask/complex)
 - tune normal/parallax/glow/environment mask/complex/specular strengths
 - scroll through all controls in smaller windows
 - auto-update output folder when a different input texture is selected
@@ -35,6 +35,7 @@ This opens a desktop interface where you can:
 - use a clearly labeled **Automatic suggestions (analyze image and set sliders)** toggle to turn auto slider updates on/off
 - use **Auto** checkboxes beside each slider to choose exactly which sliders receive automatic suggestions
 - batch-process folder inputs in the background so the UI stays responsive on larger files or larger sets
+- switch preview source images in folder mode, with automatic preview switching to the current file while batch processing
 - when a folder is selected, only process original `.dds` source textures and skip generated `_n`, `_p`, `_g`, `_m`, `_msn`, and `_cm` variants
 - continue processing remaining files in folder mode even if one file is corrupt/unreadable
 

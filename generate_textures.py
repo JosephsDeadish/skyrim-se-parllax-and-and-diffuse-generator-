@@ -727,8 +727,9 @@ if GUI_AVAILABLE:
             self.root.geometry("960x700")
             self.source_image: Image.Image | None = None
             self.preview_before: ImageTk.PhotoImage | None = None
-            self.preview_after: ImageTk.PhotoImage | None = None
+            self.preview_output_images: dict[str, ImageTk.PhotoImage] = {}
             self.selected_inputs: list[Path] = []
+            self.current_preview_index = 0
             self.batch_failures: list[tuple[str, str]] = []
             self.processing_thread: threading.Thread | None = None
             self.processing_queue: queue.Queue[tuple[str, object]] = queue.Queue()
@@ -736,6 +737,7 @@ if GUI_AVAILABLE:
 
             self.input_var = tk.StringVar()
             self.output_var = tk.StringVar()
+            self.preview_source_name_var = tk.StringVar(value="No source loaded")
             self.normal_strength_var = tk.DoubleVar(value=2.0)
             self.parallax_strength_var = tk.DoubleVar(value=1.35)
             self.complex_strength_var = tk.DoubleVar(value=1.15)
@@ -756,7 +758,6 @@ if GUI_AVAILABLE:
             self.include_glow_var = tk.BooleanVar(value=False)
             self.include_environment_mask_var = tk.BooleanVar(value=False)
             self.include_complex_var = tk.BooleanVar(value=False)
-            self.preview_mode_var = tk.StringVar(value="diffuse")
             self.status_var = tk.StringVar(value="Select a DDS file to begin.")
 
             self._set_app_icon()
@@ -861,33 +862,48 @@ if GUI_AVAILABLE:
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=9, column=3, sticky=tk.W, padx=8)
             ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_specular_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=9, column=4, sticky=tk.W)
 
-            ttk.Label(options_frame, text="Preview output").grid(row=10, column=0, sticky=tk.W, pady=8)
-            preview_mode = ttk.Combobox(
-                options_frame,
-                textvariable=self.preview_mode_var,
-                values=("diffuse", "normal", "parallax", "glow", "environment_mask", "complex_material"),
-                state="readonly",
-                width=20,
-            )
-            preview_mode.grid(row=10, column=1, sticky=tk.W)
-            preview_mode.bind("<<ComboboxSelected>>", lambda _: self._refresh_preview())
             options_frame.columnconfigure(2, weight=1)
             self._update_slider_auto_states()
 
             preview_frame = ttk.LabelFrame(wrapper, text="Preview", padding=10)
             preview_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-            self.before_label = ttk.Label(preview_frame, text="Before")
-            self.before_label.grid(row=0, column=0, padx=10, pady=4)
-            self.after_label = ttk.Label(preview_frame, text="After")
-            self.after_label.grid(row=0, column=1, padx=10, pady=4)
-
+            ttk.Label(preview_frame, text="Before").grid(row=0, column=0, columnspan=2, padx=10, pady=(2, 4))
             self.before_image_label = ttk.Label(preview_frame, text="No source loaded")
-            self.before_image_label.grid(row=1, column=0, padx=10, pady=8)
-            self.after_image_label = ttk.Label(preview_frame, text="No preview")
-            self.after_image_label.grid(row=1, column=1, padx=10, pady=8)
+            self.before_image_label.grid(row=1, column=0, columnspan=2, padx=10, pady=8)
+
+            source_controls = ttk.Frame(preview_frame)
+            source_controls.grid(row=2, column=0, columnspan=2, pady=(0, 8))
+            self.prev_source_button = ttk.Button(source_controls, text="◀ Prev", command=self._show_previous_preview_source)
+            self.prev_source_button.pack(side=tk.LEFT, padx=4)
+            ttk.Label(source_controls, textvariable=self.preview_source_name_var).pack(side=tk.LEFT, padx=8)
+            self.next_source_button = ttk.Button(source_controls, text="Next ▶", command=self._show_next_preview_source)
+            self.next_source_button.pack(side=tk.LEFT, padx=4)
+
+            self.preview_output_labels: dict[str, ttk.Label] = {}
+            output_grid = ttk.Frame(preview_frame)
+            output_grid.grid(row=3, column=0, columnspan=2, sticky=tk.NSEW)
+            output_specs = (
+                ("diffuse", "Diffuse"),
+                ("normal", "Normal"),
+                ("parallax", "Parallax"),
+                ("glow", "Glow"),
+                ("environment_mask", "Environment Mask"),
+                ("complex_material", "Complex Material"),
+            )
+            for index, (output_key, output_label) in enumerate(output_specs):
+                row = (index // 2) * 2
+                column = index % 2
+                ttk.Label(output_grid, text=output_label).grid(row=row, column=column, padx=10, pady=(4, 2))
+                label = ttk.Label(output_grid, text="No preview")
+                label.grid(row=row + 1, column=column, padx=10, pady=(0, 8))
+                self.preview_output_labels[output_key] = label
+
             preview_frame.columnconfigure(0, weight=1)
             preview_frame.columnconfigure(1, weight=1)
+            output_grid.columnconfigure(0, weight=1)
+            output_grid.columnconfigure(1, weight=1)
+            self._update_preview_navigation_state()
 
             actions = ttk.Frame(wrapper, padding=(4, 10))
             actions.pack(fill=tk.X)
@@ -949,12 +965,11 @@ if GUI_AVAILABLE:
         def _load_input_selection(self, path: Path) -> None:
             try:
                 input_files = collect_source_textures(path)
-                preview_path = input_files[0]
-                with Image.open(preview_path) as src:
-                    self.source_image = src.convert("RGB")
                 self.selected_inputs = input_files
+                self.current_preview_index = 0
+                self._set_preview_source(0, apply_recommendations=True)
                 self.output_var.set(str(path if path.is_dir() else path.parent))
-                self._apply_recommended_settings()
+                preview_path = self.selected_inputs[self.current_preview_index]
                 if path.is_dir():
                     self.status_var.set(
                         f"Loaded {len(input_files)} source DDS file(s) from {path.name}. Previewing {preview_path.name}."
@@ -967,6 +982,9 @@ if GUI_AVAILABLE:
             except Exception as exc:
                 self.source_image = None
                 self.selected_inputs = []
+                self.current_preview_index = 0
+                self.preview_source_name_var.set("No source loaded")
+                self._update_preview_navigation_state()
                 messagebox.showerror("Unable to open texture", str(exc))
 
         def _resolve_generation_value(self, current_value: float | int, auto_var: tk.BooleanVar) -> float | int | None:
@@ -981,13 +999,14 @@ if GUI_AVAILABLE:
             self.input_file_button.configure(state=state)
             self.input_folder_button.configure(state=state)
             self.output_button.configure(state=state)
+            self._update_preview_navigation_state()
 
         def _process_generation_batch(self, input_path: Path, generation_kwargs: dict[str, object]) -> None:
             try:
                 results = run_batch_with_options(
                     input_path=input_path,
                     progress_callback=lambda index, total, current: self.processing_queue.put(
-                        ("progress", (index, total, current.name))
+                        ("progress", (index, total, current))
                     ),
                     error_callback=lambda index, total, current, exc: self.processing_queue.put(
                         ("file_error", (index, total, current.name, str(exc)))
@@ -1008,8 +1027,9 @@ if GUI_AVAILABLE:
                     break
 
                 if event_type == "progress":
-                    index, total, filename = payload
-                    self.status_var.set(f"Processing {index}/{total}: {filename}")
+                    index, total, current_path = payload
+                    self.status_var.set(f"Processing {index}/{total}: {current_path.name}")
+                    self._set_preview_source_by_path(current_path)
                 elif event_type == "file_error":
                     index, total, filename, error_message = payload
                     self.batch_failures.append((filename, error_message))
@@ -1120,43 +1140,91 @@ if GUI_AVAILABLE:
             self.specular_strength_var.set(float(resolved["specular_strength"]))
             self._update_slider_auto_states()
 
-        def _photo_image(self, image: Image.Image, max_size: int = 340) -> ImageTk.PhotoImage:
+        def _photo_image(self, image: Image.Image, max_size: int = 260) -> ImageTk.PhotoImage:
             preview = image.copy()
             preview.thumbnail((max_size, max_size))
             if preview.mode != "RGB":
                 preview = preview.convert("RGB")
             return ImageTk.PhotoImage(preview)
 
+        def _set_preview_source(self, index: int, apply_recommendations: bool = False) -> None:
+            if not self.selected_inputs:
+                self.source_image = None
+                self.current_preview_index = 0
+                self.preview_source_name_var.set("No source loaded")
+                self._update_preview_navigation_state()
+                return
+            resolved_index = max(0, min(index, len(self.selected_inputs) - 1))
+            preview_path = self.selected_inputs[resolved_index]
+            with Image.open(preview_path) as src:
+                self.source_image = src.convert("RGB")
+            self.current_preview_index = resolved_index
+            if len(self.selected_inputs) > 1:
+                self.preview_source_name_var.set(
+                    f"{resolved_index + 1}/{len(self.selected_inputs)}: {preview_path.name}"
+                )
+            else:
+                self.preview_source_name_var.set(preview_path.name)
+            if apply_recommendations:
+                self._apply_recommended_settings()
+            self._update_preview_navigation_state()
+
+        def _set_preview_source_by_path(self, path: Path) -> None:
+            for index, selected in enumerate(self.selected_inputs):
+                if selected == path:
+                    self._set_preview_source(index, apply_recommendations=False)
+                    self._refresh_preview()
+                    return
+
+        def _show_previous_preview_source(self) -> None:
+            if not self.selected_inputs:
+                return
+            self._set_preview_source(self.current_preview_index - 1, apply_recommendations=False)
+            self._refresh_preview()
+
+        def _show_next_preview_source(self) -> None:
+            if not self.selected_inputs:
+                return
+            self._set_preview_source(self.current_preview_index + 1, apply_recommendations=False)
+            self._refresh_preview()
+
+        def _update_preview_navigation_state(self) -> None:
+            has_multiple = len(self.selected_inputs) > 1
+            can_navigate = has_multiple and not self.is_processing
+            state = tk.NORMAL if can_navigate else tk.DISABLED
+            self.prev_source_button.configure(state=state)
+            self.next_source_button.configure(state=state)
+
         def _refresh_preview(self) -> None:
             if self.source_image is None:
                 return
-            mode = self.preview_mode_var.get()
 
-            transformed = self.source_image
-            if mode == "diffuse":
-                transformed = generate_diffuse(self.source_image)
-            elif mode == "normal":
-                transformed = generate_normal(self.source_image, strength=self.normal_strength_var.get())
-            elif mode == "parallax":
-                transformed = generate_parallax(self.source_image, strength=self.parallax_strength_var.get())
-            elif mode == "glow":
-                transformed = generate_glow(self.source_image, threshold=self.glow_threshold_var.get())
-            elif mode == "environment_mask":
-                transformed = generate_environment_mask(self.source_image, strength=self.environment_mask_strength_var.get())
-            elif mode == "complex_material":
-                if self.complex_format_var.get() == "msn":
-                    transformed = generate_msn(
-                        self.source_image,
-                        normal_strength=self.normal_strength_var.get(),
-                        specular_strength=self.specular_strength_var.get(),
-                    )
-                else:
-                    transformed = generate_complex_material(self.source_image, strength=self.complex_strength_var.get())
+            complex_preview = (
+                generate_msn(
+                    self.source_image,
+                    normal_strength=self.normal_strength_var.get(),
+                    specular_strength=self.specular_strength_var.get(),
+                )
+                if self.complex_format_var.get() == "msn"
+                else generate_complex_material(self.source_image, strength=self.complex_strength_var.get())
+            )
+            outputs = {
+                "diffuse": generate_diffuse(self.source_image),
+                "normal": generate_normal(self.source_image, strength=self.normal_strength_var.get()),
+                "parallax": generate_parallax(self.source_image, strength=self.parallax_strength_var.get()),
+                "glow": generate_glow(self.source_image, threshold=self.glow_threshold_var.get()),
+                "environment_mask": generate_environment_mask(
+                    self.source_image, strength=self.environment_mask_strength_var.get()
+                ),
+                "complex_material": complex_preview,
+            }
 
-            self.preview_before = self._photo_image(self.source_image)
-            self.preview_after = self._photo_image(transformed)
+            self.preview_before = self._photo_image(self.source_image, max_size=300)
             self.before_image_label.configure(image=self.preview_before, text="")
-            self.after_image_label.configure(image=self.preview_after, text="")
+            for output_key, output_image in outputs.items():
+                photo = self._photo_image(output_image, max_size=220)
+                self.preview_output_images[output_key] = photo
+                self.preview_output_labels[output_key].configure(image=photo, text="")
 
         def _generate(self) -> None:
             input_value = self.input_var.get().strip()
