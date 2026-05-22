@@ -76,6 +76,16 @@ def _high_saturation_image() -> Image.Image:
     return Image.new("RGB", (24, 24), color=(245, 40, 40))
 
 
+def _large_high_detail_image() -> Image.Image:
+    image = Image.new("RGB", (512, 512))
+    pixels = image.load()
+    for y in range(512):
+        for x in range(512):
+            value = ((x * 37) + (y * 91) + ((x * y) % 251)) % 256
+            pixels[x, y] = (value, (value * 3) % 256, (255 - value))
+    return image
+
+
 class GenerateTexturesTests(unittest.TestCase):
     def test_generate_diffuse_returns_rgb_same_size(self) -> None:
         diffuse = generate_diffuse(_sample_image())
@@ -201,6 +211,7 @@ class GenerateTexturesTests(unittest.TestCase):
     def test_analyze_image_content_exposes_expected_metrics(self) -> None:
         metrics = analyze_image_content(_sample_image())
         for key in (
+            "megapixels",
             "brightness",
             "contrast",
             "edge_strength",
@@ -235,6 +246,18 @@ class GenerateTexturesTests(unittest.TestCase):
         low_saturation = recommend_generation_settings(_uniform_bright_image())
         high_saturation = recommend_generation_settings(_high_saturation_image())
         self.assertLess(int(high_saturation["glow_threshold"]), int(low_saturation["glow_threshold"]))
+
+    def test_recommend_generation_settings_dampens_highly_detailed_large_inputs(self) -> None:
+        settings = recommend_generation_settings(_large_high_detail_image())
+        self.assertLess(float(settings["parallax_strength"]), 2.2)
+        self.assertLess(float(settings["complex_strength"]), 2.5)
+        self.assertLess(float(settings["specular_strength"]), 2.1)
+
+    def test_generate_environment_mask_glossiness_stays_above_complex_parallax_floor(self) -> None:
+        environment_mask = generate_environment_mask(_large_high_detail_image(), strength=2.2)
+        _, glossiness, _, _ = environment_mask.split()
+        minimum, _ = glossiness.getextrema()
+        self.assertGreater(minimum, 4)
 
     def test_generate_glow_produces_graded_values_above_threshold(self) -> None:
         glow = generate_glow(_vertical_gradient_image(), threshold=180)

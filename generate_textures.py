@@ -68,6 +68,7 @@ def analyze_image_content(source: Image.Image) -> dict[str, float]:
     low_saturation_ratio = sum(saturation_histogram[:72]) / saturation_total
     p90_luma = _histogram_percentile(histogram, 0.90)
     color_variance = float(sum(rgb_stats.stddev) / 3.0)
+    megapixels = float((rgb_source.width * rgb_source.height) / 1_000_000.0)
 
     return {
         "brightness": float(grayscale_stats.mean[0]),
@@ -76,6 +77,7 @@ def analyze_image_content(source: Image.Image) -> dict[str, float]:
         "saturation_variance": float(saturation_stats.stddev[0]),
         "low_saturation_ratio": float(low_saturation_ratio),
         "color_variance": float(color_variance),
+        "megapixels": float(megapixels),
         "edge_strength": float(edge_stats.mean[0]),
         "edge_variance": float(edge_stats.stddev[0]),
         "detail_energy": float(detail_stats.mean[0]),
@@ -117,6 +119,10 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
     saturation_variance = analysis["saturation_variance"]
     low_saturation_ratio = analysis["low_saturation_ratio"]
     color_variance = analysis["color_variance"]
+    megapixels = analysis["megapixels"]
+    detail_guard = _clamp((detail_energy - 16.0) / 36.0, 0.0, 1.0)
+    size_guard = _clamp((megapixels - 1.0) / 6.0, 0.0, 1.0)
+    overdetail_guard = _clamp((detail_guard * 0.7) + (size_guard * 0.6), 0.0, 1.0)
 
     normal_strength = _clamp(
         1.1 + (edge_strength / 180.0) + (edge_variance / 220.0) + (detail_energy / 120.0) + (color_variance / 900.0),
@@ -162,6 +168,11 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
         0.9,
         2.2,
     )
+    normal_strength = _clamp(normal_strength * (1.0 - (overdetail_guard * 0.22)), 1.1, 3.8)
+    parallax_strength = _clamp(parallax_strength * (1.0 - (overdetail_guard * 0.28)), 0.8, 2.4)
+    environment_mask_strength = _clamp(environment_mask_strength * (1.0 - (overdetail_guard * 0.16)), 0.9, 2.4)
+    complex_strength = _clamp(complex_strength * (1.0 - (overdetail_guard * 0.2)), 1.0, 2.6)
+    specular_strength = _clamp(specular_strength * (1.0 - (overdetail_guard * 0.18)), 0.9, 2.2)
     glow_threshold = int(
         _clamp(
             (p90_luma * 0.78)
@@ -188,10 +199,22 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
 
 def _prepare_height_map(source: Image.Image) -> Image.Image:
     grayscale = ImageOps.grayscale(source)
-    broad = grayscale.filter(ImageFilter.GaussianBlur(radius=4.0))
-    fine = grayscale.filter(ImageFilter.UnsharpMask(radius=1.6, percent=180, threshold=2))
+    resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.6)
+    broad = grayscale.filter(ImageFilter.GaussianBlur(radius=4.0 * resolution_scale))
+    fine = grayscale.filter(
+        ImageFilter.UnsharpMask(
+            radius=1.2 + (resolution_scale * 0.45),
+            percent=170,
+            threshold=int(2 + (resolution_scale * 2)),
+        )
+    )
     detail = ImageChops.subtract(fine, broad, scale=1.0, offset=128)
-    merged = ImageChops.add(grayscale, detail, scale=1.55, offset=-36)
+    merged = ImageChops.add(
+        grayscale,
+        detail,
+        scale=_clamp(1.55 - ((resolution_scale - 1.0) * 0.18), 1.18, 1.55),
+        offset=int(_clamp(-36.0 + ((resolution_scale - 1.0) * 8.0), -36.0, -22.0)),
+    )
     return ImageOps.autocontrast(merged, cutoff=1)
 
 
@@ -199,16 +222,28 @@ def _lift_black_floor(image: Image.Image, floor: int = 16) -> Image.Image:
     return image.point(lambda value: int(_clamp(max(float(floor), float(value)), 0.0, 255.0)))
 
 
+def _detail_pressure(source: Image.Image) -> float:
+    grayscale = ImageOps.grayscale(source)
+    high_freq = ImageChops.difference(grayscale, grayscale.filter(ImageFilter.GaussianBlur(radius=1.2)))
+    return _clamp((float(ImageStat.Stat(high_freq).mean[0]) - 8.0) / 22.0, 0.0, 1.0)
+
+
 def generate_diffuse(source: Image.Image) -> Image.Image:
     return ImageOps.autocontrast(source.convert("RGB"), cutoff=1)
 
 
 def generate_parallax(source: Image.Image, strength: float = 1.35) -> Image.Image:
+    pressure = _detail_pressure(source)
     height_map = _prepare_height_map(source)
     softened = height_map.filter(ImageFilter.GaussianBlur(radius=1.2))
-    micro_detail = ImageChops.subtract(height_map, height_map.filter(ImageFilter.GaussianBlur(radius=8.0)), scale=1.0, offset=128)
-    merged = ImageChops.add(softened, micro_detail, scale=1.35, offset=-20)
-    contrasted = ImageEnhance.Contrast(merged).enhance(strength)
+    micro_detail = ImageChops.subtract(
+        height_map,
+        height_map.filter(ImageFilter.GaussianBlur(radius=8.0 + (pressure * 6.0))),
+        scale=1.0,
+        offset=128,
+    )
+    merged = ImageChops.add(softened, micro_detail, scale=1.35 - (pressure * 0.35), offset=int(-20 + (pressure * 10.0)))
+    contrasted = ImageEnhance.Contrast(merged).enhance(_clamp(strength * (1.0 - (pressure * 0.18)), 0.8, 2.4))
     return ImageOps.autocontrast(contrasted, cutoff=1)
 
 
@@ -218,7 +253,10 @@ def generate_normal(source: Image.Image, strength: float = 2.0, directx: bool = 
     if (source_max - source_min) <= 2:
         return Image.new("RGB", source.size, color=(128, 128, 255))
 
-    height_map = _prepare_height_map(source).filter(ImageFilter.GaussianBlur(radius=0.8))
+    pressure = _detail_pressure(source)
+    resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.8)
+    effective_strength = _clamp(strength * (1.0 - (pressure * 0.2)), 0.9, 3.8)
+    height_map = _prepare_height_map(source).filter(ImageFilter.GaussianBlur(radius=0.8 + (pressure * 0.9) + ((resolution_scale - 1.0) * 0.35)))
     sobel_x = height_map.filter(ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=8, offset=128))
     sobel_y = height_map.filter(ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=8, offset=128))
     green_sign = 1.0 if directx else -1.0
@@ -226,8 +264,8 @@ def generate_normal(source: Image.Image, strength: float = 2.0, directx: bool = 
     green_pixels: list[int] = []
     blue_pixels: list[int] = []
     for sobel_x_value, sobel_y_value in zip(sobel_x.tobytes(), sobel_y.tobytes()):
-        red_value = int(_clamp(128.0 - ((sobel_x_value - 128.0) * strength), 0.0, 255.0))
-        green_value = int(_clamp(128.0 + ((sobel_y_value - 128.0) * strength * green_sign), 0.0, 255.0))
+        red_value = int(_clamp(128.0 - ((sobel_x_value - 128.0) * effective_strength), 0.0, 255.0))
+        green_value = int(_clamp(128.0 + ((sobel_y_value - 128.0) * effective_strength * green_sign), 0.0, 255.0))
         normal_x = (float(red_value) - 128.0) / 127.0
         normal_y = (float(green_value) - 128.0) / 127.0
         horizontal_sq = (normal_x * normal_x) + (normal_y * normal_y)
@@ -298,13 +336,14 @@ def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Im
 
 
 def generate_specular(source: Image.Image, strength: float = 1.15) -> Image.Image:
+    pressure = _detail_pressure(source)
     grayscale = ImageOps.grayscale(source)
-    smoothed = grayscale.filter(ImageFilter.GaussianBlur(radius=0.8))
+    smoothed = grayscale.filter(ImageFilter.GaussianBlur(radius=0.8 + (pressure * 0.8)))
     edges = smoothed.filter(ImageFilter.FIND_EDGES)
-    base = ImageEnhance.Contrast(smoothed).enhance(1.2)
-    boosted_edges = ImageEnhance.Brightness(edges).enhance(0.7)
-    specular = ImageChops.add(base, boosted_edges, scale=1.35)
-    return ImageEnhance.Contrast(specular).enhance(strength)
+    base = ImageEnhance.Contrast(smoothed).enhance(1.2 - (pressure * 0.15))
+    boosted_edges = ImageEnhance.Brightness(edges).enhance(0.7 - (pressure * 0.25))
+    specular = ImageChops.add(base, boosted_edges, scale=1.35 + (pressure * 0.15))
+    return ImageEnhance.Contrast(specular).enhance(_clamp(strength * (1.0 - (pressure * 0.15)), 0.9, 2.2))
 
 
 def generate_msn(source: Image.Image, normal_strength: float = 2.0, specular_strength: float = 1.15) -> Image.Image:

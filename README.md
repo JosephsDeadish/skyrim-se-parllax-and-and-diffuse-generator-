@@ -85,6 +85,7 @@ Generated outputs default to `.dds` filenames regardless of the input format. Th
   - **G**: glossiness (kept above compression-black thresholds)
   - **B**: metallic proxy
   - **A**: parallax height
+- For large/high-detail sources, generation now applies adaptive detail dampening to reduce over-sharpened normals/parallax and complex-material sparkle artifacts.
 - `_msn` output stores normal RGB with specular in alpha; `_cm` remains grayscale complex material.
 
 ## GitHub Actions
