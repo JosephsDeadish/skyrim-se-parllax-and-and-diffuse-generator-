@@ -6,6 +6,7 @@ from PIL import Image
 
 from generate_textures import (
     analyze_image_content,
+    apply_recommendations_by_auto_flags,
     build_complex_output_path,
     build_environment_mask_output_path,
     build_glow_output_path,
@@ -38,6 +39,19 @@ def _detailed_bright_image() -> Image.Image:
         for x in range(16):
             v = 245 if (x + y) % 2 == 0 else 35
             pixels[x, y] = (v, v, v)
+    return image
+
+
+def _uniform_bright_image() -> Image.Image:
+    return Image.new("RGB", (24, 24), color=(220, 220, 220))
+
+
+def _sparse_highlight_image() -> Image.Image:
+    image = Image.new("RGB", (24, 24), color=(20, 20, 20))
+    pixels = image.load()
+    for y in range(0, 24, 6):
+        for x in range(0, 24, 6):
+            pixels[x, y] = (255, 255, 255)
     return image
 
 
@@ -100,7 +114,9 @@ class GenerateTexturesTests(unittest.TestCase):
             "dynamic_range",
             "shadow_ratio",
             "highlight_ratio",
+            "bright_cluster_ratio",
             "midtone_ratio",
+            "p90_luma",
         ):
             self.assertIn(key, metrics)
 
@@ -110,6 +126,36 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertNotEqual(int(flat_dark["glow_threshold"]), int(detailed_bright["glow_threshold"]))
         self.assertNotEqual(float(flat_dark["normal_strength"]), float(detailed_bright["normal_strength"]))
         self.assertNotEqual(float(flat_dark["specular_strength"]), float(detailed_bright["specular_strength"]))
+
+    def test_recommend_generation_settings_glow_handles_sparse_highlights(self) -> None:
+        uniform = recommend_generation_settings(_uniform_bright_image())
+        sparse = recommend_generation_settings(_sparse_highlight_image())
+        self.assertGreater(int(uniform["glow_threshold"]), int(sparse["glow_threshold"]))
+
+    def test_apply_recommendations_by_auto_flags_applies_only_checked_values(self) -> None:
+        current = {
+            "normal_strength": 1.5,
+            "parallax_strength": 1.3,
+            "glow_threshold": 180,
+            "environment_mask_strength": 1.2,
+        }
+        recommended = {
+            "normal_strength": 2.4,
+            "parallax_strength": 2.0,
+            "glow_threshold": 210,
+            "environment_mask_strength": 1.8,
+        }
+        auto_flags = {
+            "normal_strength": True,
+            "parallax_strength": False,
+            "glow_threshold": True,
+            "environment_mask_strength": False,
+        }
+        merged = apply_recommendations_by_auto_flags(current=current, recommended=recommended, auto_flags=auto_flags)
+        self.assertEqual(float(merged["normal_strength"]), 2.4)
+        self.assertEqual(float(merged["parallax_strength"]), 1.3)
+        self.assertEqual(int(merged["glow_threshold"]), 210)
+        self.assertEqual(float(merged["environment_mask_strength"]), 1.2)
 
     def test_build_output_paths_uses_skyrim_default_names_and_extension(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

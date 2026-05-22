@@ -22,6 +22,16 @@ def _clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
 
 
+def _histogram_percentile(histogram: list[int], percentile: float) -> float:
+    target = (sum(histogram) * _clamp(percentile, 0.0, 1.0)) or 1.0
+    cumulative = 0
+    for value, count in enumerate(histogram):
+        cumulative += count
+        if cumulative >= target:
+            return float(value)
+    return float(len(histogram) - 1)
+
+
 def analyze_image_content(source: Image.Image) -> dict[str, float]:
     grayscale = ImageOps.grayscale(source)
     edges = grayscale.filter(ImageFilter.FIND_EDGES)
@@ -36,7 +46,9 @@ def analyze_image_content(source: Image.Image) -> dict[str, float]:
     total_pixels = float(sum(histogram)) or 1.0
     shadow_ratio = sum(histogram[:48]) / total_pixels
     highlight_ratio = sum(histogram[208:]) / total_pixels
+    bright_cluster_ratio = sum(histogram[230:]) / total_pixels
     midtone_ratio = sum(histogram[80:176]) / total_pixels
+    p90_luma = _histogram_percentile(histogram, 0.90)
 
     return {
         "brightness": float(grayscale_stats.mean[0]),
@@ -47,8 +59,22 @@ def analyze_image_content(source: Image.Image) -> dict[str, float]:
         "dynamic_range": float(maximum - minimum),
         "shadow_ratio": float(shadow_ratio),
         "highlight_ratio": float(highlight_ratio),
+        "bright_cluster_ratio": float(bright_cluster_ratio),
         "midtone_ratio": float(midtone_ratio),
+        "p90_luma": float(p90_luma),
     }
+
+
+def apply_recommendations_by_auto_flags(
+    current: dict[str, float | int],
+    recommended: dict[str, float | int],
+    auto_flags: dict[str, bool],
+) -> dict[str, float | int]:
+    merged = dict(current)
+    for key, enabled in auto_flags.items():
+        if enabled and key in recommended:
+            merged[key] = recommended[key]
+    return merged
 
 
 def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]:
@@ -61,7 +87,9 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
     dynamic_range = analysis["dynamic_range"]
     shadow_ratio = analysis["shadow_ratio"]
     highlight_ratio = analysis["highlight_ratio"]
+    bright_cluster_ratio = analysis["bright_cluster_ratio"]
     midtone_ratio = analysis["midtone_ratio"]
+    p90_luma = analysis["p90_luma"]
 
     normal_strength = _clamp(
         1.1 + (edge_strength / 180.0) + (edge_variance / 220.0) + (detail_energy / 120.0),
@@ -90,7 +118,12 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
     )
     glow_threshold = int(
         _clamp(
-            150.0 + brightness * 0.27 + contrast * 0.15 + (highlight_ratio * 35.0),
+            (p90_luma * 0.78)
+            + (brightness * 0.2)
+            + (contrast * 0.25)
+            + (highlight_ratio * 18.0)
+            - (bright_cluster_ratio * 30.0)
+            - (detail_energy * 0.12),
             140.0,
             235.0,
         )
@@ -485,6 +518,12 @@ if GUI_AVAILABLE:
             self.environment_mask_strength_var = tk.DoubleVar(value=1.2)
             self.complex_format_var = tk.StringVar(value="msn")
             self.auto_suggestions_var = tk.BooleanVar(value=True)
+            self.auto_normal_suggestion_var = tk.BooleanVar(value=True)
+            self.auto_parallax_suggestion_var = tk.BooleanVar(value=True)
+            self.auto_glow_suggestion_var = tk.BooleanVar(value=True)
+            self.auto_environment_mask_suggestion_var = tk.BooleanVar(value=True)
+            self.auto_complex_suggestion_var = tk.BooleanVar(value=True)
+            self.auto_specular_suggestion_var = tk.BooleanVar(value=True)
             self.include_diffuse_var = tk.BooleanVar(value=True)
             self.include_normal_var = tk.BooleanVar(value=True)
             self.include_parallax_var = tk.BooleanVar(value=True)
@@ -559,28 +598,40 @@ if GUI_AVAILABLE:
             complex_format.grid(row=3, column=1, sticky=tk.W)
 
             ttk.Label(options_frame, text="Normal strength").grid(row=4, column=0, sticky=tk.W, pady=8)
-            ttk.Scale(options_frame, from_=0.5, to=4.0, variable=self.normal_strength_var, command=lambda _: self._refresh_preview()).grid(row=4, column=1, columnspan=2, sticky=tk.EW)
+            self.normal_scale = ttk.Scale(options_frame, from_=0.5, to=4.0, variable=self.normal_strength_var, command=lambda _: self._refresh_preview())
+            self.normal_scale.grid(row=4, column=1, columnspan=2, sticky=tk.EW)
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 4.0")).grid(row=4, column=3, sticky=tk.W, padx=8)
+            ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_normal_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=4, column=4, sticky=tk.W)
 
             ttk.Label(options_frame, text="Parallax strength").grid(row=5, column=0, sticky=tk.W, pady=8)
-            ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.parallax_strength_var, command=lambda _: self._refresh_preview()).grid(row=5, column=1, columnspan=2, sticky=tk.EW)
+            self.parallax_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.parallax_strength_var, command=lambda _: self._refresh_preview())
+            self.parallax_scale.grid(row=5, column=1, columnspan=2, sticky=tk.EW)
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=5, column=3, sticky=tk.W, padx=8)
+            ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_parallax_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=5, column=4, sticky=tk.W)
 
             ttk.Label(options_frame, text="Glow threshold").grid(row=6, column=0, sticky=tk.W, pady=8)
-            ttk.Scale(options_frame, from_=0, to=255, variable=self.glow_threshold_var, command=lambda _: self._refresh_preview()).grid(row=6, column=1, columnspan=2, sticky=tk.EW)
+            self.glow_scale = ttk.Scale(options_frame, from_=0, to=255, variable=self.glow_threshold_var, command=lambda _: self._refresh_preview())
+            self.glow_scale.grid(row=6, column=1, columnspan=2, sticky=tk.EW)
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0 - 255")).grid(row=6, column=3, sticky=tk.W, padx=8)
+            ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_glow_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=6, column=4, sticky=tk.W)
 
             ttk.Label(options_frame, text="Environment mask strength").grid(row=7, column=0, sticky=tk.W, pady=8)
-            ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.environment_mask_strength_var, command=lambda _: self._refresh_preview()).grid(row=7, column=1, columnspan=2, sticky=tk.EW)
+            self.environment_mask_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.environment_mask_strength_var, command=lambda _: self._refresh_preview())
+            self.environment_mask_scale.grid(row=7, column=1, columnspan=2, sticky=tk.EW)
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=7, column=3, sticky=tk.W, padx=8)
+            ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_environment_mask_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=7, column=4, sticky=tk.W)
 
             ttk.Label(options_frame, text="Complex strength").grid(row=8, column=0, sticky=tk.W, pady=8)
-            ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.complex_strength_var, command=lambda _: self._refresh_preview()).grid(row=8, column=1, columnspan=2, sticky=tk.EW)
+            self.complex_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.complex_strength_var, command=lambda _: self._refresh_preview())
+            self.complex_scale.grid(row=8, column=1, columnspan=2, sticky=tk.EW)
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=8, column=3, sticky=tk.W, padx=8)
+            ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_complex_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=8, column=4, sticky=tk.W)
 
             ttk.Label(options_frame, text="Specular strength (_msn alpha)").grid(row=9, column=0, sticky=tk.W, pady=8)
-            ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.specular_strength_var, command=lambda _: self._refresh_preview()).grid(row=9, column=1, columnspan=2, sticky=tk.EW)
+            self.specular_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.specular_strength_var, command=lambda _: self._refresh_preview())
+            self.specular_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=9, column=3, sticky=tk.W, padx=8)
+            ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_specular_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=9, column=4, sticky=tk.W)
 
             ttk.Label(options_frame, text="Preview output").grid(row=10, column=0, sticky=tk.W, pady=8)
             preview_mode = ttk.Combobox(
@@ -593,6 +644,7 @@ if GUI_AVAILABLE:
             preview_mode.grid(row=10, column=1, sticky=tk.W)
             preview_mode.bind("<<ComboboxSelected>>", lambda _: self._refresh_preview())
             options_frame.columnconfigure(2, weight=1)
+            self._update_slider_auto_states()
 
             preview_frame = ttk.LabelFrame(wrapper, text="Preview", padding=10)
             preview_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
@@ -662,23 +714,74 @@ if GUI_AVAILABLE:
 
         def _toggle_auto_suggestions(self) -> None:
             if self.auto_suggestions_var.get():
+                self._set_all_auto_slider_flags(True)
                 self._apply_recommended_settings()
                 if self.source_image is not None:
-                    self.status_var.set("Automatic suggestions enabled. Sliders updated for current image.")
+                    self.status_var.set("Automatic suggestions enabled for all sliders. Uncheck any Auto box to keep manual values.")
             else:
                 self.status_var.set("Automatic suggestions disabled. Manual slider values will be kept.")
+            self._update_slider_auto_states()
             self._refresh_preview()
+
+        def _set_all_auto_slider_flags(self, value: bool) -> None:
+            self.auto_normal_suggestion_var.set(value)
+            self.auto_parallax_suggestion_var.set(value)
+            self.auto_glow_suggestion_var.set(value)
+            self.auto_environment_mask_suggestion_var.set(value)
+            self.auto_complex_suggestion_var.set(value)
+            self.auto_specular_suggestion_var.set(value)
+
+        def _on_auto_slider_preference_changed(self) -> None:
+            self._update_slider_auto_states()
+            if self.auto_suggestions_var.get():
+                self._apply_recommended_settings()
+                self.status_var.set("Automatic suggestions updated for checked sliders.")
+            self._refresh_preview()
+
+        def _update_slider_auto_states(self) -> None:
+            auto_enabled = self.auto_suggestions_var.get()
+            slider_specs = (
+                (self.normal_scale, self.auto_normal_suggestion_var),
+                (self.parallax_scale, self.auto_parallax_suggestion_var),
+                (self.glow_scale, self.auto_glow_suggestion_var),
+                (self.environment_mask_scale, self.auto_environment_mask_suggestion_var),
+                (self.complex_scale, self.auto_complex_suggestion_var),
+                (self.specular_scale, self.auto_specular_suggestion_var),
+            )
+            for slider, auto_var in slider_specs:
+                if auto_enabled and auto_var.get():
+                    slider.configure(state=tk.DISABLED)
+                else:
+                    slider.configure(state=tk.NORMAL)
 
         def _apply_recommended_settings(self) -> None:
             if self.source_image is None or not self.auto_suggestions_var.get():
                 return
             recommended = recommend_generation_settings(self.source_image)
-            self.normal_strength_var.set(float(recommended["normal_strength"]))
-            self.parallax_strength_var.set(float(recommended["parallax_strength"]))
-            self.glow_threshold_var.set(int(recommended["glow_threshold"]))
-            self.environment_mask_strength_var.set(float(recommended["environment_mask_strength"]))
-            self.complex_strength_var.set(float(recommended["complex_strength"]))
-            self.specular_strength_var.set(float(recommended["specular_strength"]))
+            current = {
+                "normal_strength": float(self.normal_strength_var.get()),
+                "parallax_strength": float(self.parallax_strength_var.get()),
+                "glow_threshold": int(self.glow_threshold_var.get()),
+                "environment_mask_strength": float(self.environment_mask_strength_var.get()),
+                "complex_strength": float(self.complex_strength_var.get()),
+                "specular_strength": float(self.specular_strength_var.get()),
+            }
+            auto_flags = {
+                "normal_strength": self.auto_normal_suggestion_var.get(),
+                "parallax_strength": self.auto_parallax_suggestion_var.get(),
+                "glow_threshold": self.auto_glow_suggestion_var.get(),
+                "environment_mask_strength": self.auto_environment_mask_suggestion_var.get(),
+                "complex_strength": self.auto_complex_suggestion_var.get(),
+                "specular_strength": self.auto_specular_suggestion_var.get(),
+            }
+            resolved = apply_recommendations_by_auto_flags(current=current, recommended=recommended, auto_flags=auto_flags)
+            self.normal_strength_var.set(float(resolved["normal_strength"]))
+            self.parallax_strength_var.set(float(resolved["parallax_strength"]))
+            self.glow_threshold_var.set(int(resolved["glow_threshold"]))
+            self.environment_mask_strength_var.set(float(resolved["environment_mask_strength"]))
+            self.complex_strength_var.set(float(resolved["complex_strength"]))
+            self.specular_strength_var.set(float(resolved["specular_strength"]))
+            self._update_slider_auto_states()
 
         def _photo_image(self, image: Image.Image, max_size: int = 340) -> ImageTk.PhotoImage:
             preview = image.copy()

@@ -33,6 +33,7 @@ This opens a desktop interface where you can:
 - auto-update output folder when a different input texture is selected
 - get adaptive recommended defaults based on richer image-content analysis
 - use a clearly labeled **Automatic suggestions (analyze image and set sliders)** toggle to turn auto slider updates on/off
+- use **Auto** checkboxes beside each slider to choose exactly which sliders receive automatic suggestions
 
 ### Command line
 
