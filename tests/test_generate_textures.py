@@ -119,6 +119,21 @@ class GenerateTexturesTests(unittest.TestCase):
         minimum_blue, _ = blue.getextrema()
         self.assertGreaterEqual(minimum_blue, 128)
 
+    def test_generate_normal_flat_surface_stays_near_neutral(self) -> None:
+        normal = generate_normal(_flat_dark_image(), strength=2.0)
+        red, green, blue = normal.split()
+        red_min, red_max = red.getextrema()
+        green_min, green_max = green.getextrema()
+        blue_min, blue_max = blue.getextrema()
+        self.assertLessEqual(red_max - red_min, 4)
+        self.assertLessEqual(green_max - green_min, 4)
+        self.assertLessEqual(blue_max - blue_min, 4)
+        self.assertGreaterEqual(red.getpixel((8, 8)), 120)
+        self.assertLessEqual(red.getpixel((8, 8)), 136)
+        self.assertGreaterEqual(green.getpixel((8, 8)), 120)
+        self.assertLessEqual(green.getpixel((8, 8)), 136)
+        self.assertGreaterEqual(blue.getpixel((8, 8)), 245)
+
     def test_generate_glow_returns_l_same_size(self) -> None:
         glow = generate_glow(_sample_image())
         self.assertEqual(glow.mode, "L")

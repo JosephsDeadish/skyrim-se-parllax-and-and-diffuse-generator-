@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import queue
 import sys
@@ -207,20 +208,30 @@ def generate_parallax(source: Image.Image, strength: float = 1.35) -> Image.Imag
 
 def generate_normal(source: Image.Image, strength: float = 2.0, directx: bool = True) -> Image.Image:
     height_map = _prepare_height_map(source).filter(ImageFilter.GaussianBlur(radius=0.8))
-    sobel_x = height_map.filter(ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=1, offset=128))
-    sobel_y = height_map.filter(ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=1, offset=128))
-    red = sobel_x.point(lambda value: int(_clamp(128.0 - ((value - 128.0) * strength), 0.0, 255.0)))
+    sobel_x = height_map.filter(ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=8, offset=128))
+    sobel_y = height_map.filter(ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=8, offset=128))
     green_sign = 1.0 if directx else -1.0
-    green = sobel_y.point(
-        lambda value: int(_clamp(128.0 + ((value - 128.0) * strength * green_sign), 0.0, 255.0))
-    )
-    midpoint = Image.new("L", height_map.size, color=128)
-    slope = ImageChops.add(
-        ImageChops.difference(red, midpoint),
-        ImageChops.difference(green, midpoint),
-        scale=max(1.0, 1.35 + (strength * 0.3)),
-    )
-    blue = ImageOps.invert(slope).point(lambda value: int(_clamp(max(128.0, value), 0.0, 255.0)))
+    red_pixels: list[int] = []
+    green_pixels: list[int] = []
+    blue_pixels: list[int] = []
+    for sobel_x_value, sobel_y_value in zip(sobel_x.getdata(), sobel_y.getdata()):
+        red_value = int(_clamp(128.0 - ((sobel_x_value - 128.0) * strength), 0.0, 255.0))
+        green_value = int(_clamp(128.0 + ((sobel_y_value - 128.0) * strength * green_sign), 0.0, 255.0))
+        normal_x = (float(red_value) - 128.0) / 127.0
+        normal_y = (float(green_value) - 128.0) / 127.0
+        horizontal_sq = (normal_x * normal_x) + (normal_y * normal_y)
+        normal_z = math.sqrt(max(0.0, 1.0 - min(1.0, horizontal_sq)))
+        blue_value = int(_clamp(128.0 + (normal_z * 127.0), 128.0, 255.0))
+        red_pixels.append(red_value)
+        green_pixels.append(green_value)
+        blue_pixels.append(blue_value)
+
+    red = Image.new("L", height_map.size)
+    red.putdata(red_pixels)
+    green = Image.new("L", height_map.size)
+    green.putdata(green_pixels)
+    blue = Image.new("L", height_map.size)
+    blue.putdata(blue_pixels)
     return Image.merge("RGB", (red, green, blue))
 
 
