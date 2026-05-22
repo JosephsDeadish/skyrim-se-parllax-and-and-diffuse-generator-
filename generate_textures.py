@@ -173,7 +173,7 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
     parallax_strength = _clamp(parallax_strength * (1.0 - (overdetail_guard * 0.28)), 0.8, 2.4)
     environment_mask_strength = _clamp(environment_mask_strength * (1.0 - (overdetail_guard * 0.16)), 0.9, 2.4)
     complex_strength = _clamp(complex_strength * (1.0 - (overdetail_guard * 0.2)), 1.0, 2.6)
-    specular_strength = _clamp(specular_strength * (1.0 - (overdetail_guard * 0.18)), 0.9, 2.2)
+    specular_strength = _clamp(specular_strength * (1.0 - (overdetail_guard * 0.24)), 0.9, 2.2)
     glow_threshold = int(
         _clamp(
             (p90_luma * 0.78)
@@ -337,14 +337,23 @@ def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Im
 
 
 def generate_specular(source: Image.Image, strength: float = 1.15) -> Image.Image:
-    pressure = _detail_pressure(source)
     grayscale = ImageOps.grayscale(source)
-    smoothed = grayscale.filter(ImageFilter.GaussianBlur(radius=0.8 + (pressure * 0.8)))
-    edges = smoothed.filter(ImageFilter.FIND_EDGES)
-    base = ImageEnhance.Contrast(smoothed).enhance(1.2 - (pressure * 0.15))
-    boosted_edges = ImageEnhance.Brightness(edges).enhance(0.7 - (pressure * 0.25))
-    specular = ImageChops.add(base, boosted_edges, scale=1.35 + (pressure * 0.15))
-    return ImageEnhance.Contrast(specular).enhance(_clamp(strength * (1.0 - (pressure * 0.15)), 0.9, 2.2))
+    grayscale_min, grayscale_max = grayscale.getextrema()
+    if (grayscale_max - grayscale_min) <= 2:
+        return _lift_black_floor(grayscale, floor=8)
+
+    pressure = _detail_pressure(source)
+    base_blur_radius = 1.0 + (pressure * 1.0)
+    broad_blur_radius = 2.4 + (pressure * 1.4)
+    smoothed = grayscale.filter(ImageFilter.GaussianBlur(radius=base_blur_radius))
+    local_detail = ImageChops.difference(grayscale, grayscale.filter(ImageFilter.GaussianBlur(radius=broad_blur_radius)))
+    base = ImageEnhance.Contrast(smoothed).enhance(1.08 - (pressure * 0.1))
+    detail_boost = ImageEnhance.Brightness(local_detail).enhance(0.55 - (pressure * 0.2))
+    specular = ImageChops.add(base, detail_boost, scale=1.45 + (pressure * 0.2), offset=4)
+    softened = specular.filter(ImageFilter.MedianFilter(size=3)).filter(ImageFilter.GaussianBlur(radius=0.6))
+    contrasted = ImageEnhance.Contrast(softened).enhance(_clamp(strength * (1.0 - (pressure * 0.18)), 0.9, 2.2))
+    normalized = ImageOps.autocontrast(contrasted, cutoff=1)
+    return _lift_black_floor(normalized, floor=8)
 
 
 def generate_msn(source: Image.Image, normal_strength: float = 2.0, specular_strength: float = 1.15) -> Image.Image:
