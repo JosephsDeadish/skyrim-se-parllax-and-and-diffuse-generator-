@@ -1260,5 +1260,24 @@ def main() -> int:
     return 0
 
 
+def _run_cli() -> int:
+    try:
+        return main()
+    except RuntimeError as exc:
+        message = str(exc)
+        if message == "GUI dependencies are unavailable in this environment.":
+            print(
+                "Error: GUI dependencies are unavailable in this environment. "
+                "Install tkinter support or provide an input file to run in CLI mode.",
+                file=sys.stderr,
+            )
+            return 1
+        print(f"Error: {message}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(_run_cli())

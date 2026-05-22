@@ -1,12 +1,14 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from PIL import Image
 
 from generate_textures import (
     PATREON_URL,
     _create_panda_icon_image,
+    _run_cli,
     analyze_image_content,
     apply_recommendations_by_auto_flags,
     build_complex_output_path,
@@ -438,6 +440,20 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_patreon_url_is_correct(self) -> None:
         self.assertEqual(PATREON_URL, "https://www.patreon.com/cw/DeadOnTheInside")
+
+    def test_run_cli_handles_missing_gui_dependencies_without_traceback(self) -> None:
+        with mock.patch("generate_textures.main", side_effect=RuntimeError("GUI dependencies are unavailable in this environment.")):
+            with mock.patch("sys.stderr") as mock_stderr:
+                exit_code = _run_cli()
+        self.assertEqual(exit_code, 1)
+        self.assertIn("GUI dependencies are unavailable", "".join(call.args[0] for call in mock_stderr.write.call_args_list))
+
+    def test_run_cli_handles_generic_runtime_error(self) -> None:
+        with mock.patch("generate_textures.main", side_effect=RuntimeError("boom")):
+            with mock.patch("sys.stderr") as mock_stderr:
+                exit_code = _run_cli()
+        self.assertEqual(exit_code, 1)
+        self.assertIn("Error: boom", "".join(call.args[0] for call in mock_stderr.write.call_args_list))
 
 
 if __name__ == "__main__":
