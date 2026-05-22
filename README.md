@@ -24,7 +24,7 @@ python generate_textures.py
 ```
 
 This opens a desktop interface where you can:
-- select input DDS texture
+- select one input texture or an entire folder of source DDS textures
 - pick an output folder
 - choose diffuse/normal/parallax/glow/environment mask/complex material outputs
 - preview before/after output
@@ -34,6 +34,8 @@ This opens a desktop interface where you can:
 - get adaptive recommended defaults based on richer image-content analysis
 - use a clearly labeled **Automatic suggestions (analyze image and set sliders)** toggle to turn auto slider updates on/off
 - use **Auto** checkboxes beside each slider to choose exactly which sliders receive automatic suggestions
+- batch-process folder inputs in the background so the UI stays responsive on larger files or larger sets
+- when a folder is selected, only process original `.dds` source textures and skip generated `_n`, `_p`, `_g`, `_m`, `_msn`, and `_cm` variants
 
 ### Command line
 
@@ -42,6 +44,8 @@ python generate_textures.py /path/to/input.dds --output-dir ./output --complex-m
 ```
 
 Optional arguments:
+
+- positional input may also be a folder; folder mode processes only original `.dds` source textures and skips generated `_n`, `_p`, `_g`, `_m`, `_msn`, and `_cm` variants
 
 - `--diffuse-name` (default: `<input_stem>`, e.g. `stonewall.dds`)
 - `--normal-name` (default: `<input_stem>_n`, e.g. `stonewall_n.dds`)

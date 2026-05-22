@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import queue
+import threading
 from pathlib import Path
+from typing import Callable
 
 from PIL import Image, ImageChops, ImageEnhance, ImageFilter, ImageOps, ImageStat
 
@@ -16,6 +19,8 @@ except Exception:
 
 
 DDS_EXTENSION = ".dds"
+SUPPORTED_INPUT_EXTENSIONS = {DDS_EXTENSION, ".png", ".jpg", ".jpeg", ".tga", ".bmp"}
+GENERATED_TEXTURE_SUFFIXES = ("_msn", "_cm", "_n", "_p", "_g", "_m")
 
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
@@ -139,48 +144,42 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
     }
 
 
+def _prepare_height_map(source: Image.Image) -> Image.Image:
+    grayscale = ImageOps.grayscale(source)
+    broad = grayscale.filter(ImageFilter.GaussianBlur(radius=4.0))
+    fine = grayscale.filter(ImageFilter.UnsharpMask(radius=1.6, percent=180, threshold=2))
+    detail = ImageChops.subtract(fine, broad, scale=1.0, offset=128)
+    merged = ImageChops.add(grayscale, detail, scale=1.55, offset=-36)
+    return ImageOps.autocontrast(merged, cutoff=1)
+
+
 def generate_diffuse(source: Image.Image) -> Image.Image:
     return ImageOps.autocontrast(source.convert("RGB"), cutoff=1)
 
 
 def generate_parallax(source: Image.Image, strength: float = 1.35) -> Image.Image:
-    grayscale = ImageOps.grayscale(source)
-    detail = grayscale.filter(ImageFilter.UnsharpMask(radius=2, percent=220, threshold=2))
-    merged = ImageChops.add(detail, grayscale, scale=1.7)
-    return ImageEnhance.Contrast(merged).enhance(strength)
+    height_map = _prepare_height_map(source)
+    softened = height_map.filter(ImageFilter.GaussianBlur(radius=1.2))
+    micro_detail = ImageChops.subtract(height_map, height_map.filter(ImageFilter.GaussianBlur(radius=8.0)), scale=1.0, offset=128)
+    merged = ImageChops.add(softened, micro_detail, scale=1.35, offset=-20)
+    contrasted = ImageEnhance.Contrast(merged).enhance(strength)
+    return ImageOps.autocontrast(contrasted, cutoff=1)
 
 
 def generate_normal(source: Image.Image, strength: float = 2.0) -> Image.Image:
-    grayscale = ImageOps.grayscale(source)
-    height = grayscale.filter(ImageFilter.GaussianBlur(radius=1.0))
-    sobel_x = height.filter(ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=1))
-    sobel_y = height.filter(ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=1))
-    width, height_px = height.size
-    src_x = sobel_x.load()
-    src_y = sobel_y.load()
-    normal = Image.new("RGB", (width, height_px))
-    dst = normal.load()
-
-    for y in range(height_px):
-        for x in range(width):
-            dx = ((src_x[x, y] - 128.0) / 127.0) * strength
-            dy = ((src_y[x, y] - 128.0) / 127.0) * strength
-            dz = 1.0
-
-            nx = -dx
-            ny = -dy
-            length = (nx * nx + ny * ny + dz * dz) ** 0.5 or 1.0
-            nx /= length
-            ny /= length
-            nz = dz / length
-
-            dst[x, y] = (
-                int((nx * 0.5 + 0.5) * 255),
-                int((ny * 0.5 + 0.5) * 255),
-                int((nz * 0.5 + 0.5) * 255),
-            )
-
-    return normal
+    height_map = _prepare_height_map(source).filter(ImageFilter.GaussianBlur(radius=0.8))
+    sobel_x = height_map.filter(ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=1, offset=128))
+    sobel_y = height_map.filter(ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=1, offset=128))
+    red = sobel_x.point(lambda value: int(_clamp(128.0 - ((value - 128.0) * strength), 0.0, 255.0)))
+    green = sobel_y.point(lambda value: int(_clamp(128.0 - ((value - 128.0) * strength), 0.0, 255.0)))
+    midpoint = Image.new("L", height_map.size, color=128)
+    slope = ImageChops.add(
+        ImageChops.difference(red, midpoint),
+        ImageChops.difference(green, midpoint),
+        scale=max(1.0, 1.35 + (strength * 0.3)),
+    )
+    blue = ImageOps.invert(slope).point(lambda value: int(_clamp(max(128.0, value), 0.0, 255.0)))
+    return Image.merge("RGB", (red, green, blue))
 
 
 def generate_glow(source: Image.Image, threshold: int = 190) -> Image.Image:
@@ -288,6 +287,39 @@ def build_complex_output_path(
     return base_output_dir / f"{complex_stem}{ext}"
 
 
+def _is_supported_input_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in SUPPORTED_INPUT_EXTENSIONS
+
+
+def _is_generated_texture(path: Path) -> bool:
+    stem = path.stem.lower()
+    return stem.endswith("_") or any(stem.endswith(suffix) for suffix in GENERATED_TEXTURE_SUFFIXES)
+
+
+def collect_source_textures(input_path: Path) -> list[Path]:
+    if input_path.is_file():
+        if not _is_supported_input_file(input_path):
+            raise ValueError(f"Unsupported input file: {input_path}")
+        return [input_path]
+
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input path does not exist: {input_path}")
+    if not input_path.is_dir():
+        raise ValueError(f"Input path must be a file or directory: {input_path}")
+
+    source_files = sorted(
+        path
+        for path in input_path.iterdir()
+        if path.is_file() and path.suffix.lower() == DDS_EXTENSION and not _is_generated_texture(path)
+    )
+    if not source_files:
+        raise ValueError(
+            f"No source DDS textures found in {input_path}. "
+            "Folder mode only processes original DDS files and skips generated *_n, *_p, *_g, *_m, *_msn, and *_cm variants."
+        )
+    return source_files
+
+
 def _to_dds_compatible_image(image: Image.Image) -> Image.Image:
     if image.mode == "RGBA":
         return image
@@ -314,9 +346,10 @@ def run(
     parallax_name: str | None = None,
     parallax_strength: float = 1.35,
 ) -> tuple[Path, Path]:
-    with Image.open(input_file) as source:
-        diffuse = generate_diffuse(source)
-        parallax = generate_parallax(source, strength=parallax_strength)
+    with Image.open(input_file) as opened_source:
+        source = opened_source.convert("RGB")
+    diffuse = generate_diffuse(source)
+    parallax = generate_parallax(source, strength=parallax_strength)
 
     diffuse_path, parallax_path = build_output_paths(
         input_path=input_file,
@@ -356,7 +389,8 @@ def run_with_options(
 
     outputs: dict[str, Path] = {}
 
-    with Image.open(input_file) as source:
+    with Image.open(input_file) as opened_source:
+        source = opened_source.convert("RGB")
         recommended = recommend_generation_settings(source)
         resolved_normal_strength = normal_strength if normal_strength is not None else float(recommended["normal_strength"])
         resolved_parallax_strength = parallax_strength if parallax_strength is not None else float(recommended["parallax_strength"])
@@ -434,11 +468,74 @@ def run_with_options(
     return outputs
 
 
+def run_batch_with_options(
+    input_path: Path,
+    output_dir: Path | None = None,
+    diffuse_name: str | None = None,
+    normal_name: str | None = None,
+    parallax_name: str | None = None,
+    glow_name: str | None = None,
+    environment_mask_name: str | None = None,
+    complex_name: str | None = None,
+    normal_strength: float | None = None,
+    parallax_strength: float | None = None,
+    glow_threshold: int | None = None,
+    environment_mask_strength: float | None = None,
+    complex_strength: float | None = None,
+    specular_strength: float | None = None,
+    complex_format: str = "msn",
+    include_diffuse: bool = True,
+    include_normal: bool = True,
+    include_parallax: bool = True,
+    include_glow: bool = False,
+    include_environment_mask: bool = False,
+    include_complex: bool = False,
+    progress_callback: Callable[[int, int, Path], None] | None = None,
+) -> dict[Path, dict[str, Path]]:
+    input_files = collect_source_textures(input_path)
+    results: dict[Path, dict[str, Path]] = {}
+    total = len(input_files)
+
+    for index, input_file in enumerate(input_files, start=1):
+        if progress_callback is not None:
+            progress_callback(index, total, input_file)
+        results[input_file] = run_with_options(
+            input_file=input_file,
+            output_dir=output_dir,
+            diffuse_name=diffuse_name,
+            normal_name=normal_name,
+            parallax_name=parallax_name,
+            glow_name=glow_name,
+            environment_mask_name=environment_mask_name,
+            complex_name=complex_name,
+            normal_strength=normal_strength,
+            parallax_strength=parallax_strength,
+            glow_threshold=glow_threshold,
+            environment_mask_strength=environment_mask_strength,
+            complex_strength=complex_strength,
+            specular_strength=specular_strength,
+            complex_format=complex_format,
+            include_diffuse=include_diffuse,
+            include_normal=include_normal,
+            include_parallax=include_parallax,
+            include_glow=include_glow,
+            include_environment_mask=include_environment_mask,
+            include_complex=include_complex,
+        )
+
+    return results
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate Skyrim texture maps from an input texture."
+        description="Generate Skyrim texture maps from an input texture or a folder of source DDS textures."
     )
-    parser.add_argument("input_file", nargs="?", type=Path, help="Path to input texture file (DDS recommended).")
+    parser.add_argument(
+        "input_file",
+        nargs="?",
+        type=Path,
+        help="Path to an input texture file or a folder of source DDS textures.",
+    )
     parser.add_argument("--output-dir", type=Path, default=None, help="Output directory for generated files.")
     parser.add_argument("--diffuse-name", type=str, default=None, help="Diffuse output file stem.")
     parser.add_argument("--normal-name", type=str, default=None, help="Normal output file stem.")
@@ -507,6 +604,10 @@ if GUI_AVAILABLE:
             self.source_image: Image.Image | None = None
             self.preview_before: ImageTk.PhotoImage | None = None
             self.preview_after: ImageTk.PhotoImage | None = None
+            self.selected_inputs: list[Path] = []
+            self.processing_thread: threading.Thread | None = None
+            self.processing_queue: queue.Queue[tuple[str, object]] = queue.Queue()
+            self.is_processing = False
 
             self.input_var = tk.StringVar()
             self.output_var = tk.StringVar()
@@ -562,13 +663,17 @@ if GUI_AVAILABLE:
             file_frame = ttk.LabelFrame(wrapper, text="Files", padding=10)
             file_frame.pack(fill=tk.X, padx=4, pady=4)
 
-            ttk.Label(file_frame, text="Input DDS").grid(row=0, column=0, sticky=tk.W, pady=4)
+            ttk.Label(file_frame, text="Input DDS or folder").grid(row=0, column=0, sticky=tk.W, pady=4)
             ttk.Entry(file_frame, textvariable=self.input_var, width=80).grid(row=0, column=1, padx=6, pady=4, sticky=tk.EW)
-            ttk.Button(file_frame, text="Browse", command=self._pick_input).grid(row=0, column=2, padx=4, pady=4)
+            self.input_file_button = ttk.Button(file_frame, text="File", command=self._pick_input)
+            self.input_file_button.grid(row=0, column=2, padx=4, pady=4)
+            self.input_folder_button = ttk.Button(file_frame, text="Folder", command=self._pick_input_folder)
+            self.input_folder_button.grid(row=0, column=3, padx=4, pady=4)
 
             ttk.Label(file_frame, text="Output folder").grid(row=1, column=0, sticky=tk.W, pady=4)
             ttk.Entry(file_frame, textvariable=self.output_var, width=80).grid(row=1, column=1, padx=6, pady=4, sticky=tk.EW)
-            ttk.Button(file_frame, text="Browse", command=self._pick_output).grid(row=1, column=2, padx=4, pady=4)
+            self.output_button = ttk.Button(file_frame, text="Browse", command=self._pick_output)
+            self.output_button.grid(row=1, column=2, padx=4, pady=4)
             file_frame.columnconfigure(1, weight=1)
 
             options_frame = ttk.LabelFrame(wrapper, text="Generation Options", padding=10)
@@ -663,7 +768,8 @@ if GUI_AVAILABLE:
 
             actions = ttk.Frame(wrapper, padding=(4, 10))
             actions.pack(fill=tk.X)
-            ttk.Button(actions, text="Generate", command=self._generate).pack(side=tk.LEFT)
+            self.generate_button = ttk.Button(actions, text="Generate", command=self._generate)
+            self.generate_button.pack(side=tk.LEFT)
             ttk.Label(actions, textvariable=self.status_var).pack(side=tk.LEFT, padx=14)
 
         def _bind_mousewheel(self, canvas: tk.Canvas) -> None:
@@ -690,27 +796,104 @@ if GUI_AVAILABLE:
             if not selected:
                 return
             self.input_var.set(selected)
-            self._load_source(Path(selected))
+            self._load_input_selection(Path(selected))
+
+        def _pick_input_folder(self) -> None:
+            selected = filedialog.askdirectory(title="Select folder with source DDS textures")
+            if not selected:
+                return
+            self.input_var.set(selected)
+            self._load_input_selection(Path(selected))
 
         def _pick_output(self) -> None:
             selected = filedialog.askdirectory(title="Select output folder")
             if selected:
                 self.output_var.set(selected)
 
-        def _load_source(self, path: Path) -> None:
+        def _load_input_selection(self, path: Path) -> None:
             try:
-                with Image.open(path) as src:
-                    self.source_image = src.copy()
-                self.output_var.set(str(path.parent))
+                input_files = collect_source_textures(path)
+                preview_path = input_files[0]
+                with Image.open(preview_path) as src:
+                    self.source_image = src.convert("RGB")
+                self.selected_inputs = input_files
+                self.output_var.set(str(path if path.is_dir() else path.parent))
                 self._apply_recommended_settings()
-                if self.auto_suggestions_var.get():
+                if path.is_dir():
+                    self.status_var.set(
+                        f"Loaded {len(input_files)} source DDS file(s) from {path.name}. Previewing {preview_path.name}."
+                    )
+                elif self.auto_suggestions_var.get():
                     self.status_var.set(f"Loaded: {path.name} (automatic suggestions applied)")
                 else:
                     self.status_var.set(f"Loaded: {path.name} (automatic suggestions off)")
                 self._refresh_preview()
             except Exception as exc:
                 self.source_image = None
+                self.selected_inputs = []
                 messagebox.showerror("Unable to open texture", str(exc))
+
+        def _resolve_generation_value(self, current_value: float | int, auto_var: tk.BooleanVar) -> float | int | None:
+            if self.auto_suggestions_var.get() and auto_var.get():
+                return None
+            return current_value
+
+        def _set_processing_state(self, processing: bool) -> None:
+            self.is_processing = processing
+            state = tk.DISABLED if processing else tk.NORMAL
+            self.generate_button.configure(state=state)
+            self.input_file_button.configure(state=state)
+            self.input_folder_button.configure(state=state)
+            self.output_button.configure(state=state)
+
+        def _process_generation_batch(self, input_path: Path, generation_kwargs: dict[str, object]) -> None:
+            try:
+                results = run_batch_with_options(
+                    input_path=input_path,
+                    progress_callback=lambda index, total, current: self.processing_queue.put(
+                        ("progress", (index, total, current.name))
+                    ),
+                    **generation_kwargs,
+                )
+                self.processing_queue.put(("done", results))
+            except Exception as exc:
+                self.processing_queue.put(("error", str(exc)))
+
+        def _poll_processing_queue(self) -> None:
+            keep_polling = self.is_processing
+            while True:
+                try:
+                    event_type, payload = self.processing_queue.get_nowait()
+                except queue.Empty:
+                    break
+
+                if event_type == "progress":
+                    index, total, filename = payload
+                    self.status_var.set(f"Processing {index}/{total}: {filename}")
+                elif event_type == "done":
+                    results = payload
+                    self._set_processing_state(False)
+                    total_sources = len(results)
+                    total_outputs = sum(len(output_set) for output_set in results.values())
+                    self.status_var.set(f"Generated {total_outputs} file(s) from {total_sources} source texture(s).")
+                    if total_sources == 1:
+                        only_outputs = next(iter(results.values()))
+                        lines = [f"{key.replace('_', ' ').title()}: {value}" for key, value in only_outputs.items()]
+                    else:
+                        lines = [
+                            f"Processed {total_sources} source textures.",
+                            f"Generated {total_outputs} files.",
+                        ]
+                    messagebox.showinfo("Generation complete", "\n".join(lines))
+                    self._refresh_preview()
+                    keep_polling = False
+                elif event_type == "error":
+                    self._set_processing_state(False)
+                    messagebox.showerror("Generation failed", str(payload))
+                    keep_polling = False
+
+            if keep_polling and self.is_processing:
+                self.root.after(100, self._poll_processing_queue)
 
         def _toggle_auto_suggestions(self) -> None:
             if self.auto_suggestions_var.get():
@@ -826,6 +1009,8 @@ if GUI_AVAILABLE:
             if not input_value:
                 messagebox.showwarning("Missing input", "Please choose an input DDS texture first.")
                 return
+            if self.is_processing:
+                return
 
             include_diffuse = self.include_diffuse_var.get()
             include_normal = self.include_normal_var.get()
@@ -838,31 +1023,49 @@ if GUI_AVAILABLE:
                 return
 
             try:
-                outputs = run_with_options(
-                    input_file=Path(input_value),
-                    output_dir=Path(self.output_var.get()) if self.output_var.get().strip() else None,
-                    normal_strength=self.normal_strength_var.get(),
-                    parallax_strength=self.parallax_strength_var.get(),
-                    glow_threshold=self.glow_threshold_var.get(),
-                    environment_mask_strength=self.environment_mask_strength_var.get(),
-                    complex_strength=self.complex_strength_var.get(),
-                    specular_strength=self.specular_strength_var.get(),
-                    complex_format=self.complex_format_var.get(),
-                    include_diffuse=include_diffuse,
-                    include_normal=include_normal,
-                    include_parallax=include_parallax,
-                    include_glow=include_glow,
-                    include_environment_mask=include_environment_mask,
-                    include_complex=include_complex,
-                )
+                input_path = Path(input_value)
+                self.selected_inputs = collect_source_textures(input_path)
             except Exception as exc:
                 messagebox.showerror("Generation failed", str(exc))
                 return
 
-            lines = [f"{key.replace('_', ' ').title()}: {value}" for key, value in outputs.items()]
-            self.status_var.set(f"Generated {len(outputs)} file(s).")
-            messagebox.showinfo("Generation complete", "\n".join(lines))
-            self._refresh_preview()
+            generation_kwargs = {
+                "output_dir": Path(self.output_var.get()) if self.output_var.get().strip() else None,
+                "normal_strength": self._resolve_generation_value(
+                    self.normal_strength_var.get(), self.auto_normal_suggestion_var
+                ),
+                "parallax_strength": self._resolve_generation_value(
+                    self.parallax_strength_var.get(), self.auto_parallax_suggestion_var
+                ),
+                "glow_threshold": self._resolve_generation_value(
+                    self.glow_threshold_var.get(), self.auto_glow_suggestion_var
+                ),
+                "environment_mask_strength": self._resolve_generation_value(
+                    self.environment_mask_strength_var.get(), self.auto_environment_mask_suggestion_var
+                ),
+                "complex_strength": self._resolve_generation_value(
+                    self.complex_strength_var.get(), self.auto_complex_suggestion_var
+                ),
+                "specular_strength": self._resolve_generation_value(
+                    self.specular_strength_var.get(), self.auto_specular_suggestion_var
+                ),
+                "complex_format": self.complex_format_var.get(),
+                "include_diffuse": include_diffuse,
+                "include_normal": include_normal,
+                "include_parallax": include_parallax,
+                "include_glow": include_glow,
+                "include_environment_mask": include_environment_mask,
+                "include_complex": include_complex,
+            }
+            self._set_processing_state(True)
+            self.status_var.set(f"Queued {len(self.selected_inputs)} source texture(s) for processing...")
+            self.processing_thread = threading.Thread(
+                target=self._process_generation_batch,
+                args=(input_path, generation_kwargs),
+                daemon=True,
+            )
+            self.processing_thread.start()
+            self.root.after(100, self._poll_processing_queue)
 
         def run(self) -> None:
             self.root.mainloop()
@@ -878,6 +1081,36 @@ def main() -> int:
         if not GUI_AVAILABLE:
             raise RuntimeError("GUI dependencies are unavailable in this environment.")
         TextureGeneratorGUI().run()
+        return 0
+
+    if args.input_file.is_dir():
+        batch_outputs = run_batch_with_options(
+            input_path=args.input_file,
+            output_dir=args.output_dir,
+            diffuse_name=args.diffuse_name,
+            normal_name=args.normal_name,
+            parallax_name=args.parallax_name,
+            glow_name=args.glow_name,
+            environment_mask_name=args.environment_mask_name,
+            complex_name=args.complex_name,
+            normal_strength=args.normal_strength,
+            parallax_strength=args.parallax_strength,
+            glow_threshold=args.glow_threshold,
+            environment_mask_strength=args.environment_mask_strength,
+            complex_strength=args.complex_strength,
+            specular_strength=args.specular_strength,
+            complex_format=args.complex_format,
+            include_diffuse=not args.no_diffuse,
+            include_normal=not args.no_normal,
+            include_parallax=not args.no_parallax,
+            include_glow=args.glow_map,
+            include_environment_mask=args.environment_mask,
+            include_complex=args.complex_material,
+        )
+        for input_file, outputs in batch_outputs.items():
+            print(f"[{input_file.name}]")
+            for output_type, path in outputs.items():
+                print(f"  {output_type.replace('_', ' ').title()} texture: {path}")
         return 0
 
     outputs = run_with_options(

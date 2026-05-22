@@ -9,6 +9,7 @@ from generate_textures import (
     apply_recommendations_by_auto_flags,
     build_complex_output_path,
     build_environment_mask_output_path,
+    collect_source_textures,
     build_glow_output_path,
     build_normal_output_path,
     build_output_paths,
@@ -20,6 +21,7 @@ from generate_textures import (
     generate_normal,
     generate_parallax,
     recommend_generation_settings,
+    run_batch_with_options,
     run_with_options,
 )
 
@@ -261,6 +263,16 @@ class GenerateTexturesTests(unittest.TestCase):
 
             self.assertEqual(complex_path.name, "brick_cm.dds")
 
+    def test_collect_source_textures_from_directory_skips_generated_suffixes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            for name in ("brick.dds", "stone_wall.dds", "brick_n.dds", "brick_p.dds", "brick_msn.dds", "preview.png"):
+                (temp_path / name).write_bytes(b"stub")
+
+            collected = collect_source_textures(temp_path)
+
+            self.assertEqual([path.name for path in collected], ["brick.dds", "stone_wall.dds"])
+
     def test_run_with_options_requires_at_least_one_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -334,6 +346,30 @@ class GenerateTexturesTests(unittest.TestCase):
             with Image.open(outputs["complex_material"]) as generated:
                 generated.load()
                 self.assertIn(generated.mode, ("RGBA", "RGB"))
+
+    def test_run_batch_with_options_processes_only_original_dds_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            input_dir.mkdir()
+
+            for name in ("brick.dds", "stone_wall.dds", "brick_n.dds", "brick_p.dds", "stone_wall_msn.dds"):
+                _sample_image().save(input_dir / name, format="DDS", pixel_format="DXT5")
+
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+            )
+
+            self.assertEqual(sorted(path.name for path in outputs.keys()), ["brick.dds", "stone_wall.dds"])
+            self.assertEqual(sorted(path.name for path in output_dir.iterdir()), ["brick.dds", "stone_wall.dds"])
 
 
 if __name__ == "__main__":
