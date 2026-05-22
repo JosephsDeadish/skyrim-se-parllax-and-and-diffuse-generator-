@@ -141,14 +141,22 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_generate_environment_mask_returns_l_same_size(self) -> None:
         environment_mask = generate_environment_mask(_sample_image())
-        self.assertEqual(environment_mask.mode, "L")
+        self.assertEqual(environment_mask.mode, "RGBA")
         self.assertEqual(environment_mask.size, (8, 8))
 
     def test_generate_environment_mask_flat_surface_avoids_black_holes(self) -> None:
         environment_mask = generate_environment_mask(_flat_dark_image(), strength=2.2)
-        minimum, maximum = environment_mask.getextrema()
-        self.assertGreaterEqual(minimum, 14)
-        self.assertLessEqual(maximum - minimum, 40)
+        env_amount, glossiness, metallic, height_alpha = environment_mask.split()
+        env_min, env_max = env_amount.getextrema()
+        gloss_min, _ = glossiness.getextrema()
+        metallic_min, _ = metallic.getextrema()
+        height_min, height_max = height_alpha.getextrema()
+        self.assertGreaterEqual(env_min, 10)
+        self.assertLessEqual(env_max - env_min, 80)
+        self.assertGreaterEqual(gloss_min, 5)
+        self.assertGreaterEqual(metallic_min, 6)
+        self.assertGreaterEqual(height_min, 95)
+        self.assertLessEqual(height_max, 160)
 
     def test_generate_complex_material_returns_l_same_size(self) -> None:
         complex_material = generate_complex_material(_sample_image())
@@ -185,6 +193,8 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertLessEqual(float(settings["normal_strength"]), 3.8)
         self.assertGreaterEqual(float(settings["parallax_strength"]), 0.8)
         self.assertLessEqual(float(settings["parallax_strength"]), 2.4)
+        self.assertGreaterEqual(float(settings["specular_strength"]), 0.9)
+        self.assertLessEqual(float(settings["specular_strength"]), 2.2)
         self.assertGreaterEqual(int(settings["glow_threshold"]), 140)
         self.assertLessEqual(int(settings["glow_threshold"]), 235)
 

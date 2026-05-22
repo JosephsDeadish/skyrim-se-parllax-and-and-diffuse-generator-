@@ -133,32 +133,34 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
         2.4,
     )
     environment_mask_strength = _clamp(
-        0.95
-        + (contrast / 170.0)
-        + (midtone_ratio * 0.45)
-        + (low_saturation_ratio * 0.6)
-        + ((1.0 - (saturation_mean / 255.0)) * 0.45),
+        1.0
+        + (contrast / 185.0)
+        + (midtone_ratio * 0.35)
+        + (low_saturation_ratio * 0.65)
+        + ((1.0 - (saturation_mean / 255.0)) * 0.5)
+        + (highlight_ratio * 0.3),
         0.9,
         2.4,
     )
     complex_strength = _clamp(
-        1.0
-        + (edge_strength / 210.0)
-        + (detail_energy / 110.0)
-        + (dynamic_range / 1000.0)
-        + (saturation_variance / 950.0),
+        1.05
+        + (edge_strength / 220.0)
+        + (detail_energy / 120.0)
+        + (dynamic_range / 1100.0)
+        + (saturation_variance / 1050.0)
+        + (highlight_ratio * 0.25),
         1.0,
         2.6,
     )
     specular_strength = _clamp(
-        0.8
+        0.9
         + (highlight_ratio * 1.5)
-        + (edge_variance / 260.0)
-        + ((0.3 - shadow_ratio) * 0.45)
+        + (edge_variance / 290.0)
+        + ((0.3 - shadow_ratio) * 0.35)
         + (low_saturation_ratio * 0.5)
         + ((1.0 - (saturation_mean / 255.0)) * 0.35),
-        0.8,
-        2.4,
+        0.9,
+        2.2,
     )
     glow_threshold = int(
         _clamp(
@@ -260,27 +262,39 @@ def generate_environment_mask(source: Image.Image, strength: float = 1.2) -> Ima
     maximum = ImageChops.lighter(ImageChops.lighter(red, green), blue)
     minimum = ImageChops.darker(ImageChops.darker(red, green), blue)
     chroma = ImageChops.subtract(maximum, minimum)
+
+    env_amount = ImageEnhance.Contrast(grayscale).enhance(0.9 + (strength * 0.35))
+    env_amount = _lift_black_floor(ImageOps.autocontrast(env_amount, cutoff=1), floor=10)
+
+    glossiness = generate_specular(rgb_source, strength=max(0.9, min(2.0, strength + 0.15)))
+    glossiness = ImageEnhance.Contrast(glossiness).enhance(0.9 + (strength * 0.25))
+    glossiness = _lift_black_floor(glossiness, floor=5)
+
     metallic_proxy = ImageOps.invert(chroma).filter(ImageFilter.GaussianBlur(radius=0.9))
-    merged = ImageChops.add(grayscale, metallic_proxy, scale=1.9)
-    blended = Image.blend(grayscale, merged, alpha=0.65)
-    softened = blended.filter(ImageFilter.MedianFilter(size=3)).filter(ImageFilter.GaussianBlur(radius=0.8))
-    contrasted = ImageEnhance.Contrast(softened).enhance(strength)
-    normalized = ImageOps.autocontrast(contrasted, cutoff=1)
-    return _lift_black_floor(normalized, floor=14)
+    metallic = Image.blend(grayscale, metallic_proxy, alpha=0.7)
+    metallic = ImageEnhance.Contrast(metallic).enhance(0.85 + (strength * 0.3))
+    metallic = _lift_black_floor(ImageOps.autocontrast(metallic, cutoff=1), floor=6)
+
+    raw_height = generate_parallax(rgb_source, strength=max(0.85, min(2.0, strength)))
+    midpoint = Image.new("L", raw_height.size, color=127)
+    height_alpha = Image.blend(midpoint, raw_height, alpha=0.75)
+
+    return Image.merge("RGBA", (env_amount, glossiness, metallic, height_alpha))
 
 
 def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Image.Image:
     grayscale = ImageOps.grayscale(source).filter(ImageFilter.GaussianBlur(radius=0.8))
     grayscale_min, grayscale_max = grayscale.getextrema()
     if (grayscale_max - grayscale_min) <= 2:
-        return _lift_black_floor(grayscale, floor=14)
+        return _lift_black_floor(grayscale, floor=8)
     edges = grayscale.filter(ImageFilter.FIND_EDGES).filter(ImageFilter.GaussianBlur(radius=0.8))
     highpass = ImageChops.subtract(grayscale, grayscale.filter(ImageFilter.GaussianBlur(radius=2.8)), scale=1.2, offset=120)
-    shaped = ImageEnhance.Contrast(ImageChops.add(edges, highpass, scale=1.8)).enhance(strength)
-    merged = Image.blend(grayscale, shaped, alpha=0.55)
+    detail_shape = ImageEnhance.Contrast(ImageChops.add(edges, highpass, scale=1.8)).enhance(strength)
+    gloss_base = generate_specular(source, strength=max(0.9, min(2.1, 0.95 + (strength * 0.55))))
+    merged = Image.blend(gloss_base, detail_shape, alpha=0.4)
     softened = merged.filter(ImageFilter.MedianFilter(size=3)).filter(ImageFilter.GaussianBlur(radius=0.7))
     normalized = ImageOps.autocontrast(softened, cutoff=1)
-    return _lift_black_floor(normalized, floor=14)
+    return _lift_black_floor(normalized, floor=8)
 
 
 def generate_specular(source: Image.Image, strength: float = 1.15) -> Image.Image:

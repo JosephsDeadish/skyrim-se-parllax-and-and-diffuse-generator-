@@ -5,7 +5,7 @@ Texture generator that supports both GUI and command-line usage. It can generate
 - a normal map
 - a grayscale parallax texture
 - a glow map
-- an environment mask
+- an environment mask (complex-parallax packed RGBA)
 - a complex material output:
   - `_msn`: normal RGB with specular in alpha
   - `_cm`: grayscale complex material texture
@@ -80,7 +80,12 @@ Generated outputs default to `.dds` filenames regardless of the input format. Th
 - Normal map output (`*_n`) uses **DirectX-style tangent-space orientation** by default (green channel flipped vs OpenGL workflows), which is what Skyrim expects.
 - Neutral normal color remains centered around `RGB(128, 128, 255)` so flat areas stay visually flat in-game.
 - Parallax output (`*_p`) is generated as a grayscale height map (`L` mode), suitable for Skyrim SE parallax workflows.
-- `_msn` output still stores normal RGB with specular in alpha; `_cm` remains grayscale complex material.
+- Environment mask output (`*_m`) is channel-packed for complex parallax style workflows:
+  - **R**: environment map amount
+  - **G**: glossiness (kept above compression-black thresholds)
+  - **B**: metallic proxy
+  - **A**: parallax height
+- `_msn` output stores normal RGB with specular in alpha; `_cm` remains grayscale complex material.
 
 ## GitHub Actions
 
