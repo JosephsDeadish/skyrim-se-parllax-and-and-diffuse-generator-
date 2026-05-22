@@ -43,26 +43,38 @@ def _histogram_percentile(histogram: list[int], percentile: float) -> float:
 
 
 def analyze_image_content(source: Image.Image) -> dict[str, float]:
-    grayscale = ImageOps.grayscale(source)
+    rgb_source = source.convert("RGB")
+    grayscale = ImageOps.grayscale(rgb_source)
+    saturation = rgb_source.convert("HSV").split()[1]
     edges = grayscale.filter(ImageFilter.FIND_EDGES)
     blurred = grayscale.filter(ImageFilter.GaussianBlur(radius=2.0))
     detail = ImageChops.difference(grayscale, blurred)
 
     grayscale_stats = ImageStat.Stat(grayscale)
+    saturation_stats = ImageStat.Stat(saturation)
+    rgb_stats = ImageStat.Stat(rgb_source)
     edge_stats = ImageStat.Stat(edges)
     detail_stats = ImageStat.Stat(detail)
     minimum, maximum = grayscale.getextrema()
     histogram = grayscale.histogram()
     total_pixels = float(sum(histogram)) or 1.0
+    saturation_histogram = saturation.histogram()
+    saturation_total = float(sum(saturation_histogram)) or 1.0
     shadow_ratio = sum(histogram[:48]) / total_pixels
     highlight_ratio = sum(histogram[208:]) / total_pixels
     bright_cluster_ratio = sum(histogram[230:]) / total_pixels
     midtone_ratio = sum(histogram[80:176]) / total_pixels
+    low_saturation_ratio = sum(saturation_histogram[:72]) / saturation_total
     p90_luma = _histogram_percentile(histogram, 0.90)
+    color_variance = float(sum(rgb_stats.stddev) / 3.0)
 
     return {
         "brightness": float(grayscale_stats.mean[0]),
         "contrast": float(grayscale_stats.stddev[0]),
+        "saturation_mean": float(saturation_stats.mean[0]),
+        "saturation_variance": float(saturation_stats.stddev[0]),
+        "low_saturation_ratio": float(low_saturation_ratio),
+        "color_variance": float(color_variance),
         "edge_strength": float(edge_stats.mean[0]),
         "edge_variance": float(edge_stats.stddev[0]),
         "detail_energy": float(detail_stats.mean[0]),
@@ -100,29 +112,50 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
     bright_cluster_ratio = analysis["bright_cluster_ratio"]
     midtone_ratio = analysis["midtone_ratio"]
     p90_luma = analysis["p90_luma"]
+    saturation_mean = analysis["saturation_mean"]
+    saturation_variance = analysis["saturation_variance"]
+    low_saturation_ratio = analysis["low_saturation_ratio"]
+    color_variance = analysis["color_variance"]
 
     normal_strength = _clamp(
-        1.1 + (edge_strength / 180.0) + (edge_variance / 220.0) + (detail_energy / 120.0),
+        1.1 + (edge_strength / 180.0) + (edge_variance / 220.0) + (detail_energy / 120.0) + (color_variance / 900.0),
         1.1,
         3.8,
     )
     parallax_strength = _clamp(
-        0.9 + (detail_energy / 120.0) + (dynamic_range / 800.0) + ((0.25 - highlight_ratio) * 0.7),
+        0.9
+        + (detail_energy / 120.0)
+        + (dynamic_range / 800.0)
+        + ((0.25 - highlight_ratio) * 0.7)
+        + (low_saturation_ratio * 0.25),
         0.8,
         2.4,
     )
     environment_mask_strength = _clamp(
-        0.9 + (contrast / 160.0) + (midtone_ratio * 0.55),
+        0.95
+        + (contrast / 170.0)
+        + (midtone_ratio * 0.45)
+        + (low_saturation_ratio * 0.6)
+        + ((1.0 - (saturation_mean / 255.0)) * 0.45),
         0.9,
         2.4,
     )
     complex_strength = _clamp(
-        1.0 + (edge_strength / 210.0) + (detail_energy / 110.0) + (dynamic_range / 1000.0),
+        1.0
+        + (edge_strength / 210.0)
+        + (detail_energy / 110.0)
+        + (dynamic_range / 1000.0)
+        + (saturation_variance / 950.0),
         1.0,
         2.6,
     )
     specular_strength = _clamp(
-        0.8 + (highlight_ratio * 1.6) + (edge_variance / 260.0) + ((0.3 - shadow_ratio) * 0.45),
+        0.8
+        + (highlight_ratio * 1.5)
+        + (edge_variance / 260.0)
+        + ((0.3 - shadow_ratio) * 0.45)
+        + (low_saturation_ratio * 0.5)
+        + ((1.0 - (saturation_mean / 255.0)) * 0.35),
         0.8,
         2.4,
     )
@@ -133,7 +166,8 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
             + (contrast * 0.25)
             + (highlight_ratio * 18.0)
             - (bright_cluster_ratio * 30.0)
-            - (detail_energy * 0.12),
+            - (detail_energy * 0.12)
+            - ((saturation_mean / 255.0) * 12.0),
             140.0,
             235.0,
         )
@@ -192,14 +226,25 @@ def generate_normal(source: Image.Image, strength: float = 2.0, directx: bool = 
 
 def generate_glow(source: Image.Image, threshold: int = 190) -> Image.Image:
     grayscale = ImageOps.grayscale(source)
-    boosted = ImageEnhance.Contrast(grayscale).enhance(1.25)
-    return boosted.point(lambda v: 255 if v >= threshold else 0)
+    boosted = ImageEnhance.Contrast(grayscale).enhance(1.35)
+    denominator = max(1.0, 255.0 - float(threshold))
+    rolled = boosted.point(lambda value: int(_clamp(((float(value) - threshold) / denominator) * 255.0, 0.0, 255.0)))
+    softened = rolled.filter(ImageFilter.GaussianBlur(radius=0.9))
+    return ImageEnhance.Brightness(softened).enhance(1.05).point(lambda value: int(_clamp(value, 0.0, 255.0)))
 
 
 def generate_environment_mask(source: Image.Image, strength: float = 1.2) -> Image.Image:
-    grayscale = ImageOps.grayscale(source)
-    softened = grayscale.filter(ImageFilter.GaussianBlur(radius=1.0))
-    return ImageEnhance.Contrast(softened).enhance(strength)
+    rgb_source = source.convert("RGB")
+    grayscale = ImageOps.grayscale(rgb_source)
+    red, green, blue = rgb_source.split()
+    maximum = ImageChops.lighter(ImageChops.lighter(red, green), blue)
+    minimum = ImageChops.darker(ImageChops.darker(red, green), blue)
+    chroma = ImageChops.subtract(maximum, minimum)
+    metallic_proxy = ImageOps.invert(chroma)
+    merged = ImageChops.add(grayscale, metallic_proxy, scale=1.7)
+    softened = merged.filter(ImageFilter.GaussianBlur(radius=1.2))
+    contrasted = ImageEnhance.Contrast(softened).enhance(strength)
+    return ImageOps.autocontrast(contrasted, cutoff=1)
 
 
 def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Image.Image:

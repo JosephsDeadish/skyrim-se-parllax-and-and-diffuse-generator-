@@ -71,6 +71,10 @@ def _sparse_highlight_image() -> Image.Image:
     return image
 
 
+def _high_saturation_image() -> Image.Image:
+    return Image.new("RGB", (24, 24), color=(245, 40, 40))
+
+
 class GenerateTexturesTests(unittest.TestCase):
     def test_generate_diffuse_returns_rgb_same_size(self) -> None:
         diffuse = generate_diffuse(_sample_image())
@@ -142,6 +146,10 @@ class GenerateTexturesTests(unittest.TestCase):
             "bright_cluster_ratio",
             "midtone_ratio",
             "p90_luma",
+            "saturation_mean",
+            "saturation_variance",
+            "low_saturation_ratio",
+            "color_variance",
         ):
             self.assertIn(key, metrics)
 
@@ -156,6 +164,16 @@ class GenerateTexturesTests(unittest.TestCase):
         uniform = recommend_generation_settings(_uniform_bright_image())
         sparse = recommend_generation_settings(_sparse_highlight_image())
         self.assertGreater(int(uniform["glow_threshold"]), int(sparse["glow_threshold"]))
+
+    def test_recommend_generation_settings_uses_saturation_for_glow_threshold(self) -> None:
+        low_saturation = recommend_generation_settings(_uniform_bright_image())
+        high_saturation = recommend_generation_settings(_high_saturation_image())
+        self.assertLess(int(high_saturation["glow_threshold"]), int(low_saturation["glow_threshold"]))
+
+    def test_generate_glow_produces_graded_values_above_threshold(self) -> None:
+        glow = generate_glow(_vertical_gradient_image(), threshold=180)
+        values = set(glow.tobytes())
+        self.assertGreater(len(values), 2)
 
     def test_apply_recommendations_by_auto_flags_applies_only_checked_values(self) -> None:
         current = {
