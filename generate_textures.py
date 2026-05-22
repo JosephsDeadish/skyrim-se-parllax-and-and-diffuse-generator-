@@ -27,6 +27,7 @@ except Exception:
 DDS_EXTENSION = ".dds"
 SUPPORTED_INPUT_EXTENSIONS = {DDS_EXTENSION, ".png", ".jpg", ".jpeg", ".tga", ".bmp"}
 GENERATED_TEXTURE_SUFFIXES = ("_msn", "_cm", "_n", "_p", "_g", "_m")
+PREVIEW_MAX_DIMENSION = 1024
 
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
@@ -351,6 +352,52 @@ def generate_msn(source: Image.Image, normal_strength: float = 2.0, specular_str
     specular_alpha = generate_specular(source, strength=specular_strength)
     r, g, b = normal_rgb.split()
     return Image.merge("RGBA", (r, g, b, specular_alpha))
+
+
+def prepare_preview_source(source: Image.Image, max_dimension: int = PREVIEW_MAX_DIMENSION) -> Image.Image:
+    preview_source = source.convert("RGB")
+    if max(preview_source.width, preview_source.height) <= max_dimension:
+        return preview_source
+    resized = preview_source.copy()
+    resized.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+    return resized
+
+
+def generate_preview_outputs(
+    source: Image.Image,
+    *,
+    normal_strength: float,
+    parallax_strength: float,
+    glow_threshold: int,
+    environment_mask_strength: float,
+    complex_strength: float,
+    specular_strength: float,
+    complex_format: str,
+    include_diffuse: bool,
+    include_normal: bool,
+    include_parallax: bool,
+    include_glow: bool,
+    include_environment_mask: bool,
+    include_complex: bool,
+) -> dict[str, Image.Image]:
+    outputs: dict[str, Image.Image] = {}
+    if include_diffuse:
+        outputs["diffuse"] = generate_diffuse(source)
+    if include_normal:
+        outputs["normal"] = generate_normal(source, strength=normal_strength)
+    if include_parallax:
+        outputs["parallax"] = generate_parallax(source, strength=parallax_strength)
+    if include_glow:
+        outputs["glow"] = generate_glow(source, threshold=glow_threshold)
+    if include_environment_mask:
+        outputs["environment_mask"] = generate_environment_mask(source, strength=environment_mask_strength)
+    if include_complex:
+        outputs["complex_material"] = (
+            generate_msn(source, normal_strength=normal_strength, specular_strength=specular_strength)
+            if complex_format == "msn"
+            else generate_complex_material(source, strength=complex_strength)
+        )
+    return outputs
 
 
 def build_output_paths(
@@ -1272,7 +1319,7 @@ if GUI_AVAILABLE:
             resolved_index = max(0, min(index, len(self.selected_inputs) - 1))
             preview_path = self.selected_inputs[resolved_index]
             with Image.open(preview_path) as src:
-                self.source_image = src.convert("RGB")
+                self.source_image = prepare_preview_source(src)
             self.current_preview_index = resolved_index
             if len(self.selected_inputs) > 1:
                 self.preview_source_name_var.set(
@@ -1314,32 +1361,34 @@ if GUI_AVAILABLE:
             if self.source_image is None:
                 return
 
-            complex_preview = (
-                generate_msn(
-                    self.source_image,
-                    normal_strength=self.normal_strength_var.get(),
-                    specular_strength=self.specular_strength_var.get(),
-                )
-                if self.complex_format_var.get() == "msn"
-                else generate_complex_material(self.source_image, strength=self.complex_strength_var.get())
+            outputs = generate_preview_outputs(
+                self.source_image,
+                normal_strength=float(self.normal_strength_var.get()),
+                parallax_strength=float(self.parallax_strength_var.get()),
+                glow_threshold=int(self.glow_threshold_var.get()),
+                environment_mask_strength=float(self.environment_mask_strength_var.get()),
+                complex_strength=float(self.complex_strength_var.get()),
+                specular_strength=float(self.specular_strength_var.get()),
+                complex_format=self.complex_format_var.get(),
+                include_diffuse=self.include_diffuse_var.get(),
+                include_normal=self.include_normal_var.get(),
+                include_parallax=self.include_parallax_var.get(),
+                include_glow=self.include_glow_var.get(),
+                include_environment_mask=self.include_environment_mask_var.get(),
+                include_complex=self.include_complex_var.get(),
             )
-            outputs = {
-                "diffuse": generate_diffuse(self.source_image),
-                "normal": generate_normal(self.source_image, strength=self.normal_strength_var.get()),
-                "parallax": generate_parallax(self.source_image, strength=self.parallax_strength_var.get()),
-                "glow": generate_glow(self.source_image, threshold=self.glow_threshold_var.get()),
-                "environment_mask": generate_environment_mask(
-                    self.source_image, strength=self.environment_mask_strength_var.get()
-                ),
-                "complex_material": complex_preview,
-            }
 
             self.preview_before = self._photo_image(self.source_image, max_size=300)
             self.before_image_label.configure(image=self.preview_before, text="")
-            for output_key, output_image in outputs.items():
+            for output_key, label in self.preview_output_labels.items():
+                output_image = outputs.get(output_key)
+                if output_image is None:
+                    self.preview_output_images.pop(output_key, None)
+                    label.configure(image="", text="No preview")
+                    continue
                 photo = self._photo_image(output_image, max_size=220)
                 self.preview_output_images[output_key] = photo
-                self.preview_output_labels[output_key].configure(image=photo, text="")
+                label.configure(image=photo, text="")
 
         def _generate(self) -> None:
             input_value = self.input_var.get().strip()

@@ -24,7 +24,9 @@ from generate_textures import (
     generate_msn,
     generate_normal,
     generate_parallax,
+    generate_preview_outputs,
     generate_specular,
+    prepare_preview_source,
     recommend_generation_settings,
     run_batch_with_options,
     run_with_options,
@@ -258,6 +260,67 @@ class GenerateTexturesTests(unittest.TestCase):
         _, glossiness, _, _ = environment_mask.split()
         minimum, _ = glossiness.getextrema()
         self.assertGreater(minimum, 4)
+
+    def test_prepare_preview_source_downscales_large_images(self) -> None:
+        source = Image.new("RGB", (4096, 2048), color=(64, 96, 128))
+        preview = prepare_preview_source(source, max_dimension=1024)
+        self.assertEqual(preview.mode, "RGB")
+        self.assertLessEqual(max(preview.size), 1024)
+
+    def test_generate_preview_outputs_only_includes_requested_outputs(self) -> None:
+        outputs = generate_preview_outputs(
+            _sample_image(),
+            normal_strength=2.0,
+            parallax_strength=1.35,
+            glow_threshold=190,
+            environment_mask_strength=1.2,
+            complex_strength=1.15,
+            specular_strength=1.15,
+            complex_format="msn",
+            include_diffuse=True,
+            include_normal=False,
+            include_parallax=True,
+            include_glow=False,
+            include_environment_mask=False,
+            include_complex=False,
+        )
+        self.assertEqual(set(outputs.keys()), {"diffuse", "parallax"})
+
+    def test_generate_preview_outputs_supports_complex_formats(self) -> None:
+        msn_outputs = generate_preview_outputs(
+            _sample_image(),
+            normal_strength=2.0,
+            parallax_strength=1.35,
+            glow_threshold=190,
+            environment_mask_strength=1.2,
+            complex_strength=1.15,
+            specular_strength=1.15,
+            complex_format="msn",
+            include_diffuse=False,
+            include_normal=False,
+            include_parallax=False,
+            include_glow=False,
+            include_environment_mask=False,
+            include_complex=True,
+        )
+        cm_outputs = generate_preview_outputs(
+            _sample_image(),
+            normal_strength=2.0,
+            parallax_strength=1.35,
+            glow_threshold=190,
+            environment_mask_strength=1.2,
+            complex_strength=1.15,
+            specular_strength=1.15,
+            complex_format="cm",
+            include_diffuse=False,
+            include_normal=False,
+            include_parallax=False,
+            include_glow=False,
+            include_environment_mask=False,
+            include_complex=True,
+        )
+        self.assertEqual(msn_outputs["complex_material"].mode, "RGBA")
+        self.assertEqual(cm_outputs["complex_material"].mode, "L")
 
     def test_generate_glow_produces_graded_values_above_threshold(self) -> None:
         glow = generate_glow(_vertical_gradient_image(), threshold=180)

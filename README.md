@@ -28,7 +28,7 @@ This opens a desktop interface where you can:
 - pick an output folder
 - use a **Use different output folder** toggle to switch between writing beside the input or writing to a custom location
 - choose diffuse/normal/parallax/glow/environment mask/complex material outputs
-- preview the **Before** source image and all output types at once (diffuse/normal/parallax/glow/environment mask/complex)
+- preview the **Before** source image and the currently selected output types (diffuse/normal/parallax/glow/environment mask/complex)
 - tune normal/parallax/glow/environment mask/complex/specular strengths
 - scroll through all controls in smaller windows
 - auto-update output folder when a different input texture is selected
@@ -36,6 +36,7 @@ This opens a desktop interface where you can:
 - use a clearly labeled **Automatic suggestions (analyze image and set sliders)** toggle to turn auto slider updates on/off
 - use **Auto** checkboxes beside each slider to choose exactly which sliders receive automatic suggestions
 - batch-process folder inputs in the background so the UI stays responsive on larger files or larger sets
+- load oversized preview sources with automatic downscaling to keep the GUI responsive when opening very large textures
 - switch preview source images in folder mode, with automatic preview switching to the current file while batch processing
 - when a folder is selected, only process original `.dds` source textures and skip generated `_n`, `_p`, `_g`, `_m`, `_msn`, and `_cm` variants
 - continue processing remaining files in folder mode even if one file is corrupt/unreadable
