@@ -33,9 +33,10 @@ python generate_textures.py /path/to/input.dds --output-dir ./output --complex-m
 
 Optional arguments:
 
-- `--diffuse-name` (default: `<input_stem>_diffuse`)
-- `--parallax-name` (default: `<input_stem>_parallax`)
-- `--complex-name` (default: `<input_stem>_complex_material`)
+- `--diffuse-name` (default: `<input_stem>`, e.g. `stonewall.dds`)
+- `--parallax-name` (default: `<input_stem>_n`, e.g. `stonewall_n.dds`)
+- `--complex-name` (default from format: `<input_stem>_msn` or `<input_stem>_cm`)
+- `--complex-format` (`msn` or `cm`, default: `msn`)
 - `--parallax-strength` (default: `1.35`)
 - `--complex-strength` (default: `1.15`)
 - `--no-diffuse` (skip diffuse output)

@@ -34,7 +34,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(complex_material.mode, "L")
         self.assertEqual(complex_material.size, (8, 8))
 
-    def test_build_output_paths_uses_default_names_and_extension(self) -> None:
+    def test_build_output_paths_uses_skyrim_default_names_and_extension(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             input_path = temp_path / "brick.dds"
@@ -47,10 +47,10 @@ class GenerateTexturesTests(unittest.TestCase):
                 parallax_name=None,
             )
 
-            self.assertEqual(diffuse_path.name, "brick_diffuse.dds")
-            self.assertEqual(parallax_path.name, "brick_parallax.dds")
+            self.assertEqual(diffuse_path.name, "brick.dds")
+            self.assertEqual(parallax_path.name, "brick_n.dds")
 
-    def test_build_complex_output_path_uses_default_name_and_extension(self) -> None:
+    def test_build_complex_output_path_uses_msn_default_name_and_extension(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             input_path = temp_path / "brick.dds"
@@ -60,9 +60,25 @@ class GenerateTexturesTests(unittest.TestCase):
                 input_path=input_path,
                 output_dir=temp_path / "out",
                 complex_name=None,
+                complex_format="msn",
             )
 
-            self.assertEqual(complex_path.name, "brick_complex_material.dds")
+            self.assertEqual(complex_path.name, "brick_msn.dds")
+
+    def test_build_complex_output_path_supports_cm_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.dds"
+            input_path.write_bytes(b"stub")
+
+            complex_path = build_complex_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+                complex_name=None,
+                complex_format="cm",
+            )
+
+            self.assertEqual(complex_path.name, "brick_cm.dds")
 
     def test_run_with_options_requires_at_least_one_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
