@@ -36,6 +36,7 @@ This opens a desktop interface where you can:
 - use **Auto** checkboxes beside each slider to choose exactly which sliders receive automatic suggestions
 - batch-process folder inputs in the background so the UI stays responsive on larger files or larger sets
 - when a folder is selected, only process original `.dds` source textures and skip generated `_n`, `_p`, `_g`, `_m`, `_msn`, and `_cm` variants
+- continue processing remaining files in folder mode even if one file is corrupt/unreadable
 
 ### Command line
 
@@ -69,6 +70,12 @@ Optional arguments:
 - `--gui` (force GUI mode)
 
 Generated outputs default to `.dds` filenames regardless of the input format. The tool writes DDS files using DXT5 compression for broader compatibility with external viewers/converters; if DDS export is unavailable on the current Pillow build, it falls back to PNG output.
+
+### Skyrim SE output conventions (fact-checked)
+
+- Normal map output (`*_n`) uses **DirectX-style tangent-space orientation** by default (green channel flipped vs OpenGL workflows), which is what Skyrim expects.
+- Neutral normal color remains centered around `RGB(128, 128, 255)` so flat areas stay visually flat in-game.
+- `_msn` output still stores normal RGB with specular in alpha; `_cm` remains grayscale complex material.
 
 ## GitHub Actions
 

@@ -48,6 +48,16 @@ def _uniform_bright_image() -> Image.Image:
     return Image.new("RGB", (24, 24), color=(220, 220, 220))
 
 
+def _vertical_gradient_image() -> Image.Image:
+    image = Image.new("RGB", (24, 24))
+    pixels = image.load()
+    for y in range(24):
+        value = int((y / 23) * 255)
+        for x in range(24):
+            pixels[x, y] = (value, value, value)
+    return image
+
+
 def _sparse_highlight_image() -> Image.Image:
     image = Image.new("RGB", (24, 24), color=(20, 20, 20))
     pixels = image.load()
@@ -72,6 +82,15 @@ class GenerateTexturesTests(unittest.TestCase):
         normal = generate_normal(_sample_image())
         self.assertEqual(normal.mode, "RGB")
         self.assertEqual(normal.size, (8, 8))
+
+    def test_generate_normal_directx_green_channel_differs_from_opengl(self) -> None:
+        gradient = _vertical_gradient_image()
+        directx_normal = generate_normal(gradient, strength=1.0, directx=True)
+        opengl_normal = generate_normal(gradient, strength=1.0, directx=False)
+        _, directx_green, _ = directx_normal.split()
+        _, opengl_green, _ = opengl_normal.split()
+        sample_coord = (12, 12)
+        self.assertNotEqual(directx_green.getpixel(sample_coord), opengl_green.getpixel(sample_coord))
 
     def test_generate_glow_returns_l_same_size(self) -> None:
         glow = generate_glow(_sample_image())
@@ -370,6 +389,35 @@ class GenerateTexturesTests(unittest.TestCase):
 
             self.assertEqual(sorted(path.name for path in outputs.keys()), ["brick.dds", "stone_wall.dds"])
             self.assertEqual(sorted(path.name for path in output_dir.iterdir()), ["brick.dds", "stone_wall.dds"])
+
+    def test_run_batch_with_options_can_continue_on_file_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            input_dir.mkdir()
+
+            _sample_image().save(input_dir / "good.dds", format="DDS", pixel_format="DXT5")
+            (input_dir / "bad.dds").write_bytes(b"this is not a valid dds")
+            errors: list[tuple[str, str]] = []
+
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                continue_on_error=True,
+                error_callback=lambda _index, _total, current, exc: errors.append((current.name, str(exc))),
+            )
+
+            self.assertEqual(sorted(path.name for path in outputs.keys()), ["good.dds"])
+            self.assertEqual(sorted(path.name for path in output_dir.iterdir()), ["good.dds"])
+            self.assertEqual(len(errors), 1)
+            self.assertEqual(errors[0][0], "bad.dds")
 
 
 if __name__ == "__main__":

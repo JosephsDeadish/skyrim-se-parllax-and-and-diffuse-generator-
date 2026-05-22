@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 import queue
+import sys
 import threading
+import uuid
 from pathlib import Path
 from typing import Callable
 
@@ -166,12 +169,15 @@ def generate_parallax(source: Image.Image, strength: float = 1.35) -> Image.Imag
     return ImageOps.autocontrast(contrasted, cutoff=1)
 
 
-def generate_normal(source: Image.Image, strength: float = 2.0) -> Image.Image:
+def generate_normal(source: Image.Image, strength: float = 2.0, directx: bool = True) -> Image.Image:
     height_map = _prepare_height_map(source).filter(ImageFilter.GaussianBlur(radius=0.8))
     sobel_x = height_map.filter(ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=1, offset=128))
     sobel_y = height_map.filter(ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=1, offset=128))
     red = sobel_x.point(lambda value: int(_clamp(128.0 - ((value - 128.0) * strength), 0.0, 255.0)))
-    green = sobel_y.point(lambda value: int(_clamp(128.0 - ((value - 128.0) * strength), 0.0, 255.0)))
+    green_sign = 1.0 if directx else -1.0
+    green = sobel_y.point(
+        lambda value: int(_clamp(128.0 + ((value - 128.0) * strength * green_sign), 0.0, 255.0))
+    )
     midpoint = Image.new("L", height_map.size, color=128)
     slope = ImageChops.add(
         ImageChops.difference(red, midpoint),
@@ -329,13 +335,24 @@ def _to_dds_compatible_image(image: Image.Image) -> Image.Image:
 
 
 def _save_with_dds_fallback(image: Image.Image, output_path: Path) -> Path:
+    def _atomic_save(target: Path, image_to_save: Image.Image, **save_kwargs: object) -> None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = target.with_name(f".{target.stem}.{uuid.uuid4().hex}{target.suffix}")
+        try:
+            image_to_save.save(temp_path, **save_kwargs)
+            os.replace(temp_path, target)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink(missing_ok=True)
+
     dds_image = _to_dds_compatible_image(image)
+    dds_target = output_path.with_suffix(DDS_EXTENSION)
     try:
-        dds_image.save(output_path.with_suffix(DDS_EXTENSION), format="DDS", pixel_format="DXT5")
+        _atomic_save(dds_target, dds_image, format="DDS", pixel_format="DXT5")
         return output_path
     except Exception:
         fallback = output_path.with_suffix(".png")
-        image.save(fallback, format="PNG")
+        _atomic_save(fallback, image, format="PNG")
         return fallback
 
 
@@ -491,6 +508,8 @@ def run_batch_with_options(
     include_environment_mask: bool = False,
     include_complex: bool = False,
     progress_callback: Callable[[int, int, Path], None] | None = None,
+    error_callback: Callable[[int, int, Path, Exception], None] | None = None,
+    continue_on_error: bool = False,
 ) -> dict[Path, dict[str, Path]]:
     input_files = collect_source_textures(input_path)
     results: dict[Path, dict[str, Path]] = {}
@@ -499,29 +518,35 @@ def run_batch_with_options(
     for index, input_file in enumerate(input_files, start=1):
         if progress_callback is not None:
             progress_callback(index, total, input_file)
-        results[input_file] = run_with_options(
-            input_file=input_file,
-            output_dir=output_dir,
-            diffuse_name=diffuse_name,
-            normal_name=normal_name,
-            parallax_name=parallax_name,
-            glow_name=glow_name,
-            environment_mask_name=environment_mask_name,
-            complex_name=complex_name,
-            normal_strength=normal_strength,
-            parallax_strength=parallax_strength,
-            glow_threshold=glow_threshold,
-            environment_mask_strength=environment_mask_strength,
-            complex_strength=complex_strength,
-            specular_strength=specular_strength,
-            complex_format=complex_format,
-            include_diffuse=include_diffuse,
-            include_normal=include_normal,
-            include_parallax=include_parallax,
-            include_glow=include_glow,
-            include_environment_mask=include_environment_mask,
-            include_complex=include_complex,
-        )
+        try:
+            results[input_file] = run_with_options(
+                input_file=input_file,
+                output_dir=output_dir,
+                diffuse_name=diffuse_name,
+                normal_name=normal_name,
+                parallax_name=parallax_name,
+                glow_name=glow_name,
+                environment_mask_name=environment_mask_name,
+                complex_name=complex_name,
+                normal_strength=normal_strength,
+                parallax_strength=parallax_strength,
+                glow_threshold=glow_threshold,
+                environment_mask_strength=environment_mask_strength,
+                complex_strength=complex_strength,
+                specular_strength=specular_strength,
+                complex_format=complex_format,
+                include_diffuse=include_diffuse,
+                include_normal=include_normal,
+                include_parallax=include_parallax,
+                include_glow=include_glow,
+                include_environment_mask=include_environment_mask,
+                include_complex=include_complex,
+            )
+        except Exception as exc:
+            if error_callback is not None:
+                error_callback(index, total, input_file, exc)
+            if not continue_on_error:
+                raise
 
     return results
 
@@ -605,6 +630,7 @@ if GUI_AVAILABLE:
             self.preview_before: ImageTk.PhotoImage | None = None
             self.preview_after: ImageTk.PhotoImage | None = None
             self.selected_inputs: list[Path] = []
+            self.batch_failures: list[tuple[str, str]] = []
             self.processing_thread: threading.Thread | None = None
             self.processing_queue: queue.Queue[tuple[str, object]] = queue.Queue()
             self.is_processing = False
@@ -853,6 +879,10 @@ if GUI_AVAILABLE:
                     progress_callback=lambda index, total, current: self.processing_queue.put(
                         ("progress", (index, total, current.name))
                     ),
+                    error_callback=lambda index, total, current, exc: self.processing_queue.put(
+                        ("file_error", (index, total, current.name, str(exc)))
+                    ),
+                    continue_on_error=True,
                     **generation_kwargs,
                 )
                 self.processing_queue.put(("done", results))
@@ -870,13 +900,21 @@ if GUI_AVAILABLE:
                 if event_type == "progress":
                     index, total, filename = payload
                     self.status_var.set(f"Processing {index}/{total}: {filename}")
+                elif event_type == "file_error":
+                    index, total, filename, error_message = payload
+                    self.batch_failures.append((filename, error_message))
+                    self.status_var.set(f"Skipped failed file {index}/{total}: {filename}")
                 elif event_type == "done":
                     results = payload
                     self._set_processing_state(False)
                     total_sources = len(results)
+                    total_failed = len(self.batch_failures)
                     total_outputs = sum(len(output_set) for output_set in results.values())
-                    self.status_var.set(f"Generated {total_outputs} file(s) from {total_sources} source texture(s).")
-                    if total_sources == 1:
+                    self.status_var.set(
+                        f"Generated {total_outputs} file(s) from {total_sources} source texture(s). "
+                        f"Failed: {total_failed}."
+                    )
+                    if total_sources == 1 and total_failed == 0:
                         only_outputs = next(iter(results.values()))
                         lines = [f"{key.replace('_', ' ').title()}: {value}" for key, value in only_outputs.items()]
                     else:
@@ -884,6 +922,12 @@ if GUI_AVAILABLE:
                             f"Processed {total_sources} source textures.",
                             f"Generated {total_outputs} files.",
                         ]
+                        if total_failed:
+                            lines.append(f"Skipped {total_failed} failed source texture(s).")
+                            for filename, error_message in self.batch_failures[:5]:
+                                lines.append(f"- {filename}: {error_message}")
+                            if total_failed > 5:
+                                lines.append(f"...and {total_failed - 5} more.")
                     messagebox.showinfo("Generation complete", "\n".join(lines))
                     self._refresh_preview()
                     keep_polling = False
@@ -1057,6 +1101,7 @@ if GUI_AVAILABLE:
                 "include_environment_mask": include_environment_mask,
                 "include_complex": include_complex,
             }
+            self.batch_failures = []
             self._set_processing_state(True)
             self.status_var.set(f"Queued {len(self.selected_inputs)} source texture(s) for processing...")
             self.processing_thread = threading.Thread(
@@ -1084,6 +1129,7 @@ def main() -> int:
         return 0
 
     if args.input_file.is_dir():
+        failures: list[tuple[Path, str]] = []
         batch_outputs = run_batch_with_options(
             input_path=args.input_file,
             output_dir=args.output_dir,
@@ -1106,11 +1152,18 @@ def main() -> int:
             include_glow=args.glow_map,
             include_environment_mask=args.environment_mask,
             include_complex=args.complex_material,
+            continue_on_error=True,
+            error_callback=lambda _index, _total, current, exc: failures.append((current, str(exc))),
         )
         for input_file, outputs in batch_outputs.items():
             print(f"[{input_file.name}]")
             for output_type, path in outputs.items():
                 print(f"  {output_type.replace('_', ' ').title()} texture: {path}")
+        if failures:
+            print("\nSome files failed during batch processing:", file=sys.stderr)
+            for file_path, error_message in failures:
+                print(f"- {file_path}: {error_message}", file=sys.stderr)
+            return 1
         return 0
 
     outputs = run_with_options(
