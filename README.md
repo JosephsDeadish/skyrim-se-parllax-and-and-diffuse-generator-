@@ -6,7 +6,9 @@ Texture generator that supports both GUI and command-line usage. It can generate
 - a grayscale parallax texture
 - a glow map
 - an environment mask
-- a grayscale complex material texture
+- a complex material output:
+  - `_msn`: normal RGB with specular in alpha
+  - `_cm`: grayscale complex material texture
 
 ## Requirements
 
@@ -26,8 +28,10 @@ This opens a desktop interface where you can:
 - pick an output folder
 - choose diffuse/normal/parallax/glow/environment mask/complex material outputs
 - preview before/after output
-- tune normal/parallax/glow/environment mask/complex strengths
+- tune normal/parallax/glow/environment mask/complex/specular strengths
 - scroll through all controls in smaller windows
+- auto-update output folder when a different input texture is selected
+- get adaptive recommended defaults based on the selected image
 
 ### Command line
 
@@ -44,11 +48,12 @@ Optional arguments:
 - `--environment-mask-name` (default: `<input_stem>_m`, e.g. `stonewall_m.dds`)
 - `--complex-name` (default from format: `<input_stem>_msn` or `<input_stem>_cm`)
 - `--complex-format` (`msn` or `cm`, default: `msn`)
-- `--normal-strength` (default: `2.0`)
-- `--parallax-strength` (default: `1.35`)
-- `--glow-threshold` (default: `190`)
-- `--environment-mask-strength` (default: `1.2`)
-- `--complex-strength` (default: `1.15`)
+- `--normal-strength` (default: adaptive from image)
+- `--parallax-strength` (default: adaptive from image)
+- `--glow-threshold` (default: adaptive from image)
+- `--environment-mask-strength` (default: adaptive from image)
+- `--complex-strength` (default: adaptive from image)
+- `--specular-strength` (default: adaptive from image, used for `_msn` alpha)
 - `--no-diffuse` (skip diffuse output)
 - `--no-normal` (skip normal output)
 - `--no-parallax` (skip parallax output)

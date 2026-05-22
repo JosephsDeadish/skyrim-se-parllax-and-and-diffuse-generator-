@@ -14,8 +14,10 @@ from generate_textures import (
     generate_diffuse,
     generate_environment_mask,
     generate_glow,
+    generate_msn,
     generate_normal,
     generate_parallax,
+    recommend_generation_settings,
     run_with_options,
 )
 
@@ -54,6 +56,20 @@ class GenerateTexturesTests(unittest.TestCase):
         complex_material = generate_complex_material(_sample_image())
         self.assertEqual(complex_material.mode, "L")
         self.assertEqual(complex_material.size, (8, 8))
+
+    def test_generate_msn_returns_rgba_same_size(self) -> None:
+        msn = generate_msn(_sample_image())
+        self.assertEqual(msn.mode, "RGBA")
+        self.assertEqual(msn.size, (8, 8))
+
+    def test_recommend_generation_settings_returns_valid_ranges(self) -> None:
+        settings = recommend_generation_settings(_sample_image())
+        self.assertGreaterEqual(float(settings["normal_strength"]), 1.1)
+        self.assertLessEqual(float(settings["normal_strength"]), 3.8)
+        self.assertGreaterEqual(float(settings["parallax_strength"]), 0.8)
+        self.assertLessEqual(float(settings["parallax_strength"]), 2.4)
+        self.assertGreaterEqual(int(settings["glow_threshold"]), 140)
+        self.assertLessEqual(int(settings["glow_threshold"]), 235)
 
     def test_build_output_paths_uses_skyrim_default_names_and_extension(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -209,6 +225,29 @@ class GenerateTexturesTests(unittest.TestCase):
                 with Image.open(path) as generated:
                     generated.load()
                     self.assertEqual(generated.size, (8, 8))
+
+    def test_run_with_options_writes_msn_with_alpha_when_complex_format_is_msn(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            outputs = run_with_options(
+                input_file=input_path,
+                output_dir=output_dir,
+                include_diffuse=False,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=True,
+                complex_format="msn",
+            )
+
+            with Image.open(outputs["complex_material"]) as generated:
+                generated.load()
+                self.assertIn(generated.mode, ("RGBA", "RGB"))
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageEnhance, ImageFilter, ImageOps, ImageStat
 
 try:
     import tkinter as tk
@@ -18,32 +18,64 @@ except Exception:
 DDS_EXTENSION = ".dds"
 
 
+def _clamp(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(maximum, value))
+
+
+def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]:
+    grayscale = ImageOps.grayscale(source)
+    edge_map = grayscale.filter(ImageFilter.FIND_EDGES)
+    brightness = float(ImageStat.Stat(grayscale).mean[0])
+    contrast = float(ImageStat.Stat(grayscale).stddev[0])
+    edge_strength = float(ImageStat.Stat(edge_map).mean[0])
+
+    normal_strength = _clamp(1.2 + (edge_strength / 100.0) + (contrast / 180.0), 1.1, 3.8)
+    parallax_strength = _clamp(
+        0.95 + (contrast / 220.0) + ((128.0 - brightness) / 255.0) * 0.3,
+        0.8,
+        2.4,
+    )
+    environment_mask_strength = _clamp(1.0 + (contrast / 180.0), 0.9, 2.4)
+    complex_strength = _clamp(1.0 + (edge_strength / 130.0), 1.0, 2.6)
+    specular_strength = _clamp(0.9 + (edge_strength / 140.0) + ((128.0 - brightness) / 255.0) * 0.4, 0.8, 2.4)
+    glow_threshold = int(_clamp(168.0 + brightness * 0.26 + contrast * 0.16, 140.0, 235.0))
+
+    return {
+        "normal_strength": normal_strength,
+        "parallax_strength": parallax_strength,
+        "environment_mask_strength": environment_mask_strength,
+        "complex_strength": complex_strength,
+        "specular_strength": specular_strength,
+        "glow_threshold": glow_threshold,
+    }
+
+
 def generate_diffuse(source: Image.Image) -> Image.Image:
     return ImageOps.autocontrast(source.convert("RGB"), cutoff=1)
 
 
 def generate_parallax(source: Image.Image, strength: float = 1.35) -> Image.Image:
     grayscale = ImageOps.grayscale(source)
-    detail = grayscale.filter(ImageFilter.UnsharpMask(radius=2, percent=200, threshold=3))
-    return ImageEnhance.Contrast(detail).enhance(strength)
+    detail = grayscale.filter(ImageFilter.UnsharpMask(radius=2, percent=220, threshold=2))
+    merged = ImageChops.add(detail, grayscale, scale=1.7)
+    return ImageEnhance.Contrast(merged).enhance(strength)
 
 
 def generate_normal(source: Image.Image, strength: float = 2.0) -> Image.Image:
-    height = ImageOps.grayscale(source).filter(ImageFilter.GaussianBlur(radius=1.0))
+    grayscale = ImageOps.grayscale(source)
+    height = grayscale.filter(ImageFilter.GaussianBlur(radius=1.0))
+    sobel_x = height.filter(ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=1))
+    sobel_y = height.filter(ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=1))
     width, height_px = height.size
-    src = height.load()
+    src_x = sobel_x.load()
+    src_y = sobel_y.load()
     normal = Image.new("RGB", (width, height_px))
     dst = normal.load()
 
     for y in range(height_px):
-        y_prev = y - 1 if y > 0 else 0
-        y_next = y + 1 if y < height_px - 1 else height_px - 1
         for x in range(width):
-            x_prev = x - 1 if x > 0 else 0
-            x_next = x + 1 if x < width - 1 else width - 1
-
-            dx = ((src[x_next, y] - src[x_prev, y]) / 255.0) * strength
-            dy = ((src[x, y_next] - src[x, y_prev]) / 255.0) * strength
+            dx = ((src_x[x, y] - 128.0) / 127.0) * strength
+            dy = ((src_y[x, y] - 128.0) / 127.0) * strength
             dz = 1.0
 
             nx = -dx
@@ -76,10 +108,28 @@ def generate_environment_mask(source: Image.Image, strength: float = 1.2) -> Ima
 
 def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Image.Image:
     grayscale = ImageOps.grayscale(source)
-    edged = grayscale.filter(ImageFilter.FIND_EDGES)
-    shaped = ImageEnhance.Contrast(edged).enhance(strength)
-    merged = ImageChops.add(grayscale, shaped, scale=1.6)
+    edges = grayscale.filter(ImageFilter.FIND_EDGES).filter(ImageFilter.UnsharpMask(radius=1.5, percent=200, threshold=2))
+    highpass = ImageChops.subtract(grayscale, grayscale.filter(ImageFilter.GaussianBlur(radius=2.4)), scale=1.0, offset=128)
+    shaped = ImageEnhance.Contrast(ImageChops.add(edges, highpass, scale=1.5)).enhance(strength)
+    merged = ImageChops.add(grayscale, shaped, scale=1.45)
     return ImageOps.autocontrast(merged, cutoff=2)
+
+
+def generate_specular(source: Image.Image, strength: float = 1.15) -> Image.Image:
+    grayscale = ImageOps.grayscale(source)
+    smoothed = grayscale.filter(ImageFilter.GaussianBlur(radius=0.8))
+    edges = smoothed.filter(ImageFilter.FIND_EDGES)
+    base = ImageEnhance.Contrast(smoothed).enhance(1.2)
+    boosted_edges = ImageEnhance.Brightness(edges).enhance(0.7)
+    specular = ImageChops.add(base, boosted_edges, scale=1.35)
+    return ImageEnhance.Contrast(specular).enhance(strength)
+
+
+def generate_msn(source: Image.Image, normal_strength: float = 2.0, specular_strength: float = 1.15) -> Image.Image:
+    normal_rgb = generate_normal(source, strength=normal_strength)
+    specular_alpha = generate_specular(source, strength=specular_strength)
+    r, g, b = normal_rgb.split()
+    return Image.merge("RGBA", (r, g, b, specular_alpha))
 
 
 def build_output_paths(
@@ -198,11 +248,12 @@ def run_with_options(
     glow_name: str | None = None,
     environment_mask_name: str | None = None,
     complex_name: str | None = None,
-    normal_strength: float = 2.0,
-    parallax_strength: float = 1.35,
-    glow_threshold: int = 190,
-    environment_mask_strength: float = 1.2,
-    complex_strength: float = 1.15,
+    normal_strength: float | None = None,
+    parallax_strength: float | None = None,
+    glow_threshold: int | None = None,
+    environment_mask_strength: float | None = None,
+    complex_strength: float | None = None,
+    specular_strength: float | None = None,
     complex_format: str = "msn",
     include_diffuse: bool = True,
     include_normal: bool = True,
@@ -217,6 +268,16 @@ def run_with_options(
     outputs: dict[str, Path] = {}
 
     with Image.open(input_file) as source:
+        recommended = recommend_generation_settings(source)
+        resolved_normal_strength = normal_strength if normal_strength is not None else float(recommended["normal_strength"])
+        resolved_parallax_strength = parallax_strength if parallax_strength is not None else float(recommended["parallax_strength"])
+        resolved_glow_threshold = glow_threshold if glow_threshold is not None else int(recommended["glow_threshold"])
+        resolved_environment_mask_strength = (
+            environment_mask_strength if environment_mask_strength is not None else float(recommended["environment_mask_strength"])
+        )
+        resolved_complex_strength = complex_strength if complex_strength is not None else float(recommended["complex_strength"])
+        resolved_specular_strength = specular_strength if specular_strength is not None else float(recommended["specular_strength"])
+
         if include_diffuse:
             diffuse = generate_diffuse(source)
             diffuse_path, _ = build_output_paths(
@@ -228,7 +289,7 @@ def run_with_options(
             outputs["diffuse"] = _save_with_dds_fallback(diffuse, diffuse_path)
 
         if include_normal:
-            normal = generate_normal(source, strength=normal_strength)
+            normal = generate_normal(source, strength=resolved_normal_strength)
             normal_path = build_normal_output_path(
                 input_path=input_file,
                 output_dir=output_dir,
@@ -237,7 +298,7 @@ def run_with_options(
             outputs["normal"] = _save_with_dds_fallback(normal, normal_path)
 
         if include_parallax:
-            parallax = generate_parallax(source, strength=parallax_strength)
+            parallax = generate_parallax(source, strength=resolved_parallax_strength)
             _, parallax_path = build_output_paths(
                 input_path=input_file,
                 output_dir=output_dir,
@@ -247,7 +308,7 @@ def run_with_options(
             outputs["parallax"] = _save_with_dds_fallback(parallax, parallax_path)
 
         if include_glow:
-            glow = generate_glow(source, threshold=glow_threshold)
+            glow = generate_glow(source, threshold=resolved_glow_threshold)
             glow_path = build_glow_output_path(
                 input_path=input_file,
                 output_dir=output_dir,
@@ -256,7 +317,7 @@ def run_with_options(
             outputs["glow"] = _save_with_dds_fallback(glow, glow_path)
 
         if include_environment_mask:
-            environment_mask = generate_environment_mask(source, strength=environment_mask_strength)
+            environment_mask = generate_environment_mask(source, strength=resolved_environment_mask_strength)
             environment_mask_path = build_environment_mask_output_path(
                 input_path=input_file,
                 output_dir=output_dir,
@@ -265,7 +326,14 @@ def run_with_options(
             outputs["environment_mask"] = _save_with_dds_fallback(environment_mask, environment_mask_path)
 
         if include_complex:
-            complex_material = generate_complex_material(source, strength=complex_strength)
+            if complex_format == "msn":
+                complex_material = generate_msn(
+                    source,
+                    normal_strength=resolved_normal_strength,
+                    specular_strength=resolved_specular_strength,
+                )
+            else:
+                complex_material = generate_complex_material(source, strength=resolved_complex_strength)
             complex_path = build_complex_output_path(
                 input_path=input_file,
                 output_dir=output_dir,
@@ -298,32 +366,38 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--normal-strength",
         type=float,
-        default=2.0,
-        help="Normal map detail strength factor.",
+        default=None,
+        help="Normal map detail strength factor (auto if omitted).",
     )
     parser.add_argument(
         "--parallax-strength",
         type=float,
-        default=1.35,
-        help="Parallax contrast strength factor.",
+        default=None,
+        help="Parallax contrast strength factor (auto if omitted).",
     )
     parser.add_argument(
         "--glow-threshold",
         type=int,
-        default=190,
-        help="Glow brightness threshold (0-255).",
+        default=None,
+        help="Glow brightness threshold (0-255, auto if omitted).",
     )
     parser.add_argument(
         "--environment-mask-strength",
         type=float,
-        default=1.2,
-        help="Environment mask contrast strength factor.",
+        default=None,
+        help="Environment mask contrast strength factor (auto if omitted).",
     )
     parser.add_argument(
         "--complex-strength",
         type=float,
-        default=1.15,
-        help="Complex material contrast strength factor.",
+        default=None,
+        help="Complex material contrast strength factor (auto if omitted).",
+    )
+    parser.add_argument(
+        "--specular-strength",
+        type=float,
+        default=None,
+        help="Specular alpha strength when --complex-format=msn (auto if omitted).",
     )
     parser.add_argument("--no-diffuse", action="store_true", help="Skip diffuse output generation.")
     parser.add_argument("--no-normal", action="store_true", help="Skip normal output generation.")
@@ -350,6 +424,7 @@ if GUI_AVAILABLE:
             self.normal_strength_var = tk.DoubleVar(value=2.0)
             self.parallax_strength_var = tk.DoubleVar(value=1.35)
             self.complex_strength_var = tk.DoubleVar(value=1.15)
+            self.specular_strength_var = tk.DoubleVar(value=1.15)
             self.glow_threshold_var = tk.IntVar(value=190)
             self.environment_mask_strength_var = tk.DoubleVar(value=1.2)
             self.complex_format_var = tk.StringVar(value="msn")
@@ -440,7 +515,11 @@ if GUI_AVAILABLE:
             ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.complex_strength_var, command=lambda _: self._refresh_preview()).grid(row=7, column=1, columnspan=2, sticky=tk.EW)
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=7, column=3, sticky=tk.W, padx=8)
 
-            ttk.Label(options_frame, text="Preview output").grid(row=8, column=0, sticky=tk.W, pady=8)
+            ttk.Label(options_frame, text="Specular strength (_msn alpha)").grid(row=8, column=0, sticky=tk.W, pady=8)
+            ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.specular_strength_var, command=lambda _: self._refresh_preview()).grid(row=8, column=1, columnspan=2, sticky=tk.EW)
+            ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=8, column=3, sticky=tk.W, padx=8)
+
+            ttk.Label(options_frame, text="Preview output").grid(row=9, column=0, sticky=tk.W, pady=8)
             preview_mode = ttk.Combobox(
                 options_frame,
                 textvariable=self.preview_mode_var,
@@ -448,7 +527,7 @@ if GUI_AVAILABLE:
                 state="readonly",
                 width=20,
             )
-            preview_mode.grid(row=8, column=1, sticky=tk.W)
+            preview_mode.grid(row=9, column=1, sticky=tk.W)
             preview_mode.bind("<<ComboboxSelected>>", lambda _: self._refresh_preview())
             options_frame.columnconfigure(2, weight=1)
 
@@ -507,13 +586,24 @@ if GUI_AVAILABLE:
             try:
                 with Image.open(path) as src:
                     self.source_image = src.copy()
-                if not self.output_var.get():
-                    self.output_var.set(str(path.parent))
+                self.output_var.set(str(path.parent))
+                self._apply_recommended_settings()
                 self.status_var.set(f"Loaded: {path.name}")
                 self._refresh_preview()
             except Exception as exc:
                 self.source_image = None
                 messagebox.showerror("Unable to open texture", str(exc))
+
+        def _apply_recommended_settings(self) -> None:
+            if self.source_image is None:
+                return
+            recommended = recommend_generation_settings(self.source_image)
+            self.normal_strength_var.set(float(recommended["normal_strength"]))
+            self.parallax_strength_var.set(float(recommended["parallax_strength"]))
+            self.glow_threshold_var.set(int(recommended["glow_threshold"]))
+            self.environment_mask_strength_var.set(float(recommended["environment_mask_strength"]))
+            self.complex_strength_var.set(float(recommended["complex_strength"]))
+            self.specular_strength_var.set(float(recommended["specular_strength"]))
 
         def _photo_image(self, image: Image.Image, max_size: int = 340) -> ImageTk.PhotoImage:
             preview = image.copy()
@@ -539,7 +629,14 @@ if GUI_AVAILABLE:
             elif mode == "environment_mask":
                 transformed = generate_environment_mask(self.source_image, strength=self.environment_mask_strength_var.get())
             elif mode == "complex_material":
-                transformed = generate_complex_material(self.source_image, strength=self.complex_strength_var.get())
+                if self.complex_format_var.get() == "msn":
+                    transformed = generate_msn(
+                        self.source_image,
+                        normal_strength=self.normal_strength_var.get(),
+                        specular_strength=self.specular_strength_var.get(),
+                    )
+                else:
+                    transformed = generate_complex_material(self.source_image, strength=self.complex_strength_var.get())
 
             self.preview_before = self._photo_image(self.source_image)
             self.preview_after = self._photo_image(transformed)
@@ -571,6 +668,7 @@ if GUI_AVAILABLE:
                     glow_threshold=self.glow_threshold_var.get(),
                     environment_mask_strength=self.environment_mask_strength_var.get(),
                     complex_strength=self.complex_strength_var.get(),
+                    specular_strength=self.specular_strength_var.get(),
                     complex_format=self.complex_format_var.get(),
                     include_diffuse=include_diffuse,
                     include_normal=include_normal,
@@ -618,6 +716,7 @@ def main() -> int:
         glow_threshold=args.glow_threshold,
         environment_mask_strength=args.environment_mask_strength,
         complex_strength=args.complex_strength,
+        specular_strength=args.specular_strength,
         complex_format=args.complex_format,
         include_diffuse=not args.no_diffuse,
         include_normal=not args.no_normal,
