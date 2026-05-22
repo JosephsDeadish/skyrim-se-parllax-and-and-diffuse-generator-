@@ -193,6 +193,10 @@ def _prepare_height_map(source: Image.Image) -> Image.Image:
     return ImageOps.autocontrast(merged, cutoff=1)
 
 
+def _lift_black_floor(image: Image.Image, floor: int = 16) -> Image.Image:
+    return image.point(lambda value: int(_clamp(max(float(floor), float(value)), 0.0, 255.0)))
+
+
 def generate_diffuse(source: Image.Image) -> Image.Image:
     return ImageOps.autocontrast(source.convert("RGB"), cutoff=1)
 
@@ -207,6 +211,11 @@ def generate_parallax(source: Image.Image, strength: float = 1.35) -> Image.Imag
 
 
 def generate_normal(source: Image.Image, strength: float = 2.0, directx: bool = True) -> Image.Image:
+    source_grayscale = ImageOps.grayscale(source)
+    source_min, source_max = source_grayscale.getextrema()
+    if (source_max - source_min) <= 2:
+        return Image.new("RGB", source.size, color=(128, 128, 255))
+
     height_map = _prepare_height_map(source).filter(ImageFilter.GaussianBlur(radius=0.8))
     sobel_x = height_map.filter(ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=8, offset=128))
     sobel_y = height_map.filter(ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=8, offset=128))
@@ -214,7 +223,7 @@ def generate_normal(source: Image.Image, strength: float = 2.0, directx: bool = 
     red_pixels: list[int] = []
     green_pixels: list[int] = []
     blue_pixels: list[int] = []
-    for sobel_x_value, sobel_y_value in zip(sobel_x.getdata(), sobel_y.getdata()):
+    for sobel_x_value, sobel_y_value in zip(sobel_x.tobytes(), sobel_y.tobytes()):
         red_value = int(_clamp(128.0 - ((sobel_x_value - 128.0) * strength), 0.0, 255.0))
         green_value = int(_clamp(128.0 + ((sobel_y_value - 128.0) * strength * green_sign), 0.0, 255.0))
         normal_x = (float(red_value) - 128.0) / 127.0
@@ -246,25 +255,32 @@ def generate_glow(source: Image.Image, threshold: int = 190) -> Image.Image:
 
 def generate_environment_mask(source: Image.Image, strength: float = 1.2) -> Image.Image:
     rgb_source = source.convert("RGB")
-    grayscale = ImageOps.grayscale(rgb_source)
+    grayscale = ImageOps.grayscale(rgb_source).filter(ImageFilter.GaussianBlur(radius=0.8))
     red, green, blue = rgb_source.split()
     maximum = ImageChops.lighter(ImageChops.lighter(red, green), blue)
     minimum = ImageChops.darker(ImageChops.darker(red, green), blue)
     chroma = ImageChops.subtract(maximum, minimum)
-    metallic_proxy = ImageOps.invert(chroma)
-    merged = ImageChops.add(grayscale, metallic_proxy, scale=1.7)
-    softened = merged.filter(ImageFilter.GaussianBlur(radius=1.2))
+    metallic_proxy = ImageOps.invert(chroma).filter(ImageFilter.GaussianBlur(radius=0.9))
+    merged = ImageChops.add(grayscale, metallic_proxy, scale=1.9)
+    blended = Image.blend(grayscale, merged, alpha=0.65)
+    softened = blended.filter(ImageFilter.MedianFilter(size=3)).filter(ImageFilter.GaussianBlur(radius=0.8))
     contrasted = ImageEnhance.Contrast(softened).enhance(strength)
-    return ImageOps.autocontrast(contrasted, cutoff=1)
+    normalized = ImageOps.autocontrast(contrasted, cutoff=1)
+    return _lift_black_floor(normalized, floor=14)
 
 
 def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Image.Image:
-    grayscale = ImageOps.grayscale(source)
-    edges = grayscale.filter(ImageFilter.FIND_EDGES).filter(ImageFilter.UnsharpMask(radius=1.5, percent=200, threshold=2))
-    highpass = ImageChops.subtract(grayscale, grayscale.filter(ImageFilter.GaussianBlur(radius=2.4)), scale=1.0, offset=128)
-    shaped = ImageEnhance.Contrast(ImageChops.add(edges, highpass, scale=1.5)).enhance(strength)
-    merged = ImageChops.add(grayscale, shaped, scale=1.45)
-    return ImageOps.autocontrast(merged, cutoff=2)
+    grayscale = ImageOps.grayscale(source).filter(ImageFilter.GaussianBlur(radius=0.8))
+    grayscale_min, grayscale_max = grayscale.getextrema()
+    if (grayscale_max - grayscale_min) <= 2:
+        return _lift_black_floor(grayscale, floor=14)
+    edges = grayscale.filter(ImageFilter.FIND_EDGES).filter(ImageFilter.GaussianBlur(radius=0.8))
+    highpass = ImageChops.subtract(grayscale, grayscale.filter(ImageFilter.GaussianBlur(radius=2.8)), scale=1.2, offset=120)
+    shaped = ImageEnhance.Contrast(ImageChops.add(edges, highpass, scale=1.8)).enhance(strength)
+    merged = Image.blend(grayscale, shaped, alpha=0.55)
+    softened = merged.filter(ImageFilter.MedianFilter(size=3)).filter(ImageFilter.GaussianBlur(radius=0.7))
+    normalized = ImageOps.autocontrast(softened, cutoff=1)
+    return _lift_black_floor(normalized, floor=14)
 
 
 def generate_specular(source: Image.Image, strength: float = 1.15) -> Image.Image:

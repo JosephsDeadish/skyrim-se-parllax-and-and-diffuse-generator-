@@ -144,10 +144,22 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(environment_mask.mode, "L")
         self.assertEqual(environment_mask.size, (8, 8))
 
+    def test_generate_environment_mask_flat_surface_avoids_black_holes(self) -> None:
+        environment_mask = generate_environment_mask(_flat_dark_image(), strength=2.2)
+        minimum, maximum = environment_mask.getextrema()
+        self.assertGreaterEqual(minimum, 14)
+        self.assertLessEqual(maximum - minimum, 40)
+
     def test_generate_complex_material_returns_l_same_size(self) -> None:
         complex_material = generate_complex_material(_sample_image())
         self.assertEqual(complex_material.mode, "L")
         self.assertEqual(complex_material.size, (8, 8))
+
+    def test_generate_complex_material_flat_surface_avoids_black_holes(self) -> None:
+        complex_material = generate_complex_material(_flat_dark_image(), strength=2.2)
+        minimum, maximum = complex_material.getextrema()
+        self.assertGreaterEqual(minimum, 14)
+        self.assertLessEqual(maximum - minimum, 40)
 
     def test_generate_msn_returns_rgba_same_size(self) -> None:
         msn = generate_msn(_sample_image())
