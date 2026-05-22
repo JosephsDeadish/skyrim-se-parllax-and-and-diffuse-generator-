@@ -9,7 +9,9 @@ import uuid
 from pathlib import Path
 from typing import Callable
 
-from PIL import Image, ImageChops, ImageEnhance, ImageFilter, ImageOps, ImageStat
+import webbrowser
+
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageOps, ImageStat
 
 try:
     import tkinter as tk
@@ -620,6 +622,58 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+PATREON_URL = "https://www.patreon.com/cw/DeadOnTheInside"
+
+
+def _create_panda_icon_image(size: int = 128) -> Image.Image:
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    c = size // 2
+
+    # White head / face
+    fr = int(size * 0.44)
+    d.ellipse([c - fr, c - fr, c + fr, c + fr], fill=(255, 255, 255, 255), outline=(40, 40, 40, 255), width=max(2, size // 64))
+
+    # Black ears (upper-left and upper-right, behind head)
+    er = int(size * 0.14)
+    eo = int(size * 0.30)
+    d.ellipse([c - eo - er, c - eo - er, c - eo + er, c - eo + er], fill=(30, 30, 30, 255))
+    d.ellipse([c + eo - er, c - eo - er, c + eo + er, c - eo + er], fill=(30, 30, 30, 255))
+
+    # Black eye patches
+    epw = int(size * 0.14)
+    eph = int(size * 0.16)
+    exo = int(size * 0.17)
+    eyo = int(size * -0.04)
+    d.ellipse([c - exo - epw, c + eyo - eph, c - exo + epw, c + eyo + eph], fill=(30, 30, 30, 255))
+    d.ellipse([c + exo - epw, c + eyo - eph, c + exo + epw, c + eyo + eph], fill=(30, 30, 30, 255))
+
+    # White eye highlights inside patches
+    eyr = int(size * 0.065)
+    eycy = c + eyo
+    d.ellipse([c - exo - eyr, eycy - eyr, c - exo + eyr, eycy + eyr], fill=(255, 255, 255, 255))
+    d.ellipse([c + exo - eyr, eycy - eyr, c + exo + eyr, eycy + eyr], fill=(255, 255, 255, 255))
+
+    # Black pupils
+    pr = int(size * 0.035)
+    d.ellipse([c - exo - pr, eycy - pr, c - exo + pr, eycy + pr], fill=(10, 10, 10, 255))
+    d.ellipse([c + exo - pr, eycy - pr, c + exo + pr, eycy + pr], fill=(10, 10, 10, 255))
+
+    # Nose (dark oval, centre)
+    ny = c + int(size * 0.14)
+    nrx = int(size * 0.06)
+    nry = int(size * 0.035)
+    d.ellipse([c - nrx, ny - nry, c + nrx, ny + nry], fill=(50, 50, 50, 255))
+
+    # Mouth (simple downward arc)
+    mw = int(size * 0.13)
+    my0 = ny + int(size * 0.03)
+    my1 = my0 + int(size * 0.09)
+    d.arc([c - mw, my0, c + mw, my1], start=0, end=180, fill=(50, 50, 50, 255), width=max(1, size // 80))
+
+    return img
+
+
 if GUI_AVAILABLE:
     class TextureGeneratorGUI:
         def __init__(self) -> None:
@@ -661,8 +715,7 @@ if GUI_AVAILABLE:
             self.status_var = tk.StringVar(value="Select a DDS file to begin.")
 
             self._build_ui()
-
-        def _build_ui(self) -> None:
+            self._set_app_icon()
             container = ttk.Frame(self.root)
             container.pack(fill=tk.BOTH, expand=True)
 
@@ -797,6 +850,19 @@ if GUI_AVAILABLE:
             self.generate_button = ttk.Button(actions, text="Generate", command=self._generate)
             self.generate_button.pack(side=tk.LEFT)
             ttk.Label(actions, textvariable=self.status_var).pack(side=tk.LEFT, padx=14)
+            ttk.Button(
+                actions,
+                text="❤ Support on Patreon",
+                command=lambda: webbrowser.open(PATREON_URL),
+            ).pack(side=tk.RIGHT, padx=4)
+
+        def _set_app_icon(self) -> None:
+            try:
+                icon_image = _create_panda_icon_image(size=128)
+                self._panda_icon_photo = ImageTk.PhotoImage(icon_image)
+                self.root.iconphoto(True, self._panda_icon_photo)
+            except Exception:
+                pass
 
         def _bind_mousewheel(self, canvas: tk.Canvas) -> None:
             def _on_mousewheel(event: tk.Event[tk.Misc]) -> None:

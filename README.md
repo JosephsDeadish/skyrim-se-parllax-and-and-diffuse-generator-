@@ -71,6 +71,8 @@ Optional arguments:
 
 Generated outputs default to `.dds` filenames regardless of the input format. The tool writes DDS files using DXT5 compression for broader compatibility with external viewers/converters; if DDS export is unavailable on the current Pillow build, it falls back to PNG output.
 
+- click **❤ Support on Patreon** in the toolbar to open the creator's Patreon page
+
 ### Skyrim SE output conventions (fact-checked)
 
 - Normal map output (`*_n`) uses **DirectX-style tangent-space orientation** by default (green channel flipped vs OpenGL workflows), which is what Skyrim expects.

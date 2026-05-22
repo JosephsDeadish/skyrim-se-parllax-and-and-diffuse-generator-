@@ -50,8 +50,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Generate application icon
+        run: python assets/create_panda_ico.py
+
       - name: Build executable with PyInstaller
-        run: pyinstaller --onefile --windowed --name generate_textures generate_textures.py
+        run: pyinstaller --onefile --windowed --name generate_textures --icon assets\panda.ico generate_textures.py
 
       - name: Create zip archive
         run: Compress-Archive -Path dist\generate_textures.exe -DestinationPath skyrim-texture-generator.zip

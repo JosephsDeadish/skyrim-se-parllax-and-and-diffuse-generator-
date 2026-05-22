@@ -5,6 +5,8 @@ from pathlib import Path
 from PIL import Image
 
 from generate_textures import (
+    PATREON_URL,
+    _create_panda_icon_image,
     analyze_image_content,
     apply_recommendations_by_auto_flags,
     build_complex_output_path,
@@ -418,6 +420,24 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(sorted(path.name for path in output_dir.iterdir()), ["good.dds"])
             self.assertEqual(len(errors), 1)
             self.assertEqual(errors[0][0], "bad.dds")
+
+    def test_create_panda_icon_image_returns_rgba_square(self) -> None:
+        for size in (16, 32, 64, 128, 256):
+            icon = _create_panda_icon_image(size=size)
+            self.assertEqual(icon.mode, "RGBA")
+            self.assertEqual(icon.size, (size, size))
+
+    def test_create_panda_icon_image_is_not_fully_transparent(self) -> None:
+        icon = _create_panda_icon_image(size=128)
+        opaque_count = 0
+        for x in range(icon.width):
+            for y in range(icon.height):
+                if icon.getpixel((x, y))[3] == 255:
+                    opaque_count += 1
+        self.assertGreater(opaque_count, 0)
+
+    def test_patreon_url_is_correct(self) -> None:
+        self.assertEqual(PATREON_URL, "https://www.patreon.com/cw/DeadOnTheInside")
 
 
 if __name__ == "__main__":
