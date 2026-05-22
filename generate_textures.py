@@ -25,6 +25,52 @@ def generate_parallax(source: Image.Image, strength: float = 1.35) -> Image.Imag
     return ImageEnhance.Contrast(detail).enhance(strength)
 
 
+def generate_normal(source: Image.Image, strength: float = 2.0) -> Image.Image:
+    height = ImageOps.grayscale(source).filter(ImageFilter.GaussianBlur(radius=1.0))
+    width, height_px = height.size
+    src = height.load()
+    normal = Image.new("RGB", (width, height_px))
+    dst = normal.load()
+
+    for y in range(height_px):
+        y_prev = y - 1 if y > 0 else 0
+        y_next = y + 1 if y < height_px - 1 else height_px - 1
+        for x in range(width):
+            x_prev = x - 1 if x > 0 else 0
+            x_next = x + 1 if x < width - 1 else width - 1
+
+            dx = ((src[x_next, y] - src[x_prev, y]) / 255.0) * strength
+            dy = ((src[x, y_next] - src[x, y_prev]) / 255.0) * strength
+            dz = 1.0
+
+            nx = -dx
+            ny = -dy
+            length = (nx * nx + ny * ny + dz * dz) ** 0.5 or 1.0
+            nx /= length
+            ny /= length
+            nz = dz / length
+
+            dst[x, y] = (
+                int((nx * 0.5 + 0.5) * 255),
+                int((ny * 0.5 + 0.5) * 255),
+                int((nz * 0.5 + 0.5) * 255),
+            )
+
+    return normal
+
+
+def generate_glow(source: Image.Image, threshold: int = 190) -> Image.Image:
+    grayscale = ImageOps.grayscale(source)
+    boosted = ImageEnhance.Contrast(grayscale).enhance(1.25)
+    return boosted.point(lambda v: 255 if v >= threshold else 0)
+
+
+def generate_environment_mask(source: Image.Image, strength: float = 1.2) -> Image.Image:
+    grayscale = ImageOps.grayscale(source)
+    softened = grayscale.filter(ImageFilter.GaussianBlur(radius=1.0))
+    return ImageEnhance.Contrast(softened).enhance(strength)
+
+
 def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Image.Image:
     grayscale = ImageOps.grayscale(source)
     edged = grayscale.filter(ImageFilter.FIND_EDGES)
@@ -44,8 +90,44 @@ def build_output_paths(
     ext = input_path.suffix.lower() if input_path.suffix else ".dds"
 
     diffuse_stem = diffuse_name or input_path.stem
-    parallax_stem = parallax_name or f"{input_path.stem}_n"
+    parallax_stem = parallax_name or f"{input_path.stem}_p"
     return base_output_dir / f"{diffuse_stem}{ext}", base_output_dir / f"{parallax_stem}{ext}"
+
+
+def build_normal_output_path(
+    input_path: Path,
+    output_dir: Path | None,
+    normal_name: str | None,
+) -> Path:
+    base_output_dir = output_dir or input_path.parent
+    base_output_dir.mkdir(parents=True, exist_ok=True)
+    ext = input_path.suffix.lower() if input_path.suffix else ".dds"
+    normal_stem = normal_name or f"{input_path.stem}_n"
+    return base_output_dir / f"{normal_stem}{ext}"
+
+
+def build_glow_output_path(
+    input_path: Path,
+    output_dir: Path | None,
+    glow_name: str | None,
+) -> Path:
+    base_output_dir = output_dir or input_path.parent
+    base_output_dir.mkdir(parents=True, exist_ok=True)
+    ext = input_path.suffix.lower() if input_path.suffix else ".dds"
+    glow_stem = glow_name or f"{input_path.stem}_g"
+    return base_output_dir / f"{glow_stem}{ext}"
+
+
+def build_environment_mask_output_path(
+    input_path: Path,
+    output_dir: Path | None,
+    environment_mask_name: str | None,
+) -> Path:
+    base_output_dir = output_dir or input_path.parent
+    base_output_dir.mkdir(parents=True, exist_ok=True)
+    ext = input_path.suffix.lower() if input_path.suffix else ".dds"
+    mask_stem = environment_mask_name or f"{input_path.stem}_m"
+    return base_output_dir / f"{mask_stem}{ext}"
 
 
 def build_complex_output_path(
@@ -99,17 +181,26 @@ def run_with_options(
     input_file: Path,
     output_dir: Path | None = None,
     diffuse_name: str | None = None,
+    normal_name: str | None = None,
     parallax_name: str | None = None,
+    glow_name: str | None = None,
+    environment_mask_name: str | None = None,
     complex_name: str | None = None,
+    normal_strength: float = 2.0,
     parallax_strength: float = 1.35,
+    glow_threshold: int = 190,
+    environment_mask_strength: float = 1.2,
     complex_strength: float = 1.15,
     complex_format: str = "msn",
     include_diffuse: bool = True,
+    include_normal: bool = True,
     include_parallax: bool = True,
+    include_glow: bool = False,
+    include_environment_mask: bool = False,
     include_complex: bool = False,
 ) -> dict[str, Path]:
-    if not any((include_diffuse, include_parallax, include_complex)):
-        raise ValueError("Select at least one output: diffuse, parallax, or complex material.")
+    if not any((include_diffuse, include_normal, include_parallax, include_glow, include_environment_mask, include_complex)):
+        raise ValueError("Select at least one output.")
 
     outputs: dict[str, Path] = {}
 
@@ -124,6 +215,15 @@ def run_with_options(
             )
             outputs["diffuse"] = _save_with_dds_fallback(diffuse, diffuse_path)
 
+        if include_normal:
+            normal = generate_normal(source, strength=normal_strength)
+            normal_path = build_normal_output_path(
+                input_path=input_file,
+                output_dir=output_dir,
+                normal_name=normal_name,
+            )
+            outputs["normal"] = _save_with_dds_fallback(normal, normal_path)
+
         if include_parallax:
             parallax = generate_parallax(source, strength=parallax_strength)
             _, parallax_path = build_output_paths(
@@ -133,6 +233,24 @@ def run_with_options(
                 parallax_name=parallax_name,
             )
             outputs["parallax"] = _save_with_dds_fallback(parallax, parallax_path)
+
+        if include_glow:
+            glow = generate_glow(source, threshold=glow_threshold)
+            glow_path = build_glow_output_path(
+                input_path=input_file,
+                output_dir=output_dir,
+                glow_name=glow_name,
+            )
+            outputs["glow"] = _save_with_dds_fallback(glow, glow_path)
+
+        if include_environment_mask:
+            environment_mask = generate_environment_mask(source, strength=environment_mask_strength)
+            environment_mask_path = build_environment_mask_output_path(
+                input_path=input_file,
+                output_dir=output_dir,
+                environment_mask_name=environment_mask_name,
+            )
+            outputs["environment_mask"] = _save_with_dds_fallback(environment_mask, environment_mask_path)
 
         if include_complex:
             complex_material = generate_complex_material(source, strength=complex_strength)
@@ -149,12 +267,15 @@ def run_with_options(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate diffuse, parallax, and complex material textures from an input DDS texture."
+        description="Generate Skyrim texture maps from an input texture."
     )
     parser.add_argument("input_file", nargs="?", type=Path, help="Path to input texture file (DDS recommended).")
     parser.add_argument("--output-dir", type=Path, default=None, help="Output directory for generated files.")
     parser.add_argument("--diffuse-name", type=str, default=None, help="Diffuse output file stem.")
+    parser.add_argument("--normal-name", type=str, default=None, help="Normal output file stem.")
     parser.add_argument("--parallax-name", type=str, default=None, help="Parallax output file stem.")
+    parser.add_argument("--glow-name", type=str, default=None, help="Glow output file stem.")
+    parser.add_argument("--environment-mask-name", type=str, default=None, help="Environment mask output file stem.")
     parser.add_argument("--complex-name", type=str, default=None, help="Complex material output file stem.")
     parser.add_argument(
         "--complex-format",
@@ -163,10 +284,28 @@ def parse_args() -> argparse.Namespace:
         help="Complex material naming suffix: msn -> _msn, cm -> _cm.",
     )
     parser.add_argument(
+        "--normal-strength",
+        type=float,
+        default=2.0,
+        help="Normal map detail strength factor.",
+    )
+    parser.add_argument(
         "--parallax-strength",
         type=float,
         default=1.35,
         help="Parallax contrast strength factor.",
+    )
+    parser.add_argument(
+        "--glow-threshold",
+        type=int,
+        default=190,
+        help="Glow brightness threshold (0-255).",
+    )
+    parser.add_argument(
+        "--environment-mask-strength",
+        type=float,
+        default=1.2,
+        help="Environment mask contrast strength factor.",
     )
     parser.add_argument(
         "--complex-strength",
@@ -175,7 +314,10 @@ def parse_args() -> argparse.Namespace:
         help="Complex material contrast strength factor.",
     )
     parser.add_argument("--no-diffuse", action="store_true", help="Skip diffuse output generation.")
+    parser.add_argument("--no-normal", action="store_true", help="Skip normal output generation.")
     parser.add_argument("--no-parallax", action="store_true", help="Skip parallax output generation.")
+    parser.add_argument("--glow-map", action="store_true", help="Generate glow output.")
+    parser.add_argument("--environment-mask", action="store_true", help="Generate environment mask output.")
     parser.add_argument("--complex-material", action="store_true", help="Generate complex material output.")
     parser.add_argument("--gui", action="store_true", help="Launch graphical interface.")
     return parser.parse_args()
@@ -193,11 +335,17 @@ if GUI_AVAILABLE:
 
             self.input_var = tk.StringVar()
             self.output_var = tk.StringVar()
+            self.normal_strength_var = tk.DoubleVar(value=2.0)
             self.parallax_strength_var = tk.DoubleVar(value=1.35)
             self.complex_strength_var = tk.DoubleVar(value=1.15)
+            self.glow_threshold_var = tk.IntVar(value=190)
+            self.environment_mask_strength_var = tk.DoubleVar(value=1.2)
             self.complex_format_var = tk.StringVar(value="msn")
             self.include_diffuse_var = tk.BooleanVar(value=True)
+            self.include_normal_var = tk.BooleanVar(value=True)
             self.include_parallax_var = tk.BooleanVar(value=True)
+            self.include_glow_var = tk.BooleanVar(value=False)
+            self.include_environment_mask_var = tk.BooleanVar(value=False)
             self.include_complex_var = tk.BooleanVar(value=False)
             self.preview_mode_var = tk.StringVar(value="diffuse")
             self.status_var = tk.StringVar(value="Select a DDS file to begin.")
@@ -224,10 +372,13 @@ if GUI_AVAILABLE:
             options_frame.pack(fill=tk.X, padx=4, pady=4)
 
             ttk.Checkbutton(options_frame, text="Diffuse", variable=self.include_diffuse_var, command=self._refresh_preview).grid(row=0, column=0, sticky=tk.W)
-            ttk.Checkbutton(options_frame, text="Parallax / _n", variable=self.include_parallax_var, command=self._refresh_preview).grid(row=0, column=1, sticky=tk.W)
-            ttk.Checkbutton(options_frame, text="Complex material", variable=self.include_complex_var, command=self._refresh_preview).grid(row=0, column=2, sticky=tk.W)
+            ttk.Checkbutton(options_frame, text="Normal / _n", variable=self.include_normal_var, command=self._refresh_preview).grid(row=0, column=1, sticky=tk.W)
+            ttk.Checkbutton(options_frame, text="Parallax / _p", variable=self.include_parallax_var, command=self._refresh_preview).grid(row=0, column=2, sticky=tk.W)
+            ttk.Checkbutton(options_frame, text="Glow / _g", variable=self.include_glow_var, command=self._refresh_preview).grid(row=1, column=0, sticky=tk.W)
+            ttk.Checkbutton(options_frame, text="Environment mask / _m", variable=self.include_environment_mask_var, command=self._refresh_preview).grid(row=1, column=1, sticky=tk.W)
+            ttk.Checkbutton(options_frame, text="Complex material", variable=self.include_complex_var, command=self._refresh_preview).grid(row=1, column=2, sticky=tk.W)
 
-            ttk.Label(options_frame, text="Complex naming").grid(row=1, column=0, sticky=tk.W, pady=8)
+            ttk.Label(options_frame, text="Complex naming").grid(row=2, column=0, sticky=tk.W, pady=8)
             complex_format = ttk.Combobox(
                 options_frame,
                 textvariable=self.complex_format_var,
@@ -235,25 +386,37 @@ if GUI_AVAILABLE:
                 state="readonly",
                 width=20,
             )
-            complex_format.grid(row=1, column=1, sticky=tk.W)
+            complex_format.grid(row=2, column=1, sticky=tk.W)
 
-            ttk.Label(options_frame, text="Parallax strength").grid(row=2, column=0, sticky=tk.W, pady=8)
-            ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.parallax_strength_var, command=lambda _: self._refresh_preview()).grid(row=2, column=1, columnspan=2, sticky=tk.EW)
-            ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=2, column=3, sticky=tk.W, padx=8)
+            ttk.Label(options_frame, text="Normal strength").grid(row=3, column=0, sticky=tk.W, pady=8)
+            ttk.Scale(options_frame, from_=0.5, to=4.0, variable=self.normal_strength_var, command=lambda _: self._refresh_preview()).grid(row=3, column=1, columnspan=2, sticky=tk.EW)
+            ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 4.0")).grid(row=3, column=3, sticky=tk.W, padx=8)
 
-            ttk.Label(options_frame, text="Complex strength").grid(row=3, column=0, sticky=tk.W, pady=8)
-            ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.complex_strength_var, command=lambda _: self._refresh_preview()).grid(row=3, column=1, columnspan=2, sticky=tk.EW)
-            ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=3, column=3, sticky=tk.W, padx=8)
+            ttk.Label(options_frame, text="Parallax strength").grid(row=4, column=0, sticky=tk.W, pady=8)
+            ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.parallax_strength_var, command=lambda _: self._refresh_preview()).grid(row=4, column=1, columnspan=2, sticky=tk.EW)
+            ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=4, column=3, sticky=tk.W, padx=8)
 
-            ttk.Label(options_frame, text="Preview output").grid(row=4, column=0, sticky=tk.W, pady=8)
+            ttk.Label(options_frame, text="Glow threshold").grid(row=5, column=0, sticky=tk.W, pady=8)
+            ttk.Scale(options_frame, from_=0, to=255, variable=self.glow_threshold_var, command=lambda _: self._refresh_preview()).grid(row=5, column=1, columnspan=2, sticky=tk.EW)
+            ttk.Label(options_frame, textvariable=tk.StringVar(value="0 - 255")).grid(row=5, column=3, sticky=tk.W, padx=8)
+
+            ttk.Label(options_frame, text="Environment mask strength").grid(row=6, column=0, sticky=tk.W, pady=8)
+            ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.environment_mask_strength_var, command=lambda _: self._refresh_preview()).grid(row=6, column=1, columnspan=2, sticky=tk.EW)
+            ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=6, column=3, sticky=tk.W, padx=8)
+
+            ttk.Label(options_frame, text="Complex strength").grid(row=7, column=0, sticky=tk.W, pady=8)
+            ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.complex_strength_var, command=lambda _: self._refresh_preview()).grid(row=7, column=1, columnspan=2, sticky=tk.EW)
+            ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=7, column=3, sticky=tk.W, padx=8)
+
+            ttk.Label(options_frame, text="Preview output").grid(row=8, column=0, sticky=tk.W, pady=8)
             preview_mode = ttk.Combobox(
                 options_frame,
                 textvariable=self.preview_mode_var,
-                values=("diffuse", "parallax", "complex_material"),
+                values=("diffuse", "normal", "parallax", "glow", "environment_mask", "complex_material"),
                 state="readonly",
                 width=20,
             )
-            preview_mode.grid(row=4, column=1, sticky=tk.W)
+            preview_mode.grid(row=8, column=1, sticky=tk.W)
             preview_mode.bind("<<ComboboxSelected>>", lambda _: self._refresh_preview())
             options_frame.columnconfigure(2, weight=1)
 
@@ -319,8 +482,14 @@ if GUI_AVAILABLE:
             transformed = self.source_image
             if mode == "diffuse":
                 transformed = generate_diffuse(self.source_image)
+            elif mode == "normal":
+                transformed = generate_normal(self.source_image, strength=self.normal_strength_var.get())
             elif mode == "parallax":
                 transformed = generate_parallax(self.source_image, strength=self.parallax_strength_var.get())
+            elif mode == "glow":
+                transformed = generate_glow(self.source_image, threshold=self.glow_threshold_var.get())
+            elif mode == "environment_mask":
+                transformed = generate_environment_mask(self.source_image, strength=self.environment_mask_strength_var.get())
             elif mode == "complex_material":
                 transformed = generate_complex_material(self.source_image, strength=self.complex_strength_var.get())
 
@@ -336,9 +505,12 @@ if GUI_AVAILABLE:
                 return
 
             include_diffuse = self.include_diffuse_var.get()
+            include_normal = self.include_normal_var.get()
             include_parallax = self.include_parallax_var.get()
+            include_glow = self.include_glow_var.get()
+            include_environment_mask = self.include_environment_mask_var.get()
             include_complex = self.include_complex_var.get()
-            if not any((include_diffuse, include_parallax, include_complex)):
+            if not any((include_diffuse, include_normal, include_parallax, include_glow, include_environment_mask, include_complex)):
                 messagebox.showwarning("No outputs selected", "Select at least one output type.")
                 return
 
@@ -346,11 +518,17 @@ if GUI_AVAILABLE:
                 outputs = run_with_options(
                     input_file=Path(input_value),
                     output_dir=Path(self.output_var.get()) if self.output_var.get().strip() else None,
+                    normal_strength=self.normal_strength_var.get(),
                     parallax_strength=self.parallax_strength_var.get(),
+                    glow_threshold=self.glow_threshold_var.get(),
+                    environment_mask_strength=self.environment_mask_strength_var.get(),
                     complex_strength=self.complex_strength_var.get(),
                     complex_format=self.complex_format_var.get(),
                     include_diffuse=include_diffuse,
+                    include_normal=include_normal,
                     include_parallax=include_parallax,
+                    include_glow=include_glow,
+                    include_environment_mask=include_environment_mask,
                     include_complex=include_complex,
                 )
             except Exception as exc:
@@ -382,13 +560,22 @@ def main() -> int:
         input_file=args.input_file,
         output_dir=args.output_dir,
         diffuse_name=args.diffuse_name,
+        normal_name=args.normal_name,
         parallax_name=args.parallax_name,
+        glow_name=args.glow_name,
+        environment_mask_name=args.environment_mask_name,
         complex_name=args.complex_name,
+        normal_strength=args.normal_strength,
         parallax_strength=args.parallax_strength,
+        glow_threshold=args.glow_threshold,
+        environment_mask_strength=args.environment_mask_strength,
         complex_strength=args.complex_strength,
         complex_format=args.complex_format,
         include_diffuse=not args.no_diffuse,
+        include_normal=not args.no_normal,
         include_parallax=not args.no_parallax,
+        include_glow=args.glow_map,
+        include_environment_mask=args.environment_mask,
         include_complex=args.complex_material,
     )
     for output_type, path in outputs.items():

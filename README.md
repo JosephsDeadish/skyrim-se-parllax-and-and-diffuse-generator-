@@ -2,7 +2,10 @@
 
 Texture generator that supports both GUI and command-line usage. It can generate:
 - a diffuse texture
+- a normal map
 - a grayscale parallax texture
+- a glow map
+- an environment mask
 - a grayscale complex material texture
 
 ## Requirements
@@ -21,9 +24,9 @@ python generate_textures.py
 This opens a desktop interface where you can:
 - select input DDS texture
 - pick an output folder
-- choose diffuse/parallax/complex material outputs
+- choose diffuse/normal/parallax/glow/environment mask/complex material outputs
 - preview before/after output
-- tune parallax and complex material strength
+- tune normal/parallax/glow/environment mask/complex strengths
 
 ### Command line
 
@@ -34,13 +37,22 @@ python generate_textures.py /path/to/input.dds --output-dir ./output --complex-m
 Optional arguments:
 
 - `--diffuse-name` (default: `<input_stem>`, e.g. `stonewall.dds`)
-- `--parallax-name` (default: `<input_stem>_n`, e.g. `stonewall_n.dds`)
+- `--normal-name` (default: `<input_stem>_n`, e.g. `stonewall_n.dds`)
+- `--parallax-name` (default: `<input_stem>_p`, e.g. `stonewall_p.dds`)
+- `--glow-name` (default: `<input_stem>_g`, e.g. `stonewall_g.dds`)
+- `--environment-mask-name` (default: `<input_stem>_m`, e.g. `stonewall_m.dds`)
 - `--complex-name` (default from format: `<input_stem>_msn` or `<input_stem>_cm`)
 - `--complex-format` (`msn` or `cm`, default: `msn`)
+- `--normal-strength` (default: `2.0`)
 - `--parallax-strength` (default: `1.35`)
+- `--glow-threshold` (default: `190`)
+- `--environment-mask-strength` (default: `1.2`)
 - `--complex-strength` (default: `1.15`)
 - `--no-diffuse` (skip diffuse output)
+- `--no-normal` (skip normal output)
 - `--no-parallax` (skip parallax output)
+- `--glow-map` (include glow output)
+- `--environment-mask` (include environment mask output)
 - `--complex-material` (include complex material output)
 - `--gui` (force GUI mode)
 
