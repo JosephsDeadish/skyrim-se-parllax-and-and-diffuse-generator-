@@ -15,6 +15,9 @@ except Exception:
     GUI_AVAILABLE = False
 
 
+DDS_EXTENSION = ".dds"
+
+
 def generate_diffuse(source: Image.Image) -> Image.Image:
     return ImageOps.autocontrast(source.convert("RGB"), cutoff=1)
 
@@ -87,7 +90,7 @@ def build_output_paths(
 ) -> tuple[Path, Path]:
     base_output_dir = output_dir or input_path.parent
     base_output_dir.mkdir(parents=True, exist_ok=True)
-    ext = input_path.suffix.lower() if input_path.suffix else ".dds"
+    ext = DDS_EXTENSION
 
     diffuse_stem = diffuse_name or input_path.stem
     parallax_stem = parallax_name or f"{input_path.stem}_p"
@@ -101,7 +104,7 @@ def build_normal_output_path(
 ) -> Path:
     base_output_dir = output_dir or input_path.parent
     base_output_dir.mkdir(parents=True, exist_ok=True)
-    ext = input_path.suffix.lower() if input_path.suffix else ".dds"
+    ext = DDS_EXTENSION
     normal_stem = normal_name or f"{input_path.stem}_n"
     return base_output_dir / f"{normal_stem}{ext}"
 
@@ -113,7 +116,7 @@ def build_glow_output_path(
 ) -> Path:
     base_output_dir = output_dir or input_path.parent
     base_output_dir.mkdir(parents=True, exist_ok=True)
-    ext = input_path.suffix.lower() if input_path.suffix else ".dds"
+    ext = DDS_EXTENSION
     glow_stem = glow_name or f"{input_path.stem}_g"
     return base_output_dir / f"{glow_stem}{ext}"
 
@@ -125,7 +128,7 @@ def build_environment_mask_output_path(
 ) -> Path:
     base_output_dir = output_dir or input_path.parent
     base_output_dir.mkdir(parents=True, exist_ok=True)
-    ext = input_path.suffix.lower() if input_path.suffix else ".dds"
+    ext = DDS_EXTENSION
     mask_stem = environment_mask_name or f"{input_path.stem}_m"
     return base_output_dir / f"{mask_stem}{ext}"
 
@@ -138,7 +141,7 @@ def build_complex_output_path(
 ) -> Path:
     base_output_dir = output_dir or input_path.parent
     base_output_dir.mkdir(parents=True, exist_ok=True)
-    ext = input_path.suffix.lower() if input_path.suffix else ".dds"
+    ext = DDS_EXTENSION
     if complex_format not in {"msn", "cm"}:
         raise ValueError("complex_format must be 'msn' or 'cm'.")
     suffix = "_msn" if complex_format == "msn" else "_cm"
@@ -146,9 +149,18 @@ def build_complex_output_path(
     return base_output_dir / f"{complex_stem}{ext}"
 
 
+def _to_dds_compatible_image(image: Image.Image) -> Image.Image:
+    if image.mode == "RGBA":
+        return image
+    if image.mode in {"RGB", "L", "LA"}:
+        return image.convert("RGBA")
+    return image.convert("RGBA")
+
+
 def _save_with_dds_fallback(image: Image.Image, output_path: Path) -> Path:
+    dds_image = _to_dds_compatible_image(image)
     try:
-        image.save(output_path, format="DDS")
+        dds_image.save(output_path.with_suffix(DDS_EXTENSION), format="DDS", pixel_format="DXT5")
         return output_path
     except Exception:
         fallback = output_path.with_suffix(".png")
@@ -353,8 +365,28 @@ if GUI_AVAILABLE:
             self._build_ui()
 
         def _build_ui(self) -> None:
-            wrapper = ttk.Frame(self.root, padding=12)
-            wrapper.pack(fill=tk.BOTH, expand=True)
+            container = ttk.Frame(self.root)
+            container.pack(fill=tk.BOTH, expand=True)
+
+            canvas = tk.Canvas(container, highlightthickness=0)
+            scrollbar = ttk.Scrollbar(container, orient=tk.VERTICAL, command=canvas.yview)
+            wrapper = ttk.Frame(canvas, padding=12)
+
+            canvas.configure(yscrollcommand=scrollbar.set)
+            canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+            canvas_window = canvas.create_window((0, 0), window=wrapper, anchor="nw")
+
+            def _sync_scroll_region(_: object | None = None) -> None:
+                canvas.configure(scrollregion=canvas.bbox("all"))
+
+            def _resize_window(event: tk.Event[tk.Misc]) -> None:
+                canvas.itemconfigure(canvas_window, width=event.width)
+
+            wrapper.bind("<Configure>", _sync_scroll_region)
+            canvas.bind("<Configure>", _resize_window)
+            self._bind_mousewheel(canvas)
 
             file_frame = ttk.LabelFrame(wrapper, text="Files", padding=10)
             file_frame.pack(fill=tk.X, padx=4, pady=4)
@@ -439,6 +471,22 @@ if GUI_AVAILABLE:
             actions.pack(fill=tk.X)
             ttk.Button(actions, text="Generate", command=self._generate).pack(side=tk.LEFT)
             ttk.Label(actions, textvariable=self.status_var).pack(side=tk.LEFT, padx=14)
+
+        def _bind_mousewheel(self, canvas: tk.Canvas) -> None:
+            def _on_mousewheel(event: tk.Event[tk.Misc]) -> None:
+                delta = 0
+                if getattr(event, "delta", 0):
+                    delta = -int(event.delta / 120)
+                elif getattr(event, "num", None) == 4:
+                    delta = -1
+                elif getattr(event, "num", None) == 5:
+                    delta = 1
+                if delta:
+                    canvas.yview_scroll(delta, "units")
+
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+            canvas.bind_all("<Button-4>", _on_mousewheel)
+            canvas.bind_all("<Button-5>", _on_mousewheel)
 
         def _pick_input(self) -> None:
             selected = filedialog.askopenfilename(

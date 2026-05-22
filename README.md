@@ -27,6 +27,7 @@ This opens a desktop interface where you can:
 - choose diffuse/normal/parallax/glow/environment mask/complex material outputs
 - preview before/after output
 - tune normal/parallax/glow/environment mask/complex strengths
+- scroll through all controls in smaller windows
 
 ### Command line
 
@@ -56,7 +57,7 @@ Optional arguments:
 - `--complex-material` (include complex material output)
 - `--gui` (force GUI mode)
 
-The tool attempts to write DDS files. If DDS export is unavailable on the current Pillow build, it falls back to PNG output.
+Generated outputs default to `.dds` filenames regardless of the input format. The tool writes DDS files using DXT5 compression for broader compatibility with external viewers/converters; if DDS export is unavailable on the current Pillow build, it falls back to PNG output.
 
 ## GitHub Actions
 

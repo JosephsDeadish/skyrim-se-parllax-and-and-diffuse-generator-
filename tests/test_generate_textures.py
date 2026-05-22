@@ -71,6 +71,22 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(diffuse_path.name, "brick.dds")
             self.assertEqual(parallax_path.name, "brick_p.dds")
 
+    def test_build_output_paths_use_dds_extension_even_for_png_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            input_path.write_bytes(b"stub")
+
+            diffuse_path, parallax_path = build_output_paths(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+                diffuse_name=None,
+                parallax_name=None,
+            )
+
+            self.assertEqual(diffuse_path.name, "brick.dds")
+            self.assertEqual(parallax_path.name, "brick_p.dds")
+
     def test_build_normal_output_path_uses_default_name_and_extension(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -159,6 +175,40 @@ class GenerateTexturesTests(unittest.TestCase):
                     include_environment_mask=False,
                     include_complex=False,
                 )
+
+    def test_run_with_options_writes_openable_dds_files_for_png_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            outputs = run_with_options(
+                input_file=input_path,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=True,
+                include_parallax=True,
+                include_glow=True,
+                include_environment_mask=True,
+                include_complex=True,
+            )
+
+            expected_names = {
+                "diffuse": "brick.dds",
+                "normal": "brick_n.dds",
+                "parallax": "brick_p.dds",
+                "glow": "brick_g.dds",
+                "environment_mask": "brick_m.dds",
+                "complex_material": "brick_msn.dds",
+            }
+            self.assertEqual({key: value.name for key, value in outputs.items()}, expected_names)
+
+            for path in outputs.values():
+                self.assertEqual(path.suffix.lower(), ".dds")
+                with Image.open(path) as generated:
+                    generated.load()
+                    self.assertEqual(generated.size, (8, 8))
 
 
 if __name__ == "__main__":
