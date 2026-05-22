@@ -759,7 +759,6 @@ if GUI_AVAILABLE:
             self.preview_mode_var = tk.StringVar(value="diffuse")
             self.status_var = tk.StringVar(value="Select a DDS file to begin.")
 
-            self._build_ui()
             self._set_app_icon()
             container = ttk.Frame(self.root)
             container.pack(fill=tk.BOTH, expand=True)
