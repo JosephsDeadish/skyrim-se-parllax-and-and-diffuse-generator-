@@ -31,7 +31,8 @@ This opens a desktop interface where you can:
 - tune normal/parallax/glow/environment mask/complex/specular strengths
 - scroll through all controls in smaller windows
 - auto-update output folder when a different input texture is selected
-- get adaptive recommended defaults based on the selected image
+- get adaptive recommended defaults based on richer image-content analysis
+- use a clearly labeled **Automatic suggestions (analyze image and set sliders)** toggle to turn auto slider updates on/off
 
 ### Command line
 

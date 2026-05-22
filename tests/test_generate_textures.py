@@ -5,6 +5,7 @@ from pathlib import Path
 from PIL import Image
 
 from generate_textures import (
+    analyze_image_content,
     build_complex_output_path,
     build_environment_mask_output_path,
     build_glow_output_path,
@@ -24,6 +25,20 @@ from generate_textures import (
 
 def _sample_image() -> Image.Image:
     return Image.new("RGB", (8, 8), color=(60, 100, 140))
+
+
+def _flat_dark_image() -> Image.Image:
+    return Image.new("RGB", (16, 16), color=(28, 28, 28))
+
+
+def _detailed_bright_image() -> Image.Image:
+    image = Image.new("RGB", (16, 16))
+    pixels = image.load()
+    for y in range(16):
+        for x in range(16):
+            v = 245 if (x + y) % 2 == 0 else 35
+            pixels[x, y] = (v, v, v)
+    return image
 
 
 class GenerateTexturesTests(unittest.TestCase):
@@ -64,12 +79,37 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_recommend_generation_settings_returns_valid_ranges(self) -> None:
         settings = recommend_generation_settings(_sample_image())
+        self.assertIn("specular_strength", settings)
+        self.assertIn("complex_strength", settings)
+        self.assertIn("environment_mask_strength", settings)
         self.assertGreaterEqual(float(settings["normal_strength"]), 1.1)
         self.assertLessEqual(float(settings["normal_strength"]), 3.8)
         self.assertGreaterEqual(float(settings["parallax_strength"]), 0.8)
         self.assertLessEqual(float(settings["parallax_strength"]), 2.4)
         self.assertGreaterEqual(int(settings["glow_threshold"]), 140)
         self.assertLessEqual(int(settings["glow_threshold"]), 235)
+
+    def test_analyze_image_content_exposes_expected_metrics(self) -> None:
+        metrics = analyze_image_content(_sample_image())
+        for key in (
+            "brightness",
+            "contrast",
+            "edge_strength",
+            "edge_variance",
+            "detail_energy",
+            "dynamic_range",
+            "shadow_ratio",
+            "highlight_ratio",
+            "midtone_ratio",
+        ):
+            self.assertIn(key, metrics)
+
+    def test_recommend_generation_settings_changes_by_image_content(self) -> None:
+        flat_dark = recommend_generation_settings(_flat_dark_image())
+        detailed_bright = recommend_generation_settings(_detailed_bright_image())
+        self.assertNotEqual(int(flat_dark["glow_threshold"]), int(detailed_bright["glow_threshold"]))
+        self.assertNotEqual(float(flat_dark["normal_strength"]), float(detailed_bright["normal_strength"]))
+        self.assertNotEqual(float(flat_dark["specular_strength"]), float(detailed_bright["specular_strength"]))
 
     def test_build_output_paths_uses_skyrim_default_names_and_extension(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
