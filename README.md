@@ -1,8 +1,9 @@
 # skyrim-se-parllax-and-and-diffuse-generator-
 
-Command-line app that takes an input DDS texture and generates:
+Texture generator that supports both GUI and command-line usage. It can generate:
 - a diffuse texture
 - a grayscale parallax texture
+- a grayscale complex material texture
 
 ## Requirements
 
@@ -11,15 +12,36 @@ Command-line app that takes an input DDS texture and generates:
 
 ## Usage
 
+### GUI (default)
+
 ```bash
-python generate_textures.py /path/to/input.dds --output-dir ./output
+python generate_textures.py
+```
+
+This opens a desktop interface where you can:
+- select input DDS texture
+- pick an output folder
+- choose diffuse/parallax/complex material outputs
+- preview before/after output
+- tune parallax and complex material strength
+
+### Command line
+
+```bash
+python generate_textures.py /path/to/input.dds --output-dir ./output --complex-material
 ```
 
 Optional arguments:
 
 - `--diffuse-name` (default: `<input_stem>_diffuse`)
 - `--parallax-name` (default: `<input_stem>_parallax`)
+- `--complex-name` (default: `<input_stem>_complex_material`)
 - `--parallax-strength` (default: `1.35`)
+- `--complex-strength` (default: `1.15`)
+- `--no-diffuse` (skip diffuse output)
+- `--no-parallax` (skip parallax output)
+- `--complex-material` (include complex material output)
+- `--gui` (force GUI mode)
 
 The tool attempts to write DDS files. If DDS export is unavailable on the current Pillow build, it falls back to PNG output.
 
