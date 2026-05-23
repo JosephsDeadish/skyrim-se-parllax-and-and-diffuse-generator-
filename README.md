@@ -8,7 +8,7 @@ Texture generator that supports both GUI and command-line usage. It can generate
 - an environment mask — **standard greyscale** (vanilla Skyrim SE, no ENB needed) or **complex RGBA** (ENBSeries only)
 - a complex material output:
   - `_msn`: normal RGB with specular in alpha
-  - `_cm`: packed complex material texture (roughness/metalness/AO/height proxies)
+  - `_cm`: packed complex material texture (AO/roughness/metallic/height-spec proxies)
 
 ## Requirements
 
@@ -106,7 +106,7 @@ Generated outputs default to `.dds` filenames regardless of the input format. Mo
   - **Complex** (select in GUI or via `--environment-mask-mode complex`) — RGBA channel-packed for ENBSeries Complex Parallax Material workflows: R=env amount, G=glossiness, B=metallic proxy, A=parallax height. **ENBSeries required** with complex material support enabled.
 - For large/high-detail sources (2K/4K/8K), generation applies adaptive detail dampening to reduce over-sharpened normals/parallax and complex-material sparkle artifacts. Analysis and auto-recommendation calculations are automatically performed on a downscaled copy so large textures are processed faster without sacrificing output quality.
 - Specular generation uses numpy float32 arithmetic with percentile-based range normalisation so true-black hole artefacts cannot be introduced by integer rounding, regardless of texture size or content.
-- `_msn` output stores normal RGB with specular in alpha; `_cm` stores packed complex-material channels (R=roughness proxy, G=metalness proxy, B=ambient occlusion proxy, A=height/detail mask).
+- `_msn` output stores normal RGB with specular in alpha; `_cm` stores packed complex-material channels (R=ambient occlusion proxy, G=roughness proxy, B=metallic proxy, A=height/specular proxy).
 
 ## File name recognition
 
@@ -122,6 +122,6 @@ The tool recognises standard Skyrim SE texture naming conventions from the file 
 | `_s` | Subsurface Scattering | Slot 6, skin/character textures |
 | `_sk` | Skin Specular | Slot 7, character-specific |
 | `_msn` | Complex Parallax Material | ENBSeries only — **not vanilla Skyrim SE** |
-| `_cm` | Complex Material (packed) | Packed roughness/metalness/AO/height proxies for modern complex-material workflows — **not vanilla Skyrim SE** |
+| `_cm` | Complex Material (packed) | Packed AO/roughness/metallic/height-spec proxies for modern complex-material workflows — **not vanilla Skyrim SE** |
 
 Batch folder mode scans subfolders and automatically skips generated variants (`_n`, `_p`, `_g`, `_m`, `_msn`, `_cm`) so it only processes original source textures.

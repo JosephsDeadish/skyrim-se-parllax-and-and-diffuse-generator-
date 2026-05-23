@@ -195,6 +195,14 @@ class GenerateTexturesTests(unittest.TestCase):
         normal = generate_normal(source, strength=1.5)
         self.assertNotEqual(complex_material.split()[:3], normal.split())
 
+    def test_generate_complex_material_channel_order_matches_packed_contract(self) -> None:
+        source = _vertical_gradient_image()
+        complex_material = generate_complex_material(source, strength=1.4)
+        ao, roughness, metallic, height_or_spec = complex_material.split()
+        self.assertNotEqual(ao.tobytes(), roughness.tobytes())
+        self.assertNotEqual(roughness.tobytes(), metallic.tobytes())
+        self.assertNotEqual(height_or_spec.tobytes(), ao.tobytes())
+
     def test_generate_msn_returns_rgba_same_size(self) -> None:
         msn = generate_msn(_sample_image())
         self.assertEqual(msn.mode, "RGBA")
