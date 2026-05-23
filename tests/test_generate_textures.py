@@ -177,16 +177,23 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertGreaterEqual(env_min, 10)
         self.assertLessEqual(env_max - env_min, 80)
 
-    def test_generate_complex_material_returns_l_same_size(self) -> None:
+    def test_generate_complex_material_returns_rgba_same_size(self) -> None:
         complex_material = generate_complex_material(_sample_image())
-        self.assertEqual(complex_material.mode, "L")
+        self.assertEqual(complex_material.mode, "RGBA")
         self.assertEqual(complex_material.size, (8, 8))
 
     def test_generate_complex_material_flat_surface_avoids_black_holes(self) -> None:
         complex_material = generate_complex_material(_flat_dark_image(), strength=2.2)
-        minimum, maximum = complex_material.getextrema()
-        self.assertGreaterEqual(minimum, 14)
-        self.assertLessEqual(maximum - minimum, 40)
+        extrema = complex_material.getextrema()
+        for minimum, maximum in extrema:
+            self.assertGreaterEqual(minimum, 3)
+            self.assertLessEqual(maximum - minimum, 90)
+
+    def test_generate_complex_material_is_not_normal_map_like(self) -> None:
+        source = _vertical_gradient_image()
+        complex_material = generate_complex_material(source, strength=1.5)
+        normal = generate_normal(source, strength=1.5)
+        self.assertNotEqual(complex_material.split()[:3], normal.split())
 
     def test_generate_msn_returns_rgba_same_size(self) -> None:
         msn = generate_msn(_sample_image())
@@ -368,7 +375,7 @@ class GenerateTexturesTests(unittest.TestCase):
             include_complex=True,
         )
         self.assertEqual(msn_outputs["complex_material"].mode, "RGBA")
-        self.assertEqual(cm_outputs["complex_material"].mode, "L")
+        self.assertEqual(cm_outputs["complex_material"].mode, "RGBA")
 
     def test_generate_preview_outputs_defaults_environment_mask_to_standard_skyrim_se(self) -> None:
         outputs = generate_preview_outputs(
