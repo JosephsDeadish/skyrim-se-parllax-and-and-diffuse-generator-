@@ -54,7 +54,7 @@ jobs:
         run: python assets/create_panda_ico.py
 
       - name: Build executable with PyInstaller
-        run: pyinstaller --onefile --windowed --name generate_textures --icon assets\panda.ico generate_textures.py
+        run: pyinstaller --onefile --windowed --collect-all numpy --name generate_textures --icon assets\panda.ico generate_textures.py
 
       - name: Create zip archive
         run: >
