@@ -1440,7 +1440,7 @@ if GUI_AVAILABLE:
             self.last_input_browse_dir: Path | None = None
             self.preview_size_var = tk.StringVar(value="Medium")
             self.preview_refresh_after_id: str | None = None
-            self.show_batch_preview_var = tk.BooleanVar(value=True)
+            self.show_batch_preview_var = tk.BooleanVar(value=False)
 
             self.input_var = tk.StringVar()
             self.output_var = tk.StringVar()
@@ -1453,6 +1453,12 @@ if GUI_AVAILABLE:
             self.specular_strength_var = tk.DoubleVar(value=1.15)
             self.glow_threshold_var = tk.IntVar(value=190)
             self.environment_mask_strength_var = tk.DoubleVar(value=1.2)
+            self.normal_strength_display_var = tk.StringVar()
+            self.parallax_strength_display_var = tk.StringVar()
+            self.glow_threshold_display_var = tk.StringVar()
+            self.environment_mask_strength_display_var = tk.StringVar()
+            self.complex_strength_display_var = tk.StringVar()
+            self.specular_strength_display_var = tk.StringVar()
             self.complex_format_var = tk.StringVar(value="msn")
             self.env_mask_mode_var = tk.StringVar(value="standard")
             self.auto_suggestions_var = tk.BooleanVar(value=True)
@@ -1471,6 +1477,7 @@ if GUI_AVAILABLE:
             self.status_var = tk.StringVar(
                 value=self.manager_context.summary if self.manager_context.manager is not None else "Select a DDS file to begin."
             )
+            self._update_slider_value_labels()
 
             self._set_app_icon()
             container = ttk.Frame(self.root)
@@ -1607,66 +1614,66 @@ if GUI_AVAILABLE:
 
             _normal_label = ttk.Label(options_frame, text="Normal strength")
             _normal_label.grid(row=4, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_normal_label, "💪 How beefy your normal map details are.\nHigher = more dramatic bumps. Lower = your texture looks like it's been ironed.")
-            self.normal_scale = ttk.Scale(options_frame, from_=0.5, to=4.0, variable=self.normal_strength_var, command=lambda _: self._request_preview_refresh())
+            self._add_tooltip(_normal_label, "💪 Controls normal-map intensity.\nHigher = sharper fake detail. Lower = smooth potato mode.")
+            self.normal_scale = ttk.Scale(options_frame, from_=0.5, to=4.0, variable=self.normal_strength_var, command=lambda _: self._on_slider_changed())
             self.normal_scale.grid(row=4, column=1, columnspan=2, sticky=tk.EW)
-            self._add_tooltip(self.normal_scale, "💪 Drag right for MORE NORMAL. Drag left for less.\nRange: 0.5 (smooth brain) to 4.0 (mountainous).")
-            ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 4.0")).grid(row=4, column=3, sticky=tk.W, padx=8)
+            self._add_tooltip(self.normal_scale, "💪 Drag right for epic bumps, left for subtle detail.\nLive value is shown next to the slider so you can stop guessing.")
+            ttk.Label(options_frame, textvariable=self.normal_strength_display_var).grid(row=4, column=3, sticky=tk.W, padx=8)
             _auto_normal = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_normal_suggestion_var, command=self._on_auto_slider_preference_changed)
             _auto_normal.grid(row=4, column=4, sticky=tk.W)
             self._add_tooltip(_auto_normal, "🤖 Let the app analyse the image and choose this value.\nUncheck to manually control, as the control freak you truly are.")
 
             _parallax_label = ttk.Label(options_frame, text="Parallax strength")
             _parallax_label.grid(row=5, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_parallax_label, "🏔 Controls depth contrast in the parallax/height map.\nToo high and your flat floor looks like the Grand Canyon.")
-            self.parallax_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.parallax_strength_var, command=lambda _: self._request_preview_refresh())
+            self._add_tooltip(_parallax_label, "🏔 Controls parallax depth contrast.\nToo high and your pebble becomes a canyon. Too low and your canyon becomes toast.")
+            self.parallax_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.parallax_strength_var, command=lambda _: self._on_slider_changed())
             self.parallax_scale.grid(row=5, column=1, columnspan=2, sticky=tk.EW)
-            self._add_tooltip(self.parallax_scale, "🏔 Parallax depth. Slide right to enter the matrix.\nRange: 0.5 (barely there) to 3.0 (Marianas Trench).")
-            ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=5, column=3, sticky=tk.W, padx=8)
+            self._add_tooltip(self.parallax_scale, "🏔 Slide right for deeper depth illusion, left for subtle relief.\nYes, this can absolutely make stones look dramatic.")
+            ttk.Label(options_frame, textvariable=self.parallax_strength_display_var).grid(row=5, column=3, sticky=tk.W, padx=8)
             _auto_parallax = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_parallax_suggestion_var, command=self._on_auto_slider_preference_changed)
             _auto_parallax.grid(row=5, column=4, sticky=tk.W)
             self._add_tooltip(_auto_parallax, "🤖 Automatic parallax strength suggestion.\nBased on actual image analysis, not a horoscope.")
 
             _glow_label = ttk.Label(options_frame, text="Glow threshold")
             _glow_label.grid(row=6, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_glow_label, "💡 Brightness cutoff for the glow map.\nPixels brighter than this value will glow. Set low = everything glows. Groovy.")
-            self.glow_scale = ttk.Scale(options_frame, from_=0, to=255, variable=self.glow_threshold_var, command=lambda _: self._request_preview_refresh())
+            self._add_tooltip(_glow_label, "💡 Brightness cutoff for glow.\nLower = more glow. Higher = only brightest bits glow like tiny supernovas.")
+            self.glow_scale = ttk.Scale(options_frame, from_=0, to=255, variable=self.glow_threshold_var, command=lambda _: self._on_slider_changed())
             self.glow_scale.grid(row=6, column=1, columnspan=2, sticky=tk.EW)
-            self._add_tooltip(self.glow_scale, "💡 Glow brightness threshold (0–255).\n0 = ENTIRE texture glows like the sun. 255 = nothing glows except your despair.")
-            ttk.Label(options_frame, textvariable=tk.StringVar(value="0 - 255")).grid(row=6, column=3, sticky=tk.W, padx=8)
+            self._add_tooltip(self.glow_scale, "💡 0 means everything glows like a rave. 255 means almost nothing glows.\nUse the live value display to tune precisely.")
+            ttk.Label(options_frame, textvariable=self.glow_threshold_display_var).grid(row=6, column=3, sticky=tk.W, padx=8)
             _auto_glow = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_glow_suggestion_var, command=self._on_auto_slider_preference_changed)
             _auto_glow.grid(row=6, column=4, sticky=tk.W)
             self._add_tooltip(_auto_glow, "🤖 Auto-detect the ideal glow threshold.\nBased on luminance analysis. The computer is trying its best.")
 
             _env_mask_label = ttk.Label(options_frame, text="Environment mask strength")
             _env_mask_label.grid(row=7, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_env_mask_label, "🪞 How strongly the environment mask contrasts.\nHigher = shinier peaks, darker valleys. Like a texture with opinions.")
-            self.environment_mask_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.environment_mask_strength_var, command=lambda _: self._request_preview_refresh())
+            self._add_tooltip(_env_mask_label, "🪞 Controls environment-mask contrast.\nHigher = stronger shiny-vs-matte separation. Great for dramatic materials.")
+            self.environment_mask_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.environment_mask_strength_var, command=lambda _: self._on_slider_changed())
             self.environment_mask_scale.grid(row=7, column=1, columnspan=2, sticky=tk.EW)
-            self._add_tooltip(self.environment_mask_scale, "🪞 Environment mask contrast. More = more intense reflections.\nRange: 0.5 (matte cardboard) to 3.0 (Skyrim's shiniest rock).")
-            ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=7, column=3, sticky=tk.W, padx=8)
+            self._add_tooltip(self.environment_mask_scale, "🪞 Slide right for stronger reflection contrast.\nSlide left for chill, less dramatic materials.")
+            ttk.Label(options_frame, textvariable=self.environment_mask_strength_display_var).grid(row=7, column=3, sticky=tk.W, padx=8)
             _auto_env_mask = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_environment_mask_suggestion_var, command=self._on_auto_slider_preference_changed)
             _auto_env_mask.grid(row=7, column=4, sticky=tk.W)
             self._add_tooltip(_auto_env_mask, "🤖 Auto-select environment mask strength.\nThe machine will judge your texture's reflective potential.")
 
             _complex_label = ttk.Label(options_frame, text="Complex strength")
             _complex_label.grid(row=8, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_complex_label, "🔮 Contrast strength for the complex material output.\nHigher = more dramatic material definition. ENB fans, rejoice.")
-            self.complex_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.complex_strength_var, command=lambda _: self._request_preview_refresh())
+            self._add_tooltip(_complex_label, "🔮 Controls complex-material contrast.\nHigher = punchier ENB material response. Lower = subtle, civilized vibes.")
+            self.complex_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.complex_strength_var, command=lambda _: self._on_slider_changed())
             self.complex_scale.grid(row=8, column=1, columnspan=2, sticky=tk.EW)
-            self._add_tooltip(self.complex_scale, "🔮 Complex material strength.\nRange: 0.5 (subtly fancy) to 3.0 (screaming ENBSeries energy).")
-            ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=8, column=3, sticky=tk.W, padx=8)
+            self._add_tooltip(self.complex_scale, "🔮 Right = louder material definition.\nLeft = quieter output for restrained legends.")
+            ttk.Label(options_frame, textvariable=self.complex_strength_display_var).grid(row=8, column=3, sticky=tk.W, padx=8)
             _auto_complex = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_complex_suggestion_var, command=self._on_auto_slider_preference_changed)
             _auto_complex.grid(row=8, column=4, sticky=tk.W)
             self._add_tooltip(_auto_complex, "🤖 Auto-set complex strength. Let the algorithm\nscrutinise your texture's material complexity.")
 
             _specular_label = ttk.Label(options_frame, text="Specular strength (_msn alpha)")
             _specular_label.grid(row=9, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_specular_label, "✨ Specular highlight intensity stored in the _msn alpha channel.\nMake your rocks glisten or go full matte — it's your power fantasy.")
-            self.specular_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.specular_strength_var, command=lambda _: self._request_preview_refresh())
+            self._add_tooltip(_specular_label, "✨ Controls specular highlight intensity in _msn alpha.\nHigher = shinier. Lower = dusty realism.")
+            self.specular_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.specular_strength_var, command=lambda _: self._on_slider_changed())
             self.specular_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
-            self._add_tooltip(self.specular_scale, "✨ Specular alpha strength (msn format only).\nRange: 0.5 (humble sheen) to 3.0 (blinding RPG shine).")
-            ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=9, column=3, sticky=tk.W, padx=8)
+            self._add_tooltip(self.specular_scale, "✨ Turn it up for glorious shine, down for ancient weathered stone.\nLive value shown beside slider.")
+            ttk.Label(options_frame, textvariable=self.specular_strength_display_var).grid(row=9, column=3, sticky=tk.W, padx=8)
             _auto_specular = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_specular_suggestion_var, command=self._on_auto_slider_preference_changed)
             _auto_specular.grid(row=9, column=4, sticky=tk.W)
             self._add_tooltip(_auto_specular, "🤖 Auto-set specular strength. The AI ponders how shiny\nyour texture DESERVES to be.")
@@ -1708,13 +1715,14 @@ if GUI_AVAILABLE:
                 source_controls,
                 text="Show preview during batch",
                 variable=self.show_batch_preview_var,
+                command=self._on_batch_preview_toggle,
             )
             _batch_prev_check.pack(side=tk.LEFT, padx=(14, 4))
             self._add_tooltip(
                 _batch_prev_check,
-                "🎬 Update the preview live while batch-processing textures.\n"
-                "ON = watch your textures transform in real-time like a very slow movie.\n"
-                "OFF = faster batch processing but no live previews. Your choice, no judgment.",
+                "🎬 Live preview while batch-processing.\n"
+                "Heads-up: enabling this can slow processing, especially with big textures and huge folders.\n"
+                "Default is OFF for speed; enable only when you want to watch the magic happen.",
             )
 
             self.preview_output_labels: dict[str, ttk.Label] = {}
@@ -2073,6 +2081,26 @@ if GUI_AVAILABLE:
             self._update_slider_auto_states()
             self._refresh_preview()
 
+        def _on_slider_changed(self) -> None:
+            self._update_slider_value_labels()
+            self._request_preview_refresh()
+
+        def _update_slider_value_labels(self) -> None:
+            self.normal_strength_display_var.set(f"{float(self.normal_strength_var.get()):.2f} (0.5–4.0)")
+            self.parallax_strength_display_var.set(f"{float(self.parallax_strength_var.get()):.2f} (0.5–3.0)")
+            self.glow_threshold_display_var.set(f"{int(self.glow_threshold_var.get())} (0–255)")
+            self.environment_mask_strength_display_var.set(
+                f"{float(self.environment_mask_strength_var.get()):.2f} (0.5–3.0)"
+            )
+            self.complex_strength_display_var.set(f"{float(self.complex_strength_var.get()):.2f} (0.5–3.0)")
+            self.specular_strength_display_var.set(f"{float(self.specular_strength_var.get()):.2f} (0.5–3.0)")
+
+        def _on_batch_preview_toggle(self) -> None:
+            if self.show_batch_preview_var.get():
+                self.status_var.set("Batch live preview enabled. Heads-up: this can slow processing on large batches.")
+            else:
+                self.status_var.set("Batch live preview disabled for faster processing.")
+
         def _set_all_auto_slider_flags(self, value: bool) -> None:
             self.auto_normal_suggestion_var.set(value)
             self.auto_parallax_suggestion_var.set(value)
@@ -2131,6 +2159,7 @@ if GUI_AVAILABLE:
             self.environment_mask_strength_var.set(float(resolved["environment_mask_strength"]))
             self.complex_strength_var.set(float(resolved["complex_strength"]))
             self.specular_strength_var.set(float(resolved["specular_strength"]))
+            self._update_slider_value_labels()
             self._update_slider_auto_states()
 
         def _photo_image(self, image: Image.Image, max_size: int = 260) -> ImageTk.PhotoImage:
@@ -2300,7 +2329,12 @@ if GUI_AVAILABLE:
             }
             self.batch_failures = []
             self._set_processing_state(True)
-            self.status_var.set(f"Queued {len(self.selected_inputs)} source texture(s) for processing...")
+            if self.show_batch_preview_var.get():
+                self.status_var.set(
+                    f"Queued {len(self.selected_inputs)} source texture(s). Live batch preview is ON and may slow processing."
+                )
+            else:
+                self.status_var.set(f"Queued {len(self.selected_inputs)} source texture(s) for processing...")
             self.processing_thread = threading.Thread(
                 target=self._process_generation_batch,
                 args=(input_path, generation_kwargs),
