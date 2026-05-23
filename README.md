@@ -24,6 +24,11 @@ The release ZIP (`skyrim-texture-generator.zip`) includes a FoMod installer so t
 
 Alternatively, simply extract `generate_textures.exe` anywhere and run it directly — no installation is required.
 
+When the tool is launched from **MO2** or **Vortex**, it now tries to detect the current mod-manager context:
+- **MO2**: reads the active profile and enabled mods from `modlist.txt`, then exposes detected loaded mod texture folders in the GUI.
+- **Vortex**: looks for the active profile/staging layout and exposes detected managed texture folders in the GUI.
+- The GUI shows the detected context under the file picker and adds a **Loaded Mod** button for faster browsing.
+
 ## Usage
 
 ### GUI (default)
@@ -35,6 +40,7 @@ python generate_textures.py
 This opens a desktop interface where you can:
 - select one input texture or an entire folder of source DDS textures
 - pick an output folder
+- see detected MO2/Vortex context and loaded-mod texture folders when launched through a mod manager
 - use a **Use different output folder** toggle to switch between writing beside the input or writing to a custom location
 - choose diffuse/normal/parallax/glow/environment mask/complex material outputs
 - preview the **Before** source image and the currently selected output types (diffuse/normal/parallax/glow/environment mask/complex)

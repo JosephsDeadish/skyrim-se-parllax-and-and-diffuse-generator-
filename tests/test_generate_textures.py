@@ -14,6 +14,7 @@ from generate_textures import (
     build_complex_output_path,
     build_environment_mask_output_path,
     collect_source_textures,
+    detect_mod_manager_context,
     build_glow_output_path,
     build_normal_output_path,
     build_output_paths,
@@ -496,6 +497,58 @@ class GenerateTexturesTests(unittest.TestCase):
             collected = collect_source_textures(temp_path)
 
             self.assertEqual([path.name for path in collected], ["brick.dds", "stone_wall.dds"])
+
+    def test_detect_mod_manager_context_reads_mo2_profile_and_loaded_texture_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            instance_root = temp_path / "MO2"
+            textures_dir = instance_root / "mods" / "Texture Pack" / "textures"
+            tool_dir = instance_root / "mods" / "Skyrim Texture Generator"
+            profile_dir = instance_root / "profiles" / "Default"
+            textures_dir.mkdir(parents=True)
+            tool_dir.mkdir(parents=True)
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "modlist.txt").write_text("+Texture Pack\n-Disabled Mod\n", encoding="utf-8")
+
+            context = detect_mod_manager_context(
+                {"MO_PROFILE": "Default"},
+                executable_path=tool_dir / "generate_textures.exe",
+            )
+
+            self.assertEqual(context.manager, "Mod Organizer 2")
+            self.assertEqual(context.profile_name, "Default")
+            self.assertEqual(context.loaded_mods, ("Texture Pack",))
+            self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
+            self.assertEqual(context.output_dir, (instance_root / "overwrite"))
+
+    def test_detect_mod_manager_context_reads_vortex_profile_and_staging_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            appdata_dir = temp_path / "AppData" / "Roaming"
+            profile_dir = appdata_dir / "Vortex" / "skyrimse" / "profiles" / "Main"
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "modlist.txt").write_text("+Texture Pack\n", encoding="utf-8")
+
+            staging_root = temp_path / "Vortex Mods" / "skyrimse"
+            textures_dir = staging_root / "Texture Pack" / "textures"
+            tool_dir = staging_root / "Skyrim Texture Generator"
+            textures_dir.mkdir(parents=True)
+            tool_dir.mkdir(parents=True)
+
+            context = detect_mod_manager_context(
+                {
+                    "APPDATA": str(appdata_dir),
+                    "VORTEX_PROFILE": "Main",
+                },
+                executable_path=tool_dir / "generate_textures.exe",
+            )
+
+            self.assertEqual(context.manager, "Vortex")
+            self.assertEqual(context.profile_name, "Main")
+            self.assertEqual(context.loaded_mods, ("Texture Pack",))
+            self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
+            self.assertEqual(context.staging_root, staging_root.resolve())
+            self.assertEqual(context.output_dir, (tool_dir / "generated_textures").resolve())
 
     def test_run_with_options_requires_at_least_one_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

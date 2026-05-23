@@ -8,8 +8,9 @@ import queue
 import sys
 import threading
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Mapping
 
 import webbrowser
 
@@ -32,8 +33,212 @@ GENERATED_TEXTURE_SUFFIXES = ("_msn", "_cm", "_n", "_p", "_g", "_m")
 PREVIEW_MAX_DIMENSION = 1024
 
 
+@dataclass(frozen=True)
+class ModManagerContext:
+    manager: str | None = None
+    profile_name: str | None = None
+    game_id: str | None = None
+    instance_root: Path | None = None
+    staging_root: Path | None = None
+    output_dir: Path | None = None
+    loaded_mods: tuple[str, ...] = ()
+    loaded_texture_dirs: tuple[Path, ...] = ()
+
+    @property
+    def summary(self) -> str:
+        if self.manager is None:
+            return "No MO2/Vortex context detected."
+        details: list[str] = [f"Detected {self.manager}"]
+        if self.profile_name:
+            details.append(f"profile {self.profile_name}")
+        if self.loaded_texture_dirs:
+            details.append(f"{len(self.loaded_texture_dirs)} loaded mod texture folder(s)")
+        elif self.loaded_mods:
+            details.append(f"{len(self.loaded_mods)} loaded mod(s)")
+        return " — ".join(details)
+
+
 def _clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
+
+
+def _unique_existing_paths(paths: list[Path]) -> tuple[Path, ...]:
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        try:
+            resolved = path.resolve()
+        except Exception:
+            resolved = path
+        key = os.path.normcase(str(resolved))
+        if key in seen or not resolved.exists():
+            continue
+        seen.add(key)
+        unique.append(resolved)
+    return tuple(unique)
+
+
+def _parse_enabled_modlist(modlist_path: Path) -> tuple[str, ...]:
+    enabled_mods: list[str] = []
+    if not modlist_path.exists():
+        return ()
+    for raw_line in modlist_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        prefix = line[0]
+        if prefix not in {"+", "*"}:
+            continue
+        mod_name = line[1:].strip()
+        if mod_name:
+            enabled_mods.append(mod_name)
+    return tuple(enabled_mods)
+
+
+def _find_manager_instance_root(start: Path, required_children: tuple[str, ...]) -> Path | None:
+    for candidate in (start, *start.parents):
+        if all((candidate / child).exists() for child in required_children):
+            return candidate
+    return None
+
+
+def _candidate_vortex_profile_dirs(env: Mapping[str, str], game_id: str | None) -> tuple[Path, ...]:
+    candidates: list[Path] = []
+    profile_dir = env.get("VORTEX_PROFILE_DIR")
+    if profile_dir:
+        candidates.append(Path(profile_dir))
+
+    appdata = env.get("APPDATA")
+    if appdata:
+        roaming = Path(appdata)
+        search_roots = [roaming / "Vortex", roaming / "Black Tree Gaming Ltd" / "Vortex"]
+        for root in search_roots:
+            if not root.exists():
+                continue
+            patterns = []
+            if game_id:
+                patterns.extend(
+                    [
+                        root / game_id / "profiles",
+                        root / "profiles" / game_id,
+                    ]
+                )
+            patterns.extend([root / "profiles", root])
+            for base in patterns:
+                if not base.exists():
+                    continue
+                if (base / "modlist.txt").exists():
+                    candidates.append(base)
+                    continue
+                candidates.extend(path for path in base.iterdir() if path.is_dir() and (path / "modlist.txt").exists())
+
+    ordered = sorted(
+        _unique_existing_paths(candidates),
+        key=lambda path: path.stat().st_mtime if path.exists() else 0.0,
+        reverse=True,
+    )
+    return tuple(path for path in ordered if (path / "modlist.txt").exists())
+
+
+def _detect_mo2_context(
+    env: Mapping[str, str],
+    *,
+    executable_path: Path,
+) -> ModManagerContext:
+    profile_name = env.get("MO_PROFILE") or env.get("MO2_PROFILE")
+    instance_root = _find_manager_instance_root(executable_path.parent, ("mods", "profiles"))
+    if instance_root is None and not profile_name:
+        return ModManagerContext()
+
+    resolved_profile = profile_name
+    if instance_root is not None and not resolved_profile:
+        profile_dirs = sorted(path for path in (instance_root / "profiles").iterdir() if path.is_dir())
+        if len(profile_dirs) == 1:
+            resolved_profile = profile_dirs[0].name
+
+    loaded_mods: tuple[str, ...] = ()
+    loaded_texture_dirs: tuple[Path, ...] = ()
+    if instance_root is not None and resolved_profile:
+        modlist_path = instance_root / "profiles" / resolved_profile / "modlist.txt"
+        loaded_mods = _parse_enabled_modlist(modlist_path)
+        loaded_texture_dirs = _unique_existing_paths(
+            [instance_root / "mods" / mod_name / "textures" for mod_name in loaded_mods]
+        )
+
+    output_dir = instance_root / "overwrite" if instance_root is not None else None
+    return ModManagerContext(
+        manager="Mod Organizer 2",
+        profile_name=resolved_profile,
+        game_id="skyrimse",
+        instance_root=instance_root,
+        output_dir=output_dir,
+        loaded_mods=loaded_mods,
+        loaded_texture_dirs=loaded_texture_dirs,
+    )
+
+
+def _infer_vortex_staging_root(executable_path: Path, game_id: str | None) -> Path | None:
+    for candidate in (executable_path.parent, *executable_path.parents):
+        if game_id and candidate.name.lower() == game_id.lower():
+            return candidate
+        if candidate.name.lower() == "vortex mods":
+            for child in candidate.iterdir():
+                if child.is_dir() and (not game_id or child.name.lower() == game_id.lower()):
+                    return child
+    return None
+
+
+def _detect_vortex_context(
+    env: Mapping[str, str],
+    *,
+    executable_path: Path,
+) -> ModManagerContext:
+    env_signals = any(key.startswith("VORTEX") for key in env)
+    game_id = env.get("VORTEX_GAME_ID") or env.get("GAME_ID") or "skyrimse"
+    profile_dirs = _candidate_vortex_profile_dirs(env, game_id)
+    staging_root = None
+    if env.get("VORTEX_STAGING_DIR"):
+        staging_root = Path(env["VORTEX_STAGING_DIR"])
+    else:
+        staging_root = _infer_vortex_staging_root(executable_path, game_id)
+
+    if not env_signals and staging_root is None:
+        return ModManagerContext()
+
+    profile_dir = profile_dirs[0] if profile_dirs else None
+    profile_name = env.get("VORTEX_PROFILE") or (profile_dir.name if profile_dir is not None else None)
+    loaded_mods = _parse_enabled_modlist(profile_dir / "modlist.txt") if profile_dir is not None else ()
+    if staging_root is not None and loaded_mods:
+        texture_dirs = _unique_existing_paths([staging_root / mod_name / "textures" for mod_name in loaded_mods])
+    elif staging_root is not None:
+        texture_dirs = _unique_existing_paths(
+            [path / "textures" for path in staging_root.iterdir() if path.is_dir() and (path / "textures").exists()]
+        )
+    else:
+        texture_dirs = ()
+
+    return ModManagerContext(
+        manager="Vortex",
+        profile_name=profile_name,
+        game_id=game_id,
+        staging_root=staging_root,
+        output_dir=executable_path.parent / "generated_textures",
+        loaded_mods=loaded_mods,
+        loaded_texture_dirs=texture_dirs,
+    )
+
+
+def detect_mod_manager_context(
+    env: Mapping[str, str] | None = None,
+    *,
+    executable_path: Path | None = None,
+) -> ModManagerContext:
+    resolved_env = env if env is not None else os.environ
+    resolved_executable = (executable_path or Path(sys.executable)).resolve()
+    mo2_context = _detect_mo2_context(resolved_env, executable_path=resolved_executable)
+    if mo2_context.manager is not None:
+        return mo2_context
+    return _detect_vortex_context(resolved_env, executable_path=resolved_executable)
 
 
 def _histogram_percentile(histogram: list[int], percentile: float) -> float:
@@ -1153,11 +1358,13 @@ if GUI_AVAILABLE:
             self.processing_thread: threading.Thread | None = None
             self.processing_queue: queue.Queue[tuple[str, object]] = queue.Queue()
             self.is_processing = False
+            self.manager_context = detect_mod_manager_context()
 
             self.input_var = tk.StringVar()
             self.output_var = tk.StringVar()
             self.use_custom_output_var = tk.BooleanVar(value=False)
             self.preview_source_name_var = tk.StringVar(value="No source loaded")
+            self.detected_context_var = tk.StringVar(value=self.manager_context.summary)
             self.normal_strength_var = tk.DoubleVar(value=2.0)
             self.parallax_strength_var = tk.DoubleVar(value=1.35)
             self.complex_strength_var = tk.DoubleVar(value=1.15)
@@ -1179,7 +1386,9 @@ if GUI_AVAILABLE:
             self.include_glow_var = tk.BooleanVar(value=False)
             self.include_environment_mask_var = tk.BooleanVar(value=False)
             self.include_complex_var = tk.BooleanVar(value=False)
-            self.status_var = tk.StringVar(value="Select a DDS file to begin.")
+            self.status_var = tk.StringVar(
+                value=self.manager_context.summary if self.manager_context.manager is not None else "Select a DDS file to begin."
+            )
 
             self._set_app_icon()
             container = ttk.Frame(self.root)
@@ -1214,6 +1423,8 @@ if GUI_AVAILABLE:
             self.input_file_button.grid(row=0, column=2, padx=4, pady=4)
             self.input_folder_button = ttk.Button(file_frame, text="Folder", command=self._pick_input_folder)
             self.input_folder_button.grid(row=0, column=3, padx=4, pady=4)
+            self.detected_mod_button = ttk.Button(file_frame, text="Loaded Mod", command=self._pick_detected_mod_folder)
+            self.detected_mod_button.grid(row=0, column=4, padx=4, pady=4)
 
             ttk.Label(file_frame, text="Output folder").grid(row=1, column=0, sticky=tk.W, pady=4)
             self.output_entry = ttk.Entry(file_frame, textvariable=self.output_var, width=80)
@@ -1226,8 +1437,17 @@ if GUI_AVAILABLE:
                 variable=self.use_custom_output_var,
                 command=self._toggle_custom_output_location,
             ).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(2, 0))
+            ttk.Label(
+                file_frame,
+                textvariable=self.detected_context_var,
+                foreground="gray",
+                wraplength=760,
+            ).grid(row=3, column=0, columnspan=5, sticky=tk.W, pady=(4, 0))
             file_frame.columnconfigure(1, weight=1)
             self._update_output_location_controls()
+            self.detected_mod_button.configure(
+                state=(tk.NORMAL if self.manager_context.loaded_texture_dirs else tk.DISABLED)
+            )
 
             options_frame = ttk.LabelFrame(wrapper, text="Generation Options", padding=10)
             options_frame.pack(fill=tk.X, padx=4, pady=4)
@@ -1388,6 +1608,7 @@ if GUI_AVAILABLE:
             selected = filedialog.askopenfilename(
                 title="Select input texture",
                 filetypes=[("Texture files", "*.dds *.png *.jpg *.jpeg *.tga *.bmp"), ("All files", "*.*")],
+                initialdir=str(self._default_input_browse_dir()),
             )
             if not selected:
                 return
@@ -1395,21 +1616,78 @@ if GUI_AVAILABLE:
             self._load_input_selection(Path(selected))
 
         def _pick_input_folder(self) -> None:
-            selected = filedialog.askdirectory(title="Select folder with source DDS textures")
+            selected = filedialog.askdirectory(
+                title="Select folder with source DDS textures",
+                initialdir=str(self._default_input_browse_dir()),
+            )
             if not selected:
                 return
             self.input_var.set(selected)
             self._load_input_selection(Path(selected))
 
+        def _pick_detected_mod_folder(self) -> None:
+            if not self.manager_context.loaded_texture_dirs:
+                messagebox.showinfo(
+                    "No detected mod folders",
+                    "No loaded mod texture folders were detected for the current MO2/Vortex context.",
+                )
+                return
+            if len(self.manager_context.loaded_texture_dirs) == 1:
+                selected_path = self.manager_context.loaded_texture_dirs[0]
+            else:
+                selected = filedialog.askdirectory(
+                    title="Select detected loaded mod texture folder",
+                    initialdir=str(self._default_input_browse_dir()),
+                )
+                if not selected:
+                    return
+                selected_path = Path(selected)
+            self.input_var.set(str(selected_path))
+            self._load_input_selection(selected_path)
+
         def _pick_output(self) -> None:
             if not self.use_custom_output_var.get():
                 return
-            selected = filedialog.askdirectory(title="Select output folder")
+            selected = filedialog.askdirectory(
+                title="Select output folder",
+                initialdir=str(self._default_output_browse_dir()),
+            )
             if selected:
                 self.output_var.set(selected)
 
         def _default_output_dir_for_path(self, path: Path) -> Path:
             return path if path.is_dir() else path.parent
+
+        def _default_input_browse_dir(self) -> Path:
+            if self.manager_context.loaded_texture_dirs:
+                candidate = self.manager_context.loaded_texture_dirs[0]
+                if candidate.exists():
+                    return candidate
+            if self.manager_context.instance_root is not None:
+                candidate = self.manager_context.instance_root / "mods"
+                if candidate.exists():
+                    return candidate
+            if self.manager_context.staging_root is not None:
+                candidate = self.manager_context.staging_root
+                if candidate.exists():
+                    return candidate
+            return Path.cwd()
+
+        def _default_output_browse_dir(self) -> Path:
+            if self.output_var.get().strip():
+                candidate = Path(self.output_var.get().strip())
+                if candidate.exists():
+                    return candidate
+            if self.manager_context.output_dir is not None:
+                candidate = self.manager_context.output_dir
+                if candidate.exists():
+                    return candidate
+            input_value = self.input_var.get().strip()
+            if input_value:
+                candidate = self._default_output_dir_for_path(Path(input_value))
+                if candidate.exists():
+                    return candidate
+            return Path.cwd()
 
         def _update_output_location_controls(self) -> None:
             is_custom = self.use_custom_output_var.get()
@@ -1420,9 +1698,12 @@ if GUI_AVAILABLE:
         def _toggle_custom_output_location(self) -> None:
             input_value = self.input_var.get().strip()
             if self.use_custom_output_var.get():
-                if not self.output_var.get().strip() and input_value:
-                    input_path = Path(input_value)
-                    self.output_var.set(str(self._default_output_dir_for_path(input_path)))
+                if not self.output_var.get().strip():
+                    if self.manager_context.output_dir is not None:
+                        self.output_var.set(str(self.manager_context.output_dir))
+                    elif input_value:
+                        input_path = Path(input_value)
+                        self.output_var.set(str(self._default_output_dir_for_path(input_path)))
                 self.status_var.set("Custom output folder enabled.")
             else:
                 if input_value:
@@ -1468,6 +1749,9 @@ if GUI_AVAILABLE:
             self.generate_button.configure(state=state)
             self.input_file_button.configure(state=state)
             self.input_folder_button.configure(state=state)
+            self.detected_mod_button.configure(
+                state=(tk.DISABLED if processing or not self.manager_context.loaded_texture_dirs else tk.NORMAL)
+            )
             self._update_output_location_controls()
             self._update_preview_navigation_state()
 

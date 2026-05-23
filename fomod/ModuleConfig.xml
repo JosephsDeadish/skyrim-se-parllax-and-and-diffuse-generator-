@@ -6,6 +6,8 @@
   After installation, register generate_textures.exe as an external tool:
     MO2:  Tools → Executables → Add → point to generate_textures.exe in the mod staging folder.
     Vortex: Dashboard → Add Tool → browse to generate_textures.exe.
+  When launched from MO2/Vortex, the app now tries to detect the current mod-manager context
+  and loaded mod texture folders to make browsing source textures easier.
 -->
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
@@ -19,6 +21,20 @@
     <installSteps order="Explicit">
         <installStep name="Optional Components">
             <optionalFileGroups order="Explicit">
+                <group name="Documentation (recommended)" type="SelectAny">
+                    <plugins order="Explicit">
+                        <plugin name="Include README and usage notes">
+                            <description>Installs the README so the MO2/Vortex setup notes and Skyrim SE output-format guidance are available inside the installed tool folder.</description>
+                            <image path=""/>
+                            <files>
+                                <file source="README.md" destination="README.md" priority="0"/>
+                            </files>
+                            <typeDescriptor>
+                                <type name="Recommended"/>
+                            </typeDescriptor>
+                        </plugin>
+                    </plugins>
+                </group>
 
                 <group name="Source Script (optional)" type="SelectAny">
                     <plugins order="Explicit">
