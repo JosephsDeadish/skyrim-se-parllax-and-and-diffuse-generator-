@@ -89,6 +89,7 @@ Optional arguments:
 - `--glow-map` (include glow output)
 - `--environment-mask` (include environment mask output)
 - `--complex-material` (include complex material output)
+- `--batch-workers` (parallel workers for folder mode; `0` = automatic)
 - `--gui` (force GUI mode)
 
 Generated outputs default to `.dds` filenames regardless of the input format. Most outputs are written as DXT5 DDS for broad compatibility; standard (`--environment-mask-mode standard`) `_m` masks prefer DXT1 (with automatic DXT5 fallback if needed). If DDS export is unavailable on the current Pillow build, the tool falls back to PNG output.
@@ -124,11 +125,3 @@ The tool recognises standard Skyrim SE texture naming conventions from the file 
 | `_cm` | Complex Material (greyscale) | ENBSeries only — **not vanilla Skyrim SE** |
 
 Batch folder mode automatically skips generated variants (`_n`, `_p`, `_g`, `_m`, `_msn`, `_cm`) so it only processes original source textures.
-
-## GitHub Actions
-
-The repository includes a CI workflow in `.github/workflows/build.yml` that:
-- runs on pull requests
-- can also be launched manually from the Actions tab (`workflow_dispatch`)
-
-If you want pull request runs to require explicit approval before jobs execute, configure required reviewers on the `pr-build-approval` environment in repository settings.

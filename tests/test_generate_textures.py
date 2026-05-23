@@ -677,6 +677,31 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(len(errors), 1)
             self.assertEqual(errors[0][0], "bad.dds")
 
+    def test_run_batch_with_options_supports_parallel_workers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            input_dir.mkdir()
+
+            for name in ("a.dds", "b.dds", "c.dds", "d.dds"):
+                _sample_image().save(input_dir / name, format="DDS", pixel_format="DXT5")
+
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                batch_workers=2,
+            )
+
+            self.assertEqual(sorted(path.name for path in outputs.keys()), ["a.dds", "b.dds", "c.dds", "d.dds"])
+            self.assertEqual(sorted(path.name for path in output_dir.iterdir()), ["a.dds", "b.dds", "c.dds", "d.dds"])
+
     def test_create_panda_icon_image_returns_rgba_square(self) -> None:
         for size in (16, 32, 64, 128, 256):
             icon = _create_panda_icon_image(size=size)

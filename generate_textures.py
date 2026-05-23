@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import gc
 import math
 import os
@@ -252,7 +253,11 @@ def _histogram_percentile(histogram: list[int], percentile: float) -> float:
 
 
 def analyze_image_content(source: Image.Image) -> dict[str, float]:
-    rgb_source = source.convert("RGB")
+    analysis_source = source
+    if max(source.width, source.height) > 1024:
+        analysis_source = source.copy()
+        analysis_source.thumbnail((1024, 1024), Image.Resampling.BILINEAR)
+    rgb_source = analysis_source.convert("RGB")
     grayscale = ImageOps.grayscale(rgb_source)
     denoised_grayscale = grayscale.filter(ImageFilter.MedianFilter(size=3))
     saturation = rgb_source.convert("HSV").split()[1]
@@ -295,7 +300,7 @@ def analyze_image_content(source: Image.Image) -> dict[str, float]:
     low_saturation_ratio = sum(saturation_histogram[:72]) / saturation_total
     p90_luma = _histogram_percentile(histogram, 0.90)
     color_variance = float(sum(rgb_stats.stddev) / 3.0)
-    megapixels = float((rgb_source.width * rgb_source.height) / 1_000_000.0)
+    megapixels = float((source.width * source.height) / 1_000_000.0)
 
     return {
         "brightness": float(grayscale_stats.mean[0]),
@@ -439,6 +444,17 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
         "specular_strength": specular_strength,
         "glow_threshold": glow_threshold,
     }
+
+
+def _resolve_batch_workers(batch_workers: int | None, total: int) -> int:
+    if total <= 1:
+        return 1
+    if batch_workers is not None and batch_workers > 0:
+        return int(_clamp(float(batch_workers), 1.0, 16.0))
+    if total < 4:
+        return 1
+    cpu_count = os.cpu_count() or 2
+    return max(1, min(4, cpu_count // 2))
 
 
 def _prepare_height_map(source: Image.Image) -> Image.Image:
@@ -1170,44 +1186,90 @@ def run_batch_with_options(
     progress_callback: Callable[[int, int, Path], None] | None = None,
     error_callback: Callable[[int, int, Path, Exception], None] | None = None,
     continue_on_error: bool = False,
+    batch_workers: int | None = None,
 ) -> dict[Path, dict[str, Path]]:
     input_files = collect_source_textures(input_path)
     results: dict[Path, dict[str, Path]] = {}
     total = len(input_files)
+    workers = _resolve_batch_workers(batch_workers, total)
 
-    for index, input_file in enumerate(input_files, start=1):
-        if progress_callback is not None:
-            progress_callback(index, total, input_file)
-        try:
-            results[input_file] = run_with_options(
-                input_file=input_file,
-                output_dir=output_dir,
-                diffuse_name=diffuse_name,
-                normal_name=normal_name,
-                parallax_name=parallax_name,
-                glow_name=glow_name,
-                environment_mask_name=environment_mask_name,
-                complex_name=complex_name,
-                normal_strength=normal_strength,
-                parallax_strength=parallax_strength,
-                glow_threshold=glow_threshold,
-                environment_mask_strength=environment_mask_strength,
-                complex_strength=complex_strength,
-                specular_strength=specular_strength,
-                complex_format=complex_format,
-                env_mask_mode=env_mask_mode,
-                include_diffuse=include_diffuse,
-                include_normal=include_normal,
-                include_parallax=include_parallax,
-                include_glow=include_glow,
-                include_environment_mask=include_environment_mask,
-                include_complex=include_complex,
-            )
-        except Exception as exc:
-            if error_callback is not None:
-                error_callback(index, total, input_file, exc)
-            if not continue_on_error:
-                raise
+    if workers == 1:
+        for index, input_file in enumerate(input_files, start=1):
+            if progress_callback is not None:
+                progress_callback(index, total, input_file)
+            try:
+                results[input_file] = run_with_options(
+                    input_file=input_file,
+                    output_dir=output_dir,
+                    diffuse_name=diffuse_name,
+                    normal_name=normal_name,
+                    parallax_name=parallax_name,
+                    glow_name=glow_name,
+                    environment_mask_name=environment_mask_name,
+                    complex_name=complex_name,
+                    normal_strength=normal_strength,
+                    parallax_strength=parallax_strength,
+                    glow_threshold=glow_threshold,
+                    environment_mask_strength=environment_mask_strength,
+                    complex_strength=complex_strength,
+                    specular_strength=specular_strength,
+                    complex_format=complex_format,
+                    env_mask_mode=env_mask_mode,
+                    include_diffuse=include_diffuse,
+                    include_normal=include_normal,
+                    include_parallax=include_parallax,
+                    include_glow=include_glow,
+                    include_environment_mask=include_environment_mask,
+                    include_complex=include_complex,
+                )
+            except Exception as exc:
+                if error_callback is not None:
+                    error_callback(index, total, input_file, exc)
+                if not continue_on_error:
+                    raise
+        return results
+
+    def _process_one(target_file: Path) -> dict[str, Path]:
+        return run_with_options(
+            input_file=target_file,
+            output_dir=output_dir,
+            diffuse_name=diffuse_name,
+            normal_name=normal_name,
+            parallax_name=parallax_name,
+            glow_name=glow_name,
+            environment_mask_name=environment_mask_name,
+            complex_name=complex_name,
+            normal_strength=normal_strength,
+            parallax_strength=parallax_strength,
+            glow_threshold=glow_threshold,
+            environment_mask_strength=environment_mask_strength,
+            complex_strength=complex_strength,
+            specular_strength=specular_strength,
+            complex_format=complex_format,
+            env_mask_mode=env_mask_mode,
+            include_diffuse=include_diffuse,
+            include_normal=include_normal,
+            include_parallax=include_parallax,
+            include_glow=include_glow,
+            include_environment_mask=include_environment_mask,
+            include_complex=include_complex,
+        )
+
+    completed = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        future_to_file = {executor.submit(_process_one, input_file): input_file for input_file in input_files}
+        for future in concurrent.futures.as_completed(future_to_file):
+            input_file = future_to_file[future]
+            completed += 1
+            if progress_callback is not None:
+                progress_callback(completed, total, input_file)
+            try:
+                results[input_file] = future.result()
+            except Exception as exc:
+                if error_callback is not None:
+                    error_callback(completed, total, input_file, exc)
+                if not continue_on_error:
+                    raise
 
     return results
 
@@ -1287,6 +1349,12 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--complex-material", action="store_true", help="Generate complex material output.")
+    parser.add_argument(
+        "--batch-workers",
+        type=int,
+        default=0,
+        help="Parallel workers for folder batch mode (0 = automatic).",
+    )
     parser.add_argument("--gui", action="store_true", help="Launch graphical interface.")
     return parser.parse_args()
 
@@ -2098,6 +2166,7 @@ def main() -> int:
             include_environment_mask=args.environment_mask,
             include_complex=args.complex_material,
             continue_on_error=True,
+            batch_workers=args.batch_workers,
             error_callback=lambda _index, _total, current, exc: failures.append((current, str(exc))),
         )
         for input_file, outputs in batch_outputs.items():
