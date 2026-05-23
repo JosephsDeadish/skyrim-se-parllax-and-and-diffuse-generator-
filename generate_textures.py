@@ -12,6 +12,7 @@ from typing import Callable
 
 import webbrowser
 
+import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageOps, ImageStat
 
 try:
@@ -52,11 +53,29 @@ def analyze_image_content(source: Image.Image) -> dict[str, float]:
     blurred = grayscale.filter(ImageFilter.GaussianBlur(radius=2.0))
     detail = ImageChops.difference(grayscale, blurred)
 
+    # Multi-scale edge detection via Difference-of-Gaussians (DoG)
+    dog_fine = ImageChops.difference(
+        grayscale.filter(ImageFilter.GaussianBlur(radius=0.8)),
+        grayscale.filter(ImageFilter.GaussianBlur(radius=2.5)),
+    )
+    dog_medium = ImageChops.difference(
+        grayscale.filter(ImageFilter.GaussianBlur(radius=1.5)),
+        grayscale.filter(ImageFilter.GaussianBlur(radius=5.0)),
+    )
+    # Laplacian-like high-frequency energy (approximated via unsharp minus original)
+    laplacian_approx = ImageChops.difference(
+        grayscale,
+        grayscale.filter(ImageFilter.GaussianBlur(radius=1.0)),
+    )
+
     grayscale_stats = ImageStat.Stat(grayscale)
     saturation_stats = ImageStat.Stat(saturation)
     rgb_stats = ImageStat.Stat(rgb_source)
     edge_stats = ImageStat.Stat(edges)
     detail_stats = ImageStat.Stat(detail)
+    dog_fine_stats = ImageStat.Stat(dog_fine)
+    dog_medium_stats = ImageStat.Stat(dog_medium)
+    laplacian_stats = ImageStat.Stat(laplacian_approx)
     minimum, maximum = grayscale.getextrema()
     histogram = grayscale.histogram()
     total_pixels = float(sum(histogram)) or 1.0
@@ -82,6 +101,9 @@ def analyze_image_content(source: Image.Image) -> dict[str, float]:
         "edge_strength": float(edge_stats.mean[0]),
         "edge_variance": float(edge_stats.stddev[0]),
         "detail_energy": float(detail_stats.mean[0]),
+        "dog_fine_energy": float(dog_fine_stats.mean[0]),
+        "dog_medium_energy": float(dog_medium_stats.mean[0]),
+        "laplacian_energy": float(laplacian_stats.mean[0]),
         "dynamic_range": float(maximum - minimum),
         "shadow_ratio": float(shadow_ratio),
         "highlight_ratio": float(highlight_ratio),
@@ -110,6 +132,9 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
     edge_strength = analysis["edge_strength"]
     edge_variance = analysis["edge_variance"]
     detail_energy = analysis["detail_energy"]
+    dog_fine_energy = analysis["dog_fine_energy"]
+    dog_medium_energy = analysis["dog_medium_energy"]
+    laplacian_energy = analysis["laplacian_energy"]
     dynamic_range = analysis["dynamic_range"]
     shadow_ratio = analysis["shadow_ratio"]
     highlight_ratio = analysis["highlight_ratio"]
@@ -121,12 +146,22 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
     low_saturation_ratio = analysis["low_saturation_ratio"]
     color_variance = analysis["color_variance"]
     megapixels = analysis["megapixels"]
+
+    # Multi-scale edge signal is a better predictor than single-scale alone
+    combined_edge = (edge_strength * 0.4) + (dog_fine_energy * 0.35) + (dog_medium_energy * 0.25)
     detail_guard = _clamp((detail_energy - 16.0) / 36.0, 0.0, 1.0)
+    laplacian_guard = _clamp((laplacian_energy - 6.0) / 18.0, 0.0, 1.0)
     size_guard = _clamp((megapixels - 1.0) / 6.0, 0.0, 1.0)
-    overdetail_guard = _clamp((detail_guard * 0.7) + (size_guard * 0.6), 0.0, 1.0)
+    overdetail_guard = _clamp(
+        (detail_guard * 0.55) + (laplacian_guard * 0.3) + (size_guard * 0.5), 0.0, 1.0
+    )
 
     normal_strength = _clamp(
-        1.1 + (edge_strength / 180.0) + (edge_variance / 220.0) + (detail_energy / 120.0) + (color_variance / 900.0),
+        1.1
+        + (combined_edge / 155.0)
+        + (edge_variance / 220.0)
+        + (detail_energy / 120.0)
+        + (color_variance / 900.0),
         1.1,
         3.8,
     )
@@ -151,7 +186,7 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
     )
     complex_strength = _clamp(
         1.05
-        + (edge_strength / 220.0)
+        + (combined_edge / 200.0)
         + (detail_energy / 120.0)
         + (dynamic_range / 1100.0)
         + (saturation_variance / 1050.0)
@@ -161,10 +196,11 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
     )
     specular_strength = _clamp(
         0.9
-        + (highlight_ratio * 1.5)
-        + (edge_variance / 290.0)
+        + (highlight_ratio * 1.4)
+        + (dog_fine_energy / 240.0)
+        + (edge_variance / 310.0)
         + ((0.3 - shadow_ratio) * 0.35)
-        + (low_saturation_ratio * 0.5)
+        + (low_saturation_ratio * 0.45)
         + ((1.0 - (saturation_mean / 255.0)) * 0.35),
         0.9,
         2.2,
@@ -257,31 +293,31 @@ def generate_normal(source: Image.Image, strength: float = 2.0, directx: bool = 
     pressure = _detail_pressure(source)
     resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.8)
     effective_strength = _clamp(strength * (1.0 - (pressure * 0.2)), 0.9, 3.8)
-    height_map = _prepare_height_map(source).filter(ImageFilter.GaussianBlur(radius=0.8 + (pressure * 0.9) + ((resolution_scale - 1.0) * 0.35)))
+    height_map = _prepare_height_map(source).filter(
+        ImageFilter.GaussianBlur(radius=0.8 + (pressure * 0.9) + ((resolution_scale - 1.0) * 0.35))
+    )
     sobel_x = height_map.filter(ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=8, offset=128))
     sobel_y = height_map.filter(ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=8, offset=128))
     green_sign = 1.0 if directx else -1.0
-    red_pixels: list[int] = []
-    green_pixels: list[int] = []
-    blue_pixels: list[int] = []
-    for sobel_x_value, sobel_y_value in zip(sobel_x.tobytes(), sobel_y.tobytes()):
-        red_value = int(_clamp(128.0 - ((sobel_x_value - 128.0) * effective_strength), 0.0, 255.0))
-        green_value = int(_clamp(128.0 + ((sobel_y_value - 128.0) * effective_strength * green_sign), 0.0, 255.0))
-        normal_x = (float(red_value) - 128.0) / 127.0
-        normal_y = (float(green_value) - 128.0) / 127.0
-        horizontal_sq = (normal_x * normal_x) + (normal_y * normal_y)
-        normal_z = math.sqrt(max(0.0, 1.0 - min(1.0, horizontal_sq)))
-        blue_value = int(_clamp(128.0 + (normal_z * 127.0), 128.0, 255.0))
-        red_pixels.append(red_value)
-        green_pixels.append(green_value)
-        blue_pixels.append(blue_value)
 
-    red = Image.new("L", height_map.size)
-    red.putdata(red_pixels)
-    green = Image.new("L", height_map.size)
-    green.putdata(green_pixels)
-    blue = Image.new("L", height_map.size)
-    blue.putdata(blue_pixels)
+    # Vectorised numpy computation — orders of magnitude faster than a Python loop
+    # for large textures (2 K / 4 K / 8 K) and produces identical pixel values.
+    sx = np.frombuffer(sobel_x.tobytes(), dtype=np.uint8).astype(np.float32)
+    sy = np.frombuffer(sobel_y.tobytes(), dtype=np.uint8).astype(np.float32)
+
+    red_arr = np.clip(128.0 - (sx - 128.0) * effective_strength, 0.0, 255.0).astype(np.uint8)
+    green_arr = np.clip(128.0 + (sy - 128.0) * effective_strength * green_sign, 0.0, 255.0).astype(np.uint8)
+
+    normal_x = (red_arr.astype(np.float32) - 128.0) / 127.0
+    normal_y = (green_arr.astype(np.float32) - 128.0) / 127.0
+    horizontal_sq = normal_x * normal_x + normal_y * normal_y
+    normal_z = np.sqrt(np.clip(1.0 - np.clip(horizontal_sq, 0.0, 1.0), 0.0, None))
+    blue_arr = np.clip(128.0 + normal_z * 127.0, 128.0, 255.0).astype(np.uint8)
+
+    h, w = height_map.size[1], height_map.size[0]
+    red = Image.fromarray(red_arr.reshape(h, w), mode="L")
+    green = Image.fromarray(green_arr.reshape(h, w), mode="L")
+    blue = Image.fromarray(blue_arr.reshape(h, w), mode="L")
     return Image.merge("RGB", (red, green, blue))
 
 
@@ -294,7 +330,28 @@ def generate_glow(source: Image.Image, threshold: int = 190) -> Image.Image:
     return ImageEnhance.Brightness(softened).enhance(1.05).point(lambda value: int(_clamp(value, 0.0, 255.0)))
 
 
-def generate_environment_mask(source: Image.Image, strength: float = 1.2) -> Image.Image:
+def generate_environment_mask(source: Image.Image, strength: float = 1.2, mode: str = "complex") -> Image.Image:
+    """Generate an environment mask for Skyrim SE.
+
+    Parameters
+    ----------
+    source:
+        Input diffuse texture.
+    strength:
+        Contrast/intensity strength factor (higher = stronger reflection/glossiness).
+    mode:
+        ``"complex"`` (default) — RGBA texture for ENBSeries Complex Parallax Material.
+        Channel layout: R=env reflection amount, G=glossiness, B=metallic proxy,
+        A=parallax height.  Requires ENBSeries with complex material support.
+
+        ``"standard"`` — Greyscale (L mode) texture for the vanilla Skyrim SE
+        ``_m.dds`` texture slot (Slot 5 in the NIF).  Controls environment/specular
+        reflection intensity only.  Works without any mods or ENBSeries.
+        Brighter = more environment reflection.
+    """
+    if mode == "standard":
+        return _generate_standard_env_mask(source, strength)
+
     rgb_source = source.convert("RGB")
     grayscale = ImageOps.grayscale(rgb_source).filter(ImageFilter.GaussianBlur(radius=0.8))
     red, green, blue = rgb_source.split()
@@ -319,6 +376,25 @@ def generate_environment_mask(source: Image.Image, strength: float = 1.2) -> Ima
     height_alpha = Image.blend(midpoint, raw_height, alpha=0.75)
 
     return Image.merge("RGBA", (env_amount, glossiness, metallic, height_alpha))
+
+
+def _generate_standard_env_mask(source: Image.Image, strength: float = 1.2) -> Image.Image:
+    """Standard Skyrim SE environment mask (Texture Slot 5, ``_m.dds``).
+
+    Returns a greyscale ``L``-mode image where pixel brightness controls environment
+    reflection intensity — brighter areas reflect more.  This is the correct format
+    for vanilla Skyrim SE without ENBSeries.
+    """
+    rgb_source = source.convert("RGB")
+    grayscale = ImageOps.grayscale(rgb_source)
+    # Derive reflection intensity from specular features of the diffuse texture.
+    # Bright/shiny-looking areas in the diffuse are more reflective.
+    specular = generate_specular(rgb_source, strength=max(0.9, min(2.0, strength)))
+    # Blend base luminance with the specular highlight estimate.
+    env_mask = Image.blend(grayscale, specular, alpha=0.62)
+    env_mask = ImageEnhance.Contrast(env_mask).enhance(0.8 + (strength * 0.28))
+    env_mask = _lift_black_floor(ImageOps.autocontrast(env_mask, cutoff=1), floor=14)
+    return env_mask
 
 
 def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Image.Image:
@@ -350,9 +426,16 @@ def generate_specular(source: Image.Image, strength: float = 1.15) -> Image.Imag
     base = ImageEnhance.Contrast(smoothed).enhance(1.08 - (pressure * 0.1))
     detail_boost = ImageEnhance.Brightness(local_detail).enhance(0.55 - (pressure * 0.2))
     specular = ImageChops.add(base, detail_boost, scale=1.45 + (pressure * 0.2), offset=4)
-    softened = specular.filter(ImageFilter.MedianFilter(size=3)).filter(ImageFilter.GaussianBlur(radius=0.6))
-    contrasted = ImageEnhance.Contrast(softened).enhance(_clamp(strength * (1.0 - (pressure * 0.18)), 0.9, 2.2))
-    normalized = ImageOps.autocontrast(contrasted, cutoff=1)
+    # Use GaussianBlur for softening — faster than MedianFilter on large textures (2K/4K/8K)
+    # and avoids the halo artefacts that MedianFilter can introduce at edges.
+    softened = specular.filter(ImageFilter.GaussianBlur(radius=1.2 + (pressure * 0.4)))
+    # Lift the floor BEFORE contrast enhancement so that true-black holes cannot be
+    # created by subsequent autocontrast stretching.
+    pre_lifted = _lift_black_floor(softened, floor=12)
+    contrasted = ImageEnhance.Contrast(pre_lifted).enhance(_clamp(strength * (1.0 - (pressure * 0.18)), 0.9, 2.2))
+    # Use cutoff=2 so the most extreme outliers (bright sparks / deep holes) are clipped
+    # before the stretch, further reducing the chance of black-hole artefacts.
+    normalized = ImageOps.autocontrast(contrasted, cutoff=2)
     return _lift_black_floor(normalized, floor=8)
 
 
@@ -483,6 +566,130 @@ def _is_supported_input_file(path: Path) -> bool:
 def _is_generated_texture(path: Path) -> bool:
     stem = path.stem.lower()
     return stem.endswith("_") or any(stem.endswith(suffix) for suffix in GENERATED_TEXTURE_SUFFIXES)
+
+
+# ---------------------------------------------------------------------------
+# Skyrim SE texture role recognition
+# ---------------------------------------------------------------------------
+
+_SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
+    "_n": (
+        "normal",
+        "Normal Map",
+        "Tangent-space DirectX-style normal map. Texture Slot 1 in the NIF. "
+        "R=tangent X, G=tangent Y (DirectX convention, +Y up), B=tangent Z. "
+        "Requires BSLightingShaderProperty. Standard in all Skyrim SE textures.",
+    ),
+    "_p": (
+        "parallax",
+        "Parallax Heightmap",
+        "Greyscale height map for parallax occlusion mapping. Texture Slot 3 in the NIF. "
+        "Requires BSLightingShaderProperty with Parallax shader flag set plus the SKSE64 "
+        "memory patch (or ENBSeries) to work at runtime. Brighter = raised surface.",
+    ),
+    "_g": (
+        "glow",
+        "Glow / Emissive Map",
+        "Glow/emissive map. Texture Slot 2 in the NIF. "
+        "Controls per-pixel self-illumination strength. "
+        "Requires SLSF1_Own_Emit (0x40) shader flag on the BSLightingShaderProperty.",
+    ),
+    "_m": (
+        "environment_mask",
+        "Environment Mask",
+        "Greyscale environment reflection intensity mask. Texture Slot 5 in the NIF. "
+        "Higher (brighter) values produce more environment/specular reflection. "
+        "Requires SLSF1_Environment_Mapping (0x80) shader flag. "
+        "Standard vanilla Skyrim SE format; typically stored as DXT1 (no alpha).",
+    ),
+    "_s": (
+        "subsurface",
+        "Subsurface Scattering Map",
+        "Subsurface scattering tint map. Texture Slot 6 in the NIF. "
+        "Used primarily for skin on character and creature textures.",
+    ),
+    "_sk": (
+        "skin_specular",
+        "Skin Specular Map",
+        "Specular map for character skin. Texture Slot 7 in the NIF. "
+        "Character-specific shader slot for skin specularity.",
+    ),
+    "_msn": (
+        "complex_material",
+        "Complex Parallax Material (ENBSeries only)",
+        "NOT a vanilla Skyrim SE texture. Used exclusively by ENBSeries Complex Parallax "
+        "Material feature. RGBA: R=normal X, G=normal Y, B=metalness/roughness, "
+        "A=specular intensity. Requires ENBSeries with complexmaterial support enabled. "
+        "Replaces the standard _n.dds when this ENB feature is active.",
+    ),
+    "_cm": (
+        "complex_material_cm",
+        "Complex Material Greyscale (ENBSeries only)",
+        "NOT a vanilla Skyrim SE texture. ENBSeries Complex Material grayscale variant. "
+        "Requires ENBSeries with complex material support. Not used by vanilla Skyrim SE.",
+    ),
+}
+
+_SKYRIM_SE_PATH_HINTS: dict[str, str] = {
+    "actors": "Character/creature texture (textures/actors/…)",
+    "architecture": "Architecture/building texture",
+    "landscape": "Terrain/landscape texture",
+    "effects": "Visual-effect texture",
+    "weapons": "Weapon texture",
+    "armor": "Armor texture",
+    "clothes": "Clothing/apparel texture",
+    "furniture": "Furniture/interior-prop texture",
+    "plants": "Vegetation/plant texture",
+    "sky": "Sky texture",
+    "water": "Water texture",
+    "dungeons": "Dungeon-interior texture",
+    "clutter": "Clutter/misc-object texture",
+    "terrain": "Terrain/world-space texture",
+    "dlc": "DLC content texture",
+    "interface": "UI/interface texture (not for in-world use)",
+}
+
+
+def _get_skyrim_path_hint(path: Path) -> str:
+    parts = [part.lower() for part in path.parts]
+    for part in parts:
+        for keyword, hint in _SKYRIM_SE_PATH_HINTS.items():
+            if keyword in part:
+                return hint
+    return ""
+
+
+def identify_skyrim_texture_role(path: Path) -> dict[str, str]:
+    """Identify the Skyrim SE role of a texture based on its filename and folder path.
+
+    Returns a dict with keys:
+    - ``role``:        Short role identifier (e.g. ``'diffuse'``, ``'normal'``).
+    - ``suffix``:      Detected suffix (e.g. ``'_n'``), or ``''`` for diffuse.
+    - ``description``: Human-readable name for the texture type.
+    - ``notes``:       Factual Skyrim SE usage notes.
+    - ``hint``:        Optional context hint derived from the folder path.
+    """
+    stem = path.stem.lower()
+    for suffix, (role, description, notes) in _SKYRIM_SE_SUFFIX_INFO.items():
+        if stem.endswith(suffix):
+            return {
+                "role": role,
+                "suffix": suffix,
+                "description": description,
+                "notes": notes,
+                "hint": _get_skyrim_path_hint(path),
+            }
+    return {
+        "role": "diffuse",
+        "suffix": "",
+        "description": "Diffuse / Albedo Texture",
+        "notes": (
+            "Source diffuse/albedo texture. Texture Slot 0 in the NIF. "
+            "Contains the primary colour and surface detail. "
+            "Alpha channel may store opacity or specular depending on the shader flags used."
+        ),
+        "hint": _get_skyrim_path_hint(path),
+    }
 
 
 def collect_source_textures(input_path: Path) -> list[Path]:
