@@ -91,6 +91,18 @@ def _large_high_detail_image() -> Image.Image:
     return image
 
 
+def _normal_like_image() -> Image.Image:
+    image = Image.new("RGB", (24, 24))
+    pixels = image.load()
+    for y in range(24):
+        for x in range(24):
+            r = 120 + ((x + y) % 12)
+            g = 120 + ((x * 2 + y) % 12)
+            b = 210 + ((x * y) % 25)
+            pixels[x, y] = (r, g, b)
+    return image
+
+
 class GenerateTexturesTests(unittest.TestCase):
     def test_generate_diffuse_returns_rgb_same_size(self) -> None:
         diffuse = generate_diffuse(_sample_image())
@@ -249,6 +261,19 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertLess(float(settings["parallax_strength"]), 2.2)
         self.assertLess(float(settings["complex_strength"]), 2.5)
         self.assertLess(float(settings["specular_strength"]), 2.1)
+
+    def test_recommend_generation_settings_adjusts_for_normal_input_filename(self) -> None:
+        source = _sample_image()
+        baseline = recommend_generation_settings(source)
+        normal_named = recommend_generation_settings(source, input_path=Path("textures/architecture/stone_n.dds"))
+        self.assertLessEqual(float(normal_named["normal_strength"]), float(baseline["normal_strength"]))
+        self.assertLessEqual(float(normal_named["parallax_strength"]), float(baseline["parallax_strength"]))
+
+    def test_recommend_generation_settings_can_infer_normal_like_image(self) -> None:
+        baseline = recommend_generation_settings(_sample_image())
+        inferred = recommend_generation_settings(_normal_like_image())
+        self.assertLessEqual(float(inferred["normal_strength"]), float(baseline["normal_strength"]))
+        self.assertGreaterEqual(int(inferred["glow_threshold"]), int(baseline["glow_threshold"]))
 
     def test_generate_environment_mask_glossiness_stays_above_complex_parallax_floor(self) -> None:
         environment_mask = generate_environment_mask(_large_high_detail_image(), strength=2.2, mode="complex")
@@ -835,6 +860,12 @@ class GenerateTexturesTests(unittest.TestCase):
         result = identify_skyrim_texture_role(Path("textures/architecture/brick_msn.dds"))
         self.assertEqual(result["role"], "complex_material")
         self.assertIn("ENBSeries", result["notes"])
+
+    def test_identify_skyrim_texture_role_infers_from_filename_tokens(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/architecture/wall_normalmap.dds"))
+        self.assertEqual(result["role"], "normal")
+        self.assertEqual(result["suffix"], "")
+        self.assertIn("inferred", result["description"].lower())
 
     def test_run_with_options_env_mask_standard_mode_produces_l_image(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

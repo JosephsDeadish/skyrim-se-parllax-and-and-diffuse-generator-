@@ -6,6 +6,7 @@ import gc
 import math
 import os
 import queue
+import re
 import sys
 import threading
 import uuid
@@ -347,7 +348,46 @@ def apply_recommendations_by_auto_flags(
     return merged
 
 
-def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]:
+def _infer_likely_role_from_image(source: Image.Image) -> str | None:
+    rgb = source.convert("RGB")
+    arr = np.asarray(rgb, dtype=np.float32)
+    if arr.size == 0:
+        return None
+    mean_r = float(arr[:, :, 0].mean())
+    mean_g = float(arr[:, :, 1].mean())
+    mean_b = float(arr[:, :, 2].mean())
+    std_b = float(arr[:, :, 2].std())
+    rg_delta = abs(mean_r - 128.0) + abs(mean_g - 128.0)
+    if mean_b > 150.0 and rg_delta < 85.0 and std_b < 85.0:
+        return "normal"
+    return None
+
+
+def _adjust_recommendations_for_role(
+    recommended: dict[str, float | int], detected_role: str | None
+) -> dict[str, float | int]:
+    if detected_role is None:
+        return recommended
+    adjusted = dict(recommended)
+    if detected_role == "normal":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]), 1.1, 1.8)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]), 0.8, 1.2)
+        adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]), 1.0, 1.5)
+        adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]), 190.0, 235.0))
+    elif detected_role == "parallax":
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]), 0.8, 1.25)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]), 1.1, 2.4)
+    elif detected_role == "glow":
+        adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]), 140.0, 180.0))
+    elif detected_role == "environment_mask":
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]), 0.9, 1.35)
+    elif detected_role in {"complex_material", "complex_material_cm"}:
+        adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]), 1.0, 1.6)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]), 1.1, 2.0)
+    return adjusted
+
+
+def recommend_generation_settings(source: Image.Image, input_path: Path | None = None) -> dict[str, float | int]:
     analysis = analyze_image_content(source)
     brightness = analysis["brightness"]
     contrast = analysis["contrast"]
@@ -446,7 +486,7 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
         )
     )
 
-    return {
+    recommended: dict[str, float | int] = {
         "normal_strength": normal_strength,
         "parallax_strength": parallax_strength,
         "environment_mask_strength": environment_mask_strength,
@@ -454,6 +494,14 @@ def recommend_generation_settings(source: Image.Image) -> dict[str, float | int]
         "specular_strength": specular_strength,
         "glow_threshold": glow_threshold,
     }
+    detected_role: str | None = None
+    if input_path is not None:
+        detected_role = identify_skyrim_texture_role(input_path)["role"]
+    if detected_role in {None, "diffuse"}:
+        inferred_from_image = _infer_likely_role_from_image(source)
+        if inferred_from_image is not None:
+            detected_role = inferred_from_image
+    return _adjust_recommendations_for_role(recommended, detected_role)
 
 
 def _resolve_batch_workers(batch_workers: int | None, total: int) -> int:
@@ -923,6 +971,28 @@ _SKYRIM_SE_PATH_HINTS: dict[str, str] = {
     "interface": "UI/interface texture (not for in-world use)",
 }
 
+_SKYRIM_ROLE_PRIMARY_SUFFIX: dict[str, str] = {
+    "normal": "_n",
+    "parallax": "_p",
+    "glow": "_g",
+    "environment_mask": "_m",
+    "subsurface": "_s",
+    "skin_specular": "_sk",
+    "complex_material": "_msn",
+    "complex_material_cm": "_cm",
+}
+
+_SKYRIM_ROLE_TOKEN_HINTS: dict[str, tuple[str, ...]] = {
+    "normal": ("normal", "normalmap", "nrm", "nor", "bump"),
+    "parallax": ("parallax", "height", "heightmap", "displace", "displacement"),
+    "glow": ("glow", "emissive", "emit", "emission"),
+    "environment_mask": ("env", "envmask", "cubemask", "reflectionmask", "specmask"),
+    "subsurface": ("subsurface", "sss"),
+    "skin_specular": ("skinspec", "skinspecular"),
+    "complex_material": ("complex", "complexmaterial", "msn"),
+    "complex_material_cm": ("complexcm", "cmaterial", "complexgray"),
+}
+
 
 def _get_skyrim_path_hint(path: Path) -> str:
     parts = [part.lower() for part in path.parts]
@@ -931,6 +1001,16 @@ def _get_skyrim_path_hint(path: Path) -> str:
             if keyword in part:
                 return hint
     return ""
+
+
+def _infer_skyrim_role_from_name_tokens(stem: str) -> str | None:
+    lowered = stem.lower()
+    tokens = tuple(token for token in re.split(r"[^a-z0-9]+", lowered) if token)
+    for role, hints in _SKYRIM_ROLE_TOKEN_HINTS.items():
+        for hint in hints:
+            if hint in tokens:
+                return role
+    return None
 
 
 def identify_skyrim_texture_role(path: Path) -> dict[str, str]:
@@ -953,6 +1033,17 @@ def identify_skyrim_texture_role(path: Path) -> dict[str, str]:
                 "notes": notes,
                 "hint": _get_skyrim_path_hint(path),
             }
+    inferred_role = _infer_skyrim_role_from_name_tokens(stem)
+    if inferred_role is not None:
+        primary_suffix = _SKYRIM_ROLE_PRIMARY_SUFFIX[inferred_role]
+        role, description, notes = _SKYRIM_SE_SUFFIX_INFO[primary_suffix]
+        return {
+            "role": role,
+            "suffix": "",
+            "description": f"{description} (inferred from filename)",
+            "notes": notes,
+            "hint": _get_skyrim_path_hint(path),
+        }
     return {
         "role": "diffuse",
         "suffix": "",
@@ -1086,7 +1177,7 @@ def run_with_options(
         if source.width * source.height > 512 * 512:
             analysis_source = source.copy()
             analysis_source.thumbnail((512, 512), Image.Resampling.NEAREST)
-        recommended = recommend_generation_settings(analysis_source)
+        recommended = recommend_generation_settings(analysis_source, input_path=input_file)
         del analysis_source
         resolved_normal_strength = normal_strength if normal_strength is not None else float(recommended["normal_strength"])
         resolved_parallax_strength = parallax_strength if parallax_strength is not None else float(recommended["parallax_strength"])
@@ -2135,7 +2226,8 @@ if GUI_AVAILABLE:
         def _apply_recommended_settings(self) -> None:
             if self.source_image is None or not self.auto_suggestions_var.get():
                 return
-            recommended = recommend_generation_settings(self.source_image)
+            preview_path = self.selected_inputs[self.current_preview_index] if self.selected_inputs else None
+            recommended = recommend_generation_settings(self.source_image, input_path=preview_path)
             current = {
                 "normal_strength": float(self.normal_strength_var.get()),
                 "parallax_strength": float(self.parallax_strength_var.get()),
@@ -2203,20 +2295,24 @@ if GUI_AVAILABLE:
         def _set_preview_source_by_path(self, path: Path) -> None:
             for index, selected in enumerate(self.selected_inputs):
                 if selected == path:
-                    self._set_preview_source(index, apply_recommendations=False)
+                    self._set_preview_source(index, apply_recommendations=self.auto_suggestions_var.get())
                     self._request_preview_refresh()
                     return
 
         def _show_previous_preview_source(self) -> None:
             if not self.selected_inputs:
                 return
-            self._set_preview_source(self.current_preview_index - 1, apply_recommendations=False)
+            self._set_preview_source(
+                self.current_preview_index - 1, apply_recommendations=self.auto_suggestions_var.get()
+            )
             self._refresh_preview()
 
         def _show_next_preview_source(self) -> None:
             if not self.selected_inputs:
                 return
-            self._set_preview_source(self.current_preview_index + 1, apply_recommendations=False)
+            self._set_preview_source(
+                self.current_preview_index + 1, apply_recommendations=self.auto_suggestions_var.get()
+            )
             self._refresh_preview()
 
         def _update_preview_navigation_state(self) -> None:
