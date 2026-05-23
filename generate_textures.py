@@ -1440,6 +1440,7 @@ if GUI_AVAILABLE:
             self.last_input_browse_dir: Path | None = None
             self.preview_size_var = tk.StringVar(value="Medium")
             self.preview_refresh_after_id: str | None = None
+            self.show_batch_preview_var = tk.BooleanVar(value=True)
 
             self.input_var = tk.StringVar()
             self.output_var = tk.StringVar()
@@ -1498,26 +1499,39 @@ if GUI_AVAILABLE:
             file_frame = ttk.LabelFrame(wrapper, text="Files", padding=10)
             file_frame.pack(fill=tk.X, padx=4, pady=4)
 
-            ttk.Label(file_frame, text="Input DDS or folder").grid(row=0, column=0, sticky=tk.W, pady=4)
-            ttk.Entry(file_frame, textvariable=self.input_var, width=80).grid(row=0, column=1, padx=6, pady=4, sticky=tk.EW)
+            _input_label = ttk.Label(file_frame, text="Input DDS or folder")
+            _input_label.grid(row=0, column=0, sticky=tk.W, pady=4)
+            self._add_tooltip(_input_label, "📂 Paste a .dds file path here, or use the buttons below.\nAKA: 'Where did I put that rock texture again?'")
+            _input_entry = ttk.Entry(file_frame, textvariable=self.input_var, width=80)
+            _input_entry.grid(row=0, column=1, padx=6, pady=4, sticky=tk.EW)
+            self._add_tooltip(_input_entry, "📂 The sacred path to your source texture.\nTip: Drag & drop doesn't work here, use the buttons. Yes, I know. Sorry.")
             self.input_file_button = ttk.Button(file_frame, text="File", command=self._pick_input)
             self.input_file_button.grid(row=0, column=2, padx=4, pady=4)
+            self._add_tooltip(self.input_file_button, "🗂 Open a single DDS/PNG/JPG texture.\nFor when you only have ONE texture and you're very proud of it.")
             self.input_folder_button = ttk.Button(file_frame, text="Folder", command=self._pick_input_folder)
             self.input_folder_button.grid(row=0, column=3, padx=4, pady=4)
+            self._add_tooltip(self.input_folder_button, "📁 Select a whole folder of textures for MAXIMUM CHAOS.\nBatch mode: because doing things one at a time is for cowards.")
             self.detected_mod_button = ttk.Button(file_frame, text="Loaded Mod", command=self._pick_detected_mod_folder)
             self.detected_mod_button.grid(row=0, column=4, padx=4, pady=4)
+            self._add_tooltip(self.detected_mod_button, "🧙 Auto-detected MO2/Vortex mod folder.\nIf this button is greyed out, your mod manager is playing hide and seek.")
 
-            ttk.Label(file_frame, text="Output folder").grid(row=1, column=0, sticky=tk.W, pady=4)
+            _output_label = ttk.Label(file_frame, text="Output folder")
+            _output_label.grid(row=1, column=0, sticky=tk.W, pady=4)
+            self._add_tooltip(_output_label, "📤 Where the generated textures will be deposited.\nDefault: same folder as input, so they're never far from home.")
             self.output_entry = ttk.Entry(file_frame, textvariable=self.output_var, width=80)
             self.output_entry.grid(row=1, column=1, padx=6, pady=4, sticky=tk.EW)
+            self._add_tooltip(self.output_entry, "📤 Destination for generated files.\nLeave blank and outputs land right next to the source. Very tidy.")
             self.output_button = ttk.Button(file_frame, text="Browse", command=self._pick_output)
             self.output_button.grid(row=1, column=2, padx=4, pady=4)
-            ttk.Checkbutton(
+            self._add_tooltip(self.output_button, "🗺 Browse for an output folder.\nOnly available when 'Use different output folder' is checked.")
+            _custom_out_check = ttk.Checkbutton(
                 file_frame,
                 text="Use different output folder",
                 variable=self.use_custom_output_var,
                 command=self._toggle_custom_output_location,
-            ).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(2, 0))
+            )
+            _custom_out_check.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(2, 0))
+            self._add_tooltip(_custom_out_check, "📦 Check this if you want your outputs somewhere other than the input folder.\nUseful when you have strong opinions about folder organisation.")
             ttk.Label(
                 file_frame,
                 textvariable=self.detected_context_var,
@@ -1533,20 +1547,36 @@ if GUI_AVAILABLE:
             options_frame = ttk.LabelFrame(wrapper, text="Generation Options", padding=10)
             options_frame.pack(fill=tk.X, padx=4, pady=4)
 
-            ttk.Checkbutton(options_frame, text="Diffuse", variable=self.include_diffuse_var, command=self._refresh_preview).grid(row=0, column=0, sticky=tk.W)
-            ttk.Checkbutton(options_frame, text="Normal / _n", variable=self.include_normal_var, command=self._refresh_preview).grid(row=0, column=1, sticky=tk.W)
-            ttk.Checkbutton(options_frame, text="Parallax / _p", variable=self.include_parallax_var, command=self._refresh_preview).grid(row=0, column=2, sticky=tk.W)
-            ttk.Checkbutton(options_frame, text="Glow / _g", variable=self.include_glow_var, command=self._refresh_preview).grid(row=1, column=0, sticky=tk.W)
-            ttk.Checkbutton(options_frame, text="Environment mask / _m", variable=self.include_environment_mask_var, command=self._refresh_preview).grid(row=1, column=1, sticky=tk.W)
-            ttk.Checkbutton(options_frame, text="Complex material", variable=self.include_complex_var, command=self._refresh_preview).grid(row=1, column=2, sticky=tk.W)
-            ttk.Checkbutton(
+            _diffuse_check = ttk.Checkbutton(options_frame, text="Diffuse", variable=self.include_diffuse_var, command=self._refresh_preview)
+            _diffuse_check.grid(row=0, column=0, sticky=tk.W)
+            self._add_tooltip(_diffuse_check, "🎨 Generate the diffuse (colour) texture.\nThis is the one that makes your rock look like a rock and not a void of existential dread.")
+            _normal_check = ttk.Checkbutton(options_frame, text="Normal / _n", variable=self.include_normal_var, command=self._refresh_preview)
+            _normal_check.grid(row=0, column=1, sticky=tk.W)
+            self._add_tooltip(_normal_check, "🗻 Generate a normal map for fake 3D depth.\nSkyrim's favourite optical illusion since 2011.")
+            _parallax_check = ttk.Checkbutton(options_frame, text="Parallax / _p", variable=self.include_parallax_var, command=self._refresh_preview)
+            _parallax_check.grid(row=0, column=2, sticky=tk.W)
+            self._add_tooltip(_parallax_check, "🌊 Generate a parallax (height) map.\nMakes surfaces look EXTRA bumpy. Your GPU will feel it, but it's worth it.")
+            _glow_check = ttk.Checkbutton(options_frame, text="Glow / _g", variable=self.include_glow_var, command=self._refresh_preview)
+            _glow_check.grid(row=1, column=0, sticky=tk.W)
+            self._add_tooltip(_glow_check, "✨ Generate a glow map. Bright pixels glow in the dark.\nPerfect for making your cave look like a disco.")
+            _env_mask_check = ttk.Checkbutton(options_frame, text="Environment mask / _m", variable=self.include_environment_mask_var, command=self._refresh_preview)
+            _env_mask_check.grid(row=1, column=1, sticky=tk.W)
+            self._add_tooltip(_env_mask_check, "🪞 Generate an environment mask for reflections.\nTells Skyrim which parts of a surface are shiny. Science!")
+            _complex_check = ttk.Checkbutton(options_frame, text="Complex material", variable=self.include_complex_var, command=self._refresh_preview)
+            _complex_check.grid(row=1, column=2, sticky=tk.W)
+            self._add_tooltip(_complex_check, "🔮 Generate complex material for ENBSeries parallax.\nRequires ENB. If you don't know what ENB is, you will soon, and there's no going back.")
+            _auto_sugg_check = ttk.Checkbutton(
                 options_frame,
                 text="Automatic suggestions (analyze image and set sliders)",
                 variable=self.auto_suggestions_var,
                 command=self._toggle_auto_suggestions,
-            ).grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=(6, 2))
+            )
+            _auto_sugg_check.grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=(6, 2))
+            self._add_tooltip(_auto_sugg_check, "🤖 Let the AI™ (actually just math) pick slider values.\nUncheck if you think YOU know better than the algorithm. Spoiler: maybe you do.")
 
-            ttk.Label(options_frame, text="Complex naming").grid(row=3, column=0, sticky=tk.W, pady=8)
+            _complex_fmt_label = ttk.Label(options_frame, text="Complex naming")
+            _complex_fmt_label.grid(row=3, column=0, sticky=tk.W, pady=8)
+            self._add_tooltip(_complex_fmt_label, "🏷 Output filename suffix for complex material.\n'msn' = _msn.dds (ENB normal+specular), 'cm' = _cm.dds (grey channel material).")
             complex_format = ttk.Combobox(
                 options_frame,
                 textvariable=self.complex_format_var,
@@ -1555,8 +1585,11 @@ if GUI_AVAILABLE:
                 width=20,
             )
             complex_format.grid(row=3, column=1, sticky=tk.W)
+            self._add_tooltip(complex_format, "🏷 Choose 'msn' for RGBA normal+specular, 'cm' for greyscale.\nWhen in doubt, pick 'msn'. It sounds cooler anyway.")
 
-            ttk.Label(options_frame, text="Env mask mode").grid(row=3, column=2, sticky=tk.W, padx=(20, 4), pady=8)
+            _env_mode_label = ttk.Label(options_frame, text="Env mask mode")
+            _env_mode_label.grid(row=3, column=2, sticky=tk.W, padx=(20, 4), pady=8)
+            self._add_tooltip(_env_mode_label, "🌍 How to encode the environment mask.\n'standard' = vanilla Skyrim. 'complex' = ENBSeries channel-packed RGBA. Choose wisely.")
             env_mask_mode_combo = ttk.Combobox(
                 options_frame,
                 textvariable=self.env_mask_mode_var,
@@ -1565,47 +1598,78 @@ if GUI_AVAILABLE:
                 width=20,
             )
             env_mask_mode_combo.grid(row=3, column=3, sticky=tk.W)
+            self._add_tooltip(env_mask_mode_combo, "🌍 'standard' = single grey channel for vanilla Skyrim SE.\n'complex' = RGBA for ENBSeries. Using complex without ENB produces… nothing useful.")
             ttk.Label(
                 options_frame,
                 text="standard = vanilla Skyrim SE  |  complex = ENBSeries RGBA",
                 foreground="gray",
             ).grid(row=3, column=4, sticky=tk.W, padx=(4, 0))
 
-            ttk.Label(options_frame, text="Normal strength").grid(row=4, column=0, sticky=tk.W, pady=8)
+            _normal_label = ttk.Label(options_frame, text="Normal strength")
+            _normal_label.grid(row=4, column=0, sticky=tk.W, pady=8)
+            self._add_tooltip(_normal_label, "💪 How beefy your normal map details are.\nHigher = more dramatic bumps. Lower = your texture looks like it's been ironed.")
             self.normal_scale = ttk.Scale(options_frame, from_=0.5, to=4.0, variable=self.normal_strength_var, command=lambda _: self._request_preview_refresh())
             self.normal_scale.grid(row=4, column=1, columnspan=2, sticky=tk.EW)
+            self._add_tooltip(self.normal_scale, "💪 Drag right for MORE NORMAL. Drag left for less.\nRange: 0.5 (smooth brain) to 4.0 (mountainous).")
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 4.0")).grid(row=4, column=3, sticky=tk.W, padx=8)
-            ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_normal_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=4, column=4, sticky=tk.W)
+            _auto_normal = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_normal_suggestion_var, command=self._on_auto_slider_preference_changed)
+            _auto_normal.grid(row=4, column=4, sticky=tk.W)
+            self._add_tooltip(_auto_normal, "🤖 Let the app analyse the image and choose this value.\nUncheck to manually control, as the control freak you truly are.")
 
-            ttk.Label(options_frame, text="Parallax strength").grid(row=5, column=0, sticky=tk.W, pady=8)
+            _parallax_label = ttk.Label(options_frame, text="Parallax strength")
+            _parallax_label.grid(row=5, column=0, sticky=tk.W, pady=8)
+            self._add_tooltip(_parallax_label, "🏔 Controls depth contrast in the parallax/height map.\nToo high and your flat floor looks like the Grand Canyon.")
             self.parallax_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.parallax_strength_var, command=lambda _: self._request_preview_refresh())
             self.parallax_scale.grid(row=5, column=1, columnspan=2, sticky=tk.EW)
+            self._add_tooltip(self.parallax_scale, "🏔 Parallax depth. Slide right to enter the matrix.\nRange: 0.5 (barely there) to 3.0 (Marianas Trench).")
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=5, column=3, sticky=tk.W, padx=8)
-            ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_parallax_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=5, column=4, sticky=tk.W)
+            _auto_parallax = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_parallax_suggestion_var, command=self._on_auto_slider_preference_changed)
+            _auto_parallax.grid(row=5, column=4, sticky=tk.W)
+            self._add_tooltip(_auto_parallax, "🤖 Automatic parallax strength suggestion.\nBased on actual image analysis, not a horoscope.")
 
-            ttk.Label(options_frame, text="Glow threshold").grid(row=6, column=0, sticky=tk.W, pady=8)
+            _glow_label = ttk.Label(options_frame, text="Glow threshold")
+            _glow_label.grid(row=6, column=0, sticky=tk.W, pady=8)
+            self._add_tooltip(_glow_label, "💡 Brightness cutoff for the glow map.\nPixels brighter than this value will glow. Set low = everything glows. Groovy.")
             self.glow_scale = ttk.Scale(options_frame, from_=0, to=255, variable=self.glow_threshold_var, command=lambda _: self._request_preview_refresh())
             self.glow_scale.grid(row=6, column=1, columnspan=2, sticky=tk.EW)
+            self._add_tooltip(self.glow_scale, "💡 Glow brightness threshold (0–255).\n0 = ENTIRE texture glows like the sun. 255 = nothing glows except your despair.")
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0 - 255")).grid(row=6, column=3, sticky=tk.W, padx=8)
-            ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_glow_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=6, column=4, sticky=tk.W)
+            _auto_glow = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_glow_suggestion_var, command=self._on_auto_slider_preference_changed)
+            _auto_glow.grid(row=6, column=4, sticky=tk.W)
+            self._add_tooltip(_auto_glow, "🤖 Auto-detect the ideal glow threshold.\nBased on luminance analysis. The computer is trying its best.")
 
-            ttk.Label(options_frame, text="Environment mask strength").grid(row=7, column=0, sticky=tk.W, pady=8)
+            _env_mask_label = ttk.Label(options_frame, text="Environment mask strength")
+            _env_mask_label.grid(row=7, column=0, sticky=tk.W, pady=8)
+            self._add_tooltip(_env_mask_label, "🪞 How strongly the environment mask contrasts.\nHigher = shinier peaks, darker valleys. Like a texture with opinions.")
             self.environment_mask_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.environment_mask_strength_var, command=lambda _: self._request_preview_refresh())
             self.environment_mask_scale.grid(row=7, column=1, columnspan=2, sticky=tk.EW)
+            self._add_tooltip(self.environment_mask_scale, "🪞 Environment mask contrast. More = more intense reflections.\nRange: 0.5 (matte cardboard) to 3.0 (Skyrim's shiniest rock).")
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=7, column=3, sticky=tk.W, padx=8)
-            ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_environment_mask_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=7, column=4, sticky=tk.W)
+            _auto_env_mask = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_environment_mask_suggestion_var, command=self._on_auto_slider_preference_changed)
+            _auto_env_mask.grid(row=7, column=4, sticky=tk.W)
+            self._add_tooltip(_auto_env_mask, "🤖 Auto-select environment mask strength.\nThe machine will judge your texture's reflective potential.")
 
-            ttk.Label(options_frame, text="Complex strength").grid(row=8, column=0, sticky=tk.W, pady=8)
+            _complex_label = ttk.Label(options_frame, text="Complex strength")
+            _complex_label.grid(row=8, column=0, sticky=tk.W, pady=8)
+            self._add_tooltip(_complex_label, "🔮 Contrast strength for the complex material output.\nHigher = more dramatic material definition. ENB fans, rejoice.")
             self.complex_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.complex_strength_var, command=lambda _: self._request_preview_refresh())
             self.complex_scale.grid(row=8, column=1, columnspan=2, sticky=tk.EW)
+            self._add_tooltip(self.complex_scale, "🔮 Complex material strength.\nRange: 0.5 (subtly fancy) to 3.0 (screaming ENBSeries energy).")
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=8, column=3, sticky=tk.W, padx=8)
-            ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_complex_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=8, column=4, sticky=tk.W)
+            _auto_complex = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_complex_suggestion_var, command=self._on_auto_slider_preference_changed)
+            _auto_complex.grid(row=8, column=4, sticky=tk.W)
+            self._add_tooltip(_auto_complex, "🤖 Auto-set complex strength. Let the algorithm\nscrutinise your texture's material complexity.")
 
-            ttk.Label(options_frame, text="Specular strength (_msn alpha)").grid(row=9, column=0, sticky=tk.W, pady=8)
+            _specular_label = ttk.Label(options_frame, text="Specular strength (_msn alpha)")
+            _specular_label.grid(row=9, column=0, sticky=tk.W, pady=8)
+            self._add_tooltip(_specular_label, "✨ Specular highlight intensity stored in the _msn alpha channel.\nMake your rocks glisten or go full matte — it's your power fantasy.")
             self.specular_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.specular_strength_var, command=lambda _: self._request_preview_refresh())
             self.specular_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
+            self._add_tooltip(self.specular_scale, "✨ Specular alpha strength (msn format only).\nRange: 0.5 (humble sheen) to 3.0 (blinding RPG shine).")
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=9, column=3, sticky=tk.W, padx=8)
-            ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_specular_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=9, column=4, sticky=tk.W)
+            _auto_specular = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_specular_suggestion_var, command=self._on_auto_slider_preference_changed)
+            _auto_specular.grid(row=9, column=4, sticky=tk.W)
+            self._add_tooltip(_auto_specular, "🤖 Auto-set specular strength. The AI ponders how shiny\nyour texture DESERVES to be.")
 
             options_frame.columnconfigure(2, weight=1)
             self._update_slider_auto_states()
@@ -1616,15 +1680,20 @@ if GUI_AVAILABLE:
             ttk.Label(preview_frame, text="Before").grid(row=0, column=0, columnspan=2, padx=10, pady=(2, 4))
             self.before_image_label = ttk.Label(preview_frame, text="No source loaded")
             self.before_image_label.grid(row=1, column=0, columnspan=2, padx=10, pady=8)
+            self._add_tooltip(self.before_image_label, "👀 Your raw source texture before the magic happens.\nLook upon it. Appreciate its unprocessed beauty.")
 
             source_controls = ttk.Frame(preview_frame)
             source_controls.grid(row=2, column=0, columnspan=2, pady=(0, 8))
             self.prev_source_button = ttk.Button(source_controls, text="◀ Prev", command=self._show_previous_preview_source)
             self.prev_source_button.pack(side=tk.LEFT, padx=4)
+            self._add_tooltip(self.prev_source_button, "⏮ Preview the previous texture in your batch.\nBecause forward isn't always the right direction.")
             ttk.Label(source_controls, textvariable=self.preview_source_name_var).pack(side=tk.LEFT, padx=8)
             self.next_source_button = ttk.Button(source_controls, text="Next ▶", command=self._show_next_preview_source)
             self.next_source_button.pack(side=tk.LEFT, padx=4)
-            ttk.Label(source_controls, text="Preview size").pack(side=tk.LEFT, padx=(14, 4))
+            self._add_tooltip(self.next_source_button, "⏭ Preview the next texture in your batch.\nOnward! To the next texture frontier!")
+            _preview_size_label = ttk.Label(source_controls, text="Preview size")
+            _preview_size_label.pack(side=tk.LEFT, padx=(14, 4))
+            self._add_tooltip(_preview_size_label, "📐 How large the preview thumbnails appear.\nBigger = easier to see details. Smaller = fits more on screen. Life is full of trade-offs.")
             preview_size_combo = ttk.Combobox(
                 source_controls,
                 textvariable=self.preview_size_var,
@@ -1634,6 +1703,19 @@ if GUI_AVAILABLE:
             )
             preview_size_combo.pack(side=tk.LEFT)
             preview_size_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_preview_size_changed())
+            self._add_tooltip(preview_size_combo, "📐 Choose thumbnail size: Small (fast), Medium (default), Large, XL (impressive).\nNote: XL does not make your textures better, just easier to admire.")
+            _batch_prev_check = ttk.Checkbutton(
+                source_controls,
+                text="Show preview during batch",
+                variable=self.show_batch_preview_var,
+            )
+            _batch_prev_check.pack(side=tk.LEFT, padx=(14, 4))
+            self._add_tooltip(
+                _batch_prev_check,
+                "🎬 Update the preview live while batch-processing textures.\n"
+                "ON = watch your textures transform in real-time like a very slow movie.\n"
+                "OFF = faster batch processing but no live previews. Your choice, no judgment.",
+            )
 
             self.preview_output_labels: dict[str, ttk.Label] = {}
             output_grid = ttk.Frame(preview_frame)
@@ -1646,12 +1728,23 @@ if GUI_AVAILABLE:
                 ("environment_mask", "Environment Mask"),
                 ("complex_material", "Complex Material"),
             )
+            _output_tooltips = {
+                "diffuse": "🎨 Preview of the diffuse (colour) output.\nIf this looks wrong you should probably re-examine your life choices.",
+                "normal": "🗻 Preview of the normal map output.\nThat psychedelic blue-purple soup is actually geometric data. Science!",
+                "parallax": "🏔 Preview of the parallax/height map.\nDarker = deeper, lighter = higher. A greyscale height map of greatness.",
+                "glow": "✨ Preview of the glow map.\nWhite = glows in darkness. Black = does not glow. Simple, powerful, disco.",
+                "environment_mask": "🪞 Preview of the environment mask.\nTells the engine where to apply reflections. Grey = shiny, black = matte.",
+                "complex_material": "🔮 Preview of the complex material output.\nRequires ENB to see in-game. Without ENB it just… sits there, looking important.",
+            }
             for index, (output_key, output_label) in enumerate(output_specs):
                 row = (index // 2) * 2
                 column = index % 2
-                ttk.Label(output_grid, text=output_label).grid(row=row, column=column, padx=10, pady=(4, 2))
+                _out_title = ttk.Label(output_grid, text=output_label)
+                _out_title.grid(row=row, column=column, padx=10, pady=(4, 2))
+                self._add_tooltip(_out_title, _output_tooltips.get(output_key, f"Preview of {output_label} output."))
                 label = ttk.Label(output_grid, text="No preview")
                 label.grid(row=row + 1, column=column, padx=10, pady=(0, 8))
+                self._add_tooltip(label, _output_tooltips.get(output_key, f"Preview of {output_label} output."))
                 self.preview_output_labels[output_key] = label
 
             preview_frame.columnconfigure(0, weight=1)
@@ -1664,12 +1757,15 @@ if GUI_AVAILABLE:
             actions.pack(fill=tk.X)
             self.generate_button = ttk.Button(actions, text="Generate", command=self._generate)
             self.generate_button.pack(side=tk.LEFT)
+            self._add_tooltip(self.generate_button, "🚀 ENGAGE! Click to process your textures.\nWARNING: May cause excitement, temporary CPU warming, and beautiful Skyrim textures.")
             ttk.Label(actions, textvariable=self.status_var).pack(side=tk.LEFT, padx=14)
-            ttk.Button(
+            _patreon_button = ttk.Button(
                 actions,
                 text="❤ Support on Patreon",
                 command=lambda: webbrowser.open(PATREON_URL),
-            ).pack(side=tk.RIGHT, padx=4)
+            )
+            _patreon_button.pack(side=tk.RIGHT, padx=4)
+            self._add_tooltip(_patreon_button, "❤ Support the developer on Patreon.\nBecause caffeine and texture generation both cost money.")
 
         def _set_app_icon(self) -> None:
             try:
@@ -1694,6 +1790,48 @@ if GUI_AVAILABLE:
             canvas.bind_all("<MouseWheel>", _on_mousewheel)
             canvas.bind_all("<Button-4>", _on_mousewheel)
             canvas.bind_all("<Button-5>", _on_mousewheel)
+
+        def _add_tooltip(self, widget: tk.Widget, text: str) -> None:
+            tip_window: list[tk.Toplevel | None] = [None]
+
+            def _show(_event: object) -> None:
+                if tip_window[0] is not None:
+                    return
+                try:
+                    x = widget.winfo_rootx() + 20
+                    y = widget.winfo_rooty() + widget.winfo_height() + 4
+                    tip = tk.Toplevel(widget)
+                    tip.wm_overrideredirect(True)
+                    tip.wm_geometry(f"+{x}+{y}")
+                    label = tk.Label(
+                        tip,
+                        text=text,
+                        justify=tk.LEFT,
+                        background="#ffffcc",
+                        relief=tk.SOLID,
+                        borderwidth=1,
+                        font=("TkDefaultFont", 9),
+                        wraplength=340,
+                        padx=6,
+                        pady=4,
+                    )
+                    label.pack()
+                    tip_window[0] = tip
+                except Exception:
+                    tip_window[0] = None
+
+            def _hide(_event: object) -> None:
+                tip = tip_window[0]
+                tip_window[0] = None
+                if tip is not None:
+                    try:
+                        tip.destroy()
+                    except Exception:
+                        pass
+
+            widget.bind("<Enter>", _show, add="+")
+            widget.bind("<Leave>", _hide, add="+")
+            widget.bind("<ButtonPress>", _hide, add="+")
 
         def _pick_input(self) -> None:
             selected = filedialog.askopenfilename(
@@ -1883,7 +2021,7 @@ if GUI_AVAILABLE:
                 if event_type == "progress":
                     index, total, current_path = payload
                     self.status_var.set(f"Processing {index}/{total}: {current_path.name}")
-                    if len(self.selected_inputs) <= 8:
+                    if self.show_batch_preview_var.get():
                         self._set_preview_source_by_path(current_path)
                 elif event_type == "file_error":
                     index, total, filename, error_message = payload
@@ -2037,7 +2175,7 @@ if GUI_AVAILABLE:
             for index, selected in enumerate(self.selected_inputs):
                 if selected == path:
                     self._set_preview_source(index, apply_recommendations=False)
-                    self._refresh_preview()
+                    self._request_preview_refresh()
                     return
 
         def _show_previous_preview_source(self) -> None:
