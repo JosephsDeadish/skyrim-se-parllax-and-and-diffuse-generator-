@@ -154,22 +154,14 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_generate_environment_mask_returns_l_same_size(self) -> None:
         environment_mask = generate_environment_mask(_sample_image())
-        self.assertEqual(environment_mask.mode, "RGBA")
+        self.assertEqual(environment_mask.mode, "L")
         self.assertEqual(environment_mask.size, (8, 8))
 
     def test_generate_environment_mask_flat_surface_avoids_black_holes(self) -> None:
         environment_mask = generate_environment_mask(_flat_dark_image(), strength=2.2)
-        env_amount, glossiness, metallic, height_alpha = environment_mask.split()
-        env_min, env_max = env_amount.getextrema()
-        gloss_min, _ = glossiness.getextrema()
-        metallic_min, _ = metallic.getextrema()
-        height_min, height_max = height_alpha.getextrema()
+        env_min, env_max = environment_mask.getextrema()
         self.assertGreaterEqual(env_min, 10)
         self.assertLessEqual(env_max - env_min, 80)
-        self.assertGreaterEqual(gloss_min, 5)
-        self.assertGreaterEqual(metallic_min, 6)
-        self.assertGreaterEqual(height_min, 95)
-        self.assertLessEqual(height_max, 160)
 
     def test_generate_complex_material_returns_l_same_size(self) -> None:
         complex_material = generate_complex_material(_sample_image())
@@ -257,10 +249,29 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertLess(float(settings["specular_strength"]), 2.1)
 
     def test_generate_environment_mask_glossiness_stays_above_complex_parallax_floor(self) -> None:
-        environment_mask = generate_environment_mask(_large_high_detail_image(), strength=2.2)
+        environment_mask = generate_environment_mask(_large_high_detail_image(), strength=2.2, mode="complex")
         _, glossiness, _, _ = environment_mask.split()
         minimum, _ = glossiness.getextrema()
         self.assertGreater(minimum, 4)
+
+    def test_generate_environment_mask_complex_mode_returns_rgba_same_size(self) -> None:
+        environment_mask = generate_environment_mask(_sample_image(), mode="complex")
+        self.assertEqual(environment_mask.mode, "RGBA")
+        self.assertEqual(environment_mask.size, (8, 8))
+
+    def test_generate_environment_mask_complex_mode_flat_surface_avoids_black_holes(self) -> None:
+        environment_mask = generate_environment_mask(_flat_dark_image(), strength=2.2, mode="complex")
+        env_amount, glossiness, metallic, height_alpha = environment_mask.split()
+        env_min, env_max = env_amount.getextrema()
+        gloss_min, _ = glossiness.getextrema()
+        metallic_min, _ = metallic.getextrema()
+        height_min, height_max = height_alpha.getextrema()
+        self.assertGreaterEqual(env_min, 10)
+        self.assertLessEqual(env_max - env_min, 80)
+        self.assertGreaterEqual(gloss_min, 5)
+        self.assertGreaterEqual(metallic_min, 6)
+        self.assertGreaterEqual(height_min, 95)
+        self.assertLessEqual(height_max, 160)
 
     def test_prepare_preview_source_downscales_large_images(self) -> None:
         source = Image.new("RGB", (4096, 2048), color=(64, 96, 128))
@@ -322,6 +333,25 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         self.assertEqual(msn_outputs["complex_material"].mode, "RGBA")
         self.assertEqual(cm_outputs["complex_material"].mode, "L")
+
+    def test_generate_preview_outputs_defaults_environment_mask_to_standard_skyrim_se(self) -> None:
+        outputs = generate_preview_outputs(
+            _sample_image(),
+            normal_strength=2.0,
+            parallax_strength=1.35,
+            glow_threshold=190,
+            environment_mask_strength=1.2,
+            complex_strength=1.15,
+            specular_strength=1.15,
+            complex_format="msn",
+            include_diffuse=False,
+            include_normal=False,
+            include_parallax=False,
+            include_glow=False,
+            include_environment_mask=True,
+            include_complex=False,
+        )
+        self.assertEqual(outputs["environment_mask"].mode, "L")
 
     def test_generate_glow_produces_graded_values_above_threshold(self) -> None:
         glow = generate_glow(_vertical_gradient_image(), threshold=180)

@@ -338,7 +338,7 @@ def generate_glow(source: Image.Image, threshold: int = 190) -> Image.Image:
     return ImageEnhance.Brightness(softened).enhance(1.05).point(lambda value: int(_clamp(value, 0.0, 255.0)))
 
 
-def generate_environment_mask(source: Image.Image, strength: float = 1.2, mode: str = "complex") -> Image.Image:
+def generate_environment_mask(source: Image.Image, strength: float = 1.2, mode: str = "standard") -> Image.Image:
     """Generate an environment mask for Skyrim SE.
 
     Parameters
@@ -348,11 +348,11 @@ def generate_environment_mask(source: Image.Image, strength: float = 1.2, mode: 
     strength:
         Contrast/intensity strength factor (higher = stronger reflection/glossiness).
     mode:
-        ``"complex"`` (default) — RGBA texture for ENBSeries Complex Parallax Material.
+        ``"complex"`` — RGBA texture for ENBSeries Complex Parallax Material.
         Channel layout: R=env reflection amount, G=glossiness, B=metallic proxy,
         A=parallax height.  Requires ENBSeries with complex material support.
 
-        ``"standard"`` — Greyscale (L mode) texture for the vanilla Skyrim SE
+        ``"standard"`` (default) — Greyscale (L mode) texture for the vanilla Skyrim SE
         ``_m.dds`` texture slot (Slot 5 in the NIF).  Controls environment/specular
         reflection intensity only.  Works without any mods or ENBSeries.
         Brighter = more environment reflection.
@@ -507,7 +507,7 @@ def generate_preview_outputs(
     complex_strength: float,
     specular_strength: float,
     complex_format: str,
-    env_mask_mode: str = "complex",
+    env_mask_mode: str = "standard",
     include_diffuse: bool,
     include_normal: bool,
     include_parallax: bool,
