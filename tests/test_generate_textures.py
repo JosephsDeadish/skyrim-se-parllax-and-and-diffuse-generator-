@@ -700,6 +700,58 @@ class GenerateTexturesTests(unittest.TestCase):
                 # that decodes to a single channel — pillow DDS may store as RGBA).
                 self.assertIn(generated.mode, ("L", "RGBA", "RGB"))
 
+    def test_run_with_options_standard_env_mask_prefers_dxt1_then_dxt5(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ) as save_mock:
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=True,
+                    include_complex=False,
+                    env_mask_mode="standard",
+                )
+
+            self.assertEqual(save_mock.call_count, 1)
+            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT1", "DXT5"))
+
+    def test_run_with_options_complex_env_mask_uses_dxt5(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ) as save_mock:
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=True,
+                    include_complex=False,
+                    env_mask_mode="complex",
+                )
+
+            self.assertEqual(save_mock.call_count, 1)
+            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT5",))
+
 
 if __name__ == "__main__":
     unittest.main()

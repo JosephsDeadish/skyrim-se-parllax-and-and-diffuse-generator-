@@ -85,7 +85,7 @@ Optional arguments:
 - `--complex-material` (include complex material output)
 - `--gui` (force GUI mode)
 
-Generated outputs default to `.dds` filenames regardless of the input format. The tool writes DDS files using DXT5 compression for broader compatibility with external viewers/converters; if DDS export is unavailable on the current Pillow build, it falls back to PNG output.
+Generated outputs default to `.dds` filenames regardless of the input format. Most outputs are written as DXT5 DDS for broad compatibility; standard (`--environment-mask-mode standard`) `_m` masks prefer DXT1 (with automatic DXT5 fallback if needed). If DDS export is unavailable on the current Pillow build, the tool falls back to PNG output.
 
 - click **❤ Support on Patreon** in the toolbar to open the creator's Patreon page
 
