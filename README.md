@@ -65,7 +65,7 @@ python generate_textures.py /path/to/input.dds --output-dir ./output --complex-m
 
 Optional arguments:
 
-- positional input may also be a folder; folder mode processes only original `.dds` source textures and skips generated `_n`, `_p`, `_g`, `_m`, `_msn`, and `_cm` variants
+- positional input may also be a folder; folder mode scans subfolders, processes only original `.dds` source textures, and skips generated `_n`, `_p`, `_g`, `_m`, `_msn`, and `_cm` variants
 
 - `--diffuse-name` (default: `<input_stem>`, e.g. `stonewall.dds`)
 - `--normal-name` (default: `<input_stem>_n`, e.g. `stonewall_n.dds`)
@@ -124,4 +124,4 @@ The tool recognises standard Skyrim SE texture naming conventions from the file 
 | `_msn` | Complex Parallax Material | ENBSeries only — **not vanilla Skyrim SE** |
 | `_cm` | Complex Material (greyscale) | ENBSeries only — **not vanilla Skyrim SE** |
 
-Batch folder mode automatically skips generated variants (`_n`, `_p`, `_g`, `_m`, `_msn`, `_cm`) so it only processes original source textures.
+Batch folder mode scans subfolders and automatically skips generated variants (`_n`, `_p`, `_g`, `_m`, `_msn`, `_cm`) so it only processes original source textures.

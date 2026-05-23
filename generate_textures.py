@@ -969,13 +969,13 @@ def collect_source_textures(input_path: Path) -> list[Path]:
 
     source_files = sorted(
         path
-        for path in input_path.iterdir()
+        for path in input_path.rglob(f"*{DDS_EXTENSION}")
         if path.is_file() and path.suffix.lower() == DDS_EXTENSION and not _is_generated_texture(path)
     )
     if not source_files:
         raise ValueError(
             f"No source DDS textures found in {input_path}. "
-            "Folder mode only processes original DDS files and skips generated *_n, *_p, *_g, *_m, *_msn, and *_cm variants."
+            "Folder mode scans subfolders, processes original DDS files, and skips generated *_n, *_p, *_g, *_m, *_msn, and *_cm variants."
         )
     return source_files
 
@@ -1427,6 +1427,7 @@ if GUI_AVAILABLE:
             self.processing_queue: queue.Queue[tuple[str, object]] = queue.Queue()
             self.is_processing = False
             self.manager_context = detect_mod_manager_context()
+            self.last_input_browse_dir: Path | None = None
 
             self.input_var = tk.StringVar()
             self.output_var = tk.StringVar()
@@ -1727,6 +1728,14 @@ if GUI_AVAILABLE:
             return path if path.is_dir() else path.parent
 
         def _default_input_browse_dir(self) -> Path:
+            if self.last_input_browse_dir is not None and self.last_input_browse_dir.exists():
+                return self.last_input_browse_dir
+            input_value = self.input_var.get().strip()
+            if input_value:
+                candidate = Path(input_value)
+                resolved = candidate if candidate.is_dir() else candidate.parent
+                if resolved.exists():
+                    return resolved
             if self.manager_context.loaded_texture_dirs:
                 candidate = self.manager_context.loaded_texture_dirs[0]
                 if candidate.exists():
@@ -1784,6 +1793,7 @@ if GUI_AVAILABLE:
             try:
                 input_files = collect_source_textures(path)
                 self.selected_inputs = input_files
+                self.last_input_browse_dir = path if path.is_dir() else path.parent
                 self.current_preview_index = 0
                 self._set_preview_source(0, apply_recommendations=True)
                 if not self.use_custom_output_var.get():
@@ -1851,7 +1861,8 @@ if GUI_AVAILABLE:
                 if event_type == "progress":
                     index, total, current_path = payload
                     self.status_var.set(f"Processing {index}/{total}: {current_path.name}")
-                    self._set_preview_source_by_path(current_path)
+                    if len(self.selected_inputs) <= 8:
+                        self._set_preview_source_by_path(current_path)
                 elif event_type == "file_error":
                     index, total, filename, error_message = payload
                     self.batch_failures.append((filename, error_message))
@@ -2112,6 +2123,7 @@ if GUI_AVAILABLE:
                 "include_glow": include_glow,
                 "include_environment_mask": include_environment_mask,
                 "include_complex": include_complex,
+                "batch_workers": 1,
             }
             self.batch_failures = []
             self._set_processing_state(True)

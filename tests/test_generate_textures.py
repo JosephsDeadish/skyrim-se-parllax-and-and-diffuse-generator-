@@ -648,6 +648,50 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(sorted(path.name for path in outputs.keys()), ["brick.dds", "stone_wall.dds"])
             self.assertEqual(sorted(path.name for path in output_dir.iterdir()), ["brick.dds", "stone_wall.dds"])
 
+    def test_collect_source_textures_scans_subfolders_and_skips_generated_suffixes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "input"
+            nested = root / "nested"
+            deeper = nested / "deeper"
+            deeper.mkdir(parents=True)
+
+            _sample_image().save(root / "top.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(nested / "brick.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_n.dds", format="DDS", pixel_format="DXT5")
+
+            discovered = collect_source_textures(root)
+            self.assertEqual(
+                sorted(path.relative_to(root).as_posix() for path in discovered),
+                ["nested/brick.dds", "nested/deeper/stone.dds", "top.dds"],
+            )
+
+    def test_run_batch_with_options_processes_subfolder_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            nested = input_dir / "nested"
+            output_dir = temp_path / "out"
+            nested.mkdir(parents=True)
+
+            _sample_image().save(input_dir / "top.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(nested / "inner.dds", format="DDS", pixel_format="DXT5")
+
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                batch_workers=1,
+            )
+
+            self.assertEqual(sorted(path.name for path in outputs.keys()), ["inner.dds", "top.dds"])
+            self.assertEqual(sorted(path.name for path in output_dir.iterdir()), ["inner.dds", "top.dds"])
+
     def test_run_batch_with_options_can_continue_on_file_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
