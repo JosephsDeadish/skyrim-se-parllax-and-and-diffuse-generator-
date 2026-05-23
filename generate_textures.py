@@ -32,6 +32,12 @@ DDS_EXTENSION = ".dds"
 SUPPORTED_INPUT_EXTENSIONS = {DDS_EXTENSION, ".png", ".jpg", ".jpeg", ".tga", ".bmp"}
 GENERATED_TEXTURE_SUFFIXES = ("_msn", "_cm", "_n", "_p", "_g", "_m")
 PREVIEW_MAX_DIMENSION = 1024
+PREVIEW_SIZE_PRESETS: dict[str, tuple[int, int]] = {
+    "Small": (220, 170),
+    "Medium": (300, 220),
+    "Large": (380, 280),
+    "XL": (460, 340),
+}
 
 
 @dataclass(frozen=True)
@@ -61,6 +67,10 @@ class ModManagerContext:
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
+
+
+def get_preview_size_limits(size_preset: str) -> tuple[int, int]:
+    return PREVIEW_SIZE_PRESETS.get(size_preset, PREVIEW_SIZE_PRESETS["Medium"])
 
 
 def _unique_existing_paths(paths: list[Path]) -> tuple[Path, ...]:
@@ -1428,6 +1438,8 @@ if GUI_AVAILABLE:
             self.is_processing = False
             self.manager_context = detect_mod_manager_context()
             self.last_input_browse_dir: Path | None = None
+            self.preview_size_var = tk.StringVar(value="Medium")
+            self.preview_refresh_after_id: str | None = None
 
             self.input_var = tk.StringVar()
             self.output_var = tk.StringVar()
@@ -1560,37 +1572,37 @@ if GUI_AVAILABLE:
             ).grid(row=3, column=4, sticky=tk.W, padx=(4, 0))
 
             ttk.Label(options_frame, text="Normal strength").grid(row=4, column=0, sticky=tk.W, pady=8)
-            self.normal_scale = ttk.Scale(options_frame, from_=0.5, to=4.0, variable=self.normal_strength_var, command=lambda _: self._refresh_preview())
+            self.normal_scale = ttk.Scale(options_frame, from_=0.5, to=4.0, variable=self.normal_strength_var, command=lambda _: self._request_preview_refresh())
             self.normal_scale.grid(row=4, column=1, columnspan=2, sticky=tk.EW)
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 4.0")).grid(row=4, column=3, sticky=tk.W, padx=8)
             ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_normal_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=4, column=4, sticky=tk.W)
 
             ttk.Label(options_frame, text="Parallax strength").grid(row=5, column=0, sticky=tk.W, pady=8)
-            self.parallax_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.parallax_strength_var, command=lambda _: self._refresh_preview())
+            self.parallax_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.parallax_strength_var, command=lambda _: self._request_preview_refresh())
             self.parallax_scale.grid(row=5, column=1, columnspan=2, sticky=tk.EW)
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=5, column=3, sticky=tk.W, padx=8)
             ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_parallax_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=5, column=4, sticky=tk.W)
 
             ttk.Label(options_frame, text="Glow threshold").grid(row=6, column=0, sticky=tk.W, pady=8)
-            self.glow_scale = ttk.Scale(options_frame, from_=0, to=255, variable=self.glow_threshold_var, command=lambda _: self._refresh_preview())
+            self.glow_scale = ttk.Scale(options_frame, from_=0, to=255, variable=self.glow_threshold_var, command=lambda _: self._request_preview_refresh())
             self.glow_scale.grid(row=6, column=1, columnspan=2, sticky=tk.EW)
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0 - 255")).grid(row=6, column=3, sticky=tk.W, padx=8)
             ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_glow_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=6, column=4, sticky=tk.W)
 
             ttk.Label(options_frame, text="Environment mask strength").grid(row=7, column=0, sticky=tk.W, pady=8)
-            self.environment_mask_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.environment_mask_strength_var, command=lambda _: self._refresh_preview())
+            self.environment_mask_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.environment_mask_strength_var, command=lambda _: self._request_preview_refresh())
             self.environment_mask_scale.grid(row=7, column=1, columnspan=2, sticky=tk.EW)
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=7, column=3, sticky=tk.W, padx=8)
             ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_environment_mask_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=7, column=4, sticky=tk.W)
 
             ttk.Label(options_frame, text="Complex strength").grid(row=8, column=0, sticky=tk.W, pady=8)
-            self.complex_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.complex_strength_var, command=lambda _: self._refresh_preview())
+            self.complex_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.complex_strength_var, command=lambda _: self._request_preview_refresh())
             self.complex_scale.grid(row=8, column=1, columnspan=2, sticky=tk.EW)
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=8, column=3, sticky=tk.W, padx=8)
             ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_complex_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=8, column=4, sticky=tk.W)
 
             ttk.Label(options_frame, text="Specular strength (_msn alpha)").grid(row=9, column=0, sticky=tk.W, pady=8)
-            self.specular_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.specular_strength_var, command=lambda _: self._refresh_preview())
+            self.specular_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.specular_strength_var, command=lambda _: self._request_preview_refresh())
             self.specular_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
             ttk.Label(options_frame, textvariable=tk.StringVar(value="0.5 - 3.0")).grid(row=9, column=3, sticky=tk.W, padx=8)
             ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_specular_suggestion_var, command=self._on_auto_slider_preference_changed).grid(row=9, column=4, sticky=tk.W)
@@ -1612,6 +1624,16 @@ if GUI_AVAILABLE:
             ttk.Label(source_controls, textvariable=self.preview_source_name_var).pack(side=tk.LEFT, padx=8)
             self.next_source_button = ttk.Button(source_controls, text="Next ▶", command=self._show_next_preview_source)
             self.next_source_button.pack(side=tk.LEFT, padx=4)
+            ttk.Label(source_controls, text="Preview size").pack(side=tk.LEFT, padx=(14, 4))
+            preview_size_combo = ttk.Combobox(
+                source_controls,
+                textvariable=self.preview_size_var,
+                values=tuple(PREVIEW_SIZE_PRESETS.keys()),
+                state="readonly",
+                width=10,
+            )
+            preview_size_combo.pack(side=tk.LEFT)
+            preview_size_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_preview_size_changed())
 
             self.preview_output_labels: dict[str, ttk.Label] = {}
             output_grid = ttk.Frame(preview_frame)
@@ -1980,6 +2002,15 @@ if GUI_AVAILABLE:
                 preview = preview.convert("RGB")
             return ImageTk.PhotoImage(preview)
 
+        def _request_preview_refresh(self) -> None:
+            if self.preview_refresh_after_id is not None:
+                self.root.after_cancel(self.preview_refresh_after_id)
+            self.preview_refresh_after_id = self.root.after(75, self._refresh_preview)
+
+        def _on_preview_size_changed(self) -> None:
+            self.status_var.set(f"Preview size set to {self.preview_size_var.get()}.")
+            self._refresh_preview()
+
         def _set_preview_source(self, index: int, apply_recommendations: bool = False) -> None:
             if not self.selected_inputs:
                 self.source_image = None
@@ -2029,38 +2060,42 @@ if GUI_AVAILABLE:
             self.next_source_button.configure(state=state)
 
         def _refresh_preview(self) -> None:
+            self.preview_refresh_after_id = None
             if self.source_image is None:
                 return
+            try:
+                outputs = generate_preview_outputs(
+                    self.source_image,
+                    normal_strength=float(self.normal_strength_var.get()),
+                    parallax_strength=float(self.parallax_strength_var.get()),
+                    glow_threshold=int(self.glow_threshold_var.get()),
+                    environment_mask_strength=float(self.environment_mask_strength_var.get()),
+                    complex_strength=float(self.complex_strength_var.get()),
+                    specular_strength=float(self.specular_strength_var.get()),
+                    complex_format=self.complex_format_var.get(),
+                    env_mask_mode=self.env_mask_mode_var.get(),
+                    include_diffuse=self.include_diffuse_var.get(),
+                    include_normal=self.include_normal_var.get(),
+                    include_parallax=self.include_parallax_var.get(),
+                    include_glow=self.include_glow_var.get(),
+                    include_environment_mask=self.include_environment_mask_var.get(),
+                    include_complex=self.include_complex_var.get(),
+                )
 
-            outputs = generate_preview_outputs(
-                self.source_image,
-                normal_strength=float(self.normal_strength_var.get()),
-                parallax_strength=float(self.parallax_strength_var.get()),
-                glow_threshold=int(self.glow_threshold_var.get()),
-                environment_mask_strength=float(self.environment_mask_strength_var.get()),
-                complex_strength=float(self.complex_strength_var.get()),
-                specular_strength=float(self.specular_strength_var.get()),
-                complex_format=self.complex_format_var.get(),
-                env_mask_mode=self.env_mask_mode_var.get(),
-                include_diffuse=self.include_diffuse_var.get(),
-                include_normal=self.include_normal_var.get(),
-                include_parallax=self.include_parallax_var.get(),
-                include_glow=self.include_glow_var.get(),
-                include_environment_mask=self.include_environment_mask_var.get(),
-                include_complex=self.include_complex_var.get(),
-            )
-
-            self.preview_before = self._photo_image(self.source_image, max_size=300)
-            self.before_image_label.configure(image=self.preview_before, text="")
-            for output_key, label in self.preview_output_labels.items():
-                output_image = outputs.get(output_key)
-                if output_image is None:
-                    self.preview_output_images.pop(output_key, None)
-                    label.configure(image="", text="No preview")
-                    continue
-                photo = self._photo_image(output_image, max_size=220)
-                self.preview_output_images[output_key] = photo
-                label.configure(image=photo, text="")
+                before_max, output_max = get_preview_size_limits(self.preview_size_var.get())
+                self.preview_before = self._photo_image(self.source_image, max_size=before_max)
+                self.before_image_label.configure(image=self.preview_before, text="")
+                for output_key, label in self.preview_output_labels.items():
+                    output_image = outputs.get(output_key)
+                    if output_image is None:
+                        self.preview_output_images.pop(output_key, None)
+                        label.configure(image="", text="No preview")
+                        continue
+                    photo = self._photo_image(output_image, max_size=output_max)
+                    self.preview_output_images[output_key] = photo
+                    label.configure(image=photo, text="")
+            except Exception as exc:
+                self.status_var.set(f"Preview update failed: {exc}")
 
         def _generate(self) -> None:
             input_value = self.input_var.get().strip()

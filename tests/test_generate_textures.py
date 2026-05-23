@@ -27,6 +27,7 @@ from generate_textures import (
     generate_parallax,
     generate_preview_outputs,
     generate_specular,
+    get_preview_size_limits,
     identify_skyrim_texture_role,
     prepare_preview_source,
     recommend_generation_settings,
@@ -279,6 +280,15 @@ class GenerateTexturesTests(unittest.TestCase):
         preview = prepare_preview_source(source, max_dimension=1024)
         self.assertEqual(preview.mode, "RGB")
         self.assertLessEqual(max(preview.size), 1024)
+
+    def test_get_preview_size_limits_returns_expected_preset_sizes(self) -> None:
+        self.assertEqual(get_preview_size_limits("Small"), (220, 170))
+        self.assertEqual(get_preview_size_limits("Medium"), (300, 220))
+        self.assertEqual(get_preview_size_limits("Large"), (380, 280))
+        self.assertEqual(get_preview_size_limits("XL"), (460, 340))
+
+    def test_get_preview_size_limits_falls_back_to_medium_for_unknown_values(self) -> None:
+        self.assertEqual(get_preview_size_limits("Unknown"), (300, 220))
 
     def test_generate_preview_outputs_only_includes_requested_outputs(self) -> None:
         outputs = generate_preview_outputs(
