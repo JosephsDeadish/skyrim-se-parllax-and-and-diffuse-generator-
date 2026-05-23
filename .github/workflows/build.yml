@@ -57,14 +57,9 @@ jobs:
         run: pyinstaller --onefile --windowed --collect-all numpy --name generate_textures --icon assets\panda.ico generate_textures.py
 
       - name: Create zip archive
-        run: >
-          Compress-Archive -Path
-          dist\generate_textures.exe,
-          generate_textures.py,
-          README.md,
-          requirements.txt,
-          assets
-          -DestinationPath skyrim-texture-generator.zip
+        run: |
+          Copy-Item dist\generate_textures.exe generate_textures.exe
+          Compress-Archive -Path generate_textures.exe, generate_textures.py, README.md, requirements.txt, assets, fomod -DestinationPath skyrim-texture-generator.zip
         shell: pwsh
 
       - name: Upload artifact

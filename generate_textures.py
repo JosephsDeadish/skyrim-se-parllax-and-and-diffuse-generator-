@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import math
 import os
 import queue
@@ -260,7 +261,13 @@ def _lift_black_floor(image: Image.Image, floor: int = 16) -> Image.Image:
 
 
 def _detail_pressure(source: Image.Image) -> float:
-    grayscale = ImageOps.grayscale(source)
+    # Downsample to max 512 px for performance — the pressure signal is a scalar
+    # statistic that does not require full resolution to be representative.
+    analysis = source
+    if max(source.width, source.height) > 512:
+        analysis = source.copy()
+        analysis.thumbnail((512, 512), Image.Resampling.NEAREST)
+    grayscale = ImageOps.grayscale(analysis)
     high_freq = ImageChops.difference(grayscale, grayscale.filter(ImageFilter.GaussianBlur(radius=1.2)))
     return _clamp((float(ImageStat.Stat(high_freq).mean[0]) - 8.0) / 22.0, 0.0, 1.0)
 
@@ -422,21 +429,55 @@ def generate_specular(source: Image.Image, strength: float = 1.15) -> Image.Imag
     base_blur_radius = 1.0 + (pressure * 1.0)
     broad_blur_radius = 2.4 + (pressure * 1.4)
     smoothed = grayscale.filter(ImageFilter.GaussianBlur(radius=base_blur_radius))
+    # abs-difference (PIL ImageChops.difference is always ≥ 0)
     local_detail = ImageChops.difference(grayscale, grayscale.filter(ImageFilter.GaussianBlur(radius=broad_blur_radius)))
-    base = ImageEnhance.Contrast(smoothed).enhance(1.08 - (pressure * 0.1))
-    detail_boost = ImageEnhance.Brightness(local_detail).enhance(0.55 - (pressure * 0.2))
-    specular = ImageChops.add(base, detail_boost, scale=1.45 + (pressure * 0.2), offset=4)
-    # Use GaussianBlur for softening — faster than MedianFilter on large textures (2K/4K/8K)
-    # and avoids the halo artefacts that MedianFilter can introduce at edges.
-    softened = specular.filter(ImageFilter.GaussianBlur(radius=1.2 + (pressure * 0.4)))
-    # Lift the floor BEFORE contrast enhancement so that true-black holes cannot be
-    # created by subsequent autocontrast stretching.
-    pre_lifted = _lift_black_floor(softened, floor=12)
-    contrasted = ImageEnhance.Contrast(pre_lifted).enhance(_clamp(strength * (1.0 - (pressure * 0.18)), 0.9, 2.2))
-    # Use cutoff=2 so the most extreme outliers (bright sparks / deep holes) are clipped
-    # before the stretch, further reducing the chance of black-hole artefacts.
-    normalized = ImageOps.autocontrast(contrasted, cutoff=2)
-    return _lift_black_floor(normalized, floor=8)
+
+    # --- numpy path: float32 throughout so no integer-rounding holes ---
+    h, w = grayscale.size[1], grayscale.size[0]
+    sm_arr = np.frombuffer(smoothed.tobytes(), dtype=np.uint8).astype(np.float32)
+    ld_arr = np.frombuffer(local_detail.tobytes(), dtype=np.uint8).astype(np.float32)
+
+    # Contrast-enhance the smoothed base (ImageEnhance.Contrast equivalent)
+    contrast_factor = 1.08 - (pressure * 0.1)
+    sm_mean = sm_arr.mean()
+    base_arr = np.clip((sm_arr - sm_mean) * contrast_factor + sm_mean, 0.0, 255.0)
+
+    # Brightness-scale the local detail (ImageEnhance.Brightness equivalent)
+    brightness_factor = 0.55 - (pressure * 0.2)
+    detail_arr = np.clip(ld_arr * brightness_factor, 0.0, 255.0)
+
+    # Combine (ImageChops.add with scale and offset)
+    scale = 1.45 + (pressure * 0.2)
+    specular_arr = np.clip((base_arr + detail_arr) / scale + 4.0, 0.0, 255.0)
+
+    # GaussianBlur softening step — bounce through PIL (no native numpy FFT)
+    soft_radius = 1.2 + (pressure * 0.4)
+    specular_img = Image.fromarray(specular_arr.reshape(h, w).astype(np.uint8), mode="L")
+    softened = specular_img.filter(ImageFilter.GaussianBlur(radius=soft_radius))
+    soft_arr = np.frombuffer(softened.tobytes(), dtype=np.uint8).astype(np.float32)
+
+    # Hard floor before contrast so no downstream step can create true-black holes
+    soft_arr = np.maximum(soft_arr, 12.0)
+
+    # Contrast enhancement
+    effective_strength = _clamp(strength * (1.0 - (pressure * 0.18)), 0.9, 2.2)
+    soft_mean = soft_arr.mean()
+    contrasted_arr = np.clip((soft_arr - soft_mean) * effective_strength + soft_mean, 0.0, 255.0)
+
+    # Percentile-based range stretch (replaces PIL autocontrast with cutoff=2).
+    # Float32 arithmetic guarantees the lifted floor value (12.0) is never
+    # accidentally pushed to zero by integer truncation inside autocontrast.
+    p2 = float(np.percentile(contrasted_arr, 2.0))
+    p98 = float(np.percentile(contrasted_arr, 98.0))
+    if p98 > p2 + 1.0:
+        normalized_arr = np.clip((contrasted_arr - p2) / (p98 - p2) * 255.0, 0.0, 255.0)
+    else:
+        normalized_arr = contrasted_arr
+
+    # Absolute final floor — no pixel may be a true black hole
+    normalized_arr = np.maximum(normalized_arr, 8.0)
+
+    return Image.fromarray(normalized_arr.reshape(h, w).astype(np.uint8), mode="L")
 
 
 def generate_msn(source: Image.Image, normal_strength: float = 2.0, specular_strength: float = 1.15) -> Image.Image:
@@ -465,6 +506,7 @@ def generate_preview_outputs(
     complex_strength: float,
     specular_strength: float,
     complex_format: str,
+    env_mask_mode: str = "complex",
     include_diffuse: bool,
     include_normal: bool,
     include_parallax: bool,
@@ -482,7 +524,7 @@ def generate_preview_outputs(
     if include_glow:
         outputs["glow"] = generate_glow(source, threshold=glow_threshold)
     if include_environment_mask:
-        outputs["environment_mask"] = generate_environment_mask(source, strength=environment_mask_strength)
+        outputs["environment_mask"] = generate_environment_mask(source, strength=environment_mask_strength, mode=env_mask_mode)
     if include_complex:
         outputs["complex_material"] = (
             generate_msn(source, normal_strength=normal_strength, specular_strength=specular_strength)
@@ -784,6 +826,7 @@ def run_with_options(
     complex_strength: float | None = None,
     specular_strength: float | None = None,
     complex_format: str = "msn",
+    env_mask_mode: str = "standard",
     include_diffuse: bool = True,
     include_normal: bool = True,
     include_parallax: bool = True,
@@ -798,7 +841,14 @@ def run_with_options(
 
     with Image.open(input_file) as opened_source:
         source = opened_source.convert("RGB")
-        recommended = recommend_generation_settings(source)
+        # Downsample to ≤512 px for analysis/recommendations on large textures —
+        # auto-suggestions are a scalar signal and do not need full resolution.
+        analysis_source = source
+        if source.width * source.height > 512 * 512:
+            analysis_source = source.copy()
+            analysis_source.thumbnail((512, 512), Image.Resampling.NEAREST)
+        recommended = recommend_generation_settings(analysis_source)
+        del analysis_source
         resolved_normal_strength = normal_strength if normal_strength is not None else float(recommended["normal_strength"])
         resolved_parallax_strength = parallax_strength if parallax_strength is not None else float(recommended["parallax_strength"])
         resolved_glow_threshold = glow_threshold if glow_threshold is not None else int(recommended["glow_threshold"])
@@ -847,7 +897,7 @@ def run_with_options(
             outputs["glow"] = _save_with_dds_fallback(glow, glow_path)
 
         if include_environment_mask:
-            environment_mask = generate_environment_mask(source, strength=resolved_environment_mask_strength)
+            environment_mask = generate_environment_mask(source, strength=resolved_environment_mask_strength, mode=env_mask_mode)
             environment_mask_path = build_environment_mask_output_path(
                 input_path=input_file,
                 output_dir=output_dir,
@@ -872,6 +922,7 @@ def run_with_options(
             )
             outputs["complex_material"] = _save_with_dds_fallback(complex_material, complex_path)
 
+    gc.collect()
     return outputs
 
 
@@ -891,6 +942,7 @@ def run_batch_with_options(
     complex_strength: float | None = None,
     specular_strength: float | None = None,
     complex_format: str = "msn",
+    env_mask_mode: str = "standard",
     include_diffuse: bool = True,
     include_normal: bool = True,
     include_parallax: bool = True,
@@ -925,6 +977,7 @@ def run_batch_with_options(
                 complex_strength=complex_strength,
                 specular_strength=specular_strength,
                 complex_format=complex_format,
+                env_mask_mode=env_mask_mode,
                 include_diffuse=include_diffuse,
                 include_normal=include_normal,
                 include_parallax=include_parallax,
@@ -1005,6 +1058,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-parallax", action="store_true", help="Skip parallax output generation.")
     parser.add_argument("--glow-map", action="store_true", help="Generate glow output.")
     parser.add_argument("--environment-mask", action="store_true", help="Generate environment mask output.")
+    parser.add_argument(
+        "--environment-mask-mode",
+        choices=("standard", "complex"),
+        default="standard",
+        help=(
+            "Environment mask output mode. "
+            "'standard' (default) = greyscale _m.dds for vanilla Skyrim SE (Texture Slot 5, no ENB required). "
+            "'complex' = RGBA channel-packed texture for ENBSeries Complex Parallax Material."
+        ),
+    )
     parser.add_argument("--complex-material", action="store_true", help="Generate complex material output.")
     parser.add_argument("--gui", action="store_true", help="Launch graphical interface.")
     return parser.parse_args()
@@ -1089,6 +1152,7 @@ if GUI_AVAILABLE:
             self.glow_threshold_var = tk.IntVar(value=190)
             self.environment_mask_strength_var = tk.DoubleVar(value=1.2)
             self.complex_format_var = tk.StringVar(value="msn")
+            self.env_mask_mode_var = tk.StringVar(value="standard")
             self.auto_suggestions_var = tk.BooleanVar(value=True)
             self.auto_normal_suggestion_var = tk.BooleanVar(value=True)
             self.auto_parallax_suggestion_var = tk.BooleanVar(value=True)
@@ -1177,6 +1241,21 @@ if GUI_AVAILABLE:
                 width=20,
             )
             complex_format.grid(row=3, column=1, sticky=tk.W)
+
+            ttk.Label(options_frame, text="Env mask mode").grid(row=3, column=2, sticky=tk.W, padx=(20, 4), pady=8)
+            env_mask_mode_combo = ttk.Combobox(
+                options_frame,
+                textvariable=self.env_mask_mode_var,
+                values=("standard", "complex"),
+                state="readonly",
+                width=20,
+            )
+            env_mask_mode_combo.grid(row=3, column=3, sticky=tk.W)
+            ttk.Label(
+                options_frame,
+                text="standard = vanilla Skyrim SE  |  complex = ENBSeries RGBA",
+                foreground="gray",
+            ).grid(row=3, column=4, sticky=tk.W, padx=(4, 0))
 
             ttk.Label(options_frame, text="Normal strength").grid(row=4, column=0, sticky=tk.W, pady=8)
             self.normal_scale = ttk.Scale(options_frame, from_=0.5, to=4.0, variable=self.normal_strength_var, command=lambda _: self._refresh_preview())
@@ -1586,6 +1665,7 @@ if GUI_AVAILABLE:
                 complex_strength=float(self.complex_strength_var.get()),
                 specular_strength=float(self.specular_strength_var.get()),
                 complex_format=self.complex_format_var.get(),
+                env_mask_mode=self.env_mask_mode_var.get(),
                 include_diffuse=self.include_diffuse_var.get(),
                 include_normal=self.include_normal_var.get(),
                 include_parallax=self.include_parallax_var.get(),
@@ -1660,6 +1740,7 @@ if GUI_AVAILABLE:
                     self.specular_strength_var.get(), self.auto_specular_suggestion_var
                 ),
                 "complex_format": self.complex_format_var.get(),
+                "env_mask_mode": self.env_mask_mode_var.get(),
                 "include_diffuse": include_diffuse,
                 "include_normal": include_normal,
                 "include_parallax": include_parallax,
@@ -1712,6 +1793,7 @@ def main() -> int:
             complex_strength=args.complex_strength,
             specular_strength=args.specular_strength,
             complex_format=args.complex_format,
+            env_mask_mode=args.environment_mask_mode,
             include_diffuse=not args.no_diffuse,
             include_normal=not args.no_normal,
             include_parallax=not args.no_parallax,
@@ -1748,6 +1830,7 @@ def main() -> int:
         complex_strength=args.complex_strength,
         specular_strength=args.specular_strength,
         complex_format=args.complex_format,
+        env_mask_mode=args.environment_mask_mode,
         include_diffuse=not args.no_diffuse,
         include_normal=not args.no_normal,
         include_parallax=not args.no_parallax,

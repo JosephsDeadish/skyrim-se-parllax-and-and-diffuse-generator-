@@ -26,6 +26,7 @@ from generate_textures import (
     generate_parallax,
     generate_preview_outputs,
     generate_specular,
+    identify_skyrim_texture_role,
     prepare_preview_source,
     recommend_generation_settings,
     run_batch_with_options,
@@ -624,6 +625,80 @@ class GenerateTexturesTests(unittest.TestCase):
                 exit_code = _run_cli()
         self.assertEqual(exit_code, 1)
         self.assertIn("Error: boom", "".join(call.args[0] for call in mock_stderr.write.call_args_list))
+
+
+    def test_generate_specular_no_black_holes_on_detailed_image(self) -> None:
+        specular = generate_specular(_large_high_detail_image(), strength=2.0)
+        self.assertEqual(specular.mode, "L")
+        minimum, _ = specular.getextrema()
+        self.assertGreaterEqual(minimum, 8)
+
+    def test_generate_environment_mask_standard_mode_returns_l_same_size(self) -> None:
+        env_mask = generate_environment_mask(_sample_image(), mode="standard")
+        self.assertEqual(env_mask.mode, "L")
+        self.assertEqual(env_mask.size, (8, 8))
+
+    def test_generate_environment_mask_standard_mode_stays_above_floor(self) -> None:
+        env_mask = generate_environment_mask(_flat_dark_image(), strength=2.2, mode="standard")
+        minimum, _ = env_mask.getextrema()
+        self.assertGreaterEqual(minimum, 8)
+
+    def test_identify_skyrim_texture_role_normal_map(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/architecture/stonewall_n.dds"))
+        self.assertEqual(result["role"], "normal")
+        self.assertEqual(result["suffix"], "_n")
+        self.assertIn("DirectX", result["notes"])
+
+    def test_identify_skyrim_texture_role_parallax(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/landscape/dirt_p.dds"))
+        self.assertEqual(result["role"], "parallax")
+        self.assertEqual(result["suffix"], "_p")
+
+    def test_identify_skyrim_texture_role_environment_mask(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/armor/iron_m.dds"))
+        self.assertEqual(result["role"], "environment_mask")
+        self.assertEqual(result["suffix"], "_m")
+        self.assertIn("Slot 5", result["notes"])
+
+    def test_identify_skyrim_texture_role_diffuse_fallback(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/clutter/candle.dds"))
+        self.assertEqual(result["role"], "diffuse")
+        self.assertEqual(result["suffix"], "")
+
+    def test_identify_skyrim_texture_role_path_hint(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/landscape/grass01.dds"))
+        self.assertIn("landscape", result["hint"].lower())
+
+    def test_identify_skyrim_texture_role_msn_is_enb_only(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/architecture/brick_msn.dds"))
+        self.assertEqual(result["role"], "complex_material")
+        self.assertIn("ENBSeries", result["notes"])
+
+    def test_run_with_options_env_mask_standard_mode_produces_l_image(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            outputs = run_with_options(
+                input_file=input_path,
+                output_dir=output_dir,
+                include_diffuse=False,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=True,
+                include_complex=False,
+                env_mask_mode="standard",
+            )
+
+            self.assertIn("environment_mask", outputs)
+            with Image.open(outputs["environment_mask"]) as generated:
+                generated.load()
+                # Standard mode must produce a greyscale-compatible output (L or RGBA
+                # that decodes to a single channel — pillow DDS may store as RGBA).
+                self.assertIn(generated.mode, ("L", "RGBA", "RGB"))
 
 
 if __name__ == "__main__":

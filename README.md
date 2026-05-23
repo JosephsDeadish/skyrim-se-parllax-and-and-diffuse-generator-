@@ -2,10 +2,10 @@
 
 Texture generator that supports both GUI and command-line usage. It can generate:
 - a diffuse texture
-- a normal map
+- a normal map (DirectX-style tangent-space, correct for Skyrim SE)
 - a grayscale parallax texture
 - a glow map
-- an environment mask (complex-parallax packed RGBA)
+- an environment mask — **standard greyscale** (vanilla Skyrim SE, no ENB needed) or **complex RGBA** (ENBSeries only)
 - a complex material output:
   - `_msn`: normal RGB with specular in alpha
   - `_cm`: grayscale complex material texture
@@ -14,6 +14,15 @@ Texture generator that supports both GUI and command-line usage. It can generate
 
 - Python 3.11+
 - Dependencies in `requirements.txt`
+
+## Installation via Mod Organizer 2 or Vortex (FoMod)
+
+The release ZIP (`skyrim-texture-generator.zip`) includes a FoMod installer so the tool can be installed directly through Mod Organizer 2 (v2.4+) or Vortex like any other mod:
+
+1. In **MO2**: drag-and-drop the ZIP onto the left pane (or use Install a new mod from an archive), follow the installer wizard, then go to **Tools → Executables → Add** and point it at `generate_textures.exe` in the mod's staging folder.
+2. In **Vortex**: install the ZIP via the **Mods** tab as usual, then register `generate_textures.exe` under **Dashboard → Add Tool**.
+
+Alternatively, simply extract `generate_textures.exe` anywhere and run it directly — no installation is required.
 
 ## Usage
 
@@ -30,6 +39,7 @@ This opens a desktop interface where you can:
 - choose diffuse/normal/parallax/glow/environment mask/complex material outputs
 - preview the **Before** source image and the currently selected output types (diffuse/normal/parallax/glow/environment mask/complex)
 - tune normal/parallax/glow/environment mask/complex/specular strengths
+- choose the **Env mask mode**: `standard` (greyscale, vanilla Skyrim SE) or `complex` (RGBA, ENBSeries only)
 - scroll through all controls in smaller windows
 - auto-update output folder when a different input texture is selected
 - get adaptive recommended defaults based on richer image-content analysis
@@ -58,6 +68,9 @@ Optional arguments:
 - `--environment-mask-name` (default: `<input_stem>_m`, e.g. `stonewall_m.dds`)
 - `--complex-name` (default from format: `<input_stem>_msn` or `<input_stem>_cm`)
 - `--complex-format` (`msn` or `cm`, default: `msn`)
+- `--environment-mask-mode` (`standard` or `complex`, default: `standard`)
+  - `standard` — greyscale `_m.dds` for vanilla Skyrim SE (Texture Slot 5, no ENB required)
+  - `complex` — RGBA channel-packed texture for ENBSeries Complex Parallax Material only
 - `--normal-strength` (default: adaptive from image)
 - `--parallax-strength` (default: adaptive from image)
 - `--glow-threshold` (default: adaptive from image)
@@ -79,15 +92,32 @@ Generated outputs default to `.dds` filenames regardless of the input format. Th
 ### Skyrim SE output conventions (fact-checked)
 
 - Normal map output (`*_n`) uses **DirectX-style tangent-space orientation** by default (green channel flipped vs OpenGL workflows), which is what Skyrim expects.
-- Neutral normal color remains centered around `RGB(128, 128, 255)` so flat areas stay visually flat in-game.
+- Neutral normal color remains centered around `RGB(128, 128,255)` so flat areas stay visually flat in-game.
 - Parallax output (`*_p`) is generated as a grayscale height map (`L` mode), suitable for Skyrim SE parallax workflows.
-- Environment mask output (`*_m`) is channel-packed for complex parallax style workflows:
-  - **R**: environment map amount
-  - **G**: glossiness (kept above compression-black thresholds)
-  - **B**: metallic proxy
-  - **A**: parallax height
-- For large/high-detail sources, generation now applies adaptive detail dampening to reduce over-sharpened normals/parallax and complex-material sparkle artifacts.
+- **Environment mask** (`*_m`) has two modes:
+  - **Standard** (default) — greyscale `L`-mode texture. Texture Slot 5 in the NIF. Controls per-pixel environment/specular reflection intensity (brighter = more reflection). Requires `SLSF1_Environment_Mapping` shader flag. Works with vanilla Skyrim SE — **no ENBSeries required**. Typically stored as DXT1.
+  - **Complex** (select in GUI or via `--environment-mask-mode complex`) — RGBA channel-packed for ENBSeries Complex Parallax Material workflows: R=env amount, G=glossiness, B=metallic proxy, A=parallax height. **ENBSeries required** with complex material support enabled.
+- For large/high-detail sources (2K/4K/8K), generation applies adaptive detail dampening to reduce over-sharpened normals/parallax and complex-material sparkle artifacts. Analysis and auto-recommendation calculations are automatically performed on a downscaled copy so large textures are processed faster without sacrificing output quality.
+- Specular generation uses numpy float32 arithmetic with percentile-based range normalisation so true-black hole artefacts cannot be introduced by integer rounding, regardless of texture size or content.
 - `_msn` output stores normal RGB with specular in alpha; `_cm` remains grayscale complex material.
+
+## File name recognition
+
+The tool recognises standard Skyrim SE texture naming conventions from the file name suffix:
+
+| Suffix | Role | Notes |
+|--------|------|-------|
+| *(none)* | Diffuse / Albedo | Texture Slot 0 |
+| `_n` | Normal Map | DirectX tangent-space, Slot 1 |
+| `_p` | Parallax Heightmap | Greyscale, Slot 3, requires SKSE64 memory patch |
+| `_g` | Glow / Emissive | Slot 2, requires `SLSF1_Own_Emit` flag |
+| `_m` | Environment Mask | Greyscale reflection intensity, Slot 5 |
+| `_s` | Subsurface Scattering | Slot 6, skin/character textures |
+| `_sk` | Skin Specular | Slot 7, character-specific |
+| `_msn` | Complex Parallax Material | ENBSeries only — **not vanilla Skyrim SE** |
+| `_cm` | Complex Material (greyscale) | ENBSeries only — **not vanilla Skyrim SE** |
+
+Batch folder mode automatically skips generated variants (`_n`, `_p`, `_g`, `_m`, `_msn`, `_cm`) so it only processes original source textures.
 
 ## GitHub Actions
 

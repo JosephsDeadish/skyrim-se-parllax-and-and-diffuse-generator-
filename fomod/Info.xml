@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<fomod>
+    <Name>Skyrim SE Parallax and Diffuse Texture Generator</Name>
+    <Author>JosephsDeadish</Author>
+    <Version>1.0.0</Version>
+    <Description>A standalone Windows tool that generates parallax, normal, glow, environment mask, and complex material textures for Skyrim Special Edition from any DDS, PNG, TGA, or BMP source texture. Supports batch processing of entire texture folders, automatic image-content analysis to recommend slider values, and a live preview panel. Designed for use as an external tool in Mod Organizer 2 or Vortex.</Description>
+    <Website>https://github.com/JosephsDeadish/skyrim-se-parllax-and-and-diffuse-generator-</Website>
+    <Groups/>
+</fomod>

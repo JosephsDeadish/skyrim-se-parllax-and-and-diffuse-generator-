@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  FoMod installer for Skyrim SE Parallax and Diffuse Texture Generator.
+  Compatible with Mod Organizer 2 (v2.4+) and Vortex.
+
+  After installation, register generate_textures.exe as an external tool:
+    MO2:  Tools → Executables → Add → point to generate_textures.exe in the mod staging folder.
+    Vortex: Dashboard → Add Tool → browse to generate_textures.exe.
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
+    <moduleName>Skyrim SE Parallax and Diffuse Texture Generator</moduleName>
+
+    <requiredInstallFiles>
+        <!-- The main executable is always installed. -->
+        <file source="generate_textures.exe" destination="generate_textures.exe" priority="0"/>
+    </requiredInstallFiles>
+
+    <installSteps order="Explicit">
+        <installStep name="Optional Components">
+            <optionalFileGroups order="Explicit">
+
+                <group name="Source Script (optional)" type="SelectAny">
+                    <plugins order="Explicit">
+                        <plugin name="Include Python source files">
+                            <description>Install the Python source script and requirements file. Useful for advanced users who want to run or modify the tool directly with Python 3.11+ instead of the pre-built executable. Requires: pip install -r requirements.txt.</description>
+                            <image path=""/>
+                            <files>
+                                <file source="generate_textures.py" destination="generate_textures.py" priority="0"/>
+                                <file source="requirements.txt" destination="requirements.txt" priority="0"/>
+                            </files>
+                            <typeDescriptor>
+                                <type name="Optional"/>
+                            </typeDescriptor>
+                        </plugin>
+                    </plugins>
+                </group>
+
+            </optionalFileGroups>
+        </installStep>
+    </installSteps>
+</config>
