@@ -4869,13 +4869,19 @@ if GUI_AVAILABLE:
 
                 row0 = ttk.Frame(path_frame)
                 row0.pack(fill="x")
-                ttk.Radiobutton(row0, text="Single NIF file", variable=nif_scan_mode, value="file").pack(side="left")
-                ttk.Radiobutton(row0, text="Whole mesh folder (recursive)", variable=nif_scan_mode, value="folder").pack(side="left", padx=(8, 0))
+                single_nif_radio = ttk.Radiobutton(row0, text="Single NIF file", variable=nif_scan_mode, value="file")
+                single_nif_radio.pack(side="left")
+                folder_nif_radio = ttk.Radiobutton(row0, text="Whole mesh folder (recursive)", variable=nif_scan_mode, value="folder")
+                folder_nif_radio.pack(side="left", padx=(8, 0))
+                self._add_tooltip(single_nif_radio, "🎯 Patch one mesh when you already know the troublemaker.")
+                self._add_tooltip(folder_nif_radio, "🧹 Recursive mode for when the whole folder needs a tactical reality check.")
 
                 row1 = ttk.Frame(path_frame)
                 row1.pack(fill="x", pady=(4, 0))
-                ttk.Label(row1, text="Path:").pack(side="left")
-                ttk.Entry(row1, textvariable=nif_path_var).pack(side="left", fill="x", expand=True, padx=(4, 4))
+                path_label = ttk.Label(row1, text="Path:")
+                path_label.pack(side="left")
+                nif_path_entry = ttk.Entry(row1, textvariable=nif_path_var)
+                nif_path_entry.pack(side="left", fill="x", expand=True, padx=(4, 4))
 
                 def _browse_nif() -> None:
                     if nif_scan_mode.get() == "folder":
@@ -4888,7 +4894,11 @@ if GUI_AVAILABLE:
                     if selected:
                         nif_path_var.set(selected)
 
-                ttk.Button(row1, text="Browse…", command=_browse_nif).pack(side="left")
+                browse_nif_button = ttk.Button(row1, text="Browse…", command=_browse_nif)
+                browse_nif_button.pack(side="left")
+                self._add_tooltip(path_label, "📍 Pick the NIF file/folder you want to scan or patch.")
+                self._add_tooltip(nif_path_entry, "⌨ Paste a full path here. Yes, even that scary MO2 path with 400 folders.")
+                self._add_tooltip(browse_nif_button, "🧭 Opens file/folder picker so your fingers don’t have to type all that.")
 
                 opt_frame = ttk.LabelFrame(win, text="Patch Options", padding=6)
                 opt_frame.pack(fill="x", padx=10, pady=4)
@@ -4979,7 +4989,12 @@ if GUI_AVAILABLE:
                         if guessed_normal and not normal_tex_var.get():
                             normal_tex_var.set(guessed_normal)
 
-                ttk.Button(tex_frame, text="Auto-fill paths from selected NIF", command=_auto_fill_paths).pack(anchor="w", pady=(4, 0))
+                auto_fill_button = ttk.Button(tex_frame, text="Auto-fill paths from selected NIF", command=_auto_fill_paths)
+                auto_fill_button.pack(anchor="w", pady=(4, 0))
+                self._add_tooltip(
+                    auto_fill_button,
+                    "🧠 Guesses texture slots from the selected NIF.\nGreat for speed, still worth eyeballing before you hit Patch.",
+                )
 
                 btn_frame = ttk.Frame(win)
                 btn_frame.pack(fill="x", padx=10, pady=(4, 2))
@@ -5007,6 +5022,11 @@ if GUI_AVAILABLE:
                 selected_detail_var = tk.StringVar(value="")
                 detail_entry = ttk.Entry(res_frame, textvariable=selected_detail_var)
                 detail_entry.pack(fill="x", pady=(6, 0))
+                self._add_tooltip(
+                    results_tree,
+                    "📋 Click any row to inspect/copy it.\nThis table is intentionally boring and readable so your future self says thanks.",
+                )
+                self._add_tooltip(detail_entry, "✂ Selected row details land here for easy copy/paste.")
 
                 def _add_result_row(status: str, file_name: str, details: str) -> None:
                     results_tree.insert("", "end", values=(status, file_name, details))
@@ -5131,12 +5151,24 @@ if GUI_AVAILABLE:
                                 _add_result_row("FAIL", nif.name, err)
                     status_var.set(f"Done — {ok} patched, {skip} skipped, {fail} failed.")
 
-                ttk.Button(btn_frame, text="Scan NIFs", command=_scan_nifs).pack(side="left", padx=(0, 6))
-                ttk.Button(btn_frame, text="Patch NIFs", command=_run_patch).pack(side="left", padx=(0, 6))
-                ttk.Button(btn_frame, text="Clear log", command=_clear_log).pack(side="left")
-                ttk.Button(btn_frame, text="Copy selected", command=_copy_selected_result).pack(side="left", padx=(6, 0))
-                ttk.Button(btn_frame, text="Copy all", command=_copy_all_results).pack(side="left", padx=(6, 0))
-                ttk.Button(btn_frame, text="Close", command=win.destroy).pack(side="right")
+                scan_button = ttk.Button(btn_frame, text="Scan NIFs", command=_scan_nifs)
+                scan_button.pack(side="left", padx=(0, 6))
+                patch_button = ttk.Button(btn_frame, text="Patch NIFs", command=_run_patch)
+                patch_button.pack(side="left", padx=(0, 6))
+                clear_button = ttk.Button(btn_frame, text="Clear log", command=_clear_log)
+                clear_button.pack(side="left")
+                copy_selected_button = ttk.Button(btn_frame, text="Copy selected", command=_copy_selected_result)
+                copy_selected_button.pack(side="left", padx=(6, 0))
+                copy_all_button = ttk.Button(btn_frame, text="Copy all", command=_copy_all_results)
+                copy_all_button.pack(side="left", padx=(6, 0))
+                close_button = ttk.Button(btn_frame, text="Close", command=win.destroy)
+                close_button.pack(side="right")
+                self._add_tooltip(scan_button, "🔍 Read-only analysis pass. No file changes, just receipts.")
+                self._add_tooltip(patch_button, "🛠 Actually writes patch changes. This is the button with consequences.")
+                self._add_tooltip(clear_button, "🧽 Clears rows so your brain can breathe again.")
+                self._add_tooltip(copy_selected_button, "📎 Copies only the selected row — ideal for Discord bragging or bug reports.")
+                self._add_tooltip(copy_all_button, "📦 Copies every row in one go for logs/changelists.")
+                self._add_tooltip(close_button, "🚪 Closes this window. Your NIFs will not feel abandoned.")
             except Exception as exc:
                 try:
                     win.destroy()
