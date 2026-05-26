@@ -10,6 +10,7 @@ from generate_textures import (
     PATREON_URL,
     _create_panda_icon_image,
     _run_cli,
+    _normalize_gui_state,
     analyze_image_content,
     apply_recommendations_by_auto_flags,
     build_complex_output_path,
@@ -37,8 +38,10 @@ from generate_textures import (
     identify_skyrim_texture_role,
     prepare_preview_source,
     recommend_generation_settings,
+    load_gui_state,
     run_batch_with_options,
     run_with_options,
+    save_gui_state,
     select_generation_context_source,
 )
 
@@ -125,6 +128,66 @@ def _emboss_pattern_image() -> Image.Image:
 class GenerateTexturesTests(unittest.TestCase):
     def test_app_version_is_0_5(self) -> None:
         self.assertEqual(APP_VERSION, "0.5")
+
+    def test_normalize_gui_state_turns_off_individual_auto_flags_when_master_off(self) -> None:
+        normalized = _normalize_gui_state(
+            {
+                "auto_suggestions": False,
+                "auto_normal": True,
+                "auto_parallax": True,
+                "auto_glow": True,
+                "auto_environment_mask": True,
+                "auto_complex": True,
+                "auto_specular": True,
+            }
+        )
+        self.assertFalse(bool(normalized["auto_suggestions"]))
+        self.assertFalse(bool(normalized["auto_normal"]))
+        self.assertFalse(bool(normalized["auto_parallax"]))
+        self.assertFalse(bool(normalized["auto_glow"]))
+        self.assertFalse(bool(normalized["auto_environment_mask"]))
+        self.assertFalse(bool(normalized["auto_complex"]))
+        self.assertFalse(bool(normalized["auto_specular"]))
+
+    def test_load_gui_state_defaults_when_file_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state = load_gui_state(Path(temp_dir) / "missing-state.json")
+        self.assertEqual(state["input_path"], "")
+        self.assertEqual(state["output_path"], "")
+        self.assertFalse(bool(state["dark_mode"]))
+        self.assertTrue(bool(state["auto_suggestions"]))
+
+    def test_save_gui_state_round_trips_expected_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_file = Path(temp_dir) / "gui-state.json"
+            save_gui_state(
+                {
+                    "input_path": "/tmp/in.dds",
+                    "output_path": "/tmp/out",
+                    "use_custom_output": True,
+                    "dark_mode": True,
+                    "auto_suggestions": True,
+                    "auto_normal": False,
+                    "auto_parallax": True,
+                    "auto_glow": False,
+                    "auto_environment_mask": True,
+                    "auto_complex": False,
+                    "auto_specular": True,
+                },
+                state_file,
+            )
+            loaded = load_gui_state(state_file)
+        self.assertEqual(loaded["input_path"], "/tmp/in.dds")
+        self.assertEqual(loaded["output_path"], "/tmp/out")
+        self.assertTrue(bool(loaded["use_custom_output"]))
+        self.assertTrue(bool(loaded["dark_mode"]))
+        self.assertTrue(bool(loaded["auto_suggestions"]))
+        self.assertFalse(bool(loaded["auto_normal"]))
+        self.assertTrue(bool(loaded["auto_parallax"]))
+        self.assertFalse(bool(loaded["auto_glow"]))
+        self.assertTrue(bool(loaded["auto_environment_mask"]))
+        self.assertFalse(bool(loaded["auto_complex"]))
+        self.assertTrue(bool(loaded["auto_specular"]))
 
     def test_generate_diffuse_returns_rgb_same_size(self) -> None:
         diffuse = generate_diffuse(_sample_image())

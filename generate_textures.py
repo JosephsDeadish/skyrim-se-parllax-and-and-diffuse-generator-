@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import gc
+import json
 import math
 import os
 import queue
@@ -43,6 +44,83 @@ PREVIEW_SIZE_PRESETS: dict[str, tuple[int, int]] = {
     "Large": (460, 340),
     "XL": (620, 460),
 }
+GUI_STATE_FILE = Path.home() / ".skyrim_texture_generator_gui_state.json"
+_GUI_STATE_DEFAULTS: dict[str, str | bool] = {
+    "input_path": "",
+    "output_path": "",
+    "use_custom_output": False,
+    "dark_mode": False,
+    "auto_suggestions": True,
+    "auto_normal": True,
+    "auto_parallax": True,
+    "auto_glow": True,
+    "auto_environment_mask": True,
+    "auto_complex": True,
+    "auto_specular": True,
+}
+
+
+def _coerce_bool(value: object, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
+def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, str | bool]:
+    state = dict(_GUI_STATE_DEFAULTS)
+    if raw is None:
+        return state
+    state["input_path"] = str(raw.get("input_path", state["input_path"]) or "")
+    state["output_path"] = str(raw.get("output_path", state["output_path"]) or "")
+    for key in (
+        "use_custom_output",
+        "dark_mode",
+        "auto_suggestions",
+        "auto_normal",
+        "auto_parallax",
+        "auto_glow",
+        "auto_environment_mask",
+        "auto_complex",
+        "auto_specular",
+    ):
+        state[key] = _coerce_bool(raw.get(key), bool(state[key]))
+    if not bool(state["auto_suggestions"]):
+        state["auto_normal"] = False
+        state["auto_parallax"] = False
+        state["auto_glow"] = False
+        state["auto_environment_mask"] = False
+        state["auto_complex"] = False
+        state["auto_specular"] = False
+    return state
+
+
+def load_gui_state(state_file: Path = GUI_STATE_FILE) -> dict[str, str | bool]:
+    try:
+        if not state_file.exists():
+            return dict(_GUI_STATE_DEFAULTS)
+        raw = json.loads(state_file.read_text(encoding="utf-8"))
+        if not isinstance(raw, Mapping):
+            return dict(_GUI_STATE_DEFAULTS)
+        return _normalize_gui_state(raw)
+    except Exception:
+        return dict(_GUI_STATE_DEFAULTS)
+
+
+def save_gui_state(state: Mapping[str, object], state_file: Path = GUI_STATE_FILE) -> None:
+    normalized = _normalize_gui_state(state)
+    try:
+        state_file.parent.mkdir(parents=True, exist_ok=True)
+        state_file.write_text(json.dumps(normalized, indent=2, sort_keys=True), encoding="utf-8")
+    except Exception:
+        pass
 
 
 @dataclass(frozen=True)
@@ -2140,6 +2218,7 @@ if GUI_AVAILABLE:
             self.auto_environment_mask_suggestion_var = tk.BooleanVar(value=True)
             self.auto_complex_suggestion_var = tk.BooleanVar(value=True)
             self.auto_specular_suggestion_var = tk.BooleanVar(value=True)
+            self.theme_mode_label_var = tk.StringVar(value="☀ Light mode")
             self.include_diffuse_var = tk.BooleanVar(value=True)
             self.include_normal_var = tk.BooleanVar(value=True)
             self.include_parallax_var = tk.BooleanVar(value=True)
@@ -2149,6 +2228,8 @@ if GUI_AVAILABLE:
             self.status_var = tk.StringVar(
                 value=self.manager_context.summary if self.manager_context.manager is not None else "Select a DDS file to begin."
             )
+            self._apply_persisted_gui_state()
+            self._update_theme_toggle_text()
             self._update_slider_value_labels()
 
             self._set_app_icon()
@@ -2189,7 +2270,7 @@ if GUI_AVAILABLE:
             _patreon_button.pack(side=tk.RIGHT, padx=4)
             _theme_top_check = ttk.Checkbutton(
                 top_bar,
-                text="🌙 Dark mode",
+                textvariable=self.theme_mode_label_var,
                 variable=self.dark_mode_var,
                 command=self._toggle_theme,
             )
@@ -2547,7 +2628,9 @@ if GUI_AVAILABLE:
             output_grid.columnconfigure(1, weight=0)
             self._update_preview_navigation_state()
 
+            self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
             self._apply_theme()
+            self._restore_startup_selection()
 
         def _set_app_icon(self) -> None:
             try:
@@ -2618,6 +2701,7 @@ if GUI_AVAILABLE:
 
         def _apply_theme(self) -> None:
             colors = _DARK_THEME if self.dark_mode_var.get() else _LIGHT_THEME
+            self._update_theme_toggle_text()
             self._tooltip_bg = colors["tooltip_bg"]
             self._tooltip_fg = colors["tooltip_fg"]
             style = ttk.Style(self.root)
@@ -2646,6 +2730,55 @@ if GUI_AVAILABLE:
             self._apply_theme()
             theme_name = "dark" if self.dark_mode_var.get() else "light"
             self.status_var.set(f"Switched to {theme_name} mode.")
+
+        def _update_theme_toggle_text(self) -> None:
+            self.theme_mode_label_var.set("🌙 Dark mode" if self.dark_mode_var.get() else "☀ Light mode")
+
+        def _apply_persisted_gui_state(self) -> None:
+            state = load_gui_state()
+            self.input_var.set(str(state["input_path"]))
+            self.output_var.set(str(state["output_path"]))
+            self.use_custom_output_var.set(bool(state["use_custom_output"]))
+            self.dark_mode_var.set(bool(state["dark_mode"]))
+            self.auto_suggestions_var.set(bool(state["auto_suggestions"]))
+            self.auto_normal_suggestion_var.set(bool(state["auto_normal"]))
+            self.auto_parallax_suggestion_var.set(bool(state["auto_parallax"]))
+            self.auto_glow_suggestion_var.set(bool(state["auto_glow"]))
+            self.auto_environment_mask_suggestion_var.set(bool(state["auto_environment_mask"]))
+            self.auto_complex_suggestion_var.set(bool(state["auto_complex"]))
+            self.auto_specular_suggestion_var.set(bool(state["auto_specular"]))
+
+        def _build_gui_state(self) -> dict[str, object]:
+            return {
+                "input_path": self.input_var.get().strip(),
+                "output_path": self.output_var.get().strip(),
+                "use_custom_output": self.use_custom_output_var.get(),
+                "dark_mode": self.dark_mode_var.get(),
+                "auto_suggestions": self.auto_suggestions_var.get(),
+                "auto_normal": self.auto_normal_suggestion_var.get(),
+                "auto_parallax": self.auto_parallax_suggestion_var.get(),
+                "auto_glow": self.auto_glow_suggestion_var.get(),
+                "auto_environment_mask": self.auto_environment_mask_suggestion_var.get(),
+                "auto_complex": self.auto_complex_suggestion_var.get(),
+                "auto_specular": self.auto_specular_suggestion_var.get(),
+            }
+
+        def _save_persisted_gui_state(self) -> None:
+            save_gui_state(self._build_gui_state())
+
+        def _on_window_close(self) -> None:
+            self._save_persisted_gui_state()
+            self.root.destroy()
+
+        def _restore_startup_selection(self) -> None:
+            saved_input = self.input_var.get().strip()
+            if not saved_input:
+                return
+            saved_input_path = Path(saved_input)
+            if not saved_input_path.exists():
+                self.status_var.set(f"Saved input path not found: {saved_input_path}")
+                return
+            self._load_input_selection(saved_input_path, show_error=False)
 
         def _pick_input(self) -> None:
             selected = filedialog.askopenfilename(
@@ -2763,7 +2896,7 @@ if GUI_AVAILABLE:
                 self.status_var.set("Output will be written next to the input.")
             self._update_output_location_controls()
 
-        def _load_input_selection(self, path: Path) -> None:
+        def _load_input_selection(self, path: Path, *, show_error: bool = True) -> None:
             try:
                 input_files = collect_source_textures(path)
                 self.selected_inputs = input_files
@@ -2788,7 +2921,10 @@ if GUI_AVAILABLE:
                 self.current_preview_index = 0
                 self.preview_source_name_var.set("No source loaded")
                 self._update_preview_navigation_state()
-                messagebox.showerror("Unable to open texture", str(exc))
+                if show_error:
+                    messagebox.showerror("Unable to open texture", str(exc))
+                else:
+                    self.status_var.set(f"Unable to restore saved input: {exc}")
 
         def _resolve_generation_value(self, current_value: float | int, auto_var: tk.BooleanVar) -> float | int | None:
             if self.auto_suggestions_var.get() and auto_var.get():
