@@ -39,6 +39,8 @@ from generate_textures import (
     identify_skyrim_texture_role,
     prepare_preview_source,
     recommend_generation_settings,
+    recommend_render_profile,
+    resolve_render_profile_options,
     load_gui_state,
     run_batch_with_options,
     run_with_options,
@@ -182,6 +184,7 @@ class GenerateTexturesTests(unittest.TestCase):
                     "complex_format": "cm",
                     "env_mask_mode": "complex",
                     "parallax_mode": "occlusion",
+                    "render_profile": "community_shaders",
                     "emboss_mode": True,
                     "include_diffuse": False,
                     "include_normal": True,
@@ -215,6 +218,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(loaded["complex_format"]), "cm")
         self.assertEqual(str(loaded["env_mask_mode"]), "complex")
         self.assertEqual(str(loaded["parallax_mode"]), "occlusion (ENB/POM)")
+        self.assertEqual(str(loaded["render_profile"]), "community_shaders")
         self.assertTrue(bool(loaded["emboss_mode"]))
         self.assertFalse(bool(loaded["include_diffuse"]))
         self.assertTrue(bool(loaded["include_normal"]))
@@ -243,6 +247,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 "complex_format": "bad",
                 "env_mask_mode": "invalid",
                 "parallax_mode": "occlusion",
+                "render_profile": "mystery",
                 "normal_strength": 500,
                 "parallax_strength": -10,
                 "glow_threshold": 999,
@@ -255,6 +260,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(normalized["complex_format"]), "msn")
         self.assertEqual(str(normalized["env_mask_mode"]), "standard")
         self.assertEqual(str(normalized["parallax_mode"]), "occlusion (ENB/POM)")
+        self.assertEqual(str(normalized["render_profile"]), "auto")
         self.assertAlmostEqual(float(normalized["normal_strength"]), 4.0)
         self.assertAlmostEqual(float(normalized["parallax_strength"]), 0.5)
         self.assertEqual(int(normalized["glow_threshold"]), 255)
@@ -434,6 +440,46 @@ class GenerateTexturesTests(unittest.TestCase):
             detect_workflow_profile(Path("textures/interface/cards/deck01.dds")),
             "interface",
         )
+
+    def test_recommend_render_profile_detects_enb_from_path_hint(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(Path("mods/ENBSeries/textures/architecture/stone.dds")),
+            "enb",
+        )
+
+    def test_recommend_render_profile_detects_community_shaders_from_cm_role(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/architecture/stone_cm.dds"),
+                detected_role="complex_material_cm",
+            ),
+            "community_shaders",
+        )
+
+    def test_recommend_render_profile_prefers_vanilla_for_interface_or_paper(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/interface/cards/collectible.dds"),
+                material_type="paper",
+                workflow_profile="interface",
+            ),
+            "vanilla",
+        )
+
+    def test_resolve_render_profile_options_returns_expected_modes(self) -> None:
+        enb = resolve_render_profile_options("enb")
+        self.assertEqual(enb["complex_format"], "msn")
+        self.assertEqual(enb["env_mask_mode"], "complex")
+        self.assertEqual(enb["parallax_mode"], "occlusion")
+
+        cs = resolve_render_profile_options("community_shaders")
+        self.assertEqual(cs["complex_format"], "cm")
+        self.assertEqual(cs["env_mask_mode"], "standard")
+        self.assertEqual(cs["parallax_mode"], "standard")
+
+        auto = resolve_render_profile_options("auto", recommended_profile="enb")
+        self.assertEqual(auto["effective_profile"], "enb")
+        self.assertEqual(auto["parallax_mode"], "occlusion")
 
     def test_get_generation_warnings_glow_on_stone_triggers_warning(self) -> None:
         warnings = get_generation_warnings(
@@ -1405,6 +1451,14 @@ class EmbossNormalTests(unittest.TestCase):
         emboss_variation = sum(ImageStat.Stat(channel).stddev[0] for channel in (emb_r, emb_g))
         self.assertGreater(emboss_variation, standard_variation)
 
+    def test_emboss_mode_low_detail_input_stays_close_to_flat_normal(self) -> None:
+        low_detail = Image.new("RGB", (24, 24), color=(132, 132, 132))
+        result = generate_normal(low_detail, strength=2.0, emboss_mode=True)
+        r, g, b = result.split()
+        self.assertLessEqual(r.getextrema()[1] - r.getextrema()[0], 4)
+        self.assertLessEqual(g.getextrema()[1] - g.getextrema()[0], 4)
+        self.assertGreaterEqual(b.getextrema()[0], 245)
+
 
 class TooltipPositionTests(unittest.TestCase):
     def test_compute_tooltip_position_uses_cursor_offset_when_room_exists(self) -> None:
@@ -1465,6 +1519,11 @@ class ParallaxOcclusionTests(unittest.TestCase):
         standard_mean = ImageStat.Stat(generate_parallax(detail, strength=1.35)).mean[0]
         pom_mean = ImageStat.Stat(generate_parallax_occlusion(detail, strength=1.35)).mean[0]
         self.assertLess(abs(pom_mean - standard_mean), 40.0)
+
+    def test_parallax_occlusion_flat_input_returns_mid_gray(self) -> None:
+        flat = Image.new("RGB", (16, 16), color=(128, 128, 128))
+        result = generate_parallax_occlusion(flat, strength=1.35)
+        self.assertEqual(result.getextrema(), (127, 127))
 
     def test_parallax_mode_occlusion_threads_through_preview_outputs(self) -> None:
         detail = _detailed_bright_image()

@@ -55,6 +55,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "complex_format": "msn",
     "env_mask_mode": "standard",
     "parallax_mode": "standard",
+    "render_profile": "auto",
     "emboss_mode": False,
     "include_diffuse": True,
     "include_normal": True,
@@ -188,6 +189,11 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         state["parallax_mode"] = "standard"
     else:
         state["parallax_mode"] = str(_GUI_STATE_DEFAULTS["parallax_mode"])
+    render_profile = str(raw.get("render_profile", state["render_profile"]) or state["render_profile"]).strip().lower()
+    if render_profile in {"auto", "vanilla", "community_shaders", "community shaders", "enb"}:
+        state["render_profile"] = "community_shaders" if render_profile == "community shaders" else render_profile
+    else:
+        state["render_profile"] = str(_GUI_STATE_DEFAULTS["render_profile"])
     state["normal_strength"] = _coerce_float(raw.get("normal_strength"), float(state["normal_strength"]), 0.5, 4.0)
     state["parallax_strength"] = _coerce_float(raw.get("parallax_strength"), float(state["parallax_strength"]), 0.5, 3.0)
     state["glow_threshold"] = _coerce_int(raw.get("glow_threshold"), int(state["glow_threshold"]), 0, 255)
@@ -690,6 +696,93 @@ def detect_workflow_profile(path: Path) -> str | None:
     return None
 
 
+_RENDER_PROFILE_PRESETS: dict[str, dict[str, str]] = {
+    # Baseline vanilla Skyrim SE-friendly defaults.
+    "vanilla": {
+        "complex_format": "msn",
+        "env_mask_mode": "standard",
+        "parallax_mode": "standard",
+    },
+    # Community Shaders generally expects packed _cm assets while keeping vanilla-friendly
+    # environment/parallax mode selections.
+    "community_shaders": {
+        "complex_format": "cm",
+        "env_mask_mode": "standard",
+        "parallax_mode": "standard",
+    },
+    # ENB profile favors complex env mask and POM height maps.
+    "enb": {
+        "complex_format": "msn",
+        "env_mask_mode": "complex",
+        "parallax_mode": "occlusion",
+    },
+}
+
+_RENDER_PROFILE_LABELS: dict[str, str] = {
+    "auto": "Auto-detect",
+    "vanilla": "Vanilla",
+    "community_shaders": "Community Shaders",
+    "enb": "ENB",
+}
+
+_RENDER_PROFILE_PATH_HINTS: dict[str, tuple[str, ...]] = {
+    "enb": ("enb", "enbseries"),
+    "community_shaders": ("communityshaders", "community_shaders", "community-shaders", "cs"),
+}
+
+
+def _normalize_render_profile(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in {"community shaders", "community_shaders"}:
+        return "community_shaders"
+    if normalized in {"auto", "vanilla", "community_shaders", "enb"}:
+        return normalized
+    return "auto"
+
+
+def recommend_render_profile(
+    input_path: Path | None,
+    *,
+    detected_role: str | None = None,
+    material_type: str = "general",
+    workflow_profile: str | None = None,
+) -> str:
+    """Recommend target rendering profile for map format/mode defaults."""
+    if detected_role == "complex_material_cm":
+        return "community_shaders"
+    if detected_role == "complex_material":
+        return "enb"
+    if workflow_profile == "interface" or material_type == "paper":
+        return "vanilla"
+    if input_path is not None:
+        combined = " ".join(input_path.parts).lower()
+        for profile, tokens in _RENDER_PROFILE_PATH_HINTS.items():
+            if any(token in combined for token in tokens):
+                return profile
+    return "vanilla"
+
+
+def resolve_render_profile_options(
+    selected_profile: str,
+    *,
+    recommended_profile: str | None = None,
+) -> dict[str, str]:
+    """Resolve effective output mode settings for a selected/auto profile."""
+    normalized_selected = _normalize_render_profile(selected_profile)
+    normalized_recommended = _normalize_render_profile(recommended_profile)
+    effective_profile = normalized_recommended if normalized_selected == "auto" else normalized_selected
+    if effective_profile == "auto":
+        effective_profile = "vanilla"
+    preset = _RENDER_PROFILE_PRESETS[effective_profile]
+    return {
+        "selected_profile": normalized_selected,
+        "effective_profile": effective_profile,
+        "complex_format": preset["complex_format"],
+        "env_mask_mode": preset["env_mask_mode"],
+        "parallax_mode": preset["parallax_mode"],
+    }
+
+
 def _adjust_recommendations_for_workflow_profile(
     recommended: dict[str, float | int], workflow_profile: str | None
 ) -> dict[str, float | int]:
@@ -922,6 +1015,11 @@ def generate_parallax_occlusion(source: Image.Image, strength: float = 1.35) -> 
         grazing angles with POM and are best reserved for strongly sculptured
         surfaces such as heavy carved stone.
     """
+    grayscale = ImageOps.grayscale(source)
+    source_min, source_max = grayscale.getextrema()
+    if (source_max - source_min) <= 2:
+        return Image.new("L", source.size, color=127)
+
     base_height = _prepare_height_map(source)
     pressure = _detail_pressure(source)
     resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.6)
@@ -944,10 +1042,14 @@ def generate_parallax_occlusion(source: Image.Image, strength: float = 1.35) -> 
 
     # Final light smooth pass removes any residual pixel-edge artefacts.
     final = contrasted.filter(ImageFilter.GaussianBlur(radius=0.65 + (pressure * 0.35)))
-    return ImageOps.autocontrast(final, cutoff=0)
+    normalized = ImageOps.autocontrast(final, cutoff=0)
+    if pressure < 0.1:
+        neutral = Image.new("L", source.size, color=127)
+        return Image.blend(neutral, normalized, alpha=0.7)
+    return normalized
 
 
-def _prepare_emboss_height_map(source: Image.Image) -> Image.Image:
+def _prepare_emboss_height_map(source: Image.Image, pressure: float | None = None) -> Image.Image:
     """Prepare a height map optimised for emboss-style normal generation.
 
     Unlike :func:`_prepare_height_map`, which builds smooth terrain gradients
@@ -959,6 +1061,13 @@ def _prepare_emboss_height_map(source: Image.Image) -> Image.Image:
     simulate physically embossed or debossed detail.
     """
     grayscale = ImageOps.grayscale(source).filter(ImageFilter.MedianFilter(size=3))
+    minimum, maximum = grayscale.getextrema()
+    neutral = Image.new("L", source.size, color=128)
+    if (maximum - minimum) <= 4:
+        return neutral
+    resolved_pressure = _detail_pressure(source) if pressure is None else pressure
+    if resolved_pressure < 0.08:
+        return neutral
     softened = grayscale.filter(ImageFilter.GaussianBlur(radius=0.45))
     # Fine and medium unsharp passes catch both thin glyph strokes and broader ornaments.
     fine = softened.filter(ImageFilter.UnsharpMask(radius=0.7, percent=360, threshold=2))
@@ -969,8 +1078,8 @@ def _prepare_emboss_height_map(source: Image.Image) -> Image.Image:
     reinforced = ImageChops.add(Image.blend(fine, medium, alpha=0.45), edge_energy, scale=1.35, offset=0)
     normalized = ImageOps.autocontrast(reinforced, cutoff=1)
     # Keep flat regions close to neutral to avoid "always bumpy" paper surfaces.
-    neutral = Image.new("L", source.size, color=128)
-    return Image.blend(neutral, normalized, alpha=0.78)
+    emboss_blend = _clamp(0.68 + (resolved_pressure * 0.18), 0.68, 0.86)
+    return Image.blend(neutral, normalized, alpha=emboss_blend)
 
 
 def generate_normal(source: Image.Image, strength: float = 2.0, directx: bool = True, emboss_mode: bool = False) -> Image.Image:
@@ -1002,7 +1111,9 @@ def generate_normal(source: Image.Image, strength: float = 2.0, directx: bool = 
         pressure = _detail_pressure(source)
         effective_strength = _clamp(strength * (1.0 - (pressure * 0.08)), 0.9, 4.2)
         # Slight adaptive blur keeps crisp embossed ridges while suppressing pixel chatter.
-        height_map = _prepare_emboss_height_map(source).filter(ImageFilter.GaussianBlur(radius=0.30 + (pressure * 0.30)))
+        height_map = _prepare_emboss_height_map(source, pressure=pressure).filter(
+            ImageFilter.GaussianBlur(radius=0.30 + (pressure * 0.30))
+        )
     else:
         pressure = _detail_pressure(source)
         resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.8)
@@ -2308,6 +2419,8 @@ if GUI_AVAILABLE:
             self.env_mask_mode_var = tk.StringVar(value="standard")
             self.emboss_mode_var = tk.BooleanVar(value=False)
             self.parallax_mode_var = tk.StringVar(value="standard")
+            self.render_profile_var = tk.StringVar(value="auto")
+            self.render_profile_suggestion_var = tk.StringVar(value="Render profile recommendation: Auto-detect (Vanilla)")
             self.auto_suggestions_var = tk.BooleanVar(value=True)
             self.auto_normal_suggestion_var = tk.BooleanVar(value=True)
             self.auto_parallax_suggestion_var = tk.BooleanVar(value=True)
@@ -2457,8 +2570,35 @@ if GUI_AVAILABLE:
             _auto_sugg_check.grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=(6, 2))
             self._add_tooltip(_auto_sugg_check, "🤖 Let the AI™ (actually just math) pick slider values.\nUncheck if you think YOU know better than the algorithm. Spoiler: maybe you do.")
 
+            _render_profile_label = ttk.Label(options_frame, text="Target renderer")
+            _render_profile_label.grid(row=3, column=0, sticky=tk.W, pady=8)
+            self._add_tooltip(
+                _render_profile_label,
+                "🎯 Select target renderer preset.\n"
+                "Auto-detect suggests the best default mode set for your texture path/content.",
+            )
+            _render_profile_combo = ttk.Combobox(
+                options_frame,
+                textvariable=self.render_profile_var,
+                values=("auto", "vanilla", "community_shaders", "enb"),
+                state="readonly",
+                width=20,
+            )
+            _render_profile_combo.grid(row=3, column=1, sticky=tk.W)
+            _render_profile_combo.bind("<<ComboboxSelected>>", self._on_render_profile_changed)
+            self._add_tooltip(
+                _render_profile_combo,
+                "🎯 auto = detect and suggest/apply renderer defaults.\n"
+                "vanilla = safest defaults; community_shaders = _cm + standard mask/parallax; enb = complex mask + POM.",
+            )
+            ttk.Label(
+                options_frame,
+                textvariable=self.render_profile_suggestion_var,
+                foreground="gray",
+            ).grid(row=3, column=2, columnspan=3, sticky=tk.W, padx=(4, 0))
+
             _complex_fmt_label = ttk.Label(options_frame, text="Complex naming")
-            _complex_fmt_label.grid(row=3, column=0, sticky=tk.W, pady=8)
+            _complex_fmt_label.grid(row=4, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_complex_fmt_label, "🏷 Output filename suffix for complex material.\n'msn' = _msn.dds (ENB normal+specular), 'cm' = _cm.dds (packed AO/rough/metal/height-spec).")
             complex_format = ttk.Combobox(
                 options_frame,
@@ -2467,11 +2607,11 @@ if GUI_AVAILABLE:
                 state="readonly",
                 width=20,
             )
-            complex_format.grid(row=3, column=1, sticky=tk.W)
+            complex_format.grid(row=4, column=1, sticky=tk.W)
             self._add_tooltip(complex_format, "🏷 Choose 'msn' for RGBA normal+specular, 'cm' for packed AO/rough/metal/height-spec.\nWhen in doubt, use the format your target shader expects.")
 
             _env_mode_row = ttk.Frame(options_frame)
-            _env_mode_row.grid(row=3, column=2, columnspan=2, sticky=tk.W, padx=(20, 4), pady=8)
+            _env_mode_row.grid(row=4, column=2, columnspan=2, sticky=tk.W, padx=(20, 4), pady=8)
             _env_mode_label = ttk.Label(_env_mode_row, text="Env mask mode")
             _env_mode_label.pack(side=tk.LEFT)
             self._add_tooltip(_env_mode_label, "🌍 How to encode the environment mask.\n'standard' = vanilla Skyrim. 'complex' = ENBSeries channel-packed RGBA. Choose wisely.")
@@ -2488,88 +2628,88 @@ if GUI_AVAILABLE:
                 options_frame,
                 text="standard = vanilla Skyrim SE  |  complex = ENBSeries RGBA",
                 foreground="gray",
-            ).grid(row=3, column=4, sticky=tk.W, padx=(4, 0))
+            ).grid(row=4, column=4, sticky=tk.W, padx=(4, 0))
 
             _normal_label = ttk.Label(options_frame, text="Normal strength")
-            _normal_label.grid(row=4, column=0, sticky=tk.W, pady=8)
+            _normal_label.grid(row=5, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_normal_label, "💪 Controls normal-map intensity.\nHigher = sharper fake detail. Lower = smooth potato mode.")
             self.normal_scale = ttk.Scale(options_frame, from_=0.5, to=4.0, variable=self.normal_strength_var, command=lambda _: self._on_slider_changed())
-            self.normal_scale.grid(row=4, column=1, columnspan=2, sticky=tk.EW)
+            self.normal_scale.grid(row=5, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.normal_scale, "💪 Drag right for epic bumps, left for subtle detail.\nLive value is shown next to the slider so you can stop guessing.")
             self.normal_strength_display_label = ttk.Label(options_frame, textvariable=self.normal_strength_display_var)
-            self.normal_strength_display_label.grid(row=4, column=3, sticky=tk.W, padx=8)
+            self.normal_strength_display_label.grid(row=5, column=3, sticky=tk.W, padx=8)
             self.auto_normal_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_normal_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_normal_check.grid(row=4, column=4, sticky=tk.W)
+            self.auto_normal_check.grid(row=5, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_normal_check, "🤖 Let the app analyse the image and choose this value.\nUncheck to manually control, as the control freak you truly are.")
 
             _parallax_label = ttk.Label(options_frame, text="Parallax strength")
-            _parallax_label.grid(row=5, column=0, sticky=tk.W, pady=8)
+            _parallax_label.grid(row=6, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_parallax_label, "🏔 Controls parallax depth contrast.\nToo high and your pebble becomes a canyon. Too low and your canyon becomes toast.")
             self.parallax_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.parallax_strength_var, command=lambda _: self._on_slider_changed())
-            self.parallax_scale.grid(row=5, column=1, columnspan=2, sticky=tk.EW)
+            self.parallax_scale.grid(row=6, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.parallax_scale, "🏔 Slide right for deeper depth illusion, left for subtle relief.\nYes, this can absolutely make stones look dramatic.")
             self.parallax_strength_display_label = ttk.Label(options_frame, textvariable=self.parallax_strength_display_var)
-            self.parallax_strength_display_label.grid(row=5, column=3, sticky=tk.W, padx=8)
+            self.parallax_strength_display_label.grid(row=6, column=3, sticky=tk.W, padx=8)
             self.auto_parallax_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_parallax_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_parallax_check.grid(row=5, column=4, sticky=tk.W)
+            self.auto_parallax_check.grid(row=6, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_parallax_check, "🤖 Automatic parallax strength suggestion.\nBased on actual image analysis, not a horoscope.")
 
             _glow_label = ttk.Label(options_frame, text="Glow threshold")
-            _glow_label.grid(row=6, column=0, sticky=tk.W, pady=8)
+            _glow_label.grid(row=7, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_glow_label, "💡 Brightness cutoff for glow.\nLower = more glow. Higher = only brightest bits glow like tiny supernovas.")
             self.glow_scale = ttk.Scale(options_frame, from_=0, to=255, variable=self.glow_threshold_var, command=lambda _: self._on_slider_changed())
-            self.glow_scale.grid(row=6, column=1, columnspan=2, sticky=tk.EW)
+            self.glow_scale.grid(row=7, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.glow_scale, "💡 0 means everything glows like a rave. 255 means almost nothing glows.\nUse the live value display to tune precisely.")
             self.glow_threshold_display_label = ttk.Label(options_frame, textvariable=self.glow_threshold_display_var)
-            self.glow_threshold_display_label.grid(row=6, column=3, sticky=tk.W, padx=8)
+            self.glow_threshold_display_label.grid(row=7, column=3, sticky=tk.W, padx=8)
             self.auto_glow_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_glow_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_glow_check.grid(row=6, column=4, sticky=tk.W)
+            self.auto_glow_check.grid(row=7, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_glow_check, "🤖 Auto-detect the ideal glow threshold.\nBased on luminance analysis. The computer is trying its best.")
 
             _env_mask_label = ttk.Label(options_frame, text="Environment mask strength")
-            _env_mask_label.grid(row=7, column=0, sticky=tk.W, pady=8)
+            _env_mask_label.grid(row=8, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_env_mask_label, "🪞 Controls environment-mask contrast.\nHigher = stronger shiny-vs-matte separation. Great for dramatic materials.")
             self.environment_mask_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.environment_mask_strength_var, command=lambda _: self._on_slider_changed())
-            self.environment_mask_scale.grid(row=7, column=1, columnspan=2, sticky=tk.EW)
+            self.environment_mask_scale.grid(row=8, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.environment_mask_scale, "🪞 Slide right for stronger reflection contrast.\nSlide left for chill, less dramatic materials.")
             self.environment_mask_strength_display_label = ttk.Label(options_frame, textvariable=self.environment_mask_strength_display_var)
-            self.environment_mask_strength_display_label.grid(row=7, column=3, sticky=tk.W, padx=8)
+            self.environment_mask_strength_display_label.grid(row=8, column=3, sticky=tk.W, padx=8)
             self.auto_environment_mask_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_environment_mask_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_environment_mask_check.grid(row=7, column=4, sticky=tk.W)
+            self.auto_environment_mask_check.grid(row=8, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_environment_mask_check, "🤖 Auto-select environment mask strength.\nThe machine will judge your texture's reflective potential.")
 
             _complex_label = ttk.Label(options_frame, text="Complex strength")
-            _complex_label.grid(row=8, column=0, sticky=tk.W, pady=8)
+            _complex_label.grid(row=9, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_complex_label, "🔮 Controls complex-material contrast.\nHigher = punchier ENB material response. Lower = subtle, civilized vibes.")
             self.complex_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.complex_strength_var, command=lambda _: self._on_slider_changed())
-            self.complex_scale.grid(row=8, column=1, columnspan=2, sticky=tk.EW)
+            self.complex_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.complex_scale, "🔮 Right = louder material definition.\nLeft = quieter output for restrained legends.")
             self.complex_strength_display_label = ttk.Label(options_frame, textvariable=self.complex_strength_display_var)
-            self.complex_strength_display_label.grid(row=8, column=3, sticky=tk.W, padx=8)
+            self.complex_strength_display_label.grid(row=9, column=3, sticky=tk.W, padx=8)
             self.auto_complex_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_complex_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_complex_check.grid(row=8, column=4, sticky=tk.W)
+            self.auto_complex_check.grid(row=9, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_complex_check, "🤖 Auto-set complex strength. Let the algorithm\nscrutinise your texture's material complexity.")
 
             _specular_label = ttk.Label(options_frame, text="Specular strength (_msn alpha)")
-            _specular_label.grid(row=9, column=0, sticky=tk.W, pady=8)
+            _specular_label.grid(row=10, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_specular_label, "✨ Controls specular highlight intensity in _msn alpha.\nHigher = shinier. Lower = dusty realism.")
             self.specular_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.specular_strength_var, command=lambda _: self._on_slider_changed())
-            self.specular_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
+            self.specular_scale.grid(row=10, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.specular_scale, "✨ Turn it up for glorious shine, down for ancient weathered stone.\nLive value shown beside slider.")
             self.specular_strength_display_label = ttk.Label(options_frame, textvariable=self.specular_strength_display_var)
-            self.specular_strength_display_label.grid(row=9, column=3, sticky=tk.W, padx=8)
+            self.specular_strength_display_label.grid(row=10, column=3, sticky=tk.W, padx=8)
             self.auto_specular_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_specular_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_specular_check.grid(row=9, column=4, sticky=tk.W)
+            self.auto_specular_check.grid(row=10, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_specular_check, "🤖 Auto-set specular strength. The AI ponders how shiny\nyour texture DESERVES to be.")
 
-            # --- Emboss depth + parallax mode options (row 10) ---
+            # --- Emboss depth + parallax mode options ---
             _emboss_check = ttk.Checkbutton(
                 options_frame,
                 text="Emboss depth  (books, cards, scrolls — raises printed/artwork edges in normal map)",
                 variable=self.emboss_mode_var,
                 command=self._on_emboss_mode_changed,
             )
-            _emboss_check.grid(row=10, column=0, columnspan=4, sticky=tk.W, pady=(8, 2))
+            _emboss_check.grid(row=11, column=0, columnspan=4, sticky=tk.W, pady=(8, 2))
             self._add_tooltip(
                 _emboss_check,
                 "📜 Emboss mode generates normals from edge ridges instead of smooth gradients.\n"
@@ -2578,7 +2718,7 @@ if GUI_AVAILABLE:
             )
 
             _parallax_mode_label = ttk.Label(options_frame, text="Parallax mode")
-            _parallax_mode_label.grid(row=11, column=0, sticky=tk.W, pady=(2, 8))
+            _parallax_mode_label.grid(row=12, column=0, sticky=tk.W, pady=(2, 8))
             self._add_tooltip(
                 _parallax_mode_label,
                 "🏔 Heightmap style for _p.dds output.\n"
@@ -2592,7 +2732,7 @@ if GUI_AVAILABLE:
                 state="readonly",
                 width=24,
             )
-            _parallax_mode_combo.grid(row=11, column=1, columnspan=2, sticky=tk.W)
+            _parallax_mode_combo.grid(row=12, column=1, columnspan=2, sticky=tk.W)
             _parallax_mode_combo.bind("<<ComboboxSelected>>", self._on_parallax_mode_changed)
             self._add_tooltip(
                 _parallax_mode_combo,
@@ -2604,7 +2744,7 @@ if GUI_AVAILABLE:
                 options_frame,
                 text="standard = vanilla  |  occlusion = ENBSeries POM",
                 foreground="gray",
-            ).grid(row=11, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
+            ).grid(row=12, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
 
             options_frame.columnconfigure(2, weight=1)
             self._update_slider_auto_states()
@@ -2861,6 +3001,7 @@ if GUI_AVAILABLE:
             self.complex_format_var.set(str(state["complex_format"]))
             self.env_mask_mode_var.set(str(state["env_mask_mode"]))
             self.parallax_mode_var.set(str(state["parallax_mode"]))
+            self.render_profile_var.set(str(state["render_profile"]))
             self.emboss_mode_var.set(bool(state["emboss_mode"]))
             self.include_diffuse_var.set(bool(state["include_diffuse"]))
             self.include_normal_var.set(bool(state["include_normal"]))
@@ -2893,6 +3034,7 @@ if GUI_AVAILABLE:
                 "complex_format": self.complex_format_var.get(),
                 "env_mask_mode": self.env_mask_mode_var.get(),
                 "parallax_mode": self.parallax_mode_var.get(),
+                "render_profile": _normalize_render_profile(self.render_profile_var.get()),
                 "emboss_mode": self.emboss_mode_var.get(),
                 "include_diffuse": self.include_diffuse_var.get(),
                 "include_normal": self.include_normal_var.get(),
@@ -3056,6 +3198,8 @@ if GUI_AVAILABLE:
                 self.last_input_browse_dir = path if path.is_dir() else path.parent
                 self.current_preview_index = 0
                 self._set_preview_source(0, apply_recommendations=True)
+                if self.render_profile_var.get() != "auto":
+                    self._apply_render_profile_modes(self.render_profile_var.get())
                 if not self.use_custom_output_var.get():
                     self.output_var.set(str(self._default_output_dir_for_path(path)))
                 preview_path = self.selected_inputs[self.current_preview_index]
@@ -3334,6 +3478,60 @@ if GUI_AVAILABLE:
                 self.status_var.set("Emboss depth mode disabled; using standard normal-map generation.")
             self._request_preview_refresh()
 
+        def _current_preview_path(self) -> Path | None:
+            if not self.selected_inputs:
+                return None
+            return self.selected_inputs[max(0, min(self.current_preview_index, len(self.selected_inputs) - 1))]
+
+        def _recommended_render_profile_for_preview(self, preview_path: Path | None) -> str:
+            if preview_path is None:
+                return "vanilla"
+            role_info = identify_skyrim_texture_role(preview_path)
+            workflow_profile = detect_workflow_profile(preview_path)
+            material_type = classify_material_type(preview_path)
+            return recommend_render_profile(
+                preview_path,
+                detected_role=role_info["role"] if role_info is not None else None,
+                material_type=material_type,
+                workflow_profile=workflow_profile,
+            )
+
+        def _apply_render_profile_modes(self, selected_profile: str, recommended_profile: str | None = None) -> str:
+            resolved = resolve_render_profile_options(selected_profile, recommended_profile=recommended_profile)
+            self.complex_format_var.set(resolved["complex_format"])
+            self.env_mask_mode_var.set(resolved["env_mask_mode"])
+            self.parallax_mode_var.set(
+                "occlusion (ENB/POM)" if resolved["parallax_mode"] == "occlusion" else "standard"
+            )
+            return resolved["effective_profile"]
+
+        def _update_render_profile_recommendation(self, *, apply_auto: bool) -> str:
+            preview_path = self._current_preview_path()
+            recommended_profile = self._recommended_render_profile_for_preview(preview_path)
+            label = _RENDER_PROFILE_LABELS.get(recommended_profile, recommended_profile.replace("_", " ").title())
+            if self.render_profile_var.get() == "auto":
+                self.render_profile_suggestion_var.set(f"Render profile recommendation: Auto-detect ({label})")
+                if apply_auto:
+                    effective = self._apply_render_profile_modes("auto", recommended_profile=recommended_profile)
+                    if effective == "enb":
+                        self.emboss_mode_var.set(False)
+            else:
+                self.render_profile_suggestion_var.set(f"Render profile recommendation: {label}")
+            return recommended_profile
+
+        def _on_render_profile_changed(self, _event: object | None = None) -> None:
+            selected = _normalize_render_profile(self.render_profile_var.get())
+            self.render_profile_var.set(selected)
+            recommended_profile = self._update_render_profile_recommendation(apply_auto=False)
+            effective = self._apply_render_profile_modes(selected, recommended_profile=recommended_profile)
+            if selected == "auto":
+                self.status_var.set(
+                    f"Render profile set to auto-detect; using {_RENDER_PROFILE_LABELS.get(effective, effective)} recommendations."
+                )
+            else:
+                self.status_var.set(f"Render profile set to {_RENDER_PROFILE_LABELS.get(effective, effective)}.")
+            self._request_preview_refresh()
+
         def _on_parallax_mode_changed(self, _event: object | None = None) -> None:
             if "occlusion" in self.parallax_mode_var.get():
                 self.status_var.set("Parallax mode: occlusion (ENBSeries POM-optimized heightmap).")
@@ -3395,6 +3593,7 @@ if GUI_AVAILABLE:
             self.environment_mask_strength_var.set(float(resolved["environment_mask_strength"]))
             self.complex_strength_var.set(float(resolved["complex_strength"]))
             self.specular_strength_var.set(float(resolved["specular_strength"]))
+            self._update_render_profile_recommendation(apply_auto=True)
             # Auto-suggest emboss mode for paper/book/card/scroll textures.
             if preview_path is not None:
                 material_type = classify_material_type(preview_path)
@@ -3450,6 +3649,8 @@ if GUI_AVAILABLE:
                 self.preview_source_name_var.set(preview_path.name)
             if apply_recommendations:
                 self._apply_recommended_settings()
+            else:
+                self._update_render_profile_recommendation(apply_auto=self.render_profile_var.get() == "auto")
             self._update_preview_navigation_state()
 
         def _set_preview_source_by_path(self, path: Path) -> None:
