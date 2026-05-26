@@ -13,7 +13,9 @@ from generate_textures import (
     _run_cli,
     _normalize_gui_state,
     analyze_image_content,
+    auto_patch_related_nifs_for_texture,
     apply_recommendations_by_auto_flags,
+    build_nif_patch_options_for_generated_outputs,
     build_complex_preview_image,
     build_complex_output_path,
     build_environment_mask_output_path,
@@ -23,6 +25,7 @@ from generate_textures import (
     detect_workflow_profile,
     detect_mod_manager_context,
     enforce_skyrim_output_profile,
+    find_related_nif_files_for_texture,
     build_glow_output_path,
     build_normal_output_path,
     build_output_paths,
@@ -1037,9 +1040,11 @@ class GenerateTexturesTests(unittest.TestCase):
             temp_path = Path(temp_dir)
             instance_root = temp_path / "MO2"
             textures_dir = instance_root / "mods" / "Texture Pack" / "textures"
+            meshes_dir = instance_root / "mods" / "Texture Pack" / "meshes"
             tool_dir = instance_root / "mods" / "Skyrim Texture Generator"
             profile_dir = instance_root / "profiles" / "Default"
             textures_dir.mkdir(parents=True)
+            meshes_dir.mkdir(parents=True)
             tool_dir.mkdir(parents=True)
             profile_dir.mkdir(parents=True)
             (profile_dir / "modlist.txt").write_text("+Texture Pack\n-Disabled Mod\n", encoding="utf-8")
@@ -1053,6 +1058,7 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(context.profile_name, "Default")
             self.assertEqual(context.loaded_mods, ("Texture Pack",))
             self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
+            self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
             self.assertEqual(context.output_dir, (instance_root / "overwrite"))
 
     def test_detect_mod_manager_context_reads_vortex_profile_and_staging_dirs(self) -> None:
@@ -1065,8 +1071,10 @@ class GenerateTexturesTests(unittest.TestCase):
 
             staging_root = temp_path / "Vortex Mods" / "skyrimse"
             textures_dir = staging_root / "Texture Pack" / "textures"
+            meshes_dir = staging_root / "Texture Pack" / "meshes"
             tool_dir = staging_root / "Skyrim Texture Generator"
             textures_dir.mkdir(parents=True)
+            meshes_dir.mkdir(parents=True)
             tool_dir.mkdir(parents=True)
 
             context = detect_mod_manager_context(
@@ -1081,8 +1089,84 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(context.profile_name, "Main")
             self.assertEqual(context.loaded_mods, ("Texture Pack",))
             self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
+            self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
             self.assertEqual(context.staging_root, staging_root.resolve())
             self.assertEqual(context.output_dir, (tool_dir / "generated_textures").resolve())
+
+    def test_find_related_nif_files_for_texture_matches_family_stem(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            nif_path = temp_path / "meshes" / "sign01.nif"
+            nif_path.parent.mkdir(parents=True)
+            nif_path.write_bytes(b"")
+            source = temp_path / "textures" / "sign01_d.dds"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"")
+
+            class _FakeInfo:
+                def __init__(self, texture_paths: dict[int, str]) -> None:
+                    self.texture_paths = texture_paths
+
+            related = find_related_nif_files_for_texture(
+                source,
+                candidate_roots=(nif_path.parent,),
+                nif_info_provider=lambda _: [_FakeInfo({0: "textures\\sign01.dds"})],
+            )
+
+            self.assertEqual(related, (nif_path.resolve(),))
+
+    def test_build_nif_patch_options_for_generated_outputs_prefers_msn_for_complex_parallax(self) -> None:
+        outputs = {
+            "parallax": Path("/tmp/textures/sign01_p.dds"),
+            "complex_material": Path("/tmp/textures/sign01_msn.dds"),
+            "environment_mask": Path("/tmp/textures/sign01_m.dds"),
+        }
+
+        options = build_nif_patch_options_for_generated_outputs(
+            outputs,
+            complex_format="msn",
+            env_mask_mode="complex",
+            parallax_mode="occlusion",
+            parallax_scale=4.0,
+        )
+
+        self.assertTrue(options.enable_parallax)
+        self.assertTrue(options.enable_pom)
+        self.assertTrue(options.enable_env_mapping)
+        self.assertTrue(options.force_shader_type_3)
+        self.assertEqual(options.normal_texture_path, "textures\\sign01_msn.dds")
+        self.assertEqual(options.parallax_texture_path, "textures\\sign01_p.dds")
+        self.assertEqual(options.env_mask_texture_path, "textures\\sign01_m.dds")
+        self.assertEqual(options.parallax_scale, 4.0)
+
+    def test_auto_patch_related_nifs_for_texture_patches_all_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source = temp_path / "textures" / "sign01.dds"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"")
+            nif_path = temp_path / "meshes" / "sign01.nif"
+            nif_path.parent.mkdir(parents=True)
+            nif_path.write_bytes(b"")
+            outputs = {"parallax": temp_path / "textures" / "sign01_p.dds"}
+            outputs["parallax"].write_bytes(b"")
+
+            with mock.patch("generate_textures.find_related_nif_files_for_texture", return_value=(nif_path,)), mock.patch(
+                "generate_textures.patch_nif", return_value=mock.Mock(success=True)
+            ) as patch_nif_mock:
+                results = auto_patch_related_nifs_for_texture(
+                    source,
+                    outputs,
+                    output_dir=None,
+                    manager_context=None,
+                    complex_format="msn",
+                    env_mask_mode="standard",
+                    parallax_mode="standard",
+                    parallax_scale=2.0,
+                )
+
+            self.assertEqual(len(results), 1)
+            patch_nif_mock.assert_called_once()
 
     def test_run_with_options_requires_at_least_one_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
