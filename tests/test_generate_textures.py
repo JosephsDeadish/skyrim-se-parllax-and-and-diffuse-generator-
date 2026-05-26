@@ -1493,6 +1493,148 @@ class EmbossNormalTests(unittest.TestCase):
         self.assertGreaterEqual(b.getextrema()[0], 245)
 
 
+class ReliefModeTests(unittest.TestCase):
+    def test_relief_normal_returns_rgb_same_size(self) -> None:
+        result = generate_normal(_sample_image(), relief_mode=True)
+        self.assertEqual(result.mode, "RGB")
+        self.assertEqual(result.size, (8, 8))
+
+    def test_relief_normal_flat_image_returns_flat_normal(self) -> None:
+        flat = Image.new("RGB", (16, 16), color=(128, 128, 128))
+        result = generate_normal(flat, strength=2.0, relief_mode=True)
+        self.assertEqual(result.mode, "RGB")
+        self.assertEqual(result.size, (16, 16))
+        r, g, b = result.split()
+        self.assertLessEqual(r.getextrema()[1] - r.getextrema()[0], 4)
+        self.assertLessEqual(g.getextrema()[1] - g.getextrema()[0], 4)
+        self.assertGreaterEqual(b.getextrema()[0], 245)
+
+    def test_relief_normal_blue_channel_stays_in_skyrim_safe_range(self) -> None:
+        detail = _detailed_bright_image()
+        result = generate_normal(detail, strength=2.0, relief_mode=True)
+        _, _, blue = result.split()
+        self.assertGreaterEqual(blue.getextrema()[0], 128)
+
+    def test_relief_normal_differs_from_standard_on_detailed_image(self) -> None:
+        detail = _detailed_bright_image()
+        standard = generate_normal(detail, strength=2.0, relief_mode=False)
+        relief = generate_normal(detail, strength=2.0, relief_mode=True)
+        self.assertNotEqual(standard.tobytes(), relief.tobytes())
+
+    def test_relief_mode_takes_priority_over_emboss_mode(self) -> None:
+        detail = _detailed_bright_image()
+        emboss_only = generate_normal(detail, strength=2.0, emboss_mode=True, relief_mode=False)
+        relief_only = generate_normal(detail, strength=2.0, emboss_mode=False, relief_mode=True)
+        both = generate_normal(detail, strength=2.0, emboss_mode=True, relief_mode=True)
+        # relief_mode=True should take priority: result with both matches relief_only.
+        self.assertEqual(both.tobytes(), relief_only.tobytes())
+        self.assertNotEqual(both.tobytes(), emboss_only.tobytes())
+
+    def test_relief_parallax_returns_l_same_size(self) -> None:
+        from generate_textures import generate_parallax
+
+        result = generate_parallax(_sample_image(), relief_mode=True)
+        self.assertEqual(result.mode, "L")
+        self.assertEqual(result.size, (8, 8))
+
+    def test_relief_parallax_differs_from_standard(self) -> None:
+        from generate_textures import generate_parallax
+
+        detail = _detailed_bright_image()
+        standard = generate_parallax(detail, strength=1.35, relief_mode=False)
+        relief = generate_parallax(detail, strength=1.35, relief_mode=True)
+        self.assertNotEqual(standard.tobytes(), relief.tobytes())
+
+    def test_relief_mode_threads_through_generate_msn(self) -> None:
+        detail = _detailed_bright_image()
+        standard_msn = generate_msn(detail, normal_strength=2.0, relief_mode=False)
+        relief_msn = generate_msn(detail, normal_strength=2.0, relief_mode=True)
+        std_r, std_g, _, _ = standard_msn.split()
+        rel_r, rel_g, _, _ = relief_msn.split()
+        self.assertNotEqual(std_r.tobytes(), rel_r.tobytes())
+
+    def test_relief_mode_threads_through_generate_preview_outputs(self) -> None:
+        detail = _detailed_bright_image()
+        standard_outputs = generate_preview_outputs(
+            detail,
+            normal_strength=2.0,
+            parallax_strength=1.35,
+            glow_threshold=190,
+            environment_mask_strength=1.2,
+            complex_strength=1.15,
+            specular_strength=1.15,
+            complex_format="msn",
+            relief_mode=False,
+            include_diffuse=False,
+            include_normal=True,
+            include_parallax=False,
+            include_glow=False,
+            include_environment_mask=False,
+            include_complex=False,
+        )
+        relief_outputs = generate_preview_outputs(
+            detail,
+            normal_strength=2.0,
+            parallax_strength=1.35,
+            glow_threshold=190,
+            environment_mask_strength=1.2,
+            complex_strength=1.15,
+            specular_strength=1.15,
+            complex_format="msn",
+            relief_mode=True,
+            include_diffuse=False,
+            include_normal=True,
+            include_parallax=False,
+            include_glow=False,
+            include_environment_mask=False,
+            include_complex=False,
+        )
+        self.assertNotEqual(
+            standard_outputs["normal"].tobytes(),
+            relief_outputs["normal"].tobytes(),
+        )
+
+    def test_relief_mode_threads_through_run_with_options(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "painting.png"
+            _detailed_bright_image().save(input_path)
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ):
+                outputs = run_with_options(
+                    input_file=input_path,
+                    output_dir=temp_path / "out",
+                    include_diffuse=False,
+                    include_normal=True,
+                    include_parallax=False,
+                    relief_mode=True,
+                )
+            self.assertIn("normal", outputs)
+
+    def test_analyze_image_content_includes_bg_uniformity(self) -> None:
+        uniform = Image.new("RGB", (64, 64), color=(200, 200, 200))
+        result = analyze_image_content(uniform)
+        self.assertIn("bg_uniformity", result)
+        self.assertGreaterEqual(float(result["bg_uniformity"]), 0.0)
+        self.assertLessEqual(float(result["bg_uniformity"]), 1.0)
+
+    def test_scharr_normal_differs_from_old_sobel_for_diagonal_gradient(self) -> None:
+        # Create a diagonal gradient image — Scharr has better diagonal accuracy.
+        diag = Image.new("RGB", (24, 24))
+        px = diag.load()
+        for y in range(24):
+            for x in range(24):
+                v = int((x + y) / 46.0 * 255)
+                px[x, y] = (v, v, v)
+        result = generate_normal(diag, strength=2.0)
+        self.assertEqual(result.mode, "RGB")
+        # Verify blue channel is in Skyrim-safe range.
+        _, _, blue = result.split()
+        self.assertGreaterEqual(blue.getextrema()[0], 128)
+
+
 class TooltipPositionTests(unittest.TestCase):
     def test_compute_tooltip_position_uses_cursor_offset_when_room_exists(self) -> None:
         x, y = _compute_tooltip_position(

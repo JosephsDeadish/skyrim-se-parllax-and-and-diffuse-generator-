@@ -57,6 +57,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "parallax_mode": "standard",
     "render_profile": "auto",
     "emboss_mode": False,
+    "relief_mode": False,
     "include_diffuse": True,
     "include_normal": True,
     "include_parallax": True,
@@ -165,6 +166,7 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         "dark_mode",
         "show_batch_preview",
         "emboss_mode",
+        "relief_mode",
         "include_diffuse",
         "include_normal",
         "include_parallax",
@@ -519,6 +521,13 @@ def analyze_image_content(source: Image.Image) -> dict[str, float]:
     color_variance = float(sum(rgb_stats.stddev) / 3.0)
     megapixels = float((source.width * source.height) / 1_000_000.0)
 
+    # Background uniformity: downscale to 64×64 and measure std-dev of very-blurred image.
+    # Low std-dev over blurred = large flat background areas → painting/artwork-like composition.
+    _thumb = grayscale.copy()
+    _thumb.thumbnail((64, 64), Image.Resampling.BILINEAR)
+    _thumb_blur = _thumb.filter(ImageFilter.GaussianBlur(radius=4.0))
+    bg_uniformity = float(max(0.0, 60.0 - ImageStat.Stat(_thumb_blur).stddev[0]) / 60.0)
+
     return {
         "brightness": float(grayscale_stats.mean[0]),
         "contrast": float(grayscale_stats.stddev[0]),
@@ -539,6 +548,7 @@ def analyze_image_content(source: Image.Image) -> dict[str, float]:
         "bright_cluster_ratio": float(bright_cluster_ratio),
         "midtone_ratio": float(midtone_ratio),
         "p90_luma": float(p90_luma),
+        "bg_uniformity": float(bg_uniformity),
     }
 
 
@@ -1014,8 +1024,27 @@ def generate_diffuse(source: Image.Image) -> Image.Image:
     return ImageOps.autocontrast(source.convert("RGB"), cutoff=1)
 
 
-def generate_parallax(source: Image.Image, strength: float = 1.35) -> Image.Image:
+def generate_parallax(source: Image.Image, strength: float = 1.35, relief_mode: bool = False) -> Image.Image:
+    """Generate a parallax height map (_p.dds).
+
+    Parameters
+    ----------
+    source :
+        Input diffuse texture.
+    strength :
+        Depth/contrast intensity.
+    relief_mode :
+        When ``True``, use luminosity-as-height so that bright subjects
+        (paintings, signs, murals) appear to protrude from the surface in
+        game.  Combine with ``relief_mode=True`` in :func:`generate_normal`
+        for a full bas-relief effect.
+    """
     pressure = _detail_pressure(source)
+    if relief_mode:
+        height_map = _prepare_relief_height_map(source, pressure=pressure)
+        smoothed = height_map.filter(ImageFilter.GaussianBlur(radius=0.9))
+        contrasted = ImageEnhance.Contrast(smoothed).enhance(_clamp(strength * (1.0 - (pressure * 0.12)), 0.8, 2.4))
+        return ImageOps.autocontrast(contrasted, cutoff=1)
     height_map = _prepare_height_map(source)
     softened = height_map.filter(ImageFilter.GaussianBlur(radius=1.2))
     micro_detail = ImageChops.subtract(
@@ -1120,7 +1149,59 @@ def _prepare_emboss_height_map(source: Image.Image, pressure: float | None = Non
     return Image.blend(neutral, normalized, alpha=emboss_blend)
 
 
-def generate_normal(source: Image.Image, strength: float = 2.0, directx: bool = True, emboss_mode: bool = False) -> Image.Image:
+def _prepare_relief_height_map(source: Image.Image, pressure: float | None = None) -> Image.Image:
+    """Prepare a luminosity-as-height map for bas-relief / pop-out normal generation.
+
+    Unlike terrain height maps that encode broad surface gradients, and emboss
+    maps that exaggerate printed edges, this function treats the image's own
+    luminosity as the height field: bright subjects protrude toward the viewer
+    while dark areas recede.  The result makes paintings, murals, signs, and
+    decorative plaques appear as if they are physically extruded from the wall
+    surface — a bas-relief effect that reads correctly under Skyrim's parallax
+    and normal-map shading.
+
+    Parameters
+    ----------
+    source :
+        Input diffuse texture (painting, mural, sign, card, etc.).
+    pressure :
+        Pre-computed detail pressure scalar; computed if not supplied.
+    """
+    grayscale = ImageOps.grayscale(source)
+    minimum, maximum = grayscale.getextrema()
+    if (maximum - minimum) <= 4:
+        return Image.new("L", source.size, color=128)
+    resolved_pressure = _detail_pressure(source) if pressure is None else pressure
+
+    # Use full luminosity range as height — subjects that are brighter than the
+    # background will naturally protrude.  A gentle bilateral-like blur (median
+    # then Gaussian) preserves subject silhouettes while smoothing in-region noise.
+    smoothed = grayscale.filter(ImageFilter.MedianFilter(size=3)).filter(
+        ImageFilter.GaussianBlur(radius=0.8 + (resolved_pressure * 0.6))
+    )
+    # Subject-edge sharpening: DoG emphasises subject/background boundaries so
+    # the transition from protrusion to recess is crisp.
+    dog = ImageChops.subtract(
+        smoothed,
+        smoothed.filter(ImageFilter.GaussianBlur(radius=3.5)),
+        scale=1.0,
+        offset=128,
+    )
+    ridge = ImageEnhance.Contrast(dog).enhance(1.5)
+    blended = ImageChops.add(smoothed, ridge, scale=1.8, offset=-40)
+    normalized = ImageOps.autocontrast(blended, cutoff=1)
+    # Blend toward neutral to avoid punching through very flat regions.
+    relief_blend = _clamp(0.72 + (resolved_pressure * 0.14), 0.72, 0.86)
+    return Image.blend(Image.new("L", source.size, color=128), normalized, alpha=relief_blend)
+
+
+def generate_normal(
+    source: Image.Image,
+    strength: float = 2.0,
+    directx: bool = True,
+    emboss_mode: bool = False,
+    relief_mode: bool = False,
+) -> Image.Image:
     """Generate a DirectX-style (default) or OpenGL-style normal map.
 
     Parameters
@@ -1139,34 +1220,49 @@ def generate_normal(source: Image.Image, strength: float = 2.0, directx: bool = 
         posters) physically plausible embossed/debossed depth detail by
         raising the edges of printed artwork, text, and borders into the normal
         map while leaving uniform background areas as flat normals.
+    relief_mode:
+        When ``True``, use luminosity-as-height to generate a bas-relief normal
+        map.  Bright subjects protrude toward the viewer while dark areas
+        recede, making paintings, murals, signs, and decorated plaques appear
+        physically extruded from the surface.  This is ideal for any flat
+        artwork that should look 3-D when viewed in game.  ``emboss_mode`` and
+        ``relief_mode`` are mutually exclusive; ``relief_mode`` takes priority.
     """
     source_grayscale = ImageOps.grayscale(source)
     source_min, source_max = source_grayscale.getextrema()
     if (source_max - source_min) <= 2:
         return Image.new("RGB", source.size, color=(128, 128, 255))
 
-    if emboss_mode:
-        pressure = _detail_pressure(source)
+    pressure = _detail_pressure(source)
+    if relief_mode:
+        effective_strength = _clamp(strength * (1.0 - (pressure * 0.06)), 0.9, 4.5)
+        height_map = _prepare_relief_height_map(source, pressure=pressure).filter(
+            ImageFilter.GaussianBlur(radius=0.25 + (pressure * 0.25))
+        )
+    elif emboss_mode:
         effective_strength = _clamp(strength * (1.0 - (pressure * 0.08)), 0.9, 4.2)
         # Slight adaptive blur keeps crisp embossed ridges while suppressing pixel chatter.
         height_map = _prepare_emboss_height_map(source, pressure=pressure).filter(
             ImageFilter.GaussianBlur(radius=0.30 + (pressure * 0.30))
         )
     else:
-        pressure = _detail_pressure(source)
         resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.8)
         effective_strength = _clamp(strength * (1.0 - (pressure * 0.2)), 0.9, 3.8)
         height_map = _prepare_height_map(source).filter(
             ImageFilter.GaussianBlur(radius=0.8 + (pressure * 0.9) + ((resolution_scale - 1.0) * 0.35))
         )
-    sobel_x = height_map.filter(ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=8, offset=128))
-    sobel_y = height_map.filter(ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=8, offset=128))
+
+    # Scharr operator — superior rotational accuracy over standard Sobel,
+    # especially for diagonal surface features and fine curved details.
+    # Kernel: [[-3, 0, 3], [-10, 0, 10], [-3, 0, 3]], scale = 32.
+    scharr_x = height_map.filter(ImageFilter.Kernel((3, 3), (-3, 0, 3, -10, 0, 10, -3, 0, 3), scale=32, offset=128))
+    scharr_y = height_map.filter(ImageFilter.Kernel((3, 3), (-3, -10, -3, 0, 0, 0, 3, 10, 3), scale=32, offset=128))
     green_sign = 1.0 if directx else -1.0
 
     # Vectorised numpy computation — orders of magnitude faster than a Python loop
     # for large textures (2 K / 4 K / 8 K) and produces identical pixel values.
-    sx = np.frombuffer(sobel_x.tobytes(), dtype=np.uint8).astype(np.float32)
-    sy = np.frombuffer(sobel_y.tobytes(), dtype=np.uint8).astype(np.float32)
+    sx = np.frombuffer(scharr_x.tobytes(), dtype=np.uint8).astype(np.float32)
+    sy = np.frombuffer(scharr_y.tobytes(), dtype=np.uint8).astype(np.float32)
 
     red_arr = np.clip(128.0 - (sx - 128.0) * effective_strength, 0.0, 255.0).astype(np.uint8)
     green_arr = np.clip(128.0 + (sy - 128.0) * effective_strength * green_sign, 0.0, 255.0).astype(np.uint8)
@@ -1372,8 +1468,9 @@ def generate_msn(
     normal_strength: float = 2.0,
     specular_strength: float = 1.15,
     emboss_mode: bool = False,
+    relief_mode: bool = False,
 ) -> Image.Image:
-    normal_rgb = generate_normal(source, strength=normal_strength, emboss_mode=emboss_mode)
+    normal_rgb = generate_normal(source, strength=normal_strength, emboss_mode=emboss_mode, relief_mode=relief_mode)
     specular_alpha = generate_specular(source, strength=specular_strength)
     r, g, b = normal_rgb.split()
     return Image.merge("RGBA", (r, g, b, specular_alpha))
@@ -1400,6 +1497,7 @@ def generate_preview_outputs(
     complex_format: str,
     env_mask_mode: str = "standard",
     emboss_mode: bool = False,
+    relief_mode: bool = False,
     parallax_mode: str = "standard",
     include_diffuse: bool,
     include_normal: bool,
@@ -1415,13 +1513,17 @@ def generate_preview_outputs(
         outputs["diffuse"] = enforce_skyrim_output_profile("diffuse", generate_diffuse(source))
     if include_normal:
         outputs["normal"] = enforce_skyrim_output_profile(
-            "normal", generate_normal(source, strength=normal_strength, emboss_mode=emboss_mode)
+            "normal", generate_normal(source, strength=normal_strength, emboss_mode=emboss_mode, relief_mode=relief_mode)
         )
     if include_parallax:
-        _parallax_fn = generate_parallax_occlusion if parallax_mode == "occlusion" else generate_parallax
-        outputs["parallax"] = enforce_skyrim_output_profile(
-            "parallax", _parallax_fn(source, strength=parallax_strength)
-        )
+        if parallax_mode == "occlusion":
+            outputs["parallax"] = enforce_skyrim_output_profile(
+                "parallax", generate_parallax_occlusion(source, strength=parallax_strength)
+            )
+        else:
+            outputs["parallax"] = enforce_skyrim_output_profile(
+                "parallax", generate_parallax(source, strength=parallax_strength, relief_mode=relief_mode)
+            )
     if include_glow:
         outputs["glow"] = enforce_skyrim_output_profile("glow", generate_glow(source, threshold=glow_threshold))
     if include_environment_mask:
@@ -1434,7 +1536,13 @@ def generate_preview_outputs(
         outputs["complex_material"] = enforce_skyrim_output_profile(
             "complex_material",
             (
-                generate_msn(source, normal_strength=normal_strength, specular_strength=specular_strength, emboss_mode=emboss_mode)
+                generate_msn(
+                    source,
+                    normal_strength=normal_strength,
+                    specular_strength=specular_strength,
+                    emboss_mode=emboss_mode,
+                    relief_mode=relief_mode,
+                )
                 if complex_format == "msn"
                 else generate_complex_material(source, strength=complex_strength)
             ),
@@ -1980,6 +2088,7 @@ def run_with_options(
     complex_format: str = "msn",
     env_mask_mode: str = "standard",
     emboss_mode: bool = False,
+    relief_mode: bool = False,
     parallax_mode: str = "standard",
     include_diffuse: bool = True,
     include_normal: bool = True,
@@ -2026,7 +2135,7 @@ def run_with_options(
 
         if include_normal:
             normal = enforce_skyrim_output_profile(
-                "normal", generate_normal(source, strength=resolved_normal_strength, emboss_mode=emboss_mode)
+                "normal", generate_normal(source, strength=resolved_normal_strength, emboss_mode=emboss_mode, relief_mode=relief_mode)
             )
             normal_path = build_normal_output_path(
                 input_path=input_file,
@@ -2036,8 +2145,14 @@ def run_with_options(
             outputs["normal"] = _save_with_dds_fallback(normal, normal_path)
 
         if include_parallax:
-            _parallax_fn = generate_parallax_occlusion if parallax_mode == "occlusion" else generate_parallax
-            parallax = enforce_skyrim_output_profile("parallax", _parallax_fn(source, strength=resolved_parallax_strength))
+            if parallax_mode == "occlusion":
+                parallax = enforce_skyrim_output_profile(
+                    "parallax", generate_parallax_occlusion(source, strength=resolved_parallax_strength)
+                )
+            else:
+                parallax = enforce_skyrim_output_profile(
+                    "parallax", generate_parallax(source, strength=resolved_parallax_strength, relief_mode=relief_mode)
+                )
             _, parallax_path = build_output_paths(
                 input_path=input_file,
                 output_dir=output_dir,
@@ -2082,6 +2197,7 @@ def run_with_options(
                         normal_strength=resolved_normal_strength,
                         specular_strength=resolved_specular_strength,
                         emboss_mode=emboss_mode,
+                        relief_mode=relief_mode,
                     ),
                     complex_format=complex_format,
                 )
@@ -2121,6 +2237,7 @@ def run_batch_with_options(
     complex_format: str = "msn",
     env_mask_mode: str = "standard",
     emboss_mode: bool = False,
+    relief_mode: bool = False,
     parallax_mode: str = "standard",
     include_diffuse: bool = True,
     include_normal: bool = True,
@@ -2161,6 +2278,7 @@ def run_batch_with_options(
                     complex_format=complex_format,
                     env_mask_mode=env_mask_mode,
                     emboss_mode=emboss_mode,
+                    relief_mode=relief_mode,
                     parallax_mode=parallax_mode,
                     include_diffuse=include_diffuse,
                     include_normal=include_normal,
@@ -2195,6 +2313,7 @@ def run_batch_with_options(
             complex_format=complex_format,
             env_mask_mode=env_mask_mode,
             emboss_mode=emboss_mode,
+            relief_mode=relief_mode,
             parallax_mode=parallax_mode,
             include_diffuse=include_diffuse,
             include_normal=include_normal,
@@ -2307,6 +2426,17 @@ def parse_args() -> argparse.Namespace:
             "printed text, borders, and artwork detail on flat surfaces such as books, cards, "
             "scrolls, and posters — giving them physically plausible embossed/debossed depth. "
             "Recommended for paper/book/card textures; leave off for terrain, stone, and wood."
+        ),
+    )
+    parser.add_argument(
+        "--relief-mode",
+        action="store_true",
+        help=(
+            "Enable relief depth mode for normal map and parallax generation. "
+            "Uses luminosity-as-height so that bright subjects (paintings, murals, signs, "
+            "decorative plaques) appear physically extruded from the surface — a bas-relief "
+            "effect that makes flat artwork look 3-D in game.  Takes priority over --emboss-mode. "
+            "Recommended for paintings, signs, illustrated cards, and decorative wall art."
         ),
     )
     parser.add_argument(
@@ -2457,6 +2587,7 @@ if GUI_AVAILABLE:
             self.complex_format_var = tk.StringVar(value="msn")
             self.env_mask_mode_var = tk.StringVar(value="standard")
             self.emboss_mode_var = tk.BooleanVar(value=False)
+            self.relief_mode_var = tk.BooleanVar(value=False)
             self.parallax_mode_var = tk.StringVar(value="standard")
             self.render_profile_var = tk.StringVar(value="auto")
             self.render_profile_suggestion_var = tk.StringVar(value="Render profile recommendation: Auto-detect (Vanilla)")
@@ -2741,7 +2872,7 @@ if GUI_AVAILABLE:
             self.auto_specular_check.grid(row=10, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_specular_check, "🤖 Auto-set specular strength. The AI ponders how shiny\nyour texture DESERVES to be.")
 
-            # --- Emboss depth + parallax mode options ---
+            # --- Emboss depth + relief depth + parallax mode options ---
             _emboss_check = ttk.Checkbutton(
                 options_frame,
                 text="Emboss depth  (books, cards, scrolls — raises printed/artwork edges in normal map)",
@@ -2754,6 +2885,22 @@ if GUI_AVAILABLE:
                 "📜 Emboss mode generates normals from edge ridges instead of smooth gradients.\n"
                 "Perfect for books, notes, cards, posters — anything flat with printed detail.\n"
                 "Uncheck for terrain, stone, wood, and any organic 3D surface.",
+            )
+
+            _relief_check = ttk.Checkbutton(
+                options_frame,
+                text="Relief depth  (paintings, murals, signs — subjects pop out as bas-relief)",
+                variable=self.relief_mode_var,
+                command=self._on_relief_mode_changed,
+            )
+            _relief_check.grid(row=11, column=4, columnspan=4, sticky=tk.W, pady=(8, 2))
+            self._add_tooltip(
+                _relief_check,
+                "🖼 Relief mode uses the image's own luminosity as a height field so that\n"
+                "bright subjects (painted figures, murals, heraldic signs, decorative plaques)\n"
+                "physically protrude from the surface in game — a bas-relief effect.\n"
+                "Takes priority over Emboss depth when both are enabled.\n"
+                "Best combined with parallax output for full 3-D pop-out depth.",
             )
 
             _parallax_mode_label = ttk.Label(options_frame, text="Parallax mode")
@@ -3064,6 +3211,7 @@ if GUI_AVAILABLE:
             self.parallax_mode_var.set(str(state["parallax_mode"]))
             self.render_profile_var.set(str(state["render_profile"]))
             self.emboss_mode_var.set(bool(state["emboss_mode"]))
+            self.relief_mode_var.set(bool(state["relief_mode"]))
             self.include_diffuse_var.set(bool(state["include_diffuse"]))
             self.include_normal_var.set(bool(state["include_normal"]))
             self.include_parallax_var.set(bool(state["include_parallax"]))
@@ -3097,6 +3245,7 @@ if GUI_AVAILABLE:
                 "parallax_mode": self.parallax_mode_var.get(),
                 "render_profile": _normalize_render_profile(self.render_profile_var.get()),
                 "emboss_mode": self.emboss_mode_var.get(),
+                "relief_mode": self.relief_mode_var.get(),
                 "include_diffuse": self.include_diffuse_var.get(),
                 "include_normal": self.include_normal_var.get(),
                 "include_parallax": self.include_parallax_var.get(),
@@ -3540,6 +3689,13 @@ if GUI_AVAILABLE:
                 self.status_var.set("Emboss depth mode disabled; using standard normal-map generation.")
             self._request_preview_refresh()
 
+        def _on_relief_mode_changed(self) -> None:
+            if self.relief_mode_var.get():
+                self.status_var.set("Relief depth mode enabled — paintings/signs/murals will pop out as bas-relief.")
+            else:
+                self.status_var.set("Relief depth mode disabled; using standard normal-map generation.")
+            self._request_preview_refresh()
+
         def _current_preview_path(self) -> Path | None:
             if not self.selected_inputs:
                 return None
@@ -3664,11 +3820,20 @@ if GUI_AVAILABLE:
             self.complex_strength_var.set(float(resolved["complex_strength"]))
             self.specular_strength_var.set(float(resolved["specular_strength"]))
             self._update_render_profile_recommendation(apply_auto=True)
-            # Auto-suggest emboss mode for paper/book/card/scroll textures.
+            # Auto-suggest emboss/relief mode based on material type and image content.
             if preview_path is not None:
                 material_type = classify_material_type(preview_path)
                 if material_type == "paper":
                     self.emboss_mode_var.set(True)
+                    # For paintings/illustrated art (high saturation + bg uniformity),
+                    # also suggest relief mode for the pop-out effect.
+                    if self.source_image is not None:
+                        analysis = analyze_image_content(self.source_image)
+                        saturation_mean = float(analysis.get("saturation_mean", 0.0))
+                        bg_uniformity = float(analysis.get("bg_uniformity", 0.0))
+                        # High saturation + uniform background suggests illustrated/painted art.
+                        if saturation_mean >= 65.0 and bg_uniformity >= 0.35:
+                            self.relief_mode_var.set(True)
             self._update_slider_auto_states()
 
         def _photo_image(self, image: Image.Image, max_size: int = 260) -> ImageTk.PhotoImage:
@@ -3799,6 +3964,7 @@ if GUI_AVAILABLE:
                     complex_format=self.complex_format_var.get(),
                     env_mask_mode=self.env_mask_mode_var.get(),
                     emboss_mode=self.emboss_mode_var.get(),
+                    relief_mode=self.relief_mode_var.get(),
                     parallax_mode=_parallax_mode,
                     include_diffuse=self.include_diffuse_var.get(),
                     include_normal=self.include_normal_var.get(),
@@ -3992,6 +4158,7 @@ if GUI_AVAILABLE:
                     "complex_format": self.complex_format_var.get(),
                     "env_mask_mode": self.env_mask_mode_var.get(),
                     "emboss_mode": self.emboss_mode_var.get(),
+                    "relief_mode": self.relief_mode_var.get(),
                     "parallax_mode": _parallax_mode_key,
                     "include_diffuse": include_diffuse,
                     "include_normal": include_normal,
@@ -4098,6 +4265,7 @@ def main() -> int:
             complex_format=args.complex_format,
             env_mask_mode=args.environment_mask_mode,
             emboss_mode=args.emboss_mode,
+            relief_mode=args.relief_mode,
             parallax_mode=args.parallax_mode,
             include_diffuse=not args.no_diffuse,
             include_normal=not args.no_normal,
@@ -4138,6 +4306,7 @@ def main() -> int:
         complex_format=args.complex_format,
         env_mask_mode=args.environment_mask_mode,
         emboss_mode=args.emboss_mode,
+        relief_mode=args.relief_mode,
         parallax_mode=args.parallax_mode,
         include_diffuse=not args.no_diffuse,
         include_normal=not args.no_normal,
