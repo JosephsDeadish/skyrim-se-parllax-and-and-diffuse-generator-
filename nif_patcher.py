@@ -982,6 +982,12 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
     """Check whether a NIF is ready for parallax, and suggest fixes."""
     result = NifValidationResult(nif_path=nif_path, valid=False)
     infos, diagnostics = scan_nif_diagnostics(nif_path)
+    guessed_parallax = guess_parallax_path_for_nif(nif_path)
+
+    def _append_unique(items: list[str], message: str) -> None:
+        if message not in items:
+            items.append(message)
+
     if diagnostics:
         result.issues.extend(diagnostics[:6])
     if not infos:
@@ -992,31 +998,87 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
     result.shader_count = len(infos)
     for info in infos:
         has_flag = info.has_parallax_flag
-        has_tex = bool(info.texture_paths.get(TEXTURE_SLOT_PARALLAX, "").strip())
+        parallax_path = info.texture_paths.get(TEXTURE_SLOT_PARALLAX, "").strip()
+        diffuse_path = info.texture_paths.get(TEXTURE_SLOT_DIFFUSE, "").strip()
+        normal_path = info.texture_paths.get(TEXTURE_SLOT_NORMAL, "").strip()
+        has_tex = bool(parallax_path)
         if has_flag and has_tex:
             result.ready_count += 1
         else:
             result.needs_patch_count += 1
             if not has_flag:
-                result.issues.append(
+                _append_unique(
+                    result.issues,
                     f"Block {info.block_index}: SLSF1_Parallax flag not set."
                 )
-                result.suggestions.append(
+                _append_unique(
+                    result.suggestions,
                     "Run patch_nif with enable_parallax=True."
                 )
             if not has_tex:
-                result.issues.append(
+                _append_unique(
+                    result.issues,
                     f"Block {info.block_index}: Texture slot 3 (parallax) is empty."
                 )
-                result.suggestions.append(
-                    "Supply parallax_texture_path pointing to a _p.dds height map."
+                _append_unique(
+                    result.suggestions,
+                    (
+                        f"Supply parallax_texture_path pointing to a _p.dds height map"
+                        f"{f' (for example {guessed_parallax})' if guessed_parallax else ''}."
+                    )
                 )
             if info.shader_type != SHADER_TYPE_HEIGHTMAP:
-                result.suggestions.append(
+                _append_unique(
+                    result.suggestions,
                     f"Block {info.block_index}: shader type is {info.shader_type} "
                     "(not Heightmap/3). Use force_shader_type_3=True to enable "
                     "the parallax_scale field for stronger in-game depth."
                 )
+        if parallax_path:
+            normalized_parallax = parallax_path.lower().replace("/", "\\")
+            if not normalized_parallax.startswith("textures\\"):
+                _append_unique(
+                    result.issues,
+                    f"Block {info.block_index}: parallax path '{parallax_path}' is not a Skyrim-relative textures\\ path."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Patch slot 3 with a Skyrim-relative path such as textures\\architecture\\example_p.dds."
+                )
+            if not normalized_parallax.endswith("_p.dds"):
+                _append_unique(
+                    result.issues,
+                    f"Block {info.block_index}: parallax path '{parallax_path}' does not use the expected _p.dds naming."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Use a dedicated _p.dds height map in texture slot 3 so Skyrim/ENB parallax reads the correct file."
+                )
+            if diffuse_path and normalized_parallax == diffuse_path.lower().replace("/", "\\"):
+                _append_unique(
+                    result.issues,
+                    f"Block {info.block_index}: parallax slot 3 points at the diffuse texture instead of a _p.dds height map."
+                )
+            if normal_path and normalized_parallax == normal_path.lower().replace("/", "\\"):
+                _append_unique(
+                    result.issues,
+                    f"Block {info.block_index}: parallax slot 3 points at the normal texture instead of a dedicated height map."
+                )
+        if not normal_path:
+            _append_unique(
+                result.suggestions,
+                f"Block {info.block_index}: slot 1 normal map is empty; parallax will still patch, but lighting usually looks wrong without a matching _n.dds or _msn.dds."
+            )
+        if info.has_pom_flag and info.shader_type not in (SHADER_TYPE_HEIGHTMAP, SHADER_TYPE_PARALLAX_OCC):
+            _append_unique(
+                result.issues,
+                f"Block {info.block_index}: POM flag is set on shader type {info.shader_type}; ENB parallax occlusion is more reliable on Heightmap/3 blocks."
+            )
+        if info.parallax_scale is not None and info.parallax_scale < 0.35:
+            _append_unique(
+                result.suggestions,
+                f"Block {info.block_index}: parallax scale is only {info.parallax_scale:.2f}; increase it if the mesh patches successfully but depth is still invisible in game."
+            )
 
     result.valid = result.shader_count > 0
     return result

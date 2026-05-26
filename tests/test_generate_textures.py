@@ -148,6 +148,18 @@ def _emboss_pattern_image() -> Image.Image:
     return image
 
 
+def _color_sign_image() -> Image.Image:
+    image = Image.new("RGB", (48, 48), color=(255, 0, 0))
+    pixels = image.load()
+    for y in range(6, 42):
+        for x in range(6, 42):
+            if x in (6, 41) or y in (6, 41):
+                pixels[x, y] = (0, 129, 0)
+            elif 16 <= x <= 31 and 16 <= y <= 31:
+                pixels[x, y] = (0, 129, 0)
+    return image
+
+
 class GenerateTexturesTests(unittest.TestCase):
     def test_app_version_is_0_6(self) -> None:
         self.assertEqual(APP_VERSION, "0.6")
@@ -462,6 +474,9 @@ class GenerateTexturesTests(unittest.TestCase):
             classify_material_type(Path("textures/interface/cards/collectible_waifu_card_01.dds")),
             "paper",
         )
+
+    def test_classify_material_type_returns_paper_for_sign_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/signs/inn_sign_painted.dds")), "paper")
 
     def test_detect_workflow_profile_detects_interface_paths(self) -> None:
         self.assertEqual(
@@ -1822,6 +1837,18 @@ class ReliefModeTests(unittest.TestCase):
         # Verify blue channel is in Skyrim-safe range.
         _, _, blue = result.split()
         self.assertGreaterEqual(blue.getextrema()[0], 128)
+
+    def test_generate_normal_color_sign_image_is_not_near_flat(self) -> None:
+        normal = generate_normal(_color_sign_image(), strength=3.2, relief_mode=True)
+        red, green, blue = normal.split()
+        self.assertGreater(red.getextrema()[1] - red.getextrema()[0], 8)
+        self.assertGreater(green.getextrema()[1] - green.getextrema()[0], 8)
+        self.assertGreaterEqual(blue.getextrema()[0], 128)
+
+    def test_generate_specular_color_sign_image_is_not_flat(self) -> None:
+        specular = generate_specular(_color_sign_image(), strength=2.0)
+        minimum, maximum = specular.getextrema()
+        self.assertGreater(maximum - minimum, 10)
 
 
 class TooltipPositionTests(unittest.TestCase):

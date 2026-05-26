@@ -668,6 +668,17 @@ _MATERIAL_CATEGORY_TOKENS: dict[str, tuple[str, ...]] = {
         "card",
         "cards",
         "collectible",
+        "sign",
+        "signs",
+        "painting",
+        "paintings",
+        "mural",
+        "murals",
+        "banner",
+        "banners",
+        "plaque",
+        "plaques",
+        "fresco",
         "waifu",
         "bbr",
         "poster",
@@ -1096,10 +1107,10 @@ def _resolve_batch_workers(batch_workers: int | None, total: int) -> int:
 
 
 def _prepare_height_map(source: Image.Image) -> Image.Image:
-    grayscale = ImageOps.grayscale(source)
+    detail_source = _combined_detail_source(source)
     resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.6)
-    broad = grayscale.filter(ImageFilter.GaussianBlur(radius=4.0 * resolution_scale))
-    fine = grayscale.filter(
+    broad = detail_source.filter(ImageFilter.GaussianBlur(radius=4.0 * resolution_scale))
+    fine = detail_source.filter(
         ImageFilter.UnsharpMask(
             radius=1.2 + (resolution_scale * 0.45),
             percent=170,
@@ -1107,17 +1118,47 @@ def _prepare_height_map(source: Image.Image) -> Image.Image:
         )
     )
     detail = ImageChops.subtract(fine, broad, scale=1.0, offset=128)
+    edge_energy = detail_source.filter(ImageFilter.FIND_EDGES).filter(
+        ImageFilter.GaussianBlur(radius=0.7 + (resolution_scale * 0.2))
+    )
+    edge_energy = ImageOps.autocontrast(edge_energy, cutoff=2)
+    edge_energy = ImageEnhance.Contrast(edge_energy).enhance(1.18)
     merged = ImageChops.add(
-        grayscale,
+        detail_source,
         detail,
         scale=_clamp(1.55 - ((resolution_scale - 1.0) * 0.18), 1.18, 1.55),
         offset=int(_clamp(-36.0 + ((resolution_scale - 1.0) * 8.0), -36.0, -22.0)),
     )
+    merged = ImageChops.add(merged, edge_energy, scale=1.22, offset=-10)
     return ImageOps.autocontrast(merged, cutoff=1)
 
 
 def _lift_black_floor(image: Image.Image, floor: int = 16) -> Image.Image:
     return image.point(lambda value: int(_clamp(max(float(floor), float(value)), 0.0, 255.0)))
+
+
+def _split_detail_images(source: Image.Image) -> tuple[Image.Image, Image.Image, Image.Image]:
+    rgb_source = source.convert("RGB")
+    grayscale = ImageOps.grayscale(rgb_source)
+    red, green, blue = rgb_source.split()
+    maximum = ImageChops.lighter(ImageChops.lighter(red, green), blue)
+    minimum = ImageChops.darker(ImageChops.darker(red, green), blue)
+    chroma = ImageChops.subtract(maximum, minimum)
+    return rgb_source, grayscale, chroma
+
+
+def _detail_spans(source: Image.Image) -> tuple[int, int]:
+    _, grayscale, chroma = _split_detail_images(source)
+    grayscale_min, grayscale_max = grayscale.getextrema()
+    chroma_min, chroma_max = chroma.getextrema()
+    return grayscale_max - grayscale_min, chroma_max - chroma_min
+
+
+def _combined_detail_source(source: Image.Image) -> Image.Image:
+    _, grayscale, chroma = _split_detail_images(source)
+    boosted_chroma = ImageEnhance.Contrast(chroma).enhance(1.35)
+    edge_drive = ImageChops.lighter(grayscale, boosted_chroma)
+    return Image.blend(grayscale, edge_drive, alpha=0.38)
 
 
 def _detail_pressure(source: Image.Image) -> float:
@@ -1127,9 +1168,12 @@ def _detail_pressure(source: Image.Image) -> float:
     if max(source.width, source.height) > 512:
         analysis = source.copy()
         analysis.thumbnail((512, 512), Image.Resampling.NEAREST)
-    grayscale = ImageOps.grayscale(analysis)
-    high_freq = ImageChops.difference(grayscale, grayscale.filter(ImageFilter.GaussianBlur(radius=1.2)))
-    return _clamp((float(ImageStat.Stat(high_freq).mean[0]) - 8.0) / 22.0, 0.0, 1.0)
+    detail_source = _combined_detail_source(analysis)
+    high_freq = ImageChops.difference(detail_source, detail_source.filter(ImageFilter.GaussianBlur(radius=1.2)))
+    edges = detail_source.filter(ImageFilter.FIND_EDGES).filter(ImageFilter.GaussianBlur(radius=0.5))
+    edge_mean = float(ImageStat.Stat(edges).mean[0])
+    freq_mean = float(ImageStat.Stat(high_freq).mean[0])
+    return _clamp(((freq_mean * 0.72) + (edge_mean * 0.42) - 8.0) / 24.0, 0.0, 1.0)
 
 
 def generate_diffuse(source: Image.Image) -> Image.Image:
@@ -1156,10 +1200,15 @@ def generate_parallax(source: Image.Image, strength: float = 1.35, relief_mode: 
     if relief_mode:
         height_map = _prepare_relief_height_map(source, pressure=pressure)
         smoothed = height_map.filter(ImageFilter.GaussianBlur(radius=0.9))
-        contrasted = ImageEnhance.Contrast(smoothed).enhance(_clamp(strength * (1.0 - (pressure * 0.12)), 0.1, 6.0))
+        contrasted = ImageEnhance.Contrast(smoothed).enhance(
+            _clamp((strength * 1.16) * (1.0 - (pressure * 0.08)), 0.1, 6.0)
+        )
         normalized = ImageOps.autocontrast(contrasted, cutoff=1)
-        depth_blend = _clamp(0.22 + (normalized_strength * 0.88), 0.22, 1.0)
-        return Image.blend(Image.new("L", normalized.size, color=127), normalized, alpha=depth_blend)
+        depth_blend = _clamp(0.34 + (normalized_strength * 0.9), 0.34, 1.0)
+        tuned = Image.blend(Image.new("L", normalized.size, color=127), normalized, alpha=depth_blend)
+        if normalized_strength > 0.48:
+            tuned = ImageEnhance.Contrast(tuned).enhance(1.0 + ((normalized_strength - 0.48) * 1.15))
+        return tuned
     height_map = _prepare_height_map(source)
     softened = height_map.filter(ImageFilter.GaussianBlur(radius=1.2))
     micro_detail = ImageChops.subtract(
@@ -1169,7 +1218,7 @@ def generate_parallax(source: Image.Image, strength: float = 1.35, relief_mode: 
         offset=128,
     )
     merged = ImageChops.add(softened, micro_detail, scale=1.35 - (pressure * 0.35), offset=int(-20 + (pressure * 10.0)))
-    contrasted = ImageEnhance.Contrast(merged).enhance(_clamp(strength * (1.0 - (pressure * 0.18)), 0.1, 6.0))
+    contrasted = ImageEnhance.Contrast(merged).enhance(_clamp((strength * 1.08) * (1.0 - (pressure * 0.14)), 0.1, 6.0))
     normalized = ImageOps.autocontrast(contrasted, cutoff=1)
     depth_blend = _clamp(0.2 + (normalized_strength * 0.9), 0.2, 1.0)
     tuned = Image.blend(Image.new("L", normalized.size, color=127), normalized, alpha=depth_blend)
@@ -1207,9 +1256,8 @@ def generate_parallax_occlusion(source: Image.Image, strength: float = 1.35, *, 
         of :func:`generate_parallax` with ``relief_mode=True`` but produces a
         smoother gradient suited for ENB POM ray-marching.
     """
-    grayscale = ImageOps.grayscale(source)
-    source_min, source_max = grayscale.getextrema()
-    if (source_max - source_min) <= 2:
+    grayscale_span, chroma_span = _detail_spans(source)
+    if grayscale_span <= 2 and chroma_span <= 8:
         return Image.new("L", source.size, color=127)
 
     base_height = _prepare_relief_height_map(source) if relief_mode else _prepare_height_map(source)
@@ -1231,12 +1279,15 @@ def generate_parallax_occlusion(source: Image.Image, strength: float = 1.35, *, 
 
     # Contrast enhancement proportional to requested strength, clamped so that
     # extreme values do not produce depth artefacts at steep view angles.
-    contrasted = ImageEnhance.Contrast(normalized).enhance(_clamp(strength * (0.94 - (pressure * 0.14)), 0.1, 6.0))
+    contrast_drive = strength * (1.04 if relief_mode else 0.98)
+    contrasted = ImageEnhance.Contrast(normalized).enhance(_clamp(contrast_drive * (0.98 - (pressure * 0.12)), 0.1, 6.0))
 
     # Final light smooth pass removes any residual pixel-edge artefacts.
     final = contrasted.filter(ImageFilter.GaussianBlur(radius=0.65 + (pressure * 0.35)))
     normalized = ImageOps.autocontrast(final, cutoff=0)
-    depth_blend = _clamp(0.24 + (normalized_strength * 0.84), 0.24, 1.0)
+    reference_depth = base_height.filter(ImageFilter.GaussianBlur(radius=1.4 + (pressure * 0.5)))
+    normalized = Image.blend(reference_depth, normalized, alpha=0.72 if relief_mode else 0.68)
+    depth_blend = _clamp((0.3 if relief_mode else 0.24) + (normalized_strength * (0.9 if relief_mode else 0.84)), 0.24, 1.0)
     normalized = Image.blend(Image.new("L", normalized.size, color=127), normalized, alpha=depth_blend)
     if pressure < 0.1:
         neutral = Image.new("L", source.size, color=127)
@@ -1267,10 +1318,11 @@ def _prepare_emboss_height_map(source: Image.Image, pressure: float | None = Non
     edges at design element boundaries produce strong directional normals that
     simulate physically embossed or debossed detail.
     """
-    grayscale = ImageOps.grayscale(source).filter(ImageFilter.MedianFilter(size=3))
+    grayscale = _combined_detail_source(source).filter(ImageFilter.MedianFilter(size=3))
     minimum, maximum = grayscale.getextrema()
+    _, chroma_span = _detail_spans(source)
     neutral = Image.new("L", source.size, color=128)
-    if (maximum - minimum) <= 4:
+    if (maximum - minimum) <= 4 and chroma_span <= 8:
         return neutral
     resolved_pressure = _detail_pressure(source) if pressure is None else pressure
     if resolved_pressure < 0.08:
@@ -1308,15 +1360,17 @@ def _prepare_relief_height_map(source: Image.Image, pressure: float | None = Non
         Pre-computed detail pressure scalar; computed if not supplied.
     """
     grayscale = ImageOps.grayscale(source)
+    detail_source = _combined_detail_source(source)
     minimum, maximum = grayscale.getextrema()
-    if (maximum - minimum) <= 4:
+    _, chroma_span = _detail_spans(source)
+    if (maximum - minimum) <= 4 and chroma_span <= 8:
         return Image.new("L", source.size, color=128)
     resolved_pressure = _detail_pressure(source) if pressure is None else pressure
 
     # Use full luminosity range as height — subjects that are brighter than the
     # background will naturally protrude.  A gentle bilateral-like blur (median
     # then Gaussian) preserves subject silhouettes while smoothing in-region noise.
-    smoothed = grayscale.filter(ImageFilter.MedianFilter(size=3)).filter(
+    smoothed = Image.blend(grayscale, detail_source, alpha=0.28).filter(ImageFilter.MedianFilter(size=3)).filter(
         ImageFilter.GaussianBlur(radius=0.8 + (resolved_pressure * 0.6))
     )
     # Subject-edge sharpening: DoG emphasises subject/background boundaries so
@@ -1327,7 +1381,9 @@ def _prepare_relief_height_map(source: Image.Image, pressure: float | None = Non
         scale=1.0,
         offset=128,
     )
-    ridge = ImageEnhance.Contrast(dog).enhance(1.5)
+    edge_mask = detail_source.filter(ImageFilter.FIND_EDGES).filter(ImageFilter.GaussianBlur(radius=0.6))
+    edge_mask = ImageEnhance.Contrast(ImageOps.autocontrast(edge_mask, cutoff=2)).enhance(1.25)
+    ridge = ImageEnhance.Contrast(ImageChops.lighter(dog, edge_mask)).enhance(1.6)
     blended = ImageChops.add(smoothed, ridge, scale=1.8, offset=-40)
     normalized = ImageOps.autocontrast(blended, cutoff=1)
     # Blend toward neutral to avoid punching through very flat regions.
@@ -1368,9 +1424,8 @@ def generate_normal(
         artwork that should look 3-D when viewed in game.  ``emboss_mode`` and
         ``relief_mode`` are mutually exclusive; ``relief_mode`` takes priority.
     """
-    source_grayscale = ImageOps.grayscale(source)
-    source_min, source_max = source_grayscale.getextrema()
-    if (source_max - source_min) <= 2:
+    grayscale_span, chroma_span = _detail_spans(source)
+    if grayscale_span <= 2 and chroma_span <= 8:
         return Image.new("RGB", source.size, color=(128, 128, 255))
 
     pressure = _detail_pressure(source)
@@ -1473,6 +1528,8 @@ def generate_environment_mask(source: Image.Image, strength: float = 1.2, mode: 
     raw_height = generate_parallax(rgb_source, strength=max(0.85, min(2.0, strength)))
     midpoint = Image.new("L", raw_height.size, color=127)
     height_alpha = Image.blend(midpoint, raw_height, alpha=0.75)
+    height_alpha = _lift_black_floor(height_alpha, floor=95)
+    height_alpha = height_alpha.point(lambda value: int(_clamp(float(value), 95.0, 160.0)))
 
     return Image.merge("RGBA", (env_amount, glossiness, metallic, height_alpha))
 
@@ -1543,17 +1600,20 @@ def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Im
 
 
 def generate_specular(source: Image.Image, strength: float = 1.15) -> Image.Image:
+    detail_source = _combined_detail_source(source)
     grayscale = ImageOps.grayscale(source)
+    _, _, chroma = _split_detail_images(source)
     grayscale_min, grayscale_max = grayscale.getextrema()
-    if (grayscale_max - grayscale_min) <= 2:
-        return _lift_black_floor(grayscale, floor=8)
+    chroma_min, chroma_max = chroma.getextrema()
+    if (grayscale_max - grayscale_min) <= 2 and (chroma_max - chroma_min) <= 8:
+        return _lift_black_floor(detail_source, floor=8)
 
     pressure = _detail_pressure(source)
     base_blur_radius = 1.0 + (pressure * 1.0)
     broad_blur_radius = 2.4 + (pressure * 1.4)
-    smoothed = grayscale.filter(ImageFilter.GaussianBlur(radius=base_blur_radius))
+    smoothed = detail_source.filter(ImageFilter.GaussianBlur(radius=base_blur_radius))
     # abs-difference (PIL ImageChops.difference is always ≥ 0)
-    local_detail = ImageChops.difference(grayscale, grayscale.filter(ImageFilter.GaussianBlur(radius=broad_blur_radius)))
+    local_detail = ImageChops.difference(detail_source, detail_source.filter(ImageFilter.GaussianBlur(radius=broad_blur_radius)))
 
     # --- numpy path: float32 throughout so no integer-rounding holes ---
     h, w = grayscale.size[1], grayscale.size[0]

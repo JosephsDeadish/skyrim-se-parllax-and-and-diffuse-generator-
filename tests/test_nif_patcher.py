@@ -188,6 +188,26 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertEqual(v.ready_count, 1)
         self.assertEqual(v.needs_patch_count, 0)
 
+    def test_reports_non_skyrim_relative_parallax_path(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_PARALLAX] = "stone_p.dds"
+        nif = _write_nif(self.tmp, flags1=SLSF1_PARALLAX, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(any("not a skyrim-relative" in issue.lower() for issue in v.issues))
+
+    def test_reports_low_parallax_scale(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\stone_p.dds"
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_HEIGHTMAP,
+            parallax_scale=0.2,
+            flags1=SLSF1_PARALLAX,
+            texture_paths=paths,
+        )
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(any("parallax scale is only" in suggestion.lower() for suggestion in v.suggestions))
+
     def test_invalid_for_non_nif(self) -> None:
         bad = self.tmp / "bad.nif"
         bad.write_bytes(b"\x00\x00")
