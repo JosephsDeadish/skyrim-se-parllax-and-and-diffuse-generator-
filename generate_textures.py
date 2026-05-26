@@ -2724,6 +2724,8 @@ if GUI_AVAILABLE:
             self.env_mask_mode_var = tk.StringVar(value="standard")
             self.emboss_mode_var = tk.BooleanVar(value=False)
             self.relief_mode_var = tk.BooleanVar(value=False)
+            self.emboss_mode_manual_override = False
+            self.relief_mode_manual_override = False
             self.parallax_mode_var = tk.StringVar(value="standard")
             self.render_profile_var = tk.StringVar(value="auto")
             self.render_profile_suggestion_var = tk.StringVar(value="Render profile recommendation: Auto-detect (Vanilla)")
@@ -3573,6 +3575,8 @@ if GUI_AVAILABLE:
                 self.selected_inputs = input_files
                 self.last_input_browse_dir = path if path.is_dir() else path.parent
                 self.current_preview_index = 0
+                self.emboss_mode_manual_override = False
+                self.relief_mode_manual_override = False
                 self._set_preview_source(0, apply_recommendations=True)
                 if self.render_profile_var.get() != "auto":
                     self._apply_render_profile_modes(self.render_profile_var.get())
@@ -3849,6 +3853,7 @@ if GUI_AVAILABLE:
             self._request_preview_refresh()
 
         def _on_emboss_mode_changed(self) -> None:
+            self.emboss_mode_manual_override = True
             if self.emboss_mode_var.get():
                 self.status_var.set("Emboss depth mode enabled for flat printed surfaces (books/cards/scrolls).")
             else:
@@ -3856,6 +3861,7 @@ if GUI_AVAILABLE:
             self._request_preview_refresh()
 
         def _on_relief_mode_changed(self) -> None:
+            self.relief_mode_manual_override = True
             if self.relief_mode_var.get():
                 self.status_var.set("Relief depth mode enabled — paintings/signs/murals will pop out as bas-relief.")
             else:
@@ -4012,7 +4018,8 @@ if GUI_AVAILABLE:
             if preview_path is not None:
                 material_type = classify_material_type(preview_path)
                 if material_type == "paper":
-                    self.emboss_mode_var.set(True)
+                    if not self.emboss_mode_manual_override:
+                        self.emboss_mode_var.set(True)
                     # For paintings/illustrated art (high saturation + bg uniformity),
                     # also suggest relief mode for the pop-out effect.
                     if self.source_image is not None:
@@ -4020,7 +4027,11 @@ if GUI_AVAILABLE:
                         saturation_mean = float(analysis.get("saturation_mean", 0.0))
                         bg_uniformity = float(analysis.get("bg_uniformity", 0.0))
                         # High saturation + uniform background suggests illustrated/painted art.
-                        if saturation_mean >= 65.0 and bg_uniformity >= 0.35:
+                        if (
+                            saturation_mean >= 65.0
+                            and bg_uniformity >= 0.35
+                            and not self.relief_mode_manual_override
+                        ):
                             self.relief_mode_var.set(True)
             self._update_slider_auto_states()
 
