@@ -2296,7 +2296,7 @@ if GUI_AVAILABLE:
             self.parallax_strength_var = tk.DoubleVar(value=1.35)
             self.complex_strength_var = tk.DoubleVar(value=1.15)
             self.specular_strength_var = tk.DoubleVar(value=1.15)
-            self.glow_threshold_var = tk.IntVar(value=190)
+            self.glow_threshold_var = tk.DoubleVar(value=190.0)
             self.environment_mask_strength_var = tk.DoubleVar(value=1.2)
             self.normal_strength_display_var = tk.StringVar()
             self.parallax_strength_display_var = tk.StringVar()
@@ -2877,7 +2877,7 @@ if GUI_AVAILABLE:
             self.auto_specular_suggestion_var.set(bool(state["auto_specular"]))
             self.normal_strength_var.set(float(state["normal_strength"]))
             self.parallax_strength_var.set(float(state["parallax_strength"]))
-            self.glow_threshold_var.set(int(state["glow_threshold"]))
+            self.glow_threshold_var.set(float(state["glow_threshold"]))
             self.environment_mask_strength_var.set(float(state["environment_mask_strength"]))
             self.complex_strength_var.set(float(state["complex_strength"]))
             self.specular_strength_var.set(float(state["specular_strength"]))
@@ -2909,7 +2909,7 @@ if GUI_AVAILABLE:
                 "auto_specular": self.auto_specular_suggestion_var.get(),
                 "normal_strength": self.normal_strength_var.get(),
                 "parallax_strength": self.parallax_strength_var.get(),
-                "glow_threshold": self.glow_threshold_var.get(),
+                "glow_threshold": int(round(self.glow_threshold_var.get())),
                 "environment_mask_strength": self.environment_mask_strength_var.get(),
                 "complex_strength": self.complex_strength_var.get(),
                 "specular_strength": self.specular_strength_var.get(),
@@ -3298,7 +3298,7 @@ if GUI_AVAILABLE:
 
             self.normal_strength_display_var.set(_fmt(f"{float(self.normal_strength_var.get()):.2f} (0.5–4.0)", self.auto_normal_suggestion_var))
             self.parallax_strength_display_var.set(_fmt(f"{float(self.parallax_strength_var.get()):.2f} (0.5–3.0)", self.auto_parallax_suggestion_var))
-            self.glow_threshold_display_var.set(_fmt(f"{int(self.glow_threshold_var.get())} (0–255)", self.auto_glow_suggestion_var))
+            self.glow_threshold_display_var.set(_fmt(f"{int(round(self.glow_threshold_var.get()))} (0–255)", self.auto_glow_suggestion_var))
             self.environment_mask_strength_display_var.set(
                 _fmt(f"{float(self.environment_mask_strength_var.get()):.2f} (0.5–3.0)", self.auto_environment_mask_suggestion_var)
             )
@@ -3375,7 +3375,7 @@ if GUI_AVAILABLE:
             current = {
                 "normal_strength": float(self.normal_strength_var.get()),
                 "parallax_strength": float(self.parallax_strength_var.get()),
-                "glow_threshold": int(self.glow_threshold_var.get()),
+                "glow_threshold": int(round(self.glow_threshold_var.get())),
                 "environment_mask_strength": float(self.environment_mask_strength_var.get()),
                 "complex_strength": float(self.complex_strength_var.get()),
                 "specular_strength": float(self.specular_strength_var.get()),
@@ -3391,7 +3391,7 @@ if GUI_AVAILABLE:
             resolved = apply_recommendations_by_auto_flags(current=current, recommended=recommended, auto_flags=auto_flags)
             self.normal_strength_var.set(float(resolved["normal_strength"]))
             self.parallax_strength_var.set(float(resolved["parallax_strength"]))
-            self.glow_threshold_var.set(int(resolved["glow_threshold"]))
+            self.glow_threshold_var.set(float(resolved["glow_threshold"]))
             self.environment_mask_strength_var.set(float(resolved["environment_mask_strength"]))
             self.complex_strength_var.set(float(resolved["complex_strength"]))
             self.specular_strength_var.set(float(resolved["specular_strength"]))
@@ -3494,7 +3494,7 @@ if GUI_AVAILABLE:
                     self.source_image,
                     normal_strength=float(self.normal_strength_var.get()),
                     parallax_strength=float(self.parallax_strength_var.get()),
-                    glow_threshold=int(self.glow_threshold_var.get()),
+                    glow_threshold=int(round(self.glow_threshold_var.get())),
                     environment_mask_strength=float(self.environment_mask_strength_var.get()),
                     complex_strength=float(self.complex_strength_var.get()),
                     specular_strength=float(self.specular_strength_var.get()),
@@ -3680,7 +3680,7 @@ if GUI_AVAILABLE:
                         self.parallax_strength_var.get(), self.auto_parallax_suggestion_var
                     ),
                     "glow_threshold": self._resolve_generation_value(
-                        self.glow_threshold_var.get(), self.auto_glow_suggestion_var
+                        int(round(self.glow_threshold_var.get())), self.auto_glow_suggestion_var
                     ),
                     "environment_mask_strength": self._resolve_generation_value(
                         self.environment_mask_strength_var.get(), self.auto_environment_mask_suggestion_var
