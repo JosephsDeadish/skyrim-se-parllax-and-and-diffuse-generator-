@@ -227,14 +227,14 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         state["render_profile"] = "community_shaders" if render_profile == "community shaders" else render_profile
     else:
         state["render_profile"] = str(_GUI_STATE_DEFAULTS["render_profile"])
-    state["normal_strength"] = _coerce_float(raw.get("normal_strength"), float(state["normal_strength"]), 0.5, 4.0)
-    state["parallax_strength"] = _coerce_float(raw.get("parallax_strength"), float(state["parallax_strength"]), 0.5, 3.0)
+    state["normal_strength"] = _coerce_float(raw.get("normal_strength"), float(state["normal_strength"]), 0.1, 8.0)
+    state["parallax_strength"] = _coerce_float(raw.get("parallax_strength"), float(state["parallax_strength"]), 0.1, 6.0)
     state["glow_threshold"] = _coerce_int(raw.get("glow_threshold"), int(state["glow_threshold"]), 0, 255)
     state["environment_mask_strength"] = _coerce_float(
-        raw.get("environment_mask_strength"), float(state["environment_mask_strength"]), 0.5, 3.0
+        raw.get("environment_mask_strength"), float(state["environment_mask_strength"]), 0.1, 6.0
     )
-    state["complex_strength"] = _coerce_float(raw.get("complex_strength"), float(state["complex_strength"]), 0.5, 3.0)
-    state["specular_strength"] = _coerce_float(raw.get("specular_strength"), float(state["specular_strength"]), 0.5, 3.0)
+    state["complex_strength"] = _coerce_float(raw.get("complex_strength"), float(state["complex_strength"]), 0.1, 6.0)
+    state["specular_strength"] = _coerce_float(raw.get("specular_strength"), float(state["specular_strength"]), 0.1, 6.0)
     raw_dismissed = raw.get("dismissed_warnings", [])
     if isinstance(raw_dismissed, list):
         state["dismissed_warnings"] = [str(w) for w in raw_dismissed if isinstance(w, str)]
@@ -830,19 +830,35 @@ def resolve_render_profile_options(
     *,
     recommended_profile: str | None = None,
 ) -> dict[str, str]:
-    """Resolve effective output mode settings for a selected/auto profile."""
+    """Resolve effective output mode settings for a selected/auto profile.
+
+    When the caller has *explicitly* selected a profile (anything other than
+    ``"auto"``), every setting from that preset is applied verbatim, including
+    ``parallax_mode="occlusion"`` for the ENB preset.
+
+    When the profile is ``"auto"`` the recommended profile controls
+    ``complex_format`` and ``env_mask_mode`` (safe format changes), but
+    ``parallax_mode`` is **always kept at ``"standard"``**.  Parallax occlusion
+    (ENB POM) requires ENBSeries to be installed and its heavy smoothing can
+    degrade the pop-out depth effect on signs and artwork that relied on the
+    original standard height map.  Users who want POM occlusion should
+    explicitly choose the ENB render profile.
+    """
     normalized_selected = _normalize_render_profile(selected_profile)
     normalized_recommended = _normalize_render_profile(recommended_profile)
     effective_profile = normalized_recommended if normalized_selected == "auto" else normalized_selected
     if effective_profile == "auto":
         effective_profile = "vanilla"
     preset = _RENDER_PROFILE_PRESETS[effective_profile]
+    # When auto-detecting, keep parallax in standard mode so that sign/artwork
+    # textures keep their pop-out effect regardless of which renderer is detected.
+    parallax_mode = preset["parallax_mode"] if normalized_selected != "auto" else "standard"
     return {
         "selected_profile": normalized_selected,
         "effective_profile": effective_profile,
         "complex_format": preset["complex_format"],
         "env_mask_mode": preset["env_mask_mode"],
-        "parallax_mode": preset["parallax_mode"],
+        "parallax_mode": parallax_mode,
     }
 
 
@@ -1058,7 +1074,7 @@ def generate_parallax(source: Image.Image, strength: float = 1.35, relief_mode: 
     if relief_mode:
         height_map = _prepare_relief_height_map(source, pressure=pressure)
         smoothed = height_map.filter(ImageFilter.GaussianBlur(radius=0.9))
-        contrasted = ImageEnhance.Contrast(smoothed).enhance(_clamp(strength * (1.0 - (pressure * 0.12)), 0.8, 2.4))
+        contrasted = ImageEnhance.Contrast(smoothed).enhance(_clamp(strength * (1.0 - (pressure * 0.12)), 0.1, 6.0))
         return ImageOps.autocontrast(contrasted, cutoff=1)
     height_map = _prepare_height_map(source)
     softened = height_map.filter(ImageFilter.GaussianBlur(radius=1.2))
@@ -1069,7 +1085,7 @@ def generate_parallax(source: Image.Image, strength: float = 1.35, relief_mode: 
         offset=128,
     )
     merged = ImageChops.add(softened, micro_detail, scale=1.35 - (pressure * 0.35), offset=int(-20 + (pressure * 10.0)))
-    contrasted = ImageEnhance.Contrast(merged).enhance(_clamp(strength * (1.0 - (pressure * 0.18)), 0.8, 2.4))
+    contrasted = ImageEnhance.Contrast(merged).enhance(_clamp(strength * (1.0 - (pressure * 0.18)), 0.1, 6.0))
     return ImageOps.autocontrast(contrasted, cutoff=1)
 
 
@@ -1125,7 +1141,7 @@ def generate_parallax_occlusion(source: Image.Image, strength: float = 1.35, *, 
 
     # Contrast enhancement proportional to requested strength, clamped so that
     # extreme values do not produce depth artefacts at steep view angles.
-    contrasted = ImageEnhance.Contrast(normalized).enhance(_clamp(strength * (0.94 - (pressure * 0.14)), 0.5, 2.25))
+    contrasted = ImageEnhance.Contrast(normalized).enhance(_clamp(strength * (0.94 - (pressure * 0.14)), 0.1, 6.0))
 
     # Final light smooth pass removes any residual pixel-edge artefacts.
     final = contrasted.filter(ImageFilter.GaussianBlur(radius=0.65 + (pressure * 0.35)))
@@ -1255,19 +1271,19 @@ def generate_normal(
 
     pressure = _detail_pressure(source)
     if relief_mode:
-        effective_strength = _clamp(strength * (1.0 - (pressure * 0.06)), 0.9, 4.5)
+        effective_strength = _clamp(strength * (1.0 - (pressure * 0.06)), 0.1, 8.0)
         height_map = _prepare_relief_height_map(source, pressure=pressure).filter(
             ImageFilter.GaussianBlur(radius=0.25 + (pressure * 0.25))
         )
     elif emboss_mode:
-        effective_strength = _clamp(strength * (1.0 - (pressure * 0.08)), 0.9, 4.2)
+        effective_strength = _clamp(strength * (1.0 - (pressure * 0.08)), 0.1, 8.0)
         # Slight adaptive blur keeps crisp embossed ridges while suppressing pixel chatter.
         height_map = _prepare_emboss_height_map(source, pressure=pressure).filter(
             ImageFilter.GaussianBlur(radius=0.30 + (pressure * 0.30))
         )
     else:
         resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.8)
-        effective_strength = _clamp(strength * (1.0 - (pressure * 0.2)), 0.9, 3.8)
+        effective_strength = _clamp(strength * (1.0 - (pressure * 0.2)), 0.1, 8.0)
         height_map = _prepare_height_map(source).filter(
             ImageFilter.GaussianBlur(radius=0.8 + (pressure * 0.9) + ((resolution_scale - 1.0) * 0.35))
         )
@@ -1341,7 +1357,7 @@ def generate_environment_mask(source: Image.Image, strength: float = 1.2, mode: 
     env_amount = ImageEnhance.Contrast(grayscale).enhance(0.9 + (strength * 0.35))
     env_amount = _lift_black_floor(ImageOps.autocontrast(env_amount, cutoff=1), floor=10)
 
-    glossiness = generate_specular(rgb_source, strength=max(0.9, min(2.0, strength + 0.15)))
+    glossiness = generate_specular(rgb_source, strength=max(0.1, min(6.0, strength + 0.15)))
     glossiness = ImageEnhance.Contrast(glossiness).enhance(0.9 + (strength * 0.25))
     glossiness = _lift_black_floor(glossiness, floor=5)
 
@@ -1368,7 +1384,7 @@ def _generate_standard_env_mask(source: Image.Image, strength: float = 1.2) -> I
     grayscale = ImageOps.grayscale(rgb_source)
     # Derive reflection intensity from specular features of the diffuse texture.
     # Bright/shiny-looking areas in the diffuse are more reflective.
-    specular = generate_specular(rgb_source, strength=max(0.9, min(2.0, strength)))
+    specular = generate_specular(rgb_source, strength=max(0.1, min(6.0, strength)))
     # Blend base luminance with the specular highlight estimate.
     env_mask = Image.blend(grayscale, specular, alpha=0.62)
     env_mask = ImageEnhance.Contrast(env_mask).enhance(0.8 + (strength * 0.28))
@@ -1392,7 +1408,7 @@ def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Im
     minimum = ImageChops.darker(ImageChops.darker(red, green), blue)
     chroma = ImageChops.subtract(maximum, minimum)
 
-    specular_drive = max(0.9, min(2.4, 0.7 + (strength * 0.6)))
+    specular_drive = max(0.1, min(6.0, 0.7 + (strength * 0.6)))
     specular = generate_specular(rgb_source, strength=specular_drive)
 
     roughness_contrast = 0.7 + (strength * 0.38)
@@ -1401,7 +1417,7 @@ def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Im
     roughness = _lift_black_floor(ImageOps.autocontrast(roughness, cutoff=0), floor=20)
 
     metallic_contrast = 0.7 + (strength * 0.4)
-    metallic = Image.blend(chroma, specular, alpha=_clamp(0.2 + (strength * 0.1), 0.2, 0.5))
+    metallic = Image.blend(chroma, specular, alpha=_clamp(0.2 + (strength * 0.1), 0.2, 0.85))
     metallic = ImageEnhance.Contrast(metallic).enhance(metallic_contrast)
     metallic = _lift_black_floor(ImageOps.autocontrast(metallic, cutoff=0), floor=3)
 
@@ -1412,8 +1428,8 @@ def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Im
     ao = Image.blend(grayscale, cavity, alpha=ao_alpha)
     ao = _lift_black_floor(ImageOps.autocontrast(ao, cutoff=0), floor=24)
 
-    height_specular_alpha = _clamp(0.2 + (strength * 0.12), 0.2, 0.56)
-    raw_height = generate_parallax(rgb_source, strength=max(0.85, min(2.0, strength)))
+    height_specular_alpha = _clamp(0.2 + (strength * 0.12), 0.2, 0.90)
+    raw_height = generate_parallax(rgb_source, strength=max(0.1, min(6.0, strength)))
     height_or_spec = Image.blend(raw_height, specular, alpha=height_specular_alpha)
     blend_alpha = _clamp(0.65 + (strength * 0.1), 0.65, 0.95)
     height_or_spec = Image.blend(Image.new("L", raw_height.size, color=127), height_or_spec, alpha=blend_alpha)
@@ -1463,7 +1479,7 @@ def generate_specular(source: Image.Image, strength: float = 1.15) -> Image.Imag
     soft_arr = np.maximum(soft_arr, 12.0)
 
     # Contrast enhancement
-    effective_strength = _clamp(strength * (1.0 - (pressure * 0.18)), 0.9, 2.2)
+    effective_strength = _clamp(strength * (1.0 - (pressure * 0.18)), 0.1, 6.0)
     soft_mean = soft_arr.mean()
     contrasted_arr = np.clip((soft_arr - soft_mean) * effective_strength + soft_mean, 0.0, 255.0)
 
@@ -2953,7 +2969,7 @@ if GUI_AVAILABLE:
             _normal_label = ttk.Label(options_frame, text="Normal strength")
             _normal_label.grid(row=5, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_normal_label, "💪 Controls normal-map intensity.\nHigher = sharper fake detail. Lower = smooth potato mode.")
-            self.normal_scale = ttk.Scale(options_frame, from_=0.5, to=4.0, variable=self.normal_strength_var, command=lambda _: self._on_slider_changed())
+            self.normal_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.normal_strength_var, command=lambda _: self._on_slider_changed())
             self.normal_scale.grid(row=5, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.normal_scale, "💪 Drag right for epic bumps, left for subtle detail.\nLive value is shown next to the slider so you can stop guessing.")
             self.normal_strength_display_label = ttk.Label(options_frame, textvariable=self.normal_strength_display_var)
@@ -2965,7 +2981,7 @@ if GUI_AVAILABLE:
             _parallax_label = ttk.Label(options_frame, text="Parallax strength")
             _parallax_label.grid(row=6, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_parallax_label, "🏔 Controls parallax depth contrast.\nToo high and your pebble becomes a canyon. Too low and your canyon becomes toast.")
-            self.parallax_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.parallax_strength_var, command=lambda _: self._on_slider_changed())
+            self.parallax_scale = ttk.Scale(options_frame, from_=0.1, to=6.0, variable=self.parallax_strength_var, command=lambda _: self._on_slider_changed())
             self.parallax_scale.grid(row=6, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.parallax_scale, "🏔 Slide right for deeper depth illusion, left for subtle relief.\nYes, this can absolutely make stones look dramatic.")
             self.parallax_strength_display_label = ttk.Label(options_frame, textvariable=self.parallax_strength_display_var)
@@ -2989,7 +3005,7 @@ if GUI_AVAILABLE:
             _env_mask_label = ttk.Label(options_frame, text="Environment mask strength")
             _env_mask_label.grid(row=8, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_env_mask_label, "🪞 Controls environment-mask contrast.\nHigher = stronger shiny-vs-matte separation. Great for dramatic materials.")
-            self.environment_mask_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.environment_mask_strength_var, command=lambda _: self._on_slider_changed())
+            self.environment_mask_scale = ttk.Scale(options_frame, from_=0.1, to=6.0, variable=self.environment_mask_strength_var, command=lambda _: self._on_slider_changed())
             self.environment_mask_scale.grid(row=8, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.environment_mask_scale, "🪞 Slide right for stronger reflection contrast.\nSlide left for chill, less dramatic materials.")
             self.environment_mask_strength_display_label = ttk.Label(options_frame, textvariable=self.environment_mask_strength_display_var)
@@ -3001,7 +3017,7 @@ if GUI_AVAILABLE:
             _complex_label = ttk.Label(options_frame, text="Complex strength")
             _complex_label.grid(row=9, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_complex_label, "🔮 Controls complex-material contrast.\nHigher = punchier ENB material response. Lower = subtle, civilized vibes.")
-            self.complex_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.complex_strength_var, command=lambda _: self._on_slider_changed())
+            self.complex_scale = ttk.Scale(options_frame, from_=0.1, to=6.0, variable=self.complex_strength_var, command=lambda _: self._on_slider_changed())
             self.complex_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.complex_scale, "🔮 Right = louder material definition.\nLeft = quieter output for restrained legends.")
             self.complex_strength_display_label = ttk.Label(options_frame, textvariable=self.complex_strength_display_var)
@@ -3013,7 +3029,7 @@ if GUI_AVAILABLE:
             _specular_label = ttk.Label(options_frame, text="Specular strength (_msn alpha)")
             _specular_label.grid(row=10, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_specular_label, "✨ Controls specular highlight intensity in _msn alpha.\nHigher = shinier. Lower = dusty realism.")
-            self.specular_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.specular_strength_var, command=lambda _: self._on_slider_changed())
+            self.specular_scale = ttk.Scale(options_frame, from_=0.1, to=6.0, variable=self.specular_strength_var, command=lambda _: self._on_slider_changed())
             self.specular_scale.grid(row=10, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.specular_scale, "✨ Turn it up for glorious shine, down for ancient weathered stone.\nLive value shown beside slider.")
             self.specular_strength_display_label = ttk.Label(options_frame, textvariable=self.specular_strength_display_var)
@@ -3854,14 +3870,14 @@ if GUI_AVAILABLE:
             def _fmt(value: str, auto_var: tk.BooleanVar) -> str:
                 return f"{value}  ◉ AUTO" if (auto_all and auto_var.get()) else value
 
-            self.normal_strength_display_var.set(_fmt(f"{float(self.normal_strength_var.get()):.2f} (0.5–4.0)", self.auto_normal_suggestion_var))
-            self.parallax_strength_display_var.set(_fmt(f"{float(self.parallax_strength_var.get()):.2f} (0.5–3.0)", self.auto_parallax_suggestion_var))
+            self.normal_strength_display_var.set(_fmt(f"{float(self.normal_strength_var.get()):.2f} (0.1–8.0)", self.auto_normal_suggestion_var))
+            self.parallax_strength_display_var.set(_fmt(f"{float(self.parallax_strength_var.get()):.2f} (0.1–6.0)", self.auto_parallax_suggestion_var))
             self.glow_threshold_display_var.set(_fmt(f"{int(round(self.glow_threshold_var.get()))} (0–255)", self.auto_glow_suggestion_var))
             self.environment_mask_strength_display_var.set(
-                _fmt(f"{float(self.environment_mask_strength_var.get()):.2f} (0.5–3.0)", self.auto_environment_mask_suggestion_var)
+                _fmt(f"{float(self.environment_mask_strength_var.get()):.2f} (0.1–6.0)", self.auto_environment_mask_suggestion_var)
             )
-            self.complex_strength_display_var.set(_fmt(f"{float(self.complex_strength_var.get()):.2f} (0.5–3.0)", self.auto_complex_suggestion_var))
-            self.specular_strength_display_var.set(_fmt(f"{float(self.specular_strength_var.get()):.2f} (0.5–3.0)", self.auto_specular_suggestion_var))
+            self.complex_strength_display_var.set(_fmt(f"{float(self.complex_strength_var.get()):.2f} (0.1–6.0)", self.auto_complex_suggestion_var))
+            self.specular_strength_display_var.set(_fmt(f"{float(self.specular_strength_var.get()):.2f} (0.1–6.0)", self.auto_specular_suggestion_var))
 
         def _on_batch_preview_toggle(self) -> None:
             if self.show_batch_preview_var.get():

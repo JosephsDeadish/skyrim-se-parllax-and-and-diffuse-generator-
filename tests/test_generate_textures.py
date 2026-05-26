@@ -276,12 +276,12 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(normalized["env_mask_mode"]), "standard")
         self.assertEqual(str(normalized["parallax_mode"]), "occlusion (ENB/POM)")
         self.assertEqual(str(normalized["render_profile"]), "auto")
-        self.assertAlmostEqual(float(normalized["normal_strength"]), 4.0)
-        self.assertAlmostEqual(float(normalized["parallax_strength"]), 0.5)
+        self.assertAlmostEqual(float(normalized["normal_strength"]), 8.0)
+        self.assertAlmostEqual(float(normalized["parallax_strength"]), 0.1)
         self.assertEqual(int(normalized["glow_threshold"]), 255)
-        self.assertAlmostEqual(float(normalized["environment_mask_strength"]), 3.0)
-        self.assertAlmostEqual(float(normalized["complex_strength"]), 0.5)
-        self.assertAlmostEqual(float(normalized["specular_strength"]), 0.5)
+        self.assertAlmostEqual(float(normalized["environment_mask_strength"]), 6.0)
+        self.assertAlmostEqual(float(normalized["complex_strength"]), 0.1)
+        self.assertAlmostEqual(float(normalized["specular_strength"]), 0.1)
 
     def test_generate_diffuse_returns_rgb_same_size(self) -> None:
         diffuse = generate_diffuse(_sample_image())
@@ -503,7 +503,11 @@ class GenerateTexturesTests(unittest.TestCase):
 
         auto = resolve_render_profile_options("auto", recommended_profile="enb")
         self.assertEqual(auto["effective_profile"], "enb")
-        self.assertEqual(auto["parallax_mode"], "occlusion")
+        # Auto-detected ENB keeps parallax in standard mode so sign/artwork textures
+        # keep their pop-out effect. Occlusion is only used when ENB is explicitly chosen.
+        self.assertEqual(auto["parallax_mode"], "standard")
+        self.assertEqual(auto["complex_format"], "msn")
+        self.assertEqual(auto["env_mask_mode"], "complex")
 
     def test_parse_preview_jump_input_validates_bounds(self) -> None:
         self.assertEqual(parse_preview_jump_input("1", 5), 0)
