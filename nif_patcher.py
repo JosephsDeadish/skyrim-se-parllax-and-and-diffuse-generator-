@@ -264,51 +264,73 @@ class _Buf:
     def remaining(self) -> int:
         return len(self._b) - self._pos
 
+    def _require(self, size: int, *, offset: int | None = None, context: str = "buffer read") -> int:
+        start = self._pos if offset is None else offset
+        end = start + size
+        if start < 0 or end > len(self._b):
+            raise ValueError(
+                f"{context} out of range at offset {start} (need {size} byte(s), buffer size {len(self._b)})"
+            )
+        return start
+
     # --- reads --------------------------------------------------------------
 
     def read_u8(self) -> int:
+        self._require(1, context="u8 read")
         v = self._b[self._pos]
         self._pos += 1
         return v
 
     def read_u16(self) -> int:
+        self._require(2, context="u16 read")
         v = struct.unpack_from("<H", self._b, self._pos)[0]
         self._pos += 2
         return v
 
     def read_u32(self) -> int:
+        self._require(4, context="u32 read")
         v = struct.unpack_from("<I", self._b, self._pos)[0]
         self._pos += 4
         return v
 
     def read_i32(self) -> int:
+        self._require(4, context="i32 read")
         v = struct.unpack_from("<i", self._b, self._pos)[0]
         self._pos += 4
         return v
 
     def read_float(self) -> float:
+        self._require(4, context="float read")
         v = struct.unpack_from("<f", self._b, self._pos)[0]
         self._pos += 4
         return v
 
     def read_sstring_u8(self) -> str:
         n = self.read_u8()
+        self._require(n, context="short string read")
         raw = bytes(self._b[self._pos: self._pos + n])
         self._pos += n
         return raw.decode("latin-1")
 
     def read_sstring_u32(self) -> str:
         n = self.read_u32()
+        self._require(n, context="string read")
         raw = bytes(self._b[self._pos: self._pos + n])
         self._pos += n
         return raw.decode("latin-1")
 
+    def read_u32_at(self, offset: int) -> int:
+        start = self._require(4, offset=offset, context="u32 read")
+        return struct.unpack_from("<I", self._b, start)[0]
+
     # --- in-place writes (never resize) ------------------------------------
 
     def write_u32_at(self, offset: int, value: int) -> None:
+        self._require(4, offset=offset, context="u32 write")
         struct.pack_into("<I", self._b, offset, value)
 
     def write_float_at(self, offset: int, value: float) -> None:
+        self._require(4, offset=offset, context="float write")
         struct.pack_into("<f", self._b, offset, value)
 
     # --- resize helpers -----------------------------------------------------
@@ -323,7 +345,9 @@ class _Buf:
         """Replace the uint32-prefixed string at *offset* (may change length)."""
         old_enc = old_text.encode("latin-1")
         new_enc = new_text.encode("latin-1")
-        old_total = 4 + len(old_enc)
+        old_len = self.read_u32_at(offset)
+        self._require(4 + old_len, offset=offset, context="string replace")
+        old_total = 4 + old_len
         new_total = 4 + len(new_enc)
         new_chunk = struct.pack("<I", len(new_enc)) + new_enc
         self._b[offset: offset + old_total] = bytearray(new_chunk)
@@ -583,17 +607,23 @@ def _build_block_map(
         buf = _Buf(data)
 
         if "BSLightingShaderProperty" in btype:
-            sp = _parse_shader_prop(buf, bi, bstart, bsize)
-            if sp is not None:
-                shader_props.append(sp)
-            else:
-                errors.append(f"Block {bi}: failed to parse BSLightingShaderProperty.")
+            try:
+                sp = _parse_shader_prop(buf, bi, bstart, bsize)
+                if sp is not None:
+                    shader_props.append(sp)
+                else:
+                    errors.append(f"Block {bi}: failed to parse BSLightingShaderProperty.")
+            except (ValueError, struct.error, IndexError) as exc:
+                errors.append(f"Block {bi}: shader parse error: {exc}")
         elif "BSShaderTextureSet" in btype:
-            ts = _parse_texture_set(buf, bi, bstart)
-            if ts is not None:
-                texture_sets[bi] = ts
-            else:
-                errors.append(f"Block {bi}: failed to parse BSShaderTextureSet.")
+            try:
+                ts = _parse_texture_set(buf, bi, bstart)
+                if ts is not None:
+                    texture_sets[bi] = ts
+                else:
+                    errors.append(f"Block {bi}: failed to parse BSShaderTextureSet.")
+            except (ValueError, struct.error, IndexError) as exc:
+                errors.append(f"Block {bi}: texture-set parse error: {exc}")
 
     return shader_props, texture_sets, errors
 
@@ -629,7 +659,7 @@ def _upgrade_block_to_type3(
 
     # 3. Update block size in header
     bsize_field_offset = header.block_sizes_offset + block_index * 4
-    old_size = struct.unpack_from("<I", buf._b, bsize_field_offset)[0]
+    old_size = buf.read_u32_at(bsize_field_offset)
     buf.write_u32_at(bsize_field_offset, old_size + 8)
 
     return buf.to_bytes()
@@ -699,16 +729,64 @@ def _apply_patches(
 
     # --- Phase 3: texture path patches (may change data length) -------------
     sets_patched = 0
+
+    def _extend_texture_set_slots(
+        current_data: bytes,
+        current_header: _NifHeader,
+        texture_set: _TextureSetBlock,
+        target_slot: int,
+    ) -> tuple[bytes, _NifHeader, dict[int, _TextureSetBlock], bool]:
+        if target_slot < texture_set.num_textures:
+            return current_data, current_header, texture_sets, False
+        needed = (target_slot + 1) - texture_set.num_textures
+        if needed <= 0:
+            return current_data, current_header, texture_sets, False
+
+        block_end = texture_set.block_start + current_header.block_sizes[texture_set.block_index]
+        buf_local = _Buf(current_data)
+        buf_local.insert_bytes_at(block_end, b"\x00\x00\x00\x00" * needed)
+        buf_local.write_u32_at(texture_set.block_start, texture_set.num_textures + needed)
+        ts_bsize_off = current_header.block_sizes_offset + texture_set.block_index * 4
+        old_ts_size = buf_local.read_u32_at(ts_bsize_off)
+        buf_local.write_u32_at(ts_bsize_off, old_ts_size + (needed * 4))
+        new_data_local = buf_local.to_bytes()
+
+        new_header_local = _read_header(_Buf(new_data_local))
+        if new_header_local is None:
+            raise RuntimeError("Header corrupted after texture slot extension.")
+        _, new_texture_sets, _ = _build_block_map(new_data_local, new_header_local)
+        return new_data_local, new_header_local, new_texture_sets, True
+
     for sp in shader_props:
         ts = texture_sets.get(sp.texture_set_ref)
         if ts is None:
             continue
+
+        requested_slots: list[int] = []
+        if effective_parallax and opts.parallax_texture_path:
+            requested_slots.append(TEXTURE_SLOT_PARALLAX)
+        if opts.normal_texture_path:
+            requested_slots.append(TEXTURE_SLOT_NORMAL)
+        if opts.enable_env_mapping and opts.env_mask_texture_path:
+            requested_slots.append(TEXTURE_SLOT_ENV_MASK)
+        if opts.enable_env_mapping and opts.cubemap_texture_path:
+            requested_slots.append(TEXTURE_SLOT_CUBEMAP)
+        if requested_slots:
+            max_slot = max(requested_slots)
+            data, header, texture_sets, extended = _extend_texture_set_slots(data, header, ts, max_slot)
+            if extended:
+                sets_patched += 1
+                ts = texture_sets.get(sp.texture_set_ref)
+                if ts is None:
+                    continue
 
         # (slot_index, old_path, new_path) triples for paths that need changing
         slot_changes: list[tuple[int, str, str]] = []
 
         def _want(slot: int, new_raw: str | None) -> None:
             if new_raw is None:
+                return
+            if slot >= ts.num_textures:
                 return
             new = _normalise_path(new_raw)
             old = ts.slot_paths[slot] if slot < ts.num_textures else ""
@@ -742,7 +820,7 @@ def _apply_patches(
         # Update the BSShaderTextureSet block size in the header so subsequent
         # reparsing computes correct block starts for all following blocks.
         ts_bsize_off = header.block_sizes_offset + ts.block_index * 4
-        old_ts_size = struct.unpack_from("<I", buf2._b, ts_bsize_off)[0]
+        old_ts_size = buf2.read_u32_at(ts_bsize_off)
         buf2.write_u32_at(ts_bsize_off, old_ts_size + size_delta)
 
         data = buf2.to_bytes()
@@ -783,7 +861,12 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         return result
 
     buf = _Buf(original_data)
-    header = _read_header(buf)
+    try:
+        header = _read_header(buf)
+    except (ValueError, struct.error, IndexError) as exc:
+        result.errors.append(f"Malformed or truncated NIF: {exc}")
+        result.message = result.errors[-1]
+        return result
     if header is None:
         result.errors.append("Not a supported Skyrim SE NIF (requires 20.2.0.7).")
         result.message = result.errors[-1]
@@ -794,7 +877,10 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
     result.shader_properties_found = len(shader_props)
 
     if not shader_props:
-        result.message = "No BSLightingShaderProperty blocks found — nothing to patch."
+        if parse_errors:
+            result.message = f"No patchable BSLightingShaderProperty blocks found ({parse_errors[0]})."
+        else:
+            result.message = "No BSLightingShaderProperty blocks found — nothing to patch."
         return result
 
     try:
@@ -851,17 +937,22 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
     return result
 
 
-def scan_nif(nif_path: Path) -> list[NifShaderInfo]:
-    """Return a list of :class:`NifShaderInfo` for every shader block in the NIF."""
+def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]]:
+    """Return ``(shader_infos, diagnostics)`` for every shader block in the NIF."""
+    diagnostics: list[str] = []
     try:
         data = nif_path.read_bytes()
-    except OSError:
-        return []
+    except OSError as exc:
+        return [], [f"Cannot read NIF: {exc}"]
     buf = _Buf(data)
-    header = _read_header(buf)
+    try:
+        header = _read_header(buf)
+    except (ValueError, struct.error, IndexError) as exc:
+        return [], [f"Malformed or truncated NIF: {exc}"]
     if header is None:
-        return []
-    shader_props, texture_sets, _ = _build_block_map(data, header)
+        return [], ["Not a supported Skyrim SE NIF (requires 20.2.0.7)."]
+    shader_props, texture_sets, parse_errors = _build_block_map(data, header)
+    diagnostics.extend(parse_errors)
     results: list[NifShaderInfo] = []
     for sp in shader_props:
         ts = texture_sets.get(sp.texture_set_ref)
@@ -878,15 +969,24 @@ def scan_nif(nif_path: Path) -> list[NifShaderInfo]:
             parallax_scale=sp.parallax_scale,
             texture_paths=tex_paths,
         ))
-    return results
+    return results, diagnostics
+
+
+def scan_nif(nif_path: Path) -> list[NifShaderInfo]:
+    """Return a list of :class:`NifShaderInfo` for every shader block in the NIF."""
+    infos, _diagnostics = scan_nif_diagnostics(nif_path)
+    return infos
 
 
 def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
     """Check whether a NIF is ready for parallax, and suggest fixes."""
     result = NifValidationResult(nif_path=nif_path, valid=False)
-    infos = scan_nif(nif_path)
+    infos, diagnostics = scan_nif_diagnostics(nif_path)
+    if diagnostics:
+        result.issues.extend(diagnostics[:6])
     if not infos:
-        result.issues.append("No BSLightingShaderProperty blocks found or not a Skyrim SE NIF.")
+        if not diagnostics:
+            result.issues.append("No BSLightingShaderProperty blocks found or not a Skyrim SE NIF.")
         return result
 
     result.shader_count = len(infos)

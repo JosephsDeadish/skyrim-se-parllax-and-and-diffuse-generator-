@@ -5006,11 +5006,28 @@ if GUI_AVAILABLE:
 
                 res_frame = ttk.LabelFrame(win, text="Results (select a row to copy details)", padding=6)
                 res_frame.pack(fill="both", expand=True, padx=10, pady=(0, 8))
+                style = ttk.Style(win)
+                tree_style_name = "NifEditor.Treeview"
+                tree_select_bg = "#5a7fd6" if dark else "#c8dafc"
+                style.configure(
+                    tree_style_name,
+                    background=entry_bg,
+                    fieldbackground=entry_bg,
+                    foreground=fg,
+                    rowheight=22,
+                )
+                style.configure(f"{tree_style_name}.Heading", background=bg, foreground=fg)
+                style.map(
+                    tree_style_name,
+                    background=[("selected", tree_select_bg)],
+                    foreground=[("selected", fg)],
+                )
                 results_tree = ttk.Treeview(
                     res_frame,
                     columns=("status", "file", "details"),
                     show="headings",
                     selectmode="browse",
+                    style=tree_style_name,
                 )
                 results_tree.heading("status", text="Status")
                 results_tree.heading("file", text="File")
@@ -5019,27 +5036,65 @@ if GUI_AVAILABLE:
                 results_tree.column("file", width=220, minwidth=180, anchor="w")
                 results_tree.column("details", width=560, minwidth=260, anchor="w")
                 results_scroll = ttk.Scrollbar(res_frame, command=results_tree.yview)
-                results_tree.configure(yscrollcommand=results_scroll.set)
+                results_scroll_x = ttk.Scrollbar(res_frame, command=results_tree.xview, orient="horizontal")
+                results_tree.configure(yscrollcommand=results_scroll.set, xscrollcommand=results_scroll_x.set)
                 results_scroll.pack(side="right", fill="y")
-                results_tree.pack(fill="both", expand=True)
+                results_scroll_x.pack(side="bottom", fill="x")
+                results_tree.pack(fill="both", expand=True, side="left")
                 selected_detail_var = tk.StringVar(value="")
-                detail_entry = ttk.Entry(res_frame, textvariable=selected_detail_var)
+                detail_entry = tk.Entry(
+                    res_frame,
+                    textvariable=selected_detail_var,
+                    bg=entry_bg,
+                    fg=fg,
+                    insertbackground=fg,
+                    relief="solid",
+                    borderwidth=1,
+                )
                 detail_entry.pack(fill="x", pady=(6, 0))
+                detail_text = tk.Text(
+                    res_frame,
+                    height=6,
+                    wrap="word",
+                    bg=entry_bg,
+                    fg=fg,
+                    insertbackground=fg,
+                    relief="solid",
+                    borderwidth=1,
+                )
+                detail_text_scroll = ttk.Scrollbar(res_frame, command=detail_text.yview)
+                detail_text.configure(yscrollcommand=detail_text_scroll.set)
+                detail_text_scroll.pack(side="right", fill="y", pady=(6, 0))
+                detail_text.pack(fill="both", expand=False, pady=(6, 0))
                 self._add_tooltip(
                     results_tree,
                     "📋 Click any row to inspect/copy it.\nThis table is intentionally boring and readable so your future self says thanks.",
                 )
                 self._add_tooltip(detail_entry, "✂ Selected row details land here for easy copy/paste.")
+                self._add_tooltip(detail_text, "🧾 Full details appear here with wrapping so error messages stop getting chopped in half.")
+
+                full_row_details: dict[str, str] = {}
+
+                def _set_detail_text(value: str) -> None:
+                    detail_text.delete("1.0", "end")
+                    detail_text.insert("1.0", value)
 
                 def _add_result_row(status: str, file_name: str, details: str) -> None:
-                    results_tree.insert("", "end", values=(status, file_name, details))
+                    normalized_details = details.strip() or "(no details)"
+                    row_preview = normalized_details.replace("\n", " ↩ ")
+                    if len(row_preview) > 190:
+                        row_preview = row_preview[:187] + "..."
+                    item_id = results_tree.insert("", "end", values=(status, file_name, row_preview))
+                    full_row_details[str(item_id)] = normalized_details
                     status_var.set(f"{status}: {file_name} — {details}")
                     results_tree.yview_moveto(1.0)
 
                 def _clear_log() -> None:
                     for item in results_tree.get_children():
                         results_tree.delete(item)
+                    full_row_details.clear()
                     selected_detail_var.set("")
+                    _set_detail_text("")
                     status_var.set("Results cleared.")
                     progress_var.set(0.0)
 
@@ -5051,13 +5106,17 @@ if GUI_AVAILABLE:
                     row_values = results_tree.item(selected[0], "values")
                     if not row_values:
                         selected_detail_var.set("")
+                        _set_detail_text("")
                         return
-                    selected_detail_var.set(f"[{row_values[0]}] {row_values[1]} — {row_values[2]}")
+                    full_details = full_row_details.get(str(selected[0]), str(row_values[2]))
+                    summary = f"[{row_values[0]}] {row_values[1]} — {full_details}"
+                    selected_detail_var.set(summary)
+                    _set_detail_text(summary)
 
                 results_tree.bind("<<TreeviewSelect>>", _on_result_selected)
 
                 def _copy_selected_result() -> None:
-                    text = selected_detail_var.get().strip()
+                    text = detail_text.get("1.0", "end").strip() or selected_detail_var.get().strip()
                     if not text:
                         status_var.set("No result row selected to copy.")
                         return
@@ -5074,7 +5133,8 @@ if GUI_AVAILABLE:
                     for item in items:
                         row_values = results_tree.item(item, "values")
                         if row_values:
-                            lines.append(f"[{row_values[0]}] {row_values[1]} — {row_values[2]}")
+                            full_details = full_row_details.get(str(item), str(row_values[2]))
+                            lines.append(f"[{row_values[0]}] {row_values[1]} — {full_details}")
                     win.clipboard_clear()
                     win.clipboard_append("\n".join(lines))
                     status_var.set(f"Copied {len(lines)} result row(s) to clipboard.")
@@ -5110,12 +5170,16 @@ if GUI_AVAILABLE:
                                     f"{validation.ready_count}/{validation.shader_count} shader(s) already parallax-ready",
                                 )
                             elif validation.shader_count == 0:
-                                _add_result_row("SKIP", nif.name, "No BSLightingShaderProperty found.")
+                                if validation.issues:
+                                    _add_result_row("SKIP", nif.name, "\n".join(validation.issues[:4]))
+                                else:
+                                    _add_result_row("SKIP", nif.name, "No BSLightingShaderProperty found.")
                             else:
+                                issue_text = "\n".join(validation.issues[:5]) if validation.issues else "Needs patching."
                                 _add_result_row(
                                     "WARN",
                                     nif.name,
-                                    f"{validation.ready_count}/{validation.shader_count} ready; {'; '.join(validation.issues[:2])}",
+                                    f"{validation.ready_count}/{validation.shader_count} ready.\n{issue_text}",
                                 )
                         except Exception as exc:
                             _add_result_row("FAIL", nif.name, f"Scan failed: {exc}")
