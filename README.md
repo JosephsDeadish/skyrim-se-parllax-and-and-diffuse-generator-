@@ -12,6 +12,7 @@ Texture generator that supports both GUI and command-line usage. It can generate
 - a complex material output:
   - `_msn`: normal RGB with specular in alpha
   - `_cm`: packed complex material texture (AO/roughness/metallic/height-spec proxies)
+  - `_cm` is the tool's PBR-style output path for Community Shaders workflows
 
 ## Requirements
 
@@ -102,8 +103,25 @@ Optional arguments:
 - `--glow-map` (include glow output)
 - `--environment-mask` (include environment mask output)
 - `--complex-material` (include complex material output)
+- `--pbr-material` (shortcut for PBR-style output: enables complex material and forces `--complex-format cm`)
 - `--batch-workers` (parallel workers for folder mode; `0` = automatic)
 - `--gui` (force GUI mode)
+
+### PBR quick start (Community Shaders)
+
+This app already supports a practical PBR-style packed workflow via `_cm` output.
+
+- In GUI:
+  1. Set **Target renderer** to `community_shaders`
+  2. Enable **Complex/PBR material**
+  3. Set **Complex/PBR format** to `cm`
+  4. Generate textures (you'll get `_cm` packed output)
+- In CLI:
+  - `python generate_textures.py /path/to/input.dds --pbr-material`
+  - or explicitly: `python generate_textures.py /path/to/input.dds --complex-material --complex-format cm`
+
+`_cm` packs channels for modern shader workflows (AO/roughness/metallic/height-spec proxies).  
+For ENB complex material workflows, use `_msn` instead (`--complex-format msn`).
 
 Generated outputs default to `.dds` filenames regardless of the input format. Most outputs are written as DXT5 DDS for broad compatibility; standard (`--environment-mask-mode standard`) `_m` masks prefer DXT1 (with automatic DXT5 fallback if needed). If DDS export is unavailable on the current Pillow build, the tool falls back to PNG output.
 

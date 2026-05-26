@@ -56,6 +56,8 @@ from generate_textures import (
     resolve_render_profile_output_defaults,
     resolve_render_profile_options,
     load_gui_state,
+    main,
+    parse_args,
     run_batch_with_options,
     run_with_options,
     save_gui_state,
@@ -1576,6 +1578,57 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_patreon_url_is_correct(self) -> None:
         self.assertEqual(PATREON_URL, "https://www.patreon.com/cw/DeadOnTheInside")
+
+    def test_parse_args_accepts_pbr_material_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_file = Path(temp_dir) / "brick.dds"
+            input_file.write_bytes(b"dds")
+            with mock.patch("sys.argv", ["generate_textures.py", str(input_file), "--pbr-material"]):
+                args = parse_args()
+        self.assertTrue(args.pbr_material)
+
+    def test_main_pbr_material_forces_complex_material_cm_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_file = Path(temp_dir) / "brick.dds"
+            input_file.write_bytes(b"dds")
+            args = mock.Mock(
+                gui=False,
+                input_file=input_file,
+                output_dir=None,
+                diffuse_name=None,
+                normal_name=None,
+                parallax_name=None,
+                glow_name=None,
+                environment_mask_name=None,
+                complex_name=None,
+                normal_strength=None,
+                parallax_strength=None,
+                glow_threshold=None,
+                environment_mask_strength=None,
+                complex_strength=None,
+                specular_strength=None,
+                complex_format="msn",
+                environment_mask_mode="standard",
+                emboss_mode=False,
+                relief_mode=False,
+                parallax_mode="standard",
+                no_diffuse=False,
+                no_normal=False,
+                no_parallax=False,
+                glow_map=False,
+                environment_mask=False,
+                complex_material=False,
+                pbr_material=True,
+            )
+            with mock.patch("generate_textures.parse_args", return_value=args):
+                with mock.patch("generate_textures.run_with_options", return_value={}) as run_with_options_mock:
+                    exit_code = main()
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(args.complex_material)
+        self.assertEqual(args.complex_format, "cm")
+        run_with_options_mock.assert_called_once()
+        self.assertTrue(bool(run_with_options_mock.call_args.kwargs["include_complex"]))
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["complex_format"]), "cm")
 
     def test_run_cli_handles_missing_gui_dependencies_without_traceback(self) -> None:
         with mock.patch("generate_textures.main", side_effect=RuntimeError("GUI dependencies are unavailable in this environment.")):

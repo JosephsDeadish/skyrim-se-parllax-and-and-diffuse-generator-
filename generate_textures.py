@@ -3120,7 +3120,20 @@ def parse_args() -> argparse.Namespace:
             "'complex' = RGBA channel-packed texture for ENBSeries Complex Parallax Material."
         ),
     )
-    parser.add_argument("--complex-material", action="store_true", help="Generate complex material output.")
+    parser.add_argument(
+        "--complex-material",
+        action="store_true",
+        help="Generate complex material output (ENB _msn or Community Shaders/PBR-style _cm based on --complex-format).",
+    )
+    parser.add_argument(
+        "--pbr-material",
+        action="store_true",
+        help=(
+            "Enable PBR-style output shortcut. "
+            "Automatically enables complex material generation and switches --complex-format to 'cm' "
+            "(packed AO/roughness/metallic/height-spec workflow)."
+        ),
+    )
     parser.add_argument(
         "--emboss-mode",
         action="store_true",
@@ -3163,6 +3176,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gui", action="store_true", help="Launch graphical interface.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {APP_VERSION}")
     return parser.parse_args()
+
+
+def _apply_cli_pbr_overrides(args: argparse.Namespace) -> argparse.Namespace:
+    if getattr(args, "pbr_material", False):
+        args.complex_material = True
+        args.complex_format = "cm"
+    return args
 
 
 PATREON_URL = "https://www.patreon.com/cw/DeadOnTheInside"
@@ -3443,9 +3463,14 @@ if GUI_AVAILABLE:
             _env_mask_check = ttk.Checkbutton(options_frame, text="Environment mask / _m", variable=self.include_environment_mask_var, command=self._refresh_preview)
             _env_mask_check.grid(row=1, column=1, sticky=tk.W)
             self._add_tooltip(_env_mask_check, "🪞 Generate an environment mask for reflections.\nTells Skyrim which parts of a surface are shiny. Science!")
-            _complex_check = ttk.Checkbutton(options_frame, text="Complex material", variable=self.include_complex_var, command=self._refresh_preview)
+            _complex_check = ttk.Checkbutton(options_frame, text="Complex/PBR material", variable=self.include_complex_var, command=self._refresh_preview)
             _complex_check.grid(row=1, column=2, sticky=tk.W)
-            self._add_tooltip(_complex_check, "🔮 Generate complex material for ENBSeries parallax.\nRequires ENB. If you don't know what ENB is, you will soon, and there's no going back.")
+            self._add_tooltip(
+                _complex_check,
+                "🔮 Generate complex/PBR material output.\n"
+                "For Community Shaders PBR-style workflows use format 'cm'.\n"
+                "For ENB complex material workflows use format 'msn'.",
+            )
             _auto_sugg_check = ttk.Checkbutton(
                 options_frame,
                 text="Automatic suggestions (master switch: enables per-slider Auto toggles)",
@@ -3487,9 +3512,14 @@ if GUI_AVAILABLE:
                 wraplength=520,
             ).grid(row=3, column=2, columnspan=3, sticky=tk.W, padx=(4, 0))
 
-            _complex_fmt_label = ttk.Label(options_frame, text="Complex naming")
+            _complex_fmt_label = ttk.Label(options_frame, text="Complex/PBR format")
             _complex_fmt_label.grid(row=4, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_complex_fmt_label, "🏷 Output filename suffix for complex material.\n'msn' = _msn.dds (ENB normal+specular alpha; RGB intentionally matches normal), 'cm' = _cm.dds (packed AO/rough/metal/height-spec).")
+            self._add_tooltip(
+                _complex_fmt_label,
+                "🏷 Output format for complex/PBR maps.\n"
+                "'cm' = PBR-style packed map for Community Shaders (AO/roughness/metallic/height-spec proxies).\n"
+                "'msn' = ENB complex material (normal RGB + specular alpha).",
+            )
             complex_format = ttk.Combobox(
                 options_frame,
                 textvariable=self.complex_format_var,
@@ -3499,7 +3529,13 @@ if GUI_AVAILABLE:
             )
             complex_format.grid(row=4, column=1, sticky=tk.W)
             complex_format.bind("<<ComboboxSelected>>", self._on_complex_format_changed)
-            self._add_tooltip(complex_format, "🏷 'msn' = ENB normal/specular texture.\n'cm' = Community Shaders packed material map.\nVanilla Skyrim generally does not use either unless your mesh/shader setup expects them.")
+            self._add_tooltip(
+                complex_format,
+                "🏷 Choose map type:\n"
+                "'cm' for Community Shaders PBR-style setups.\n"
+                "'msn' for ENB complex material setups.\n"
+                "Quick start PBR: set Target renderer=community_shaders, enable Complex/PBR material, keep format=cm.",
+            )
 
             _env_mode_row = ttk.Frame(options_frame)
             _env_mode_row.grid(row=4, column=2, columnspan=2, sticky=tk.W, padx=(20, 4), pady=8)
@@ -5879,7 +5915,7 @@ else:
 
 
 def main() -> int:
-    args = parse_args()
+    args = _apply_cli_pbr_overrides(parse_args())
     if args.gui or args.input_file is None:
         if not GUI_AVAILABLE:
             raise RuntimeError("GUI dependencies are unavailable in this environment.")
