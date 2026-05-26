@@ -50,6 +50,7 @@ def _build_minimal_nif(
     shader_block_type: str = "BSLightingShaderProperty",
     user_ver2: int = 83,
     header_line_ending: bytes = b"\n",
+    shader_layout_shift: int = 0,
 ) -> bytes:
     """Build a minimal but structurally valid Skyrim SE NIF in memory.
 
@@ -68,6 +69,9 @@ def _build_minimal_nif(
     # --- BSLightingShaderProperty block ---
     # NiObjectNET: name_ref(0) + num_extra(0) + controller(-1)
     nio = struct.pack("<IIi", 0, 0, -1)
+    # Some real-world NIFs include an extra u32 between NiObjectNET and
+    # BSShaderProperty fields; shader_layout_shift=4 simulates that variant.
+    layout_pad = b"\x00\x00\x00\x00" if shader_layout_shift == 4 else b""
     # BSShaderProperty flags
     flags = struct.pack("<II", flags1, flags2)
     # shader_type
@@ -85,7 +89,7 @@ def _build_minimal_nif(
     # light_eff1(f) + light_eff2(f)
     light = struct.pack("<ff", 0.3, 2.0)
 
-    sp_body = nio + flags + stype + uv + tsref + emit + misc + spec + light
+    sp_body = nio + layout_pad + flags + stype + uv + tsref + emit + misc + spec + light
     # type-3 parallax-specific fields
     if shader_type == SHADER_TYPE_HEIGHTMAP:
         scale = parallax_scale if parallax_scale is not None else 1.0
@@ -157,6 +161,18 @@ class TestScanNif(unittest.TestCase):
         infos = scan_nif(nif)
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
         self.assertAlmostEqual(infos[0].parallax_scale or 0.0, 1.5, places=3)
+
+    def test_scan_detects_shifted_shader_layout(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_HEIGHTMAP,
+            parallax_scale=2.0,
+            shader_layout_shift=4,
+        )
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+        self.assertAlmostEqual(infos[0].parallax_scale or 0.0, 2.0, places=3)
 
     def test_scan_reads_texture_paths(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8

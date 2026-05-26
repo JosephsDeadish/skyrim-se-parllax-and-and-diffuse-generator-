@@ -104,6 +104,17 @@ SHADER_TYPE_SKIN_TINT: int = 5
 SHADER_TYPE_HAIR_TINT: int = 6
 SHADER_TYPE_PARALLAX_OCC: int = 7   # (rarely used directly)
 SHADER_TYPE_MULTILAYER: int = 11    # Multi-layer parallax
+_KNOWN_SHADER_TYPES: set[int] = {
+    SHADER_TYPE_DEFAULT,
+    SHADER_TYPE_ENVMAP,
+    SHADER_TYPE_GLOW,
+    SHADER_TYPE_HEIGHTMAP,
+    SHADER_TYPE_FACE_TINT,
+    SHADER_TYPE_SKIN_TINT,
+    SHADER_TYPE_HAIR_TINT,
+    SHADER_TYPE_PARALLAX_OCC,
+    SHADER_TYPE_MULTILAYER,
+}
 
 # Default parallax field values when upgrading a block to type 3
 _DEFAULT_PARALLAX_MAX_PASSES: float = 4.0
@@ -561,7 +572,7 @@ class _TextureSetBlock:
 
 
 def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
-                       block_size: int) -> _ShaderPropBlock | None:
+                       block_size: int, num_blocks: int) -> _ShaderPropBlock | None:
     """Parse a BSLightingShaderProperty block.
 
     Layout for NIF 20.2.0.7 / user_version=12 (zero extra-data):
@@ -586,21 +597,71 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
 
     extra_shift = num_extra * 4
 
-    flags1_offset = block_start + _OFFSET_FLAGS1 + extra_shift
-    flags2_offset = block_start + _OFFSET_FLAGS2 + extra_shift
-    shader_type_offset = block_start + _OFFSET_SHADER_TYPE + extra_shift
-    texture_set_ref_offset = block_start + _OFFSET_TEXTURE_SET + extra_shift
+    block_end = block_start + block_size
 
-    flags1 = buf.read_u32()
-    flags2 = buf.read_u32()
-    shader_type = buf.read_u32()
+    candidates: list[tuple[int, int, int, int, int, int, int, int]] = []
+    for layout_shift in (0, 4):
+        flags1_offset = block_start + _OFFSET_FLAGS1 + extra_shift + layout_shift
+        flags2_offset = block_start + _OFFSET_FLAGS2 + extra_shift + layout_shift
+        shader_type_offset = block_start + _OFFSET_SHADER_TYPE + extra_shift + layout_shift
+        texture_set_ref_offset = block_start + _OFFSET_TEXTURE_SET + extra_shift + layout_shift
+        if (
+            flags1_offset + 4 > block_end
+            or flags2_offset + 4 > block_end
+            or shader_type_offset + 4 > block_end
+            or texture_set_ref_offset + 4 > block_end
+        ):
+            continue
+        flags1 = buf.read_u32_at(flags1_offset)
+        flags2 = buf.read_u32_at(flags2_offset)
+        shader_type = buf.read_u32_at(shader_type_offset)
+        texture_set_ref = struct.unpack_from("<i", buf._b, texture_set_ref_offset)[0]
+        score = 0
+        if shader_type in _KNOWN_SHADER_TYPES:
+            score += 6
+        elif 0 <= shader_type <= 255:
+            score += 1
+        else:
+            score -= 4
+        if -1 <= texture_set_ref < num_blocks:
+            score += 3
+        else:
+            score -= 3
+        if layout_shift == 0:
+            score += 1
+        candidates.append(
+            (
+                score,
+                layout_shift,
+                flags1_offset,
+                flags2_offset,
+                shader_type_offset,
+                texture_set_ref_offset,
+                flags1,
+                flags2,
+            )
+        )
 
-    # skip uv_offset (2×float), uv_scale (2×float), then read texture_set_ref
-    buf.seek(block_start + _OFFSET_TEXTURE_SET + extra_shift)
-    texture_set_ref = buf.read_i32()
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    (
+        _score,
+        layout_shift,
+        flags1_offset,
+        flags2_offset,
+        shader_type_offset,
+        texture_set_ref_offset,
+        flags1,
+        flags2,
+    ) = candidates[0]
+
+    shader_type = buf.read_u32_at(shader_type_offset)
+    texture_set_ref = struct.unpack_from("<i", buf._b, texture_set_ref_offset)[0]
 
     # Type-specific parallax fields (only when shader_type == 3)
-    common_end = block_start + _COMMON_FIELDS_SIZE + extra_shift
+    common_end = block_start + _COMMON_FIELDS_SIZE + extra_shift + layout_shift
     pmx_offset: int | None = None
     psc_offset: int | None = None
     pmx_val: float | None = None
@@ -633,17 +694,27 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
 
 
 def _parse_texture_set(buf: _Buf, block_index: int,
-                       block_start: int) -> _TextureSetBlock | None:
+                       block_start: int, block_size: int) -> _TextureSetBlock | None:
     """Parse a BSShaderTextureSet block."""
     buf.seek(block_start)
+    block_end = block_start + block_size
+    if block_size < 4 or block_end > len(buf._b):
+        return None
     num_textures = buf.read_u32()
-    if num_textures < 1 or num_textures > 16:
+    if num_textures > 64:
         return None
     slot_offsets: list[int] = []
     slot_paths: list[str] = []
     for _ in range(num_textures):
         slot_offsets.append(buf.pos)
-        slot_paths.append(buf.read_sstring_u32())
+        if buf.pos + 4 > block_end:
+            return None
+        n = buf.read_u32()
+        if buf.pos + n > block_end:
+            return None
+        raw = bytes(buf._b[buf.pos: buf.pos + n])
+        buf.seek(buf.pos + n)
+        slot_paths.append(raw.decode("latin-1"))
     return _TextureSetBlock(
         block_index=block_index,
         block_start=block_start,
@@ -692,7 +763,7 @@ def _build_block_map(
 
         if "BSLightingShaderProperty" in btype:
             try:
-                sp = _parse_shader_prop(buf, bi, bstart, bsize)
+                sp = _parse_shader_prop(buf, bi, bstart, bsize, header.num_blocks)
                 if sp is not None:
                     shader_props.append(sp)
                 else:
@@ -701,7 +772,7 @@ def _build_block_map(
                 errors.append(f"Block {bi}: shader parse error: {exc}")
         elif "BSShaderTextureSet" in btype:
             try:
-                ts = _parse_texture_set(buf, bi, bstart)
+                ts = _parse_texture_set(buf, bi, bstart, bsize)
                 if ts is not None:
                     texture_sets[bi] = ts
                 else:
