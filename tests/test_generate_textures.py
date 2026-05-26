@@ -48,6 +48,7 @@ from generate_textures import (
     run_with_options,
     save_gui_state,
     select_generation_context_source,
+    get_output_folder_format_warnings,
 )
 
 
@@ -1776,6 +1777,162 @@ class ParallaxOcclusionTests(unittest.TestCase):
                     include_parallax=True,
                     parallax_mode="broken",
                 )
+
+
+
+
+class ConflictingOptionsWarningsTests(unittest.TestCase):
+    """Tests for conflicting-option and output-folder-format warnings."""
+
+    def _base_kwargs(self) -> dict:
+        return dict(
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.2,
+            include_parallax=False,
+            include_complex=False,
+        )
+
+    def test_emboss_and_relief_both_enabled_triggers_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=True,
+            emboss_mode=True,
+            relief_mode=True,
+            **self._base_kwargs(),
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("emboss_and_relief_both_enabled", ids)
+
+    def test_emboss_and_relief_not_both_enabled_no_conflict_warning(self) -> None:
+        for emboss, relief in [(True, False), (False, True), (False, False)]:
+            warnings = get_generation_warnings(
+                "stone",
+                include_normal=True,
+                emboss_mode=emboss,
+                relief_mode=relief,
+                **self._base_kwargs(),
+            )
+            ids = [w[0] for w in warnings]
+            self.assertNotIn("emboss_and_relief_both_enabled", ids)
+
+    def test_emboss_mode_without_normal_triggers_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=False,
+            emboss_mode=True,
+            relief_mode=False,
+            **self._base_kwargs(),
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("depth_mode_without_normal", ids)
+
+    def test_relief_mode_without_normal_triggers_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=False,
+            emboss_mode=False,
+            relief_mode=True,
+            **self._base_kwargs(),
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("depth_mode_without_normal", ids)
+
+    def test_depth_mode_with_normal_enabled_no_warning(self) -> None:
+        for emboss, relief in [(True, False), (False, True)]:
+            warnings = get_generation_warnings(
+                "stone",
+                include_normal=True,
+                emboss_mode=emboss,
+                relief_mode=relief,
+                **self._base_kwargs(),
+            )
+            ids = [w[0] for w in warnings]
+            self.assertNotIn("depth_mode_without_normal", ids)
+
+    def test_env_mask_with_complex_material_triggers_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_environment_mask=True,
+            include_complex=True,
+            include_glow=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.2,
+            include_parallax=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("env_mask_with_complex_material", ids)
+
+    def test_env_mask_alone_no_complex_conflict_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_environment_mask=True,
+            include_complex=False,
+            include_glow=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.2,
+            include_parallax=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertNotIn("env_mask_with_complex_material", ids)
+
+    def test_get_output_folder_format_warnings_msn_vs_cm_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            (temp_path / "stone_msn.dds").write_bytes(b"fake")
+            warnings = get_output_folder_format_warnings(
+                temp_path, include_complex=True, complex_format="cm"
+            )
+            ids = [w[0] for w in warnings]
+            self.assertIn("output_folder_has_msn_files", ids)
+
+    def test_get_output_folder_format_warnings_cm_vs_msn_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            (temp_path / "stone_cm.dds").write_bytes(b"fake")
+            warnings = get_output_folder_format_warnings(
+                temp_path, include_complex=True, complex_format="msn"
+            )
+            ids = [w[0] for w in warnings]
+            self.assertIn("output_folder_has_cm_files", ids)
+
+    def test_get_output_folder_format_warnings_matching_format_no_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            (temp_path / "stone_msn.dds").write_bytes(b"fake")
+            warnings = get_output_folder_format_warnings(
+                temp_path, include_complex=True, complex_format="msn"
+            )
+            self.assertEqual(warnings, [])
+
+    def test_get_output_folder_format_warnings_include_complex_false_no_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            (temp_path / "stone_msn.dds").write_bytes(b"fake")
+            warnings = get_output_folder_format_warnings(
+                temp_path, include_complex=False, complex_format="cm"
+            )
+            self.assertEqual(warnings, [])
+
+    def test_get_output_folder_format_warnings_empty_folder_no_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            warnings = get_output_folder_format_warnings(
+                temp_path, include_complex=True, complex_format="cm"
+            )
+            self.assertEqual(warnings, [])
+
+    def test_normalize_gui_state_persists_dismissed_warnings(self) -> None:
+        from generate_textures import _normalize_gui_state
+        state = _normalize_gui_state({"dismissed_warnings": ["glow_non_magical", "parallax_flat_plants"]})
+        self.assertIn("glow_non_magical", state["dismissed_warnings"])
+        self.assertIn("parallax_flat_plants", state["dismissed_warnings"])
+
+    def test_normalize_gui_state_dismissed_warnings_defaults_to_empty(self) -> None:
+        from generate_textures import _normalize_gui_state
+        state = _normalize_gui_state({})
+        self.assertEqual(state["dismissed_warnings"], [])
 
 
 if __name__ == "__main__":

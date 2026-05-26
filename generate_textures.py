@@ -77,6 +77,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "environment_mask_strength": 1.2,
     "complex_strength": 1.15,
     "specular_strength": 1.15,
+    "dismissed_warnings": [],
 }
 
 
@@ -225,6 +226,11 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     )
     state["complex_strength"] = _coerce_float(raw.get("complex_strength"), float(state["complex_strength"]), 0.5, 3.0)
     state["specular_strength"] = _coerce_float(raw.get("specular_strength"), float(state["specular_strength"]), 0.5, 3.0)
+    raw_dismissed = raw.get("dismissed_warnings", [])
+    if isinstance(raw_dismissed, list):
+        state["dismissed_warnings"] = [str(w) for w in raw_dismissed if isinstance(w, str)]
+    else:
+        state["dismissed_warnings"] = []
     return state
 
 
@@ -1837,6 +1843,8 @@ def get_generation_warnings(
     env_mask_strength: float,
     include_parallax: bool,
     include_complex: bool,
+    emboss_mode: bool = False,
+    relief_mode: bool = False,
 ) -> list[tuple[str, str]]:
     """Return a list of (warning_id, human-readable message) pairs for suspicious generation choices.
 
@@ -1977,6 +1985,84 @@ def get_generation_warnings(
             "Input path looks like a UI/interface texture.\n\n"
             "Parallax, environment mask, and complex material outputs are usually meant for in-world 3D surfaces, not menu/interface assets.\n\n"
             "Tip: For UI/interface textures, prefer diffuse and only add glow when intentionally needed.",
+        ))
+
+    # --- Conflicting option combinations ---
+    if emboss_mode and relief_mode:
+        warnings.append((
+            "emboss_and_relief_both_enabled",
+            "Both 'Emboss depth' and 'Relief / Pop-out depth' modes are enabled at the same time.\n\n"
+            "These modes use different algorithms to interpret surface depth — enabling both simultaneously is contradictory and the result will be unpredictable.\n\n"
+            "Tip: Enable only one depth mode. Use Emboss for flat printed surfaces (books, scrolls), "
+            "or Relief for painted artwork that should pop out of the surface.",
+        ))
+
+    if (emboss_mode or relief_mode) and not include_normal:
+        warnings.append((
+            "depth_mode_without_normal",
+            f"{'Emboss' if emboss_mode else 'Relief'} depth mode is enabled but 'Normal map' output is unchecked.\n\n"
+            "Depth modes only affect the generated normal map — with normal map generation disabled, "
+            "this setting has no effect.\n\n"
+            "Tip: Enable 'Normal map' output to use depth mode, or disable the depth mode toggle.",
+        ))
+
+    if include_environment_mask and include_complex:
+        warnings.append((
+            "env_mask_with_complex_material",
+            "Both 'Environment mask' and 'Complex material' outputs are enabled.\n\n"
+            "Complex material maps already encode specular/reflectivity information in their channels. "
+            "Generating a separate environment mask alongside a complex material map is usually redundant "
+            "and may cause double-specular artefacts with ENB.\n\n"
+            "Tip: Use either the environment mask OR the complex material — not both — unless you know your shader expects both.",
+        ))
+
+    return warnings
+
+
+def get_output_folder_format_warnings(
+    output_dir: Path,
+    *,
+    include_complex: bool,
+    complex_format: str,
+) -> list[tuple[str, str]]:
+    """Return (warning_id, message) pairs when the output folder contains complex-material files
+    that use a different naming convention than the one currently selected.
+
+    Checks for the presence of *_msn.dds / *_cm.dds files that conflict with ``complex_format``.
+    """
+    warnings: list[tuple[str, str]] = []
+    if not include_complex or not output_dir.is_dir():
+        return warnings
+
+    normalized_format = complex_format.strip().lower()
+
+    # Scan for existing complex material files in the output folder (non-recursive).
+    msn_files = list(output_dir.glob("*_msn.dds")) + list(output_dir.glob("*_msn.png"))
+    cm_files = list(output_dir.glob("*_cm.dds")) + list(output_dir.glob("*_cm.png"))
+
+    if normalized_format == "cm" and msn_files:
+        sample = msn_files[0].name
+        count = len(msn_files)
+        warnings.append((
+            "output_folder_has_msn_files",
+            f"The output folder contains {count} existing '_msn' complex-material file(s) (e.g. {sample}), "
+            f"but you are about to generate '_cm' format files.\n\n"
+            "Mixing _msn and _cm formats in the same folder can cause Skyrim SE / ENB to load the wrong variant, "
+            "producing incorrect shading or missing effects in-game.\n\n"
+            "Tip: Change the Complex Material Format to 'msn' to match existing files, "
+            "or clear the output folder before switching formats.",
+        ))
+    elif normalized_format == "msn" and cm_files:
+        sample = cm_files[0].name
+        count = len(cm_files)
+        warnings.append((
+            "output_folder_has_cm_files",
+            f"The output folder contains {count} existing '_cm' complex-material file(s) (e.g. {sample}), "
+            f"but you are about to generate '_msn' format files.\n\n"
+            "Mixing _cm and _msn formats in the same folder can cause Skyrim SE / ENB to load the wrong variant, "
+            "producing incorrect shading or missing effects in-game.\n\n"
+            "Tip: Change the Complex Material Format to 'cm' to match existing files, "
+            "or clear the output folder before switching formats.",
         ))
 
     return warnings
@@ -3231,6 +3317,9 @@ if GUI_AVAILABLE:
             self.environment_mask_strength_var.set(float(state["environment_mask_strength"]))
             self.complex_strength_var.set(float(state["complex_strength"]))
             self.specular_strength_var.set(float(state["specular_strength"]))
+            dismissed = state.get("dismissed_warnings", [])
+            if isinstance(dismissed, list):
+                self.dismissed_warnings = set(str(w) for w in dismissed if isinstance(w, str))
 
         def _build_gui_state(self) -> dict[str, object]:
             return {
@@ -3265,6 +3354,7 @@ if GUI_AVAILABLE:
                 "environment_mask_strength": self.environment_mask_strength_var.get(),
                 "complex_strength": self.complex_strength_var.get(),
                 "specular_strength": self.specular_strength_var.get(),
+                "dismissed_warnings": sorted(self.dismissed_warnings),
             }
 
         def _save_persisted_gui_state(self) -> None:
@@ -4002,6 +4092,8 @@ if GUI_AVAILABLE:
             env_mask_strength: float,
             include_parallax: bool,
             include_complex: bool,
+            emboss_mode: bool = False,
+            relief_mode: bool = False,
         ) -> bool:
             """Show any applicable sanity warnings. Returns False if user chose to abort."""
             warnings = get_generation_warnings(
@@ -4016,6 +4108,8 @@ if GUI_AVAILABLE:
                 env_mask_strength=env_mask_strength,
                 include_parallax=include_parallax,
                 include_complex=include_complex,
+                emboss_mode=emboss_mode,
+                relief_mode=relief_mode,
             )
             for warning_id, message in warnings:
                 if warning_id in self.dismissed_warnings:
@@ -4130,8 +4224,71 @@ if GUI_AVAILABLE:
                     env_mask_strength=float(self.environment_mask_strength_var.get()),
                     include_parallax=include_parallax,
                     include_complex=include_complex,
+                    emboss_mode=self.emboss_mode_var.get(),
+                    relief_mode=self.relief_mode_var.get(),
                 ):
                     return
+
+                # Warn if the output folder already has complex-material files in a different format.
+                _effective_output_dir = output_dir if output_dir is not None else (
+                    self.selected_inputs[0].parent if self.selected_inputs else None
+                )
+                if _effective_output_dir is not None:
+                    folder_warnings = get_output_folder_format_warnings(
+                        _effective_output_dir,
+                        include_complex=include_complex,
+                        complex_format=self.complex_format_var.get(),
+                    )
+                    for warning_id, message in folder_warnings:
+                        if warning_id in self.dismissed_warnings:
+                            continue
+                        dismiss_var = tk.BooleanVar(value=False)
+                        dialog = tk.Toplevel(self.root)
+                        dialog.title("Output Folder Warning")
+                        dialog.transient(self.root)
+                        dialog.resizable(False, False)
+                        dialog_result: list[bool] = [True]
+                        colors = _DARK_THEME if self.dark_mode_var.get() else _LIGHT_THEME
+                        dialog.configure(background=colors["bg"])
+                        tk.Label(
+                            dialog,
+                            text=f"⚠ {message}",
+                            justify=tk.LEFT,
+                            wraplength=420,
+                            padx=14,
+                            pady=10,
+                            background=colors["bg"],
+                            foreground=colors["fg"],
+                        ).pack(anchor=tk.W)
+                        check_frame = tk.Frame(dialog, background=colors["bg"])
+                        check_frame.pack(anchor=tk.W, padx=14, pady=(0, 6))
+                        tk.Checkbutton(
+                            check_frame,
+                            text="Don't show this warning again",
+                            variable=dismiss_var,
+                            background=colors["bg"],
+                            foreground=colors["fg"],
+                            activebackground=colors["bg"],
+                            selectcolor=colors["field_bg"],
+                        ).pack(side=tk.LEFT)
+                        btn_frame = tk.Frame(dialog, background=colors["bg"])
+                        btn_frame.pack(pady=(4, 12), padx=14, anchor=tk.E)
+
+                        def _fw_continue(d: tk.Toplevel = dialog, wid: str = warning_id) -> None:
+                            if dismiss_var.get():
+                                self.dismissed_warnings.add(wid)
+                            d.destroy()
+
+                        def _fw_abort(d: tk.Toplevel = dialog) -> None:
+                            dialog_result[0] = False
+                            d.destroy()
+
+                        ttk.Button(btn_frame, text="Continue anyway", command=_fw_continue).pack(side=tk.LEFT, padx=(0, 8))
+                        ttk.Button(btn_frame, text="Cancel generation", command=_fw_abort).pack(side=tk.LEFT)
+                        dialog.grab_set()
+                        self.root.wait_window(dialog)
+                        if not dialog_result[0]:
+                            return
 
                 _pm_raw = self.parallax_mode_var.get()
                 _parallax_mode_key = "occlusion" if "occlusion" in _pm_raw else "standard"
