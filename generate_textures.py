@@ -5592,6 +5592,7 @@ if GUI_AVAILABLE:
                 parallax_tex_var = tk.StringVar()
                 normal_tex_var = tk.StringVar()
                 env_mask_tex_var = tk.StringVar()
+                env_mask_tex_var.trace_add("write", _update_checkbox_warnings)
 
                 def _browse_texture_path(target_var: tk.StringVar, title: str) -> None:
                     selected = filedialog.askopenfilename(
