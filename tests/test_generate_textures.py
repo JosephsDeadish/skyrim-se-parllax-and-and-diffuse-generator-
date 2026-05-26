@@ -1813,10 +1813,79 @@ class ParallaxOcclusionTests(unittest.TestCase):
                     parallax_mode="broken",
                 )
 
+    def test_generate_parallax_occlusion_relief_mode_differs_from_standard(self) -> None:
+        """Relief mode should change the occlusion heightmap (luminosity-as-height)."""
+        source = _detailed_bright_image()
+        standard = generate_parallax_occlusion(source, strength=1.35, relief_mode=False)
+        relief = generate_parallax_occlusion(source, strength=1.35, relief_mode=True)
+        self.assertEqual(standard.mode, "L")
+        self.assertEqual(relief.mode, "L")
+        self.assertNotEqual(standard.tobytes(), relief.tobytes())
+
+    def test_generate_parallax_occlusion_relief_flat_returns_l(self) -> None:
+        """relief_mode on a flat input should still return an L-mode image of the same size."""
+        flat = Image.new("RGB", (16, 16), color=(128, 128, 128))
+        result = generate_parallax_occlusion(flat, strength=1.35, relief_mode=True)
+        self.assertEqual(result.mode, "L")
+        self.assertEqual(result.size, (16, 16))
+
+    def test_run_with_options_parallax_occlusion_relief_mode_threads_through(self) -> None:
+        """run_with_options should pass relief_mode to generate_parallax_occlusion."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "sign.png"
+            _detailed_bright_image().save(input_path)
+            captured: list[dict] = []
+
+            original_gen = generate_parallax_occlusion
+
+            def _spy(source, strength=1.35, *, relief_mode=False):
+                captured.append({"relief_mode": relief_mode})
+                return original_gen(source, strength=strength, relief_mode=relief_mode)
+
+            with mock.patch("generate_textures.generate_parallax_occlusion", side_effect=_spy), \
+                 mock.patch(
+                     "generate_textures._save_with_dds_fallback",
+                     side_effect=lambda _img, path, **_kw: path,
+                 ):
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=temp_path / "out",
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=True,
+                    parallax_mode="occlusion",
+                    relief_mode=True,
+                )
+            self.assertEqual(len(captured), 1)
+            self.assertTrue(captured[0]["relief_mode"])
+
+    def test_generate_preview_outputs_parallax_occlusion_relief_mode_threads_through(self) -> None:
+        """generate_preview_outputs should pass relief_mode to generate_parallax_occlusion."""
+        source = _detailed_bright_image()
+        standard = generate_preview_outputs(
+            source,
+            normal_strength=2.0, parallax_strength=1.35, glow_threshold=200,
+            environment_mask_strength=1.0, complex_strength=1.0, specular_strength=1.15,
+            complex_format="msn", parallax_mode="occlusion", relief_mode=False,
+            include_diffuse=False, include_normal=False, include_parallax=True,
+            include_glow=False, include_environment_mask=False, include_complex=False,
+        )
+        relief = generate_preview_outputs(
+            source,
+            normal_strength=2.0, parallax_strength=1.35, glow_threshold=200,
+            environment_mask_strength=1.0, complex_strength=1.0, specular_strength=1.15,
+            complex_format="msn", parallax_mode="occlusion", relief_mode=True,
+            include_diffuse=False, include_normal=False, include_parallax=True,
+            include_glow=False, include_environment_mask=False, include_complex=False,
+        )
+        self.assertNotEqual(
+            standard["parallax"].tobytes(),
+            relief["parallax"].tobytes(),
+        )
 
 
 
-class ConflictingOptionsWarningsTests(unittest.TestCase):
     """Tests for conflicting-option and output-folder-format warnings."""
 
     def _base_kwargs(self) -> dict:

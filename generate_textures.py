@@ -1073,7 +1073,7 @@ def generate_parallax(source: Image.Image, strength: float = 1.35, relief_mode: 
     return ImageOps.autocontrast(contrasted, cutoff=1)
 
 
-def generate_parallax_occlusion(source: Image.Image, strength: float = 1.35) -> Image.Image:
+def generate_parallax_occlusion(source: Image.Image, strength: float = 1.35, *, relief_mode: bool = False) -> Image.Image:
     """Generate a heightmap optimised for Parallax Occlusion Mapping via ENBSeries.
 
     Unlike :func:`generate_parallax`, which preserves high-frequency micro-detail
@@ -1096,13 +1096,18 @@ def generate_parallax_occlusion(source: Image.Image, strength: float = 1.35) -> 
         depth for most surfaces.  Values above 2.0 can produce extreme depth at
         grazing angles with POM and are best reserved for strongly sculptured
         surfaces such as heavy carved stone.
+    relief_mode:
+        When ``True``, use luminosity-as-height so that bright subjects (paintings,
+        signs, murals) appear to protrude from the surface.  Mirrors the behaviour
+        of :func:`generate_parallax` with ``relief_mode=True`` but produces a
+        smoother gradient suited for ENB POM ray-marching.
     """
     grayscale = ImageOps.grayscale(source)
     source_min, source_max = grayscale.getextrema()
     if (source_max - source_min) <= 2:
         return Image.new("L", source.size, color=127)
 
-    base_height = _prepare_height_map(source)
+    base_height = _prepare_relief_height_map(source) if relief_mode else _prepare_height_map(source)
     pressure = _detail_pressure(source)
     resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.6)
 
@@ -1533,7 +1538,7 @@ def generate_preview_outputs(
     if include_parallax:
         if parallax_mode == "occlusion":
             outputs["parallax"] = enforce_skyrim_output_profile(
-                "parallax", generate_parallax_occlusion(source, strength=parallax_strength)
+                "parallax", generate_parallax_occlusion(source, strength=parallax_strength, relief_mode=relief_mode)
             )
         else:
             outputs["parallax"] = enforce_skyrim_output_profile(
@@ -2283,7 +2288,7 @@ def run_with_options(
         if include_parallax:
             if parallax_mode == "occlusion":
                 parallax = enforce_skyrim_output_profile(
-                    "parallax", generate_parallax_occlusion(source, strength=resolved_parallax_strength)
+                    "parallax", generate_parallax_occlusion(source, strength=resolved_parallax_strength, relief_mode=relief_mode)
                 )
             else:
                 parallax = enforce_skyrim_output_profile(
@@ -4013,7 +4018,18 @@ if GUI_AVAILABLE:
                 auto_check.configure(state=tk.NORMAL if auto_enabled else tk.DISABLED)
             self._update_slider_value_labels()
 
-        def _apply_recommended_settings(self) -> None:
+        def _apply_recommended_settings(self, *, update_toggles: bool = True) -> None:
+            """Apply per-image recommended settings to sliders and (optionally) mode toggles.
+
+            Parameters
+            ----------
+            update_toggles:
+                When ``True`` (default), also update render-profile, emboss, and
+                relief mode toggles based on the image.  Pass ``False`` during batch
+                processing so that slider values stay current in the preview panel
+                without mutating the mode toggles that the running batch already
+                captured in its own ``generation_kwargs`` snapshot.
+            """
             if self.source_image is None or not self.auto_suggestions_var.get():
                 return
             preview_path = self.selected_inputs[self.current_preview_index] if self.selected_inputs else None
@@ -4041,26 +4057,27 @@ if GUI_AVAILABLE:
             self.environment_mask_strength_var.set(float(resolved["environment_mask_strength"]))
             self.complex_strength_var.set(float(resolved["complex_strength"]))
             self.specular_strength_var.set(float(resolved["specular_strength"]))
-            self._update_render_profile_recommendation(apply_auto=True)
-            # Auto-suggest emboss/relief mode based on material type and image content.
-            if preview_path is not None:
-                material_type = classify_material_type(preview_path)
-                if material_type == "paper":
-                    if not self.emboss_mode_manual_override:
-                        self.emboss_mode_var.set(True)
-                    # For paintings/illustrated art (high saturation + bg uniformity),
-                    # also suggest relief mode for the pop-out effect.
-                    if self.source_image is not None:
-                        analysis = analyze_image_content(self.source_image)
-                        saturation_mean = float(analysis.get("saturation_mean", 0.0))
-                        bg_uniformity = float(analysis.get("bg_uniformity", 0.0))
-                        # High saturation + uniform background suggests illustrated/painted art.
-                        if (
-                            saturation_mean >= 65.0
-                            and bg_uniformity >= 0.35
-                            and not self.relief_mode_manual_override
-                        ):
-                            self.relief_mode_var.set(True)
+            if update_toggles:
+                self._update_render_profile_recommendation(apply_auto=True)
+                # Auto-suggest emboss/relief mode based on material type and image content.
+                if preview_path is not None:
+                    material_type = classify_material_type(preview_path)
+                    if material_type == "paper":
+                        if not self.emboss_mode_manual_override:
+                            self.emboss_mode_var.set(True)
+                        # For paintings/illustrated art (high saturation + bg uniformity),
+                        # also suggest relief mode for the pop-out effect.
+                        if self.source_image is not None:
+                            analysis = analyze_image_content(self.source_image)
+                            saturation_mean = float(analysis.get("saturation_mean", 0.0))
+                            bg_uniformity = float(analysis.get("bg_uniformity", 0.0))
+                            # High saturation + uniform background suggests illustrated/painted art.
+                            if (
+                                saturation_mean >= 65.0
+                                and bg_uniformity >= 0.35
+                                and not self.relief_mode_manual_override
+                            ):
+                                self.relief_mode_var.set(True)
             self._update_slider_auto_states()
 
         def _photo_image(self, image: Image.Image, max_size: int = 260) -> ImageTk.PhotoImage:
@@ -4120,13 +4137,16 @@ if GUI_AVAILABLE:
         def _set_preview_source_by_path(self, path: Path) -> None:
             for index, selected in enumerate(self.selected_inputs):
                 if selected == path:
-                    self._set_preview_source(
-                        index,
-                        apply_recommendations=should_apply_preview_recommendations(
-                            auto_suggestions_enabled=self.auto_suggestions_var.get(),
-                            is_processing=self.is_processing,
-                        ),
+                    apply_recs = should_apply_preview_recommendations(
+                        auto_suggestions_enabled=self.auto_suggestions_var.get(),
+                        is_processing=self.is_processing,
                     )
+                    self._set_preview_source(index, apply_recommendations=apply_recs)
+                    # During batch processing (apply_recs=False), update slider values
+                    # without mutating mode toggles so the display stays current
+                    # per-image while the running batch keeps its own settings snapshot.
+                    if not apply_recs and self.auto_suggestions_var.get() and self.is_processing:
+                        self._apply_recommended_settings(update_toggles=False)
                     self._request_preview_refresh()
                     return
 
