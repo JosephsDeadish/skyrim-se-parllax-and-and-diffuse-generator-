@@ -11,6 +11,7 @@ from nif_patcher import (
     SLSF1_PARALLAX,
     SLSF1_PARALLAX_OCCLUSION,
     SHADER_TYPE_DEFAULT,
+    SHADER_TYPE_ENVMAP,
     SHADER_TYPE_HEIGHTMAP,
     TEXTURE_SLOT_DIFFUSE,
     TEXTURE_SLOT_NORMAL,
@@ -51,6 +52,7 @@ def _build_minimal_nif(
     user_ver2: int = 83,
     header_line_ending: bytes = b"\n",
     shader_layout_shift: int = 0,
+    texture_set_layout_shift: int = 0,
 ) -> bytes:
     """Build a minimal but structurally valid Skyrim SE NIF in memory.
 
@@ -62,7 +64,8 @@ def _build_minimal_nif(
         texture_paths = [""] * 9
 
     # --- BSShaderTextureSet block ---
-    ts_body = struct.pack("<I", 9)
+    ts_layout_pad = b"\x00\x00\x00\x00" if texture_set_layout_shift == 4 else b""
+    ts_body = ts_layout_pad + struct.pack("<I", 9)
     for path in texture_paths[:9]:
         ts_body += _sstring_u32(path)
 
@@ -173,6 +176,19 @@ class TestScanNif(unittest.TestCase):
         self.assertEqual(len(infos), 1)
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
         self.assertAlmostEqual(infos[0].parallax_scale or 0.0, 2.0, places=3)
+
+    def test_scan_detects_shifted_texture_set_layout(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, texture_paths=paths, texture_set_layout_shift=4)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].texture_paths.get(TEXTURE_SLOT_DIFFUSE), "textures\\arch\\stone.dds")
+
+    def test_scan_decodes_packed_shader_type_value(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=0x82400301)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
 
     def test_scan_reads_texture_paths(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8

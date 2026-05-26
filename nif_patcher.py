@@ -566,6 +566,7 @@ class _TextureSetBlock:
     """Parsed BSShaderTextureSet."""
     block_index: int
     block_start: int
+    count_offset: int
     num_textures: int
     slot_offsets: list[int]    # byte offset of each slot's uint32 length prefix
     slot_paths: list[str]
@@ -599,7 +600,18 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
 
     block_end = block_start + block_size
 
-    candidates: list[tuple[int, int, int, int, int, int, int, int]] = []
+    def _decode_shader_type(raw_value: int) -> int:
+        if raw_value in _KNOWN_SHADER_TYPES:
+            return raw_value
+        low8 = raw_value & 0xFF
+        if low8 in _KNOWN_SHADER_TYPES:
+            return low8
+        low16 = raw_value & 0xFFFF
+        if low16 in _KNOWN_SHADER_TYPES:
+            return low16
+        return raw_value
+
+    candidates: list[tuple[int, int, int, int, int, int, int, int, int]] = []
     for layout_shift in (0, 4):
         flags1_offset = block_start + _OFFSET_FLAGS1 + extra_shift + layout_shift
         flags2_offset = block_start + _OFFSET_FLAGS2 + extra_shift + layout_shift
@@ -614,7 +626,8 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
             continue
         flags1 = buf.read_u32_at(flags1_offset)
         flags2 = buf.read_u32_at(flags2_offset)
-        shader_type = buf.read_u32_at(shader_type_offset)
+        raw_shader_type = buf.read_u32_at(shader_type_offset)
+        shader_type = _decode_shader_type(raw_shader_type)
         texture_set_ref = struct.unpack_from("<i", buf._b, texture_set_ref_offset)[0]
         score = 0
         if shader_type in _KNOWN_SHADER_TYPES:
@@ -639,6 +652,7 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
                 texture_set_ref_offset,
                 flags1,
                 flags2,
+                shader_type,
             )
         )
 
@@ -655,9 +669,9 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         texture_set_ref_offset,
         flags1,
         flags2,
+        shader_type,
     ) = candidates[0]
 
-    shader_type = buf.read_u32_at(shader_type_offset)
     texture_set_ref = struct.unpack_from("<i", buf._b, texture_set_ref_offset)[0]
 
     # Type-specific parallax fields (only when shader_type == 3)
@@ -696,32 +710,60 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
 def _parse_texture_set(buf: _Buf, block_index: int,
                        block_start: int, block_size: int) -> _TextureSetBlock | None:
     """Parse a BSShaderTextureSet block."""
-    buf.seek(block_start)
     block_end = block_start + block_size
     if block_size < 4 or block_end > len(buf._b):
         return None
-    num_textures = buf.read_u32()
-    if num_textures > 64:
+
+    def _parse_with_shift(shift: int) -> _TextureSetBlock | None:
+        if shift not in (0, 4):
+            return None
+        if block_start + shift + 4 > block_end:
+            return None
+        buf.seek(block_start + shift)
+        num_textures = buf.read_u32()
+        if num_textures > 64:
+            return None
+        slot_offsets: list[int] = []
+        slot_paths: list[str] = []
+        for _ in range(num_textures):
+            slot_offsets.append(buf.pos)
+            if buf.pos + 4 > block_end:
+                return None
+            n = buf.read_u32()
+            if buf.pos + n > block_end:
+                return None
+            raw = bytes(buf._b[buf.pos: buf.pos + n])
+            buf.seek(buf.pos + n)
+            slot_paths.append(raw.decode("latin-1"))
+        if buf.pos > block_end:
+            return None
+        return _TextureSetBlock(
+            block_index=block_index,
+            block_start=block_start,
+            count_offset=block_start + shift,
+            num_textures=num_textures,
+            slot_offsets=slot_offsets,
+            slot_paths=slot_paths,
+        )
+
+    candidates = [c for c in (_parse_with_shift(0), _parse_with_shift(4)) if c is not None]
+    if not candidates:
         return None
-    slot_offsets: list[int] = []
-    slot_paths: list[str] = []
-    for _ in range(num_textures):
-        slot_offsets.append(buf.pos)
-        if buf.pos + 4 > block_end:
-            return None
-        n = buf.read_u32()
-        if buf.pos + n > block_end:
-            return None
-        raw = bytes(buf._b[buf.pos: buf.pos + n])
-        buf.seek(buf.pos + n)
-        slot_paths.append(raw.decode("latin-1"))
-    return _TextureSetBlock(
-        block_index=block_index,
-        block_start=block_start,
-        num_textures=num_textures,
-        slot_offsets=slot_offsets,
-        slot_paths=slot_paths,
-    )
+
+    def _score(ts: _TextureSetBlock) -> int:
+        score = 0
+        if ts.num_textures > 0:
+            score += 3
+        if ts.num_textures >= TEXTURE_SLOT_COUNT:
+            score += 2
+        if any(path for path in ts.slot_paths):
+            score += 2
+        if ts.count_offset == block_start:
+            score += 1
+        return score
+
+    candidates.sort(key=_score, reverse=True)
+    return candidates[0]
 
 
 # ---------------------------------------------------------------------------
@@ -900,7 +942,7 @@ def _apply_patches(
         block_end = texture_set.block_start + current_header.block_sizes[texture_set.block_index]
         buf_local = _Buf(current_data)
         buf_local.insert_bytes_at(block_end, b"\x00\x00\x00\x00" * needed)
-        buf_local.write_u32_at(texture_set.block_start, texture_set.num_textures + needed)
+        buf_local.write_u32_at(texture_set.count_offset, texture_set.num_textures + needed)
         ts_bsize_off = current_header.block_sizes_offset + texture_set.block_index * 4
         old_ts_size = buf_local.read_u32_at(ts_bsize_off)
         buf_local.write_u32_at(ts_bsize_off, old_ts_size + (needed * 4))
