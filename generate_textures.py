@@ -723,6 +723,55 @@ def generate_parallax(source: Image.Image, strength: float = 1.35) -> Image.Imag
     return ImageOps.autocontrast(contrasted, cutoff=1)
 
 
+def generate_parallax_occlusion(source: Image.Image, strength: float = 1.35) -> Image.Image:
+    """Generate a heightmap optimised for Parallax Occlusion Mapping via ENBSeries.
+
+    Unlike :func:`generate_parallax`, which preserves high-frequency micro-detail
+    for simple offset parallax shaders, this function produces a smooth,
+    gradient-rich heightmap that eliminates the sharp transitions that cause
+    visible stair-stepping artefacts when ENBSeries performs ray-marched parallax
+    occlusion (POM) at grazing view angles.
+
+    The output naming and file role are identical to standard parallax (``_p.dds``),
+    so the same NIF/material setup applies.  The improvement is purely in heightmap
+    quality when read by ENBSeries with ``EnableParallax=true`` and parallax
+    occlusion enabled.
+
+    Parameters
+    ----------
+    source:
+        Input diffuse texture.
+    strength:
+        Depth/contrast intensity (0.5–2.5).  Values of 1.0–1.5 give realistic
+        depth for most surfaces.  Values above 2.0 can produce extreme depth at
+        grazing angles with POM and are best reserved for strongly sculptured
+        surfaces such as heavy carved stone.
+    """
+    grayscale = ImageOps.grayscale(source)
+    resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.6)
+
+    # Wide Gaussian eliminates the high-frequency noise that appears as stepped
+    # depth layers in POM ray-marching.
+    broad = grayscale.filter(ImageFilter.GaussianBlur(radius=3.0 * resolution_scale))
+
+    # A medium-scale pass preserves overall surface shape (hills, dips, panel
+    # edges) without reintroducing micro-detail noise.
+    medium = grayscale.filter(ImageFilter.GaussianBlur(radius=0.8 * resolution_scale))
+
+    # Blend 70 % broad for smoothness + 30 % medium for shape retention.
+    blended = Image.blend(broad, medium, alpha=0.3)
+
+    # Full 0–255 dynamic range gives ENB POM the widest usable depth field.
+    normalized = ImageOps.autocontrast(blended, cutoff=0)
+
+    # Contrast enhancement proportional to requested strength, clamped so that
+    # extreme values do not produce depth artefacts at steep view angles.
+    contrasted = ImageEnhance.Contrast(normalized).enhance(_clamp(strength, 0.5, 2.5))
+
+    # Final light smooth pass removes any residual pixel-edge artefacts.
+    return contrasted.filter(ImageFilter.GaussianBlur(radius=0.5))
+
+
 def _prepare_emboss_height_map(source: Image.Image) -> Image.Image:
     """Prepare a height map optimised for emboss-style normal generation.
 
@@ -1021,6 +1070,7 @@ def generate_preview_outputs(
     complex_format: str,
     env_mask_mode: str = "standard",
     emboss_mode: bool = False,
+    parallax_mode: str = "standard",
     include_diffuse: bool,
     include_normal: bool,
     include_parallax: bool,
@@ -1036,8 +1086,9 @@ def generate_preview_outputs(
             "normal", generate_normal(source, strength=normal_strength, emboss_mode=emboss_mode)
         )
     if include_parallax:
+        _parallax_fn = generate_parallax_occlusion if parallax_mode == "occlusion" else generate_parallax
         outputs["parallax"] = enforce_skyrim_output_profile(
-            "parallax", generate_parallax(source, strength=parallax_strength)
+            "parallax", _parallax_fn(source, strength=parallax_strength)
         )
     if include_glow:
         outputs["glow"] = enforce_skyrim_output_profile("glow", generate_glow(source, threshold=glow_threshold))
@@ -1592,6 +1643,7 @@ def run_with_options(
     complex_format: str = "msn",
     env_mask_mode: str = "standard",
     emboss_mode: bool = False,
+    parallax_mode: str = "standard",
     include_diffuse: bool = True,
     include_normal: bool = True,
     include_parallax: bool = True,
@@ -1645,7 +1697,8 @@ def run_with_options(
             outputs["normal"] = _save_with_dds_fallback(normal, normal_path)
 
         if include_parallax:
-            parallax = enforce_skyrim_output_profile("parallax", generate_parallax(source, strength=resolved_parallax_strength))
+            _parallax_fn = generate_parallax_occlusion if parallax_mode == "occlusion" else generate_parallax
+            parallax = enforce_skyrim_output_profile("parallax", _parallax_fn(source, strength=resolved_parallax_strength))
             _, parallax_path = build_output_paths(
                 input_path=input_file,
                 output_dir=output_dir,
@@ -1729,6 +1782,7 @@ def run_batch_with_options(
     complex_format: str = "msn",
     env_mask_mode: str = "standard",
     emboss_mode: bool = False,
+    parallax_mode: str = "standard",
     include_diffuse: bool = True,
     include_normal: bool = True,
     include_parallax: bool = True,
@@ -1768,6 +1822,7 @@ def run_batch_with_options(
                     complex_format=complex_format,
                     env_mask_mode=env_mask_mode,
                     emboss_mode=emboss_mode,
+                    parallax_mode=parallax_mode,
                     include_diffuse=include_diffuse,
                     include_normal=include_normal,
                     include_parallax=include_parallax,
@@ -1801,6 +1856,7 @@ def run_batch_with_options(
             complex_format=complex_format,
             env_mask_mode=env_mask_mode,
             emboss_mode=emboss_mode,
+            parallax_mode=parallax_mode,
             include_diffuse=include_diffuse,
             include_normal=include_normal,
             include_parallax=include_parallax,
@@ -1912,6 +1968,17 @@ def parse_args() -> argparse.Namespace:
             "printed text, borders, and artwork detail on flat surfaces such as books, cards, "
             "scrolls, and posters — giving them physically plausible embossed/debossed depth. "
             "Recommended for paper/book/card textures; leave off for terrain, stone, and wood."
+        ),
+    )
+    parser.add_argument(
+        "--parallax-mode",
+        choices=("standard", "occlusion"),
+        default="standard",
+        help=(
+            "Parallax heightmap output mode. "
+            "'standard' (default) = micro-detail height map for the Skyrim SE offset parallax shader. "
+            "'occlusion' = smooth gradient height map optimised for ENBSeries Parallax Occlusion Mapping (POM). "
+            "Both modes write the same _p.dds file; the difference is in heightmap quality when read by ENB POM."
         ),
     )
     parser.add_argument(
@@ -2047,6 +2114,8 @@ if GUI_AVAILABLE:
             self.specular_strength_display_var = tk.StringVar()
             self.complex_format_var = tk.StringVar(value="msn")
             self.env_mask_mode_var = tk.StringVar(value="standard")
+            self.emboss_mode_var = tk.BooleanVar(value=False)
+            self.parallax_mode_var = tk.StringVar(value="standard")
             self.auto_suggestions_var = tk.BooleanVar(value=True)
             self.auto_normal_suggestion_var = tk.BooleanVar(value=True)
             self.auto_parallax_suggestion_var = tk.BooleanVar(value=True)
@@ -2204,7 +2273,8 @@ if GUI_AVAILABLE:
             self.normal_scale = ttk.Scale(options_frame, from_=0.5, to=4.0, variable=self.normal_strength_var, command=lambda _: self._on_slider_changed())
             self.normal_scale.grid(row=4, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.normal_scale, "💪 Drag right for epic bumps, left for subtle detail.\nLive value is shown next to the slider so you can stop guessing.")
-            ttk.Label(options_frame, textvariable=self.normal_strength_display_var).grid(row=4, column=3, sticky=tk.W, padx=8)
+            self.normal_strength_display_label = ttk.Label(options_frame, textvariable=self.normal_strength_display_var)
+            self.normal_strength_display_label.grid(row=4, column=3, sticky=tk.W, padx=8)
             _auto_normal = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_normal_suggestion_var, command=self._on_auto_slider_preference_changed)
             _auto_normal.grid(row=4, column=4, sticky=tk.W)
             self._add_tooltip(_auto_normal, "🤖 Let the app analyse the image and choose this value.\nUncheck to manually control, as the control freak you truly are.")
@@ -2215,7 +2285,8 @@ if GUI_AVAILABLE:
             self.parallax_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.parallax_strength_var, command=lambda _: self._on_slider_changed())
             self.parallax_scale.grid(row=5, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.parallax_scale, "🏔 Slide right for deeper depth illusion, left for subtle relief.\nYes, this can absolutely make stones look dramatic.")
-            ttk.Label(options_frame, textvariable=self.parallax_strength_display_var).grid(row=5, column=3, sticky=tk.W, padx=8)
+            self.parallax_strength_display_label = ttk.Label(options_frame, textvariable=self.parallax_strength_display_var)
+            self.parallax_strength_display_label.grid(row=5, column=3, sticky=tk.W, padx=8)
             _auto_parallax = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_parallax_suggestion_var, command=self._on_auto_slider_preference_changed)
             _auto_parallax.grid(row=5, column=4, sticky=tk.W)
             self._add_tooltip(_auto_parallax, "🤖 Automatic parallax strength suggestion.\nBased on actual image analysis, not a horoscope.")
@@ -2226,7 +2297,8 @@ if GUI_AVAILABLE:
             self.glow_scale = ttk.Scale(options_frame, from_=0, to=255, variable=self.glow_threshold_var, command=lambda _: self._on_slider_changed())
             self.glow_scale.grid(row=6, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.glow_scale, "💡 0 means everything glows like a rave. 255 means almost nothing glows.\nUse the live value display to tune precisely.")
-            ttk.Label(options_frame, textvariable=self.glow_threshold_display_var).grid(row=6, column=3, sticky=tk.W, padx=8)
+            self.glow_threshold_display_label = ttk.Label(options_frame, textvariable=self.glow_threshold_display_var)
+            self.glow_threshold_display_label.grid(row=6, column=3, sticky=tk.W, padx=8)
             _auto_glow = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_glow_suggestion_var, command=self._on_auto_slider_preference_changed)
             _auto_glow.grid(row=6, column=4, sticky=tk.W)
             self._add_tooltip(_auto_glow, "🤖 Auto-detect the ideal glow threshold.\nBased on luminance analysis. The computer is trying its best.")
@@ -2237,7 +2309,8 @@ if GUI_AVAILABLE:
             self.environment_mask_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.environment_mask_strength_var, command=lambda _: self._on_slider_changed())
             self.environment_mask_scale.grid(row=7, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.environment_mask_scale, "🪞 Slide right for stronger reflection contrast.\nSlide left for chill, less dramatic materials.")
-            ttk.Label(options_frame, textvariable=self.environment_mask_strength_display_var).grid(row=7, column=3, sticky=tk.W, padx=8)
+            self.environment_mask_strength_display_label = ttk.Label(options_frame, textvariable=self.environment_mask_strength_display_var)
+            self.environment_mask_strength_display_label.grid(row=7, column=3, sticky=tk.W, padx=8)
             _auto_env_mask = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_environment_mask_suggestion_var, command=self._on_auto_slider_preference_changed)
             _auto_env_mask.grid(row=7, column=4, sticky=tk.W)
             self._add_tooltip(_auto_env_mask, "🤖 Auto-select environment mask strength.\nThe machine will judge your texture's reflective potential.")
@@ -2248,7 +2321,8 @@ if GUI_AVAILABLE:
             self.complex_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.complex_strength_var, command=lambda _: self._on_slider_changed())
             self.complex_scale.grid(row=8, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.complex_scale, "🔮 Right = louder material definition.\nLeft = quieter output for restrained legends.")
-            ttk.Label(options_frame, textvariable=self.complex_strength_display_var).grid(row=8, column=3, sticky=tk.W, padx=8)
+            self.complex_strength_display_label = ttk.Label(options_frame, textvariable=self.complex_strength_display_var)
+            self.complex_strength_display_label.grid(row=8, column=3, sticky=tk.W, padx=8)
             _auto_complex = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_complex_suggestion_var, command=self._on_auto_slider_preference_changed)
             _auto_complex.grid(row=8, column=4, sticky=tk.W)
             self._add_tooltip(_auto_complex, "🤖 Auto-set complex strength. Let the algorithm\nscrutinise your texture's material complexity.")
@@ -2259,10 +2333,54 @@ if GUI_AVAILABLE:
             self.specular_scale = ttk.Scale(options_frame, from_=0.5, to=3.0, variable=self.specular_strength_var, command=lambda _: self._on_slider_changed())
             self.specular_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.specular_scale, "✨ Turn it up for glorious shine, down for ancient weathered stone.\nLive value shown beside slider.")
-            ttk.Label(options_frame, textvariable=self.specular_strength_display_var).grid(row=9, column=3, sticky=tk.W, padx=8)
+            self.specular_strength_display_label = ttk.Label(options_frame, textvariable=self.specular_strength_display_var)
+            self.specular_strength_display_label.grid(row=9, column=3, sticky=tk.W, padx=8)
             _auto_specular = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_specular_suggestion_var, command=self._on_auto_slider_preference_changed)
             _auto_specular.grid(row=9, column=4, sticky=tk.W)
             self._add_tooltip(_auto_specular, "🤖 Auto-set specular strength. The AI ponders how shiny\nyour texture DESERVES to be.")
+
+            # --- Emboss depth + parallax mode options (row 10) ---
+            _emboss_check = ttk.Checkbutton(
+                options_frame,
+                text="Emboss depth  (books, cards, scrolls — raises printed/artwork edges in normal map)",
+                variable=self.emboss_mode_var,
+                command=self._on_emboss_mode_changed,
+            )
+            _emboss_check.grid(row=10, column=0, columnspan=4, sticky=tk.W, pady=(8, 2))
+            self._add_tooltip(
+                _emboss_check,
+                "📜 Emboss mode generates normals from edge ridges instead of smooth gradients.\n"
+                "Perfect for books, notes, cards, posters — anything flat with printed detail.\n"
+                "Uncheck for terrain, stone, wood, and any organic 3D surface.",
+            )
+
+            _parallax_mode_label = ttk.Label(options_frame, text="Parallax mode")
+            _parallax_mode_label.grid(row=11, column=0, sticky=tk.W, pady=(2, 8))
+            self._add_tooltip(
+                _parallax_mode_label,
+                "🏔 Heightmap style for _p.dds output.\n"
+                "'standard' = micro-detail for vanilla Skyrim SE parallax.\n"
+                "'occlusion (ENB/POM)' = smooth gradient for ENBSeries Parallax Occlusion Mapping.",
+            )
+            _parallax_mode_combo = ttk.Combobox(
+                options_frame,
+                textvariable=self.parallax_mode_var,
+                values=("standard", "occlusion (ENB/POM)"),
+                state="readonly",
+                width=24,
+            )
+            _parallax_mode_combo.grid(row=11, column=1, columnspan=2, sticky=tk.W)
+            self._add_tooltip(
+                _parallax_mode_combo,
+                "🏔 'standard' = vanilla Skyrim SE parallax shader.\n"
+                "'occlusion (ENB/POM)' = smooth heightmap for ENBSeries POM — requires ENBSeries with\n"
+                "EnableParallax=true in enbseries.ini. Same _p.dds slot, better depth at grazing angles.",
+            )
+            ttk.Label(
+                options_frame,
+                text="standard = vanilla  |  occlusion = ENBSeries POM",
+                foreground="gray",
+            ).grid(row=11, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
 
             options_frame.columnconfigure(2, weight=1)
             self._update_slider_auto_states()
@@ -2820,14 +2938,19 @@ if GUI_AVAILABLE:
             self._request_preview_refresh()
 
         def _update_slider_value_labels(self) -> None:
-            self.normal_strength_display_var.set(f"{float(self.normal_strength_var.get()):.2f} (0.5–4.0)")
-            self.parallax_strength_display_var.set(f"{float(self.parallax_strength_var.get()):.2f} (0.5–3.0)")
-            self.glow_threshold_display_var.set(f"{int(self.glow_threshold_var.get())} (0–255)")
+            auto_all = self.auto_suggestions_var.get()
+
+            def _fmt(value: str, auto_var: tk.BooleanVar) -> str:
+                return f"{value}  ◉ AUTO" if (auto_all and auto_var.get()) else value
+
+            self.normal_strength_display_var.set(_fmt(f"{float(self.normal_strength_var.get()):.2f} (0.5–4.0)", self.auto_normal_suggestion_var))
+            self.parallax_strength_display_var.set(_fmt(f"{float(self.parallax_strength_var.get()):.2f} (0.5–3.0)", self.auto_parallax_suggestion_var))
+            self.glow_threshold_display_var.set(_fmt(f"{int(self.glow_threshold_var.get())} (0–255)", self.auto_glow_suggestion_var))
             self.environment_mask_strength_display_var.set(
-                f"{float(self.environment_mask_strength_var.get()):.2f} (0.5–3.0)"
+                _fmt(f"{float(self.environment_mask_strength_var.get()):.2f} (0.5–3.0)", self.auto_environment_mask_suggestion_var)
             )
-            self.complex_strength_display_var.set(f"{float(self.complex_strength_var.get()):.2f} (0.5–3.0)")
-            self.specular_strength_display_var.set(f"{float(self.specular_strength_var.get()):.2f} (0.5–3.0)")
+            self.complex_strength_display_var.set(_fmt(f"{float(self.complex_strength_var.get()):.2f} (0.5–3.0)", self.auto_complex_suggestion_var))
+            self.specular_strength_display_var.set(_fmt(f"{float(self.specular_strength_var.get()):.2f} (0.5–3.0)", self.auto_specular_suggestion_var))
 
         def _on_batch_preview_toggle(self) -> None:
             if self.show_batch_preview_var.get():
@@ -2842,6 +2965,7 @@ if GUI_AVAILABLE:
             self.auto_environment_mask_suggestion_var.set(value)
             self.auto_complex_suggestion_var.set(value)
             self.auto_specular_suggestion_var.set(value)
+            self._update_slider_auto_states()
 
         def _on_auto_slider_preference_changed(self) -> None:
             self._update_slider_auto_states()
@@ -2850,21 +2974,30 @@ if GUI_AVAILABLE:
                 self.status_var.set("Automatic suggestions updated for checked sliders.")
             self._refresh_preview()
 
+        def _on_emboss_mode_changed(self) -> None:
+            self._request_preview_refresh()
+
+        def _on_parallax_mode_changed(self) -> None:
+            self._request_preview_refresh()
+
         def _update_slider_auto_states(self) -> None:
             auto_enabled = self.auto_suggestions_var.get()
+            # Colours for AUTO vs manual labels — chosen to stand out in both themes.
+            auto_fg = "#1e88e5"   # vivid blue: "the computer owns this value"
+            manual_fg = ""        # reset to theme default
             slider_specs = (
-                (self.normal_scale, self.auto_normal_suggestion_var),
-                (self.parallax_scale, self.auto_parallax_suggestion_var),
-                (self.glow_scale, self.auto_glow_suggestion_var),
-                (self.environment_mask_scale, self.auto_environment_mask_suggestion_var),
-                (self.complex_scale, self.auto_complex_suggestion_var),
-                (self.specular_scale, self.auto_specular_suggestion_var),
+                (self.normal_scale, self.auto_normal_suggestion_var, self.normal_strength_display_label),
+                (self.parallax_scale, self.auto_parallax_suggestion_var, self.parallax_strength_display_label),
+                (self.glow_scale, self.auto_glow_suggestion_var, self.glow_threshold_display_label),
+                (self.environment_mask_scale, self.auto_environment_mask_suggestion_var, self.environment_mask_strength_display_label),
+                (self.complex_scale, self.auto_complex_suggestion_var, self.complex_strength_display_label),
+                (self.specular_scale, self.auto_specular_suggestion_var, self.specular_strength_display_label),
             )
-            for slider, auto_var in slider_specs:
-                if auto_enabled and auto_var.get():
-                    slider.configure(state=tk.DISABLED)
-                else:
-                    slider.configure(state=tk.NORMAL)
+            for slider, auto_var, display_label in slider_specs:
+                is_auto = auto_enabled and auto_var.get()
+                slider.configure(state=tk.DISABLED if is_auto else tk.NORMAL)
+                display_label.configure(foreground=auto_fg if is_auto else manual_fg)
+            self._update_slider_value_labels()
 
         def _apply_recommended_settings(self) -> None:
             if self.source_image is None or not self.auto_suggestions_var.get():
@@ -2894,7 +3027,11 @@ if GUI_AVAILABLE:
             self.environment_mask_strength_var.set(float(resolved["environment_mask_strength"]))
             self.complex_strength_var.set(float(resolved["complex_strength"]))
             self.specular_strength_var.set(float(resolved["specular_strength"]))
-            self._update_slider_value_labels()
+            # Auto-suggest emboss mode for paper/book/card/scroll textures.
+            if preview_path is not None:
+                material_type = classify_material_type(preview_path)
+                if material_type == "paper":
+                    self.emboss_mode_var.set(True)
             self._update_slider_auto_states()
 
         def _photo_image(self, image: Image.Image, max_size: int = 260) -> ImageTk.PhotoImage:
@@ -2970,6 +3107,9 @@ if GUI_AVAILABLE:
             if self.source_image is None:
                 return
             try:
+                # Map the GUI parallax mode combo value to the internal key.
+                _pm_raw = self.parallax_mode_var.get()
+                _parallax_mode = "occlusion" if "occlusion" in _pm_raw else "standard"
                 outputs = generate_preview_outputs(
                     self.source_image,
                     normal_strength=float(self.normal_strength_var.get()),
@@ -2980,6 +3120,8 @@ if GUI_AVAILABLE:
                     specular_strength=float(self.specular_strength_var.get()),
                     complex_format=self.complex_format_var.get(),
                     env_mask_mode=self.env_mask_mode_var.get(),
+                    emboss_mode=self.emboss_mode_var.get(),
+                    parallax_mode=_parallax_mode,
                     include_diffuse=self.include_diffuse_var.get(),
                     include_normal=self.include_normal_var.get(),
                     include_parallax=self.include_parallax_var.get(),
@@ -3135,6 +3277,8 @@ if GUI_AVAILABLE:
             ):
                 return
 
+            _pm_raw = self.parallax_mode_var.get()
+            _parallax_mode_key = "occlusion" if "occlusion" in _pm_raw else "standard"
             generation_kwargs = {
                 "output_dir": output_dir,
                 "normal_strength": self._resolve_generation_value(
@@ -3157,6 +3301,8 @@ if GUI_AVAILABLE:
                 ),
                 "complex_format": self.complex_format_var.get(),
                 "env_mask_mode": self.env_mask_mode_var.get(),
+                "emboss_mode": self.emboss_mode_var.get(),
+                "parallax_mode": _parallax_mode_key,
                 "include_diffuse": include_diffuse,
                 "include_normal": include_normal,
                 "include_parallax": include_parallax,
@@ -3257,6 +3403,8 @@ def main() -> int:
             specular_strength=args.specular_strength,
             complex_format=args.complex_format,
             env_mask_mode=args.environment_mask_mode,
+            emboss_mode=args.emboss_mode,
+            parallax_mode=args.parallax_mode,
             include_diffuse=not args.no_diffuse,
             include_normal=not args.no_normal,
             include_parallax=not args.no_parallax,
@@ -3295,6 +3443,8 @@ def main() -> int:
         specular_strength=args.specular_strength,
         complex_format=args.complex_format,
         env_mask_mode=args.environment_mask_mode,
+        emboss_mode=args.emboss_mode,
+        parallax_mode=args.parallax_mode,
         include_diffuse=not args.no_diffuse,
         include_normal=not args.no_normal,
         include_parallax=not args.no_parallax,

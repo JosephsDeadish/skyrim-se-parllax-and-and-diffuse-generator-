@@ -29,6 +29,7 @@ from generate_textures import (
     generate_msn,
     generate_normal,
     generate_parallax,
+    generate_parallax_occlusion,
     generate_preview_outputs,
     generate_specular,
     get_generation_warnings,
@@ -1143,6 +1144,134 @@ class GenerateTexturesTests(unittest.TestCase):
 
             self.assertEqual(save_mock.call_count, 1)
             self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT5",))
+
+
+class EmbossNormalTests(unittest.TestCase):
+    def test_emboss_normal_returns_rgb_same_size(self) -> None:
+        result = generate_normal(_sample_image(), emboss_mode=True)
+        self.assertEqual(result.mode, "RGB")
+        self.assertEqual(result.size, (8, 8))
+
+    def test_emboss_normal_flat_image_returns_flat_normal(self) -> None:
+        flat = Image.new("RGB", (16, 16), color=(128, 128, 128))
+        result = generate_normal(flat, strength=2.0, emboss_mode=True)
+        self.assertEqual(result.mode, "RGB")
+        self.assertEqual(result.size, (16, 16))
+        # Flat uniform input → Sobel gradients are zero → flat normal (128, 128, 255).
+        r, g, b = result.split()
+        self.assertLessEqual(r.getextrema()[1] - r.getextrema()[0], 4)
+        self.assertLessEqual(g.getextrema()[1] - g.getextrema()[0], 4)
+        self.assertGreaterEqual(b.getextrema()[0], 245)
+
+    def test_emboss_normal_differs_from_standard_on_detailed_image(self) -> None:
+        detail = _detailed_bright_image()
+        standard = generate_normal(detail, strength=2.0, emboss_mode=False)
+        emboss = generate_normal(detail, strength=2.0, emboss_mode=True)
+        self.assertNotEqual(standard.tobytes(), emboss.tobytes())
+
+    def test_emboss_normal_blue_channel_stays_in_skyrim_safe_range(self) -> None:
+        detail = _detailed_bright_image()
+        result = generate_normal(detail, strength=2.0, emboss_mode=True)
+        _, _, blue = result.split()
+        self.assertGreaterEqual(blue.getextrema()[0], 128)
+
+    def test_emboss_mode_threads_through_generate_msn(self) -> None:
+        detail = _detailed_bright_image()
+        standard_msn = generate_msn(detail, normal_strength=2.0, emboss_mode=False)
+        emboss_msn = generate_msn(detail, normal_strength=2.0, emboss_mode=True)
+        # RGB channels encode the normal; they should differ between modes.
+        std_r, std_g, _, _ = standard_msn.split()
+        emb_r, emb_g, _, _ = emboss_msn.split()
+        self.assertNotEqual(std_r.tobytes(), emb_r.tobytes())
+
+    def test_emboss_mode_threads_through_run_with_options(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "book_cover.png"
+            _detailed_bright_image().save(input_path)
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ):
+                outputs = run_with_options(
+                    input_file=input_path,
+                    output_dir=temp_path / "out",
+                    include_diffuse=False,
+                    include_normal=True,
+                    include_parallax=False,
+                    emboss_mode=True,
+                )
+            self.assertIn("normal", outputs)
+
+
+class ParallaxOcclusionTests(unittest.TestCase):
+    def test_generate_parallax_occlusion_returns_l_same_size(self) -> None:
+        result = generate_parallax_occlusion(_sample_image())
+        self.assertEqual(result.mode, "L")
+        self.assertEqual(result.size, (8, 8))
+
+    def test_generate_parallax_occlusion_produces_non_flat_output(self) -> None:
+        result = generate_parallax_occlusion(_vertical_gradient_image(), strength=1.35)
+        values = set(result.tobytes())
+        self.assertGreater(len(values), 2)
+
+    def test_parallax_occlusion_differs_from_standard_on_detailed_image(self) -> None:
+        detail = _detailed_bright_image()
+        standard = generate_parallax(detail, strength=1.35)
+        occlusion = generate_parallax_occlusion(detail, strength=1.35)
+        self.assertNotEqual(standard.tobytes(), occlusion.tobytes())
+
+    def test_parallax_occlusion_smoother_than_standard(self) -> None:
+        """POM heightmap should have smaller pixel-to-pixel variance (smoother gradients)."""
+        import statistics
+        detail = _detailed_bright_image()
+        std_bytes = list(generate_parallax(detail, strength=1.35).tobytes())
+        pom_bytes = list(generate_parallax_occlusion(detail, strength=1.35).tobytes())
+        std_diffs = [abs(std_bytes[i + 1] - std_bytes[i]) for i in range(len(std_bytes) - 1)]
+        pom_diffs = [abs(pom_bytes[i + 1] - pom_bytes[i]) for i in range(len(pom_bytes) - 1)]
+        self.assertLessEqual(statistics.mean(pom_diffs), statistics.mean(std_diffs))
+
+    def test_parallax_mode_occlusion_threads_through_preview_outputs(self) -> None:
+        detail = _detailed_bright_image()
+        standard_out = generate_preview_outputs(
+            detail,
+            normal_strength=2.0, parallax_strength=1.35, glow_threshold=200,
+            environment_mask_strength=1.0, complex_strength=1.0, specular_strength=1.15,
+            complex_format="msn", parallax_mode="standard",
+            include_diffuse=False, include_normal=False, include_parallax=True,
+            include_glow=False, include_environment_mask=False, include_complex=False,
+        )
+        occlusion_out = generate_preview_outputs(
+            detail,
+            normal_strength=2.0, parallax_strength=1.35, glow_threshold=200,
+            environment_mask_strength=1.0, complex_strength=1.0, specular_strength=1.15,
+            complex_format="msn", parallax_mode="occlusion",
+            include_diffuse=False, include_normal=False, include_parallax=True,
+            include_glow=False, include_environment_mask=False, include_complex=False,
+        )
+        self.assertNotEqual(
+            standard_out["parallax"].tobytes(),
+            occlusion_out["parallax"].tobytes(),
+        )
+
+    def test_parallax_mode_occlusion_threads_through_run_with_options(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "stone.png"
+            _detailed_bright_image().save(input_path)
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ):
+                outputs = run_with_options(
+                    input_file=input_path,
+                    output_dir=temp_path / "out",
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=True,
+                    parallax_mode="occlusion",
+                )
+            self.assertIn("parallax", outputs)
 
 
 if __name__ == "__main__":
