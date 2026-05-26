@@ -273,6 +273,29 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertIn("bsshaderpplightingproperty", joined)
         self.assertIn("convert", joined)
 
+    def test_reports_env_mask_slot_without_env_mapping_flag(self) -> None:
+        paths = [""] * 9
+        paths[5] = "textures\\arch\\stone_m.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths, flags1=0)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 5", joined)
+        self.assertIn("environment_mapping", joined)
+
+    def test_reports_pom_without_base_parallax_flag(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone_p.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=SLSF1_PARALLAX_OCCLUSION,
+            shader_type=SHADER_TYPE_HEIGHTMAP,
+        )
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("pom flag", joined)
+        self.assertIn("base slsf1_parallax", joined)
+
 
 # ---------------------------------------------------------------------------
 # Tests: flag patching
@@ -336,6 +359,21 @@ class TestPatchNifFlags(unittest.TestCase):
         nif = _write_nif(self.tmp)
         result = patch_nif(nif, NifPatchOptions(backup=False))
         self.assertFalse(result.success)  # success=False when nothing requested
+
+    def test_disable_parallax_clears_parallax_and_pom_flags(self) -> None:
+        nif = _write_nif(self.tmp, flags1=SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION)
+        result = patch_nif(nif, NifPatchOptions(disable_parallax=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertFalse(infos[0].has_parallax_flag)
+        self.assertFalse(infos[0].has_pom_flag)
+
+    def test_disable_env_mapping_clears_flag(self) -> None:
+        nif = _write_nif(self.tmp, flags1=SLSF1_ENVIRONMENT_MAPPING)
+        result = patch_nif(nif, NifPatchOptions(disable_env_mapping=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertFalse(infos[0].has_env_mapping_flag)
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +449,34 @@ class TestPatchTexturePaths(unittest.TestCase):
         self.assertEqual(
             infos[0].texture_paths.get(TEXTURE_SLOT_PARALLAX), "textures\\short_p.dds"
         )
+
+    def test_clear_parallax_texture_path(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone_p.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths, flags1=SLSF1_PARALLAX)
+        patch_nif(
+            nif,
+            NifPatchOptions(
+                clear_parallax_texture_path=True,
+                backup=False,
+            ),
+        )
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].texture_paths.get(TEXTURE_SLOT_PARALLAX, ""), "")
+
+    def test_clear_env_mask_texture_path(self) -> None:
+        paths = [""] * 9
+        paths[5] = "textures\\arch\\stone_m.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths, flags1=SLSF1_ENVIRONMENT_MAPPING)
+        patch_nif(
+            nif,
+            NifPatchOptions(
+                clear_env_mask_texture_path=True,
+                backup=False,
+            ),
+        )
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].texture_paths.get(5, ""), "")
 
 
 # ---------------------------------------------------------------------------

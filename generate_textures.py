@@ -5379,9 +5379,16 @@ if GUI_AVAILABLE:
                 enable_pom_var = tk.BooleanVar(value=False)
                 enable_env_var = tk.BooleanVar(value=False)
                 force_type3_var = tk.BooleanVar(value=False)
+                disable_parallax_var = tk.BooleanVar(value=False)
+                disable_pom_var = tk.BooleanVar(value=False)
+                disable_env_var = tk.BooleanVar(value=False)
+                clear_parallax_var = tk.BooleanVar(value=False)
+                clear_normal_var = tk.BooleanVar(value=False)
+                clear_env_var = tk.BooleanVar(value=False)
                 backup_var = tk.BooleanVar(value=True)
                 dry_run_var = tk.BooleanVar(value=False)
                 render_hint_var = tk.StringVar(value="")
+                option_warning_var = tk.StringVar(value="")
 
                 render_row = ttk.Frame(opt_frame)
                 render_row.pack(fill="x", pady=(0, 4))
@@ -5422,6 +5429,57 @@ if GUI_AVAILABLE:
                 backup_check.pack(side="left")
                 dry_run_check = ttk.Checkbutton(misc_row, text="Dry run (scan/preview only)", variable=dry_run_var)
                 dry_run_check.pack(side="left", padx=(12, 0))
+                guide_label = ttk.Label(
+                    opt_frame,
+                    text=(
+                        "Checkbox quick guide: Parallax = SLSF1_Parallax + slot 3 (_p), "
+                        "ENB POM = SLSF1_Parallax_Occlusion (ENB only), "
+                        "Environment mapping = SLSF1_Environment_Mapping + slot 5 (_m), "
+                        "Force type 3 writes parallax scale on BSLighting blocks."
+                    ),
+                    justify=tk.LEFT,
+                    wraplength=860,
+                )
+                guide_label.pack(fill="x", pady=(4, 0))
+                option_warning_label = ttk.Label(
+                    opt_frame,
+                    textvariable=option_warning_var,
+                    justify=tk.LEFT,
+                    wraplength=860,
+                    foreground="#b44",
+                )
+                option_warning_label.pack(fill="x", pady=(2, 0))
+
+                unpatch_frame = ttk.LabelFrame(win, text="Remove Features (Unpatch)", padding=6)
+                unpatch_frame.pack(fill="x", padx=10, pady=(2, 4))
+                unpatch_row = ttk.Frame(unpatch_frame)
+                unpatch_row.pack(fill="x")
+                disable_parallax_check = ttk.Checkbutton(
+                    unpatch_row,
+                    text="Disable parallax flags",
+                    variable=disable_parallax_var,
+                )
+                disable_parallax_check.pack(side="left")
+                disable_pom_check = ttk.Checkbutton(
+                    unpatch_row,
+                    text="Disable POM flag only",
+                    variable=disable_pom_var,
+                )
+                disable_pom_check.pack(side="left", padx=(12, 0))
+                disable_env_check = ttk.Checkbutton(
+                    unpatch_row,
+                    text="Disable environment mapping flag",
+                    variable=disable_env_var,
+                )
+                disable_env_check.pack(side="left", padx=(12, 0))
+                unpatch_row2 = ttk.Frame(unpatch_frame)
+                unpatch_row2.pack(fill="x", pady=(2, 0))
+                clear_parallax_check = ttk.Checkbutton(unpatch_row2, text="Clear slot 3 (_p)", variable=clear_parallax_var)
+                clear_parallax_check.pack(side="left")
+                clear_normal_check = ttk.Checkbutton(unpatch_row2, text="Clear slot 1 (_n/_msn)", variable=clear_normal_var)
+                clear_normal_check.pack(side="left", padx=(12, 0))
+                clear_env_check = ttk.Checkbutton(unpatch_row2, text="Clear slot 5 (_m)", variable=clear_env_var)
+                clear_env_check.pack(side="left", padx=(12, 0))
 
                 def _apply_renderer_defaults(*_: object) -> None:
                     defaults = resolve_nif_patch_defaults_for_render_profile(
@@ -5438,9 +5496,41 @@ if GUI_AVAILABLE:
                         f"{label}: "
                         f"{describe_render_profile_output_recommendation(effective_profile)}"
                     )
+                    option_warning_var.set("")
+
+                def _update_checkbox_warnings(*_: object) -> None:
+                    warnings: list[str] = []
+                    profile = str(renderer_profile_var.get() or "auto")
+                    if profile in {"auto", "vanilla"} and enable_pom_var.get():
+                        warnings.append("ENB POM is usually incorrect for vanilla meshes.")
+                    if enable_pom_var.get() and not force_type3_var.get():
+                        warnings.append("POM works best with shader type 3 enabled.")
+                    if enable_env_var.get() and not env_mask_tex_var.get().strip():
+                        warnings.append("Environment mapping enabled with empty slot 5 path.")
+                    if disable_parallax_var.get() and enable_parallax_var.get():
+                        warnings.append("Both enable and disable parallax are checked.")
+                    if disable_pom_var.get() and enable_pom_var.get():
+                        warnings.append("Both enable and disable POM are checked.")
+                    if disable_env_var.get() and enable_env_var.get():
+                        warnings.append("Both enable and disable environment mapping are checked.")
+                    option_warning_var.set("⚠ " + " ".join(warnings[:2]) if warnings else "")
 
                 _apply_renderer_defaults()
                 renderer_combo.bind("<<ComboboxSelected>>", _apply_renderer_defaults)
+                renderer_combo.bind("<<ComboboxSelected>>", _update_checkbox_warnings, add="+")
+                for watch_var in (
+                    enable_parallax_var,
+                    enable_pom_var,
+                    enable_env_var,
+                    force_type3_var,
+                    disable_parallax_var,
+                    disable_pom_var,
+                    disable_env_var,
+                    clear_parallax_var,
+                    clear_normal_var,
+                    clear_env_var,
+                ):
+                    watch_var.trace_add("write", _update_checkbox_warnings)
                 self._add_tooltip(
                     renderer_label,
                     "🎮 Pick your target renderer to auto-apply sane NIF patch toggles for that workflow.",
@@ -5459,6 +5549,14 @@ if GUI_AVAILABLE:
                 self._add_tooltip(force_type3_check, "💪 Upgrades shader type so stronger parallax scale can be written.")
                 self._add_tooltip(backup_check, "🧷 Writes .nif.bak safety copies before patching.")
                 self._add_tooltip(dry_run_check, "🧪 Scan and simulate changes without writing file edits.")
+                self._add_tooltip(guide_label, "📘 Fast BSLighting checkbox reference so you can patch without guessing.")
+                self._add_tooltip(option_warning_label, "⚠ Compatibility warnings for current checkbox combinations.")
+                self._add_tooltip(disable_parallax_check, "🚫 Removes parallax and POM flags from BSLightingShaderProperty.")
+                self._add_tooltip(disable_pom_check, "🚫 Removes only ENB POM flag while keeping standard parallax if desired.")
+                self._add_tooltip(disable_env_check, "🚫 Removes environment-mapping flag from BSLightingShaderProperty.")
+                self._add_tooltip(clear_parallax_check, "🧹 Clears texture slot 3 path from BSShaderTextureSet.")
+                self._add_tooltip(clear_normal_check, "🧹 Clears texture slot 1 path from BSShaderTextureSet.")
+                self._add_tooltip(clear_env_check, "🧹 Clears texture slot 5 path from BSShaderTextureSet.")
 
                 scale_frame = ttk.LabelFrame(
                     win,
@@ -5859,6 +5957,18 @@ if GUI_AVAILABLE:
                     if not nifs:
                         _add_result_row("WARN", "—", "No NIF files found at the selected path.")
                         return
+                    warnings_to_confirm = [option_warning_var.get().strip()] if option_warning_var.get().strip() else []
+                    if warnings_to_confirm:
+                        proceed = messagebox.askyesno(
+                            "Confirm patch options",
+                            "Potential option mismatch detected:\n\n"
+                            + "\n".join(w for w in warnings_to_confirm if w)
+                            + "\n\nContinue anyway?",
+                            parent=win,
+                        )
+                        if not proceed:
+                            status_var.set("Patch cancelled so options can be adjusted.")
+                            return
                     options = NifPatchOptions(
                         enable_parallax=enable_parallax_var.get(),
                         enable_pom=enable_pom_var.get(),
@@ -5898,10 +6008,66 @@ if GUI_AVAILABLE:
                         win.update_idletasks()
                     status_var.set(f"Done — {ok} patched, {skip} skipped, {fail} failed.")
 
+                def _run_unpatch() -> None:
+                    nifs = _resolve_nifs()
+                    _clear_log()
+                    if not nifs:
+                        _add_result_row("WARN", "—", "No NIF files found at the selected path.")
+                        return
+                    selected_unpatch_actions = [
+                        disable_parallax_var.get(),
+                        disable_pom_var.get(),
+                        disable_env_var.get(),
+                        clear_parallax_var.get(),
+                        clear_normal_var.get(),
+                        clear_env_var.get(),
+                    ]
+                    if not any(selected_unpatch_actions):
+                        _add_result_row("WARN", "—", "Pick at least one Remove Features checkbox before unpatching.")
+                        return
+                    options = NifPatchOptions(
+                        disable_parallax=disable_parallax_var.get(),
+                        disable_pom=disable_pom_var.get(),
+                        disable_env_mapping=disable_env_var.get(),
+                        clear_parallax_texture_path=clear_parallax_var.get(),
+                        clear_normal_texture_path=clear_normal_var.get(),
+                        clear_env_mask_texture_path=clear_env_var.get(),
+                        backup=backup_var.get(),
+                        dry_run=dry_run_var.get(),
+                    )
+                    mode_label = "dry-run unpatching" if options.dry_run else "unpatching"
+                    status_var.set(f"Starting {mode_label} for {len(nifs)} NIF file(s)…")
+                    progress_bar.configure(maximum=max(1, len(nifs)))
+                    progress_var.set(0.0)
+                    win.update_idletasks()
+                    ok = skip = fail = 0
+                    for index, nif in enumerate(nifs, start=1):
+                        try:
+                            result = patch_nif(nif, options)
+                            if result.already_up_to_date:
+                                skip += 1
+                                _add_result_row("SKIP", nif.name, "Already up-to-date.")
+                            elif result.success:
+                                ok += 1
+                                _add_result_row("OK", nif.name, result.message)
+                            else:
+                                fail += 1
+                                _add_result_row("FAIL", nif.name, result.message)
+                                for err in result.errors:
+                                    _add_result_row("FAIL", nif.name, err)
+                        except Exception as exc:
+                            fail += 1
+                            _add_result_row("FAIL", nif.name, f"Unpatch failed: {exc}")
+                        progress_var.set(float(index))
+                        win.update_idletasks()
+                    status_var.set(f"Done — {ok} unpatched, {skip} skipped, {fail} failed.")
+
                 scan_button = ttk.Button(btn_frame, text="Scan NIFs", command=_scan_nifs)
                 scan_button.pack(side="left", padx=(0, 6))
-                patch_button = ttk.Button(btn_frame, text="Patch NIFs", command=_run_patch)
+                patch_button = ttk.Button(btn_frame, text="Apply patch", command=_run_patch)
                 patch_button.pack(side="left", padx=(0, 6))
+                unpatch_button = ttk.Button(btn_frame, text="Remove features (unpatch)", command=_run_unpatch)
+                unpatch_button.pack(side="left", padx=(0, 6))
                 clear_button = ttk.Button(btn_frame, text="Clear log", command=_clear_log)
                 clear_button.pack(side="left")
                 copy_selected_button = ttk.Button(btn_frame, text="Copy selected", command=_copy_selected_result)
@@ -5912,6 +6078,7 @@ if GUI_AVAILABLE:
                 close_button.pack(side="right")
                 self._add_tooltip(scan_button, "🔍 Read-only analysis pass. No file changes, just receipts.")
                 self._add_tooltip(patch_button, "🛠 Actually writes patch changes. This is the button with consequences.")
+                self._add_tooltip(unpatch_button, "↩ Removes selected flags/slots so you can undo or simplify prior NIF patching.")
                 self._add_tooltip(clear_button, "🧽 Clears rows so your brain can breathe again.")
                 self._add_tooltip(copy_selected_button, "📎 Copies only the selected row — ideal for Discord bragging or bug reports.")
                 self._add_tooltip(copy_all_button, "📦 Copies every row in one go for logs/changelists.")

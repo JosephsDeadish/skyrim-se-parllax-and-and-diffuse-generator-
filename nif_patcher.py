@@ -189,6 +189,20 @@ class NifPatchOptions:
         Write a ``.nif.bak`` copy of the original before overwriting.
     dry_run:
         Analyse what would change but do not write any files.
+    disable_parallax:
+        Clear ``SLSF1_Parallax`` and ``SLSF1_Parallax_Occlusion``.
+    disable_pom:
+        Clear only ``SLSF1_Parallax_Occlusion``.
+    disable_env_mapping:
+        Clear ``SLSF1_Environment_Mapping``.
+    clear_parallax_texture_path:
+        Empty texture slot 3 (parallax map).
+    clear_normal_texture_path:
+        Empty texture slot 1 (normal/MSN map).
+    clear_env_mask_texture_path:
+        Empty texture slot 5 (environment mask).
+    clear_cubemap_texture_path:
+        Empty texture slot 4 (cubemap).
     """
 
     enable_parallax: bool = False
@@ -202,6 +216,13 @@ class NifPatchOptions:
     cubemap_texture_path: str | None = None
     backup: bool = True
     dry_run: bool = False
+    disable_parallax: bool = False
+    disable_pom: bool = False
+    disable_env_mapping: bool = False
+    clear_parallax_texture_path: bool = False
+    clear_normal_texture_path: bool = False
+    clear_env_mask_texture_path: bool = False
+    clear_cubemap_texture_path: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -906,6 +927,13 @@ def _apply_patches(
             new_flags1 |= SLSF1_PARALLAX_OCCLUSION
         if opts.enable_env_mapping:
             new_flags1 |= SLSF1_ENVIRONMENT_MAPPING
+        if opts.disable_parallax:
+            new_flags1 &= ~SLSF1_PARALLAX
+            new_flags1 &= ~SLSF1_PARALLAX_OCCLUSION
+        elif opts.disable_pom:
+            new_flags1 &= ~SLSF1_PARALLAX_OCCLUSION
+        if opts.disable_env_mapping:
+            new_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
 
         flags_changed = (new_flags1 != sp.flags1) or (new_flags2 != sp.flags2)
         if flags_changed:
@@ -980,22 +1008,30 @@ def _apply_patches(
         # (slot_index, old_path, new_path) triples for paths that need changing
         slot_changes: list[tuple[int, str, str]] = []
 
-        def _want(slot: int, new_raw: str | None) -> None:
-            if new_raw is None:
+        def _want(slot: int, new_raw: str | None, *, clear: bool = False) -> None:
+            if new_raw is None and not clear:
                 return
             if slot >= ts.num_textures:
                 return
-            new = _normalise_path(new_raw)
+            new = "" if clear else _normalise_path(new_raw or "")
             old = ts.slot_paths[slot] if slot < ts.num_textures else ""
             if old != new:
                 slot_changes.append((slot, old, new))
 
         if effective_parallax:
             _want(TEXTURE_SLOT_PARALLAX, opts.parallax_texture_path)
+        if opts.clear_parallax_texture_path:
+            _want(TEXTURE_SLOT_PARALLAX, None, clear=True)
         _want(TEXTURE_SLOT_NORMAL, opts.normal_texture_path)
+        if opts.clear_normal_texture_path:
+            _want(TEXTURE_SLOT_NORMAL, None, clear=True)
         if opts.enable_env_mapping:
             _want(TEXTURE_SLOT_ENV_MASK, opts.env_mask_texture_path)
             _want(TEXTURE_SLOT_CUBEMAP, opts.cubemap_texture_path)
+        if opts.clear_env_mask_texture_path:
+            _want(TEXTURE_SLOT_ENV_MASK, None, clear=True)
+        if opts.clear_cubemap_texture_path:
+            _want(TEXTURE_SLOT_CUBEMAP, None, clear=True)
 
         if not slot_changes:
             continue
@@ -1045,8 +1081,24 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
     result = NifPatchResult(nif_path=nif_path, success=False)
 
     effective_parallax = opts.enable_parallax or opts.enable_pom
-    if not effective_parallax and not opts.enable_env_mapping and \
-            opts.normal_texture_path is None:
+    has_any_toggle = any(
+        (
+            effective_parallax,
+            opts.enable_env_mapping,
+            opts.normal_texture_path is not None,
+            opts.parallax_texture_path is not None,
+            opts.env_mask_texture_path is not None,
+            opts.cubemap_texture_path is not None,
+            opts.disable_parallax,
+            opts.disable_pom,
+            opts.disable_env_mapping,
+            opts.clear_parallax_texture_path,
+            opts.clear_normal_texture_path,
+            opts.clear_env_mask_texture_path,
+            opts.clear_cubemap_texture_path,
+        )
+    )
+    if not has_any_toggle:
         result.message = "Nothing to patch — all options are disabled."
         return result
 
@@ -1287,6 +1339,30 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                 result.issues,
                 f"Block {info.block_index}: POM flag is set on shader type {info.shader_type}; ENB parallax occlusion is more reliable on Heightmap/3 blocks."
             )
+        if info.has_pom_flag and not info.has_parallax_flag:
+            _append_unique(
+                result.issues,
+                f"Block {info.block_index}: POM flag is enabled without the base SLSF1_Parallax flag."
+            )
+            _append_unique(
+                result.suggestions,
+                "Enable standard parallax alongside POM, or disable POM for this block."
+            )
+        env_mask_path = info.texture_paths.get(TEXTURE_SLOT_ENV_MASK, "").strip()
+        if env_mask_path and not info.has_env_mapping_flag:
+            _append_unique(
+                result.issues,
+                f"Block {info.block_index}: texture slot 5 is filled ('{env_mask_path}') but SLSF1_Environment_Mapping is not enabled."
+            )
+            _append_unique(
+                result.suggestions,
+                "Enable environment mapping in BSLightingShaderProperty or clear slot 5 if this mesh should not be reflective."
+            )
+        if info.has_env_mapping_flag and not env_mask_path:
+            _append_unique(
+                result.suggestions,
+                f"Block {info.block_index}: SLSF1_Environment_Mapping is enabled but slot 5 is empty; add an _m.dds mask or disable the flag."
+            )
         if info.parallax_scale is not None and info.parallax_scale < 0.35:
             _append_unique(
                 result.suggestions,
@@ -1387,6 +1463,18 @@ def _main() -> None:  # pragma: no cover
                         help="Environment mask texture path (slot 5).")
     parser.add_argument("--env-mapping", action="store_true",
                         help="Set SLSF1_Environment_Mapping flag.")
+    parser.add_argument("--disable-parallax", action="store_true",
+                        help="Clear SLSF1_Parallax and SLSF1_Parallax_Occlusion flags.")
+    parser.add_argument("--disable-pom", action="store_true",
+                        help="Clear SLSF1_Parallax_Occlusion flag only.")
+    parser.add_argument("--disable-env-mapping", action="store_true",
+                        help="Clear SLSF1_Environment_Mapping flag.")
+    parser.add_argument("--clear-parallax", action="store_true",
+                        help="Clear slot 3 parallax texture path.")
+    parser.add_argument("--clear-normal", action="store_true",
+                        help="Clear slot 1 normal/MSN texture path.")
+    parser.add_argument("--clear-env-mask", action="store_true",
+                        help="Clear slot 5 environment mask texture path.")
     parser.add_argument("--no-backup", action="store_true",
                         help="Skip .nif.bak backup.")
     parser.add_argument("--dry-run", action="store_true",
@@ -1431,6 +1519,12 @@ def _main() -> None:  # pragma: no cover
         env_mask_texture_path=args.env_mask,
         backup=not args.no_backup,
         dry_run=args.dry_run,
+        disable_parallax=args.disable_parallax,
+        disable_pom=args.disable_pom,
+        disable_env_mapping=args.disable_env_mapping,
+        clear_parallax_texture_path=args.clear_parallax,
+        clear_normal_texture_path=args.clear_normal,
+        clear_env_mask_texture_path=args.clear_env_mask,
     )
 
     ok = 0
