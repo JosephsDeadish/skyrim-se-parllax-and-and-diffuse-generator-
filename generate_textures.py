@@ -2446,17 +2446,19 @@ if GUI_AVAILABLE:
             complex_format.grid(row=3, column=1, sticky=tk.W)
             self._add_tooltip(complex_format, "🏷 Choose 'msn' for RGBA normal+specular, 'cm' for packed AO/rough/metal/height-spec.\nWhen in doubt, use the format your target shader expects.")
 
-            _env_mode_label = ttk.Label(options_frame, text="Env mask mode")
-            _env_mode_label.grid(row=3, column=2, sticky=tk.W, padx=(20, 4), pady=8)
+            _env_mode_row = ttk.Frame(options_frame)
+            _env_mode_row.grid(row=3, column=2, columnspan=2, sticky=tk.W, padx=(20, 4), pady=8)
+            _env_mode_label = ttk.Label(_env_mode_row, text="Env mask mode")
+            _env_mode_label.pack(side=tk.LEFT)
             self._add_tooltip(_env_mode_label, "🌍 How to encode the environment mask.\n'standard' = vanilla Skyrim. 'complex' = ENBSeries channel-packed RGBA. Choose wisely.")
             env_mask_mode_combo = ttk.Combobox(
-                options_frame,
+                _env_mode_row,
                 textvariable=self.env_mask_mode_var,
                 values=("standard", "complex"),
                 state="readonly",
                 width=20,
             )
-            env_mask_mode_combo.grid(row=3, column=3, sticky=tk.W)
+            env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
             self._add_tooltip(env_mask_mode_combo, "🌍 'standard' = single grey channel for vanilla Skyrim SE.\n'complex' = RGBA for ENBSeries. Using complex without ENB produces… nothing useful.")
             ttk.Label(
                 options_frame,
@@ -2603,7 +2605,7 @@ if GUI_AVAILABLE:
                 row=0, column=0, columnspan=2, padx=6, pady=(2, 3), sticky=""
             )
             self.before_image_label = ttk.Label(preview_frame, text="No source loaded", anchor=tk.CENTER, justify=tk.CENTER)
-            self.before_image_label.grid(row=1, column=0, columnspan=2, padx=6, pady=(0, 3), sticky="")
+            self.before_image_label.grid(row=2, column=0, columnspan=2, padx=6, pady=(0, 3), sticky="")
             self._add_tooltip(
                 self.before_image_label,
                 "👀 This is the original input texture.\n"
@@ -2611,7 +2613,7 @@ if GUI_AVAILABLE:
             )
 
             source_controls = ttk.Frame(preview_frame)
-            source_controls.grid(row=2, column=0, columnspan=2, pady=(0, 4), sticky="")
+            source_controls.grid(row=1, column=0, columnspan=2, pady=(0, 4), sticky="")
             self.prev_source_button = ttk.Button(source_controls, text="◀ Prev", command=self._show_previous_preview_source)
             self.prev_source_button.pack(side=tk.LEFT, padx=4)
             self._add_tooltip(
