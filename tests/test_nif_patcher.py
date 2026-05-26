@@ -48,6 +48,8 @@ def _build_minimal_nif(
     parallax_scale: float | None = None,
     texture_paths: list[str] | None = None,
     shader_block_type: str = "BSLightingShaderProperty",
+    user_ver2: int = 83,
+    header_line_ending: bytes = b"\n",
 ) -> bytes:
     """Build a minimal but structurally valid Skyrim SE NIF in memory.
 
@@ -90,12 +92,12 @@ def _build_minimal_nif(
         sp_body += struct.pack("<ff", 4.0, scale)
 
     # --- Header ---
-    header_str = b"Gamebryo File Format, Version 20.2.0.7\n"
+    header_str = b"Gamebryo File Format, Version 20.2.0.7" + header_line_ending
     version = struct.pack("<I", 0x14020007)
     endian = struct.pack("B", 1)
     user_ver = struct.pack("<I", 12)
     num_blocks = struct.pack("<I", 2)
-    user_ver2 = struct.pack("<I", 83)
+    user_ver2 = struct.pack("<I", user_ver2)
     # 3 export strings (all empty)
     export = _sstring_u8("") + _sstring_u8("") + _sstring_u8("")
     # block types
@@ -137,6 +139,16 @@ class TestScanNif(unittest.TestCase):
 
     def test_scan_returns_one_shader_for_minimal_nif(self) -> None:
         nif = _write_nif(self.tmp)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+
+    def test_scan_accepts_user_version_2_100(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=100)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+
+    def test_scan_accepts_crlf_header_line(self) -> None:
+        nif = _write_nif(self.tmp, header_line_ending=b"\r\n")
         infos = scan_nif(nif)
         self.assertEqual(len(infos), 1)
 

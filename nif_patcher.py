@@ -1,7 +1,7 @@
 """Skyrim SE NIF file patcher (v0.6).
 
 Reads Skyrim SE NIF files (format 20.2.0.7, user_version=12,
-user_version_2=83) and patches ``BSLightingShaderProperty`` shader flags and
+user_version_2=83/100) and patches ``BSLightingShaderProperty`` shader flags and
 ``BSShaderTextureSet`` texture paths to enable parallax, environment
 mapping, and ENB complex-material effects on meshes that shipped without
 those flags.
@@ -53,11 +53,17 @@ from pathlib import Path
 _NIF_VERSION_20_2_0_7: int = 0x14020007
 _SKYRIM_USER_VERSION: int = 12
 _SKYRIM_SE_USER_VERSION_2: int = 83
+_SKYRIM_SE_USER_VERSION_2_ALT: int = 100
 _SKYRIM_LE_USER_VERSION_2: int = 34
+_SUPPORTED_USER_VERSION_2: tuple[int, ...] = (
+    _SKYRIM_SE_USER_VERSION_2,
+    _SKYRIM_SE_USER_VERSION_2_ALT,
+    _SKYRIM_LE_USER_VERSION_2,
+)
 
 _HEADER_PREFIXES: tuple[bytes, ...] = (
-    b"Gamebryo File Format, Version 20.2.0.7\n",
-    b"NetImmerse File Format, Version 20.2.0.7\n",
+    b"Gamebryo File Format, Version 20.2.0.7",
+    b"NetImmerse File Format, Version 20.2.0.7",
 )
 
 # Shader Flags 1 (BSLightingShaderProperty)
@@ -384,15 +390,15 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
         )
         return diagnostics
     try:
-        header_line_end = data.find(b"\n")
-        if header_line_end == -1:
+        header_line_end = _find_header_terminator(data)
+        if header_line_end is None:
             diagnostics.append("The NIF header line is incomplete. Re-export or re-save the mesh before patching.")
             return diagnostics
-        header_line = data[: header_line_end + 1]
-        if not any(header_line.startswith(prefix) for prefix in _HEADER_PREFIXES):
+        header_line = data[:header_line_end]
+        if not _has_supported_header_prefix(header_line):
             diagnostics.append("Header prefix is not a Skyrim/Gamebryo 20.2.0.7 NIF. This file is unsupported for auto-patching.")
             return diagnostics
-        version_offset = header_line_end + 1
+        version_offset = header_line_end
         version = struct.unpack_from("<I", data, version_offset)[0]
         if version != _NIF_VERSION_20_2_0_7:
             diagnostics.append(f"NIF version is 0x{version:08X}, not Skyrim SE 20.2.0.7.")
@@ -401,7 +407,7 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
         user_version_2 = struct.unpack_from("<I", data, version_offset + 13)[0]
         if user_version_2 == _SKYRIM_LE_USER_VERSION_2:
             diagnostics.append("This looks like a Skyrim Legendary Edition / Oldrim NIF. Convert it to SSE before patching.")
-        elif user_version != _SKYRIM_USER_VERSION or user_version_2 != _SKYRIM_SE_USER_VERSION_2:
+        elif user_version != _SKYRIM_USER_VERSION or user_version_2 not in _SUPPORTED_USER_VERSION_2:
             diagnostics.append(
                 f"Unexpected user version values ({user_version}, {user_version_2}). The file may use a different game/export format."
             )
@@ -411,6 +417,20 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
         "Resolution: open the mesh in NifSkope or the Creation Kit and re-save/export it as a clean Skyrim SE NIF, then run the patch again."
     )
     return diagnostics
+
+
+def _find_header_terminator(data: bytes) -> int | None:
+    """Return byte offset immediately after the header terminator, if found."""
+    candidates = [pos for pos in (data.find(b"\n"), data.find(b"\x00")) if pos != -1]
+    if not candidates:
+        return None
+    return min(candidates) + 1
+
+
+def _has_supported_header_prefix(header_line: bytes) -> bool:
+    """Return True when the header line starts with a known Skyrim NIF prefix."""
+    normalized = header_line.rstrip(b"\r\n\x00 ")
+    return any(normalized.startswith(prefix) for prefix in _HEADER_PREFIXES)
 
 
 def _summarize_non_patchable_block_types(header: _NifHeader) -> list[str]:
@@ -450,11 +470,11 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
     while buf.remaining() > 0:
         b = buf.read_u8()
         header_line.append(b)
-        if b == ord("\n"):
+        if b in (ord("\n"), 0):
             break
         if len(header_line) > 100:
             return None
-    if not any(bytes(header_line).startswith(p) for p in _HEADER_PREFIXES):
+    if not _has_supported_header_prefix(bytes(header_line)):
         return None
 
     version = buf.read_u32()
@@ -472,7 +492,7 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
     num_blocks = buf.read_u32()
 
     user_version_2 = buf.read_u32()
-    if user_version_2 not in (_SKYRIM_SE_USER_VERSION_2, _SKYRIM_LE_USER_VERSION_2):
+    if user_version_2 not in _SUPPORTED_USER_VERSION_2:
         return None
     for _ in range(3):
         buf.read_sstring_u8()  # export strings
@@ -933,8 +953,11 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         result.message = header_diagnostics[0]
         return result
     if header is None:
-        result.errors.append("Not a supported Skyrim SE NIF (requires 20.2.0.7).")
-        result.message = result.errors[-1]
+        header_diagnostics = _diagnose_header_parse_failure(
+            original_data, ValueError("Unsupported Skyrim NIF header values")
+        )
+        result.errors.extend(header_diagnostics)
+        result.message = header_diagnostics[0]
         return result
 
     shader_props, texture_sets, parse_errors = _build_block_map(original_data, header)
@@ -1019,7 +1042,9 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
     except (ValueError, struct.error, IndexError) as exc:
         return [], _diagnose_header_parse_failure(data, exc)
     if header is None:
-        return [], ["Not a supported Skyrim SE NIF (requires 20.2.0.7)."]
+        return [], _diagnose_header_parse_failure(
+            data, ValueError("Unsupported Skyrim NIF header values")
+        )
     shader_props, texture_sets, parse_errors = _build_block_map(data, header)
     diagnostics.extend(parse_errors)
     if not shader_props:
