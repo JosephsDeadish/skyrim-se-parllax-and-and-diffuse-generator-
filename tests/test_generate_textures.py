@@ -51,6 +51,7 @@ from generate_textures import (
     parse_preview_jump_input,
     recommend_generation_settings,
     recommend_render_profile,
+    resolve_nif_patch_defaults_for_render_profile,
     resolve_render_profile_mode_selection,
     resolve_render_profile_output_defaults,
     resolve_render_profile_options,
@@ -574,6 +575,21 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(enb["include_environment_mask"]))
         self.assertTrue(bool(enb["include_complex"]))
         self.assertFalse(bool(enb["include_normal"]))
+
+    def test_resolve_nif_patch_defaults_for_render_profile_returns_expected_toggles(self) -> None:
+        vanilla = resolve_nif_patch_defaults_for_render_profile("vanilla")
+        self.assertTrue(bool(vanilla["enable_parallax"]))
+        self.assertFalse(bool(vanilla["enable_pom"]))
+        self.assertFalse(bool(vanilla["enable_env_mapping"]))
+        self.assertFalse(bool(vanilla["force_shader_type_3"]))
+        self.assertFalse(bool(vanilla["prefer_msn_normal"]))
+
+        enb = resolve_nif_patch_defaults_for_render_profile("enb")
+        self.assertTrue(bool(enb["enable_parallax"]))
+        self.assertTrue(bool(enb["enable_pom"]))
+        self.assertTrue(bool(enb["enable_env_mapping"]))
+        self.assertTrue(bool(enb["force_shader_type_3"]))
+        self.assertTrue(bool(enb["prefer_msn_normal"]))
 
     def test_build_render_profile_recommendation_message_lists_renderer_guidance(self) -> None:
         message = build_render_profile_recommendation_message("community_shaders")
@@ -1225,6 +1241,42 @@ class GenerateTexturesTests(unittest.TestCase):
             )
 
             self.assertEqual(related, (nif_path.resolve(),))
+
+    def test_find_related_nif_files_for_texture_falls_back_to_nif_name_when_scan_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            nif_path = temp_path / "meshes" / "sign01.nif"
+            nif_path.parent.mkdir(parents=True)
+            nif_path.write_bytes(b"")
+            source = temp_path / "textures" / "sign01_d.dds"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"")
+
+            related = find_related_nif_files_for_texture(
+                source,
+                candidate_roots=(nif_path.parent,),
+                nif_info_provider=lambda _: (_ for _ in ()).throw(ValueError("parse failed")),
+            )
+
+            self.assertEqual(related, (nif_path.resolve(),))
+
+    def test_find_related_nif_files_for_texture_filename_fallback_avoids_unrelated_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            nif_path = temp_path / "meshes" / "different_mesh.nif"
+            nif_path.parent.mkdir(parents=True)
+            nif_path.write_bytes(b"")
+            source = temp_path / "textures" / "sign01_d.dds"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"")
+
+            related = find_related_nif_files_for_texture(
+                source,
+                candidate_roots=(nif_path.parent,),
+                nif_info_provider=lambda _: (_ for _ in ()).throw(ValueError("parse failed")),
+            )
+
+            self.assertEqual(related, ())
 
     def test_build_nif_patch_options_for_generated_outputs_prefers_msn_for_complex_parallax(self) -> None:
         outputs = {

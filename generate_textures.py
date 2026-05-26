@@ -840,6 +840,30 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     ),
 }
 
+_RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
+    "vanilla": {
+        "enable_parallax": True,
+        "enable_pom": False,
+        "enable_env_mapping": False,
+        "force_shader_type_3": False,
+        "prefer_msn_normal": False,
+    },
+    "community_shaders": {
+        "enable_parallax": True,
+        "enable_pom": False,
+        "enable_env_mapping": True,
+        "force_shader_type_3": True,
+        "prefer_msn_normal": False,
+    },
+    "enb": {
+        "enable_parallax": True,
+        "enable_pom": True,
+        "enable_env_mapping": True,
+        "force_shader_type_3": True,
+        "prefer_msn_normal": True,
+    },
+}
+
 _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
     "vanilla": {
         "include_diffuse": True,
@@ -896,6 +920,20 @@ def describe_render_profile_output_recommendation(profile: str) -> str:
     if normalized == "auto":
         normalized = "vanilla"
     return _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS.get(normalized, _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS["vanilla"])
+
+
+def resolve_nif_patch_defaults_for_render_profile(
+    selected_profile: str,
+    *,
+    recommended_profile: str | None = None,
+) -> dict[str, bool | str]:
+    normalized_selected = _normalize_render_profile(selected_profile)
+    normalized_recommended = _normalize_render_profile(recommended_profile)
+    effective_profile = normalized_recommended if normalized_selected == "auto" else normalized_selected
+    if effective_profile == "auto":
+        effective_profile = "vanilla"
+    defaults = _RENDER_PROFILE_NIF_PATCH_DEFAULTS.get(effective_profile, _RENDER_PROFILE_NIF_PATCH_DEFAULTS["vanilla"])
+    return {"selected_profile": normalized_selected, "effective_profile": effective_profile, **defaults}
 
 
 def resolve_render_profile_output_defaults(
@@ -2115,10 +2153,11 @@ def find_related_nif_files_for_texture(
     seen: set[str] = set()
     for root in roots:
         for nif_path in find_nif_files(root):
+            matched = False
             try:
                 infos = provider(nif_path)
             except Exception:
-                continue
+                infos = []
             for info in infos:
                 texture_paths = getattr(info, "texture_paths", {})
                 for texture_path in texture_paths.values():
@@ -2128,10 +2167,19 @@ def find_related_nif_files_for_texture(
                         if key not in seen:
                             seen.add(key)
                             matches.append(resolved)
+                        matched = True
                         break
                 else:
                     continue
                 break
+            if matched:
+                continue
+            if _normalize_texture_family_stem(nif_path) == normalized_source_stem:
+                resolved = nif_path.resolve()
+                key = os.path.normcase(str(resolved))
+                if key not in seen:
+                    seen.add(key)
+                    matches.append(resolved)
     return tuple(matches)
 
 
@@ -5271,31 +5319,93 @@ if GUI_AVAILABLE:
 
                 opt_frame = ttk.LabelFrame(win, text="Patch Options", padding=6)
                 opt_frame.pack(fill="x", padx=10, pady=4)
+                renderer_profile_var = tk.StringVar(value=_normalize_render_profile(self.render_profile_var.get()))
+                if renderer_profile_var.get() not in _RENDER_PROFILE_LABELS:
+                    renderer_profile_var.set("auto")
                 enable_parallax_var = tk.BooleanVar(value=True)
                 enable_pom_var = tk.BooleanVar(value=False)
                 enable_env_var = tk.BooleanVar(value=False)
                 force_type3_var = tk.BooleanVar(value=False)
                 backup_var = tk.BooleanVar(value=True)
                 dry_run_var = tk.BooleanVar(value=False)
+                render_hint_var = tk.StringVar(value="")
+
+                render_row = ttk.Frame(opt_frame)
+                render_row.pack(fill="x", pady=(0, 4))
+                renderer_label = ttk.Label(render_row, text="Target renderer:")
+                renderer_label.pack(side="left")
+                renderer_combo = ttk.Combobox(
+                    render_row,
+                    textvariable=renderer_profile_var,
+                    values=("auto", "vanilla", "community_shaders", "enb"),
+                    state="readonly",
+                    width=20,
+                )
+                renderer_combo.pack(side="left", padx=(6, 6))
+                renderer_hint = ttk.Label(render_row, textvariable=render_hint_var, wraplength=520, justify=tk.LEFT)
+                renderer_hint.pack(side="left", fill="x", expand=True)
 
                 flag_row = ttk.Frame(opt_frame)
                 flag_row.pack(fill="x")
-                ttk.Checkbutton(flag_row, text="Enable standard parallax", variable=enable_parallax_var).pack(side="left")
-                ttk.Checkbutton(flag_row, text="Enable ENB POM / occlusion", variable=enable_pom_var).pack(side="left", padx=(12, 0))
+                enable_parallax_check = ttk.Checkbutton(flag_row, text="Enable standard parallax", variable=enable_parallax_var)
+                enable_parallax_check.pack(side="left")
+                enable_pom_check = ttk.Checkbutton(flag_row, text="Enable ENB POM / occlusion", variable=enable_pom_var)
+                enable_pom_check.pack(side="left", padx=(12, 0))
 
                 flag_row2 = ttk.Frame(opt_frame)
                 flag_row2.pack(fill="x", pady=(2, 0))
-                ttk.Checkbutton(flag_row2, text="Enable environment mapping", variable=enable_env_var).pack(side="left")
-                ttk.Checkbutton(
+                enable_env_check = ttk.Checkbutton(flag_row2, text="Enable environment mapping", variable=enable_env_var)
+                enable_env_check.pack(side="left")
+                force_type3_check = ttk.Checkbutton(
                     flag_row2,
                     text="Force shader type 3 (needed for stronger parallax scale)",
                     variable=force_type3_var,
-                ).pack(side="left", padx=(12, 0))
+                )
+                force_type3_check.pack(side="left", padx=(12, 0))
 
                 misc_row = ttk.Frame(opt_frame)
                 misc_row.pack(fill="x", pady=(4, 0))
-                ttk.Checkbutton(misc_row, text="Backup originals (.nif.bak)", variable=backup_var).pack(side="left")
-                ttk.Checkbutton(misc_row, text="Dry run (scan/preview only)", variable=dry_run_var).pack(side="left", padx=(12, 0))
+                backup_check = ttk.Checkbutton(misc_row, text="Backup originals (.nif.bak)", variable=backup_var)
+                backup_check.pack(side="left")
+                dry_run_check = ttk.Checkbutton(misc_row, text="Dry run (scan/preview only)", variable=dry_run_var)
+                dry_run_check.pack(side="left", padx=(12, 0))
+
+                def _apply_renderer_defaults(*_: object) -> None:
+                    defaults = resolve_nif_patch_defaults_for_render_profile(
+                        renderer_profile_var.get(),
+                        recommended_profile="vanilla",
+                    )
+                    effective_profile = str(defaults["effective_profile"])
+                    label = _RENDER_PROFILE_LABELS.get(effective_profile, effective_profile.replace("_", " ").title())
+                    enable_parallax_var.set(bool(defaults["enable_parallax"]))
+                    enable_pom_var.set(bool(defaults["enable_pom"]))
+                    enable_env_var.set(bool(defaults["enable_env_mapping"]))
+                    force_type3_var.set(bool(defaults["force_shader_type_3"]))
+                    render_hint_var.set(
+                        f"{label}: "
+                        f"{describe_render_profile_output_recommendation(effective_profile)}"
+                    )
+
+                _apply_renderer_defaults()
+                renderer_combo.bind("<<ComboboxSelected>>", _apply_renderer_defaults)
+                self._add_tooltip(
+                    renderer_label,
+                    "🎮 Pick your target renderer to auto-apply sane NIF patch toggles for that workflow.",
+                )
+                self._add_tooltip(
+                    renderer_combo,
+                    "🎯 Renderer preset helper.\nAuto applies patch options for Vanilla, Community Shaders, or ENB.",
+                )
+                self._add_tooltip(
+                    renderer_hint,
+                    "💡 Quick guidance for the selected renderer profile and output map expectations.",
+                )
+                self._add_tooltip(enable_parallax_check, "🪨 Enables Skyrim parallax shader flag and slot-3 _p usage.")
+                self._add_tooltip(enable_pom_check, "🌊 ENB-only parallax occlusion mode. Leave off for vanilla workflows.")
+                self._add_tooltip(enable_env_check, "🪞 Enables environment-mapping shader flag for reflective materials.")
+                self._add_tooltip(force_type3_check, "💪 Upgrades shader type so stronger parallax scale can be written.")
+                self._add_tooltip(backup_check, "🧷 Writes .nif.bak safety copies before patching.")
+                self._add_tooltip(dry_run_check, "🧪 Scan and simulate changes without writing file edits.")
 
                 scale_frame = ttk.LabelFrame(
                     win,
@@ -5340,53 +5450,121 @@ if GUI_AVAILABLE:
                     if selected:
                         target_var.set(selected.replace("/", "\\"))
 
-                def _tex_row(parent: ttk.Frame, label: str, var: tk.StringVar, browse_title: str) -> None:
+                def _tex_row(parent: ttk.Frame, label: str, var: tk.StringVar, browse_title: str, tooltip: str) -> None:
                     row = ttk.Frame(parent)
                     row.pack(fill="x", pady=2)
-                    ttk.Label(row, text=label, width=18).pack(side="left")
-                    ttk.Entry(row, textvariable=var).pack(side="left", fill="x", expand=True, padx=(4, 4))
-                    ttk.Button(
+                    row_label = ttk.Label(row, text=label, width=18)
+                    row_label.pack(side="left")
+                    row_entry = ttk.Entry(row, textvariable=var)
+                    row_entry.pack(side="left", fill="x", expand=True, padx=(4, 4))
+                    row_browse = ttk.Button(
                         row,
                         text="Browse…",
                         command=lambda: _browse_texture_path(var, browse_title),
-                    ).pack(side="left")
+                    )
+                    row_browse.pack(side="left")
+                    self._add_tooltip(row_label, tooltip)
+                    self._add_tooltip(row_entry, tooltip)
+                    self._add_tooltip(row_browse, tooltip)
 
-                _tex_row(tex_frame, "Parallax / _p.dds:", parallax_tex_var, "Select parallax texture")
-                _tex_row(tex_frame, "Normal / _n or _msn:", normal_tex_var, "Select normal or MSN texture")
-                _tex_row(tex_frame, "Env mask / _m.dds:", env_mask_tex_var, "Select environment mask texture")
+                _tex_row(
+                    tex_frame,
+                    "Parallax / _p.dds:",
+                    parallax_tex_var,
+                    "Select parallax texture",
+                    "🗺 Slot 3 parallax texture path. Usually ends with _p.dds.",
+                )
+                _tex_row(
+                    tex_frame,
+                    "Normal / _n or _msn:",
+                    normal_tex_var,
+                    "Select normal or MSN texture",
+                    "🧱 Slot 1 normal path. Use _n for vanilla/CS, or _msn for ENB complex material workflows.",
+                )
+                _tex_row(
+                    tex_frame,
+                    "Env mask / _m.dds:",
+                    env_mask_tex_var,
+                    "Select environment mask texture",
+                    "🪞 Slot 5 environment mask path. Usually _m.dds for reflection intensity control.",
+                )
 
                 def _auto_fill_paths() -> None:
                     path_value = nif_path_var.get().strip()
                     if not path_value:
                         status_var.set("Pick a NIF file or folder first, then use Auto-fill.")
                         return
+                    defaults = resolve_nif_patch_defaults_for_render_profile(renderer_profile_var.get(), recommended_profile="vanilla")
+                    prefer_msn = bool(defaults.get("prefer_msn_normal"))
                     selected_path = Path(path_value)
                     nifs = list(selected_path.rglob("*.nif")) if selected_path.is_dir() else [selected_path]
                     guessed_from: Path | None = None
                     guessed_parallax = ""
                     guessed_normal = ""
+                    guessed_env = ""
                     for nif_candidate in nifs:
                         if not nif_candidate.exists():
                             continue
                         candidate_parallax = guess_parallax_path_for_nif(nif_candidate) or ""
-                        candidate_normal = guess_normal_path_for_nif(nif_candidate) or ""
-                        if candidate_parallax or candidate_normal:
+                        candidate_normal = guess_normal_path_for_nif(nif_candidate, msn=prefer_msn) or ""
+                        candidate_env = ""
+                        try:
+                            infos = scan_nif(nif_candidate)
+                        except Exception:
+                            infos = []
+                        for info in infos:
+                            texture_paths = getattr(info, "texture_paths", {})
+                            if not candidate_parallax:
+                                candidate_parallax = str(texture_paths.get(3, "")).strip()
+                            if not candidate_normal:
+                                candidate_normal = str(texture_paths.get(1, "")).strip()
+                            if not candidate_env:
+                                candidate_env = str(texture_paths.get(5, "")).strip()
+                            diffuse_path = str(texture_paths.get(0, "")).strip()
+                            if diffuse_path:
+                                diffuse_like = Path(diffuse_path.replace("\\", "/"))
+                                diffuse_stem = _normalize_texture_family_stem(diffuse_like)
+                                if not candidate_parallax:
+                                    candidate_parallax = str(diffuse_like.parent / f"{diffuse_stem}_p.dds").replace("/", "\\")
+                                if not candidate_normal:
+                                    normal_suffix = "_msn.dds" if prefer_msn else "_n.dds"
+                                    candidate_normal = str(diffuse_like.parent / f"{diffuse_stem}{normal_suffix}").replace("/", "\\")
+                                if not candidate_env:
+                                    candidate_env = str(diffuse_like.parent / f"{diffuse_stem}_m.dds").replace("/", "\\")
+                            if candidate_parallax and candidate_normal and candidate_env:
+                                break
+                        candidate_parallax = candidate_parallax.replace("/", "\\")
+                        candidate_normal = candidate_normal.replace("/", "\\")
+                        candidate_env = candidate_env.replace("/", "\\")
+                        if candidate_parallax or candidate_normal or candidate_env:
                             guessed_from = nif_candidate
                             guessed_parallax = candidate_parallax
                             guessed_normal = candidate_normal
+                            guessed_env = candidate_env
                             break
                     if not guessed_from:
                         status_var.set("Auto-fill could not find any usable diffuse/normal texture slots in the selected NIF(s).")
                         return
+                    changed = 0
                     if guessed_parallax:
+                        if parallax_tex_var.get().strip() != guessed_parallax:
+                            changed += 1
                         parallax_tex_var.set(guessed_parallax)
                     if guessed_normal:
+                        if normal_tex_var.get().strip() != guessed_normal:
+                            changed += 1
                         normal_tex_var.set(guessed_normal)
-                    if guessed_parallax:
-                        env_mask_guess = guessed_parallax[:-6] + "_m.dds" if guessed_parallax.lower().endswith("_p.dds") else ""
-                        if env_mask_guess:
-                            env_mask_tex_var.set(env_mask_guess)
-                    status_var.set(f"Auto-filled texture paths from {guessed_from.name}.")
+                    env_mask_guess = guessed_env
+                    if not env_mask_guess and guessed_parallax.lower().endswith("_p.dds"):
+                        env_mask_guess = guessed_parallax[:-6] + "_m.dds"
+                    if env_mask_guess:
+                        if env_mask_tex_var.get().strip() != env_mask_guess:
+                            changed += 1
+                        env_mask_tex_var.set(env_mask_guess)
+                    if changed == 0:
+                        status_var.set(f"Auto-fill checked {guessed_from.name}; current paths already match the best guess.")
+                    else:
+                        status_var.set(f"Auto-filled {changed} texture path(s) from {guessed_from.name}.")
 
                 auto_fill_button = ttk.Button(tex_frame, text="Auto-fill paths from selected NIF", command=_auto_fill_paths)
                 auto_fill_button.pack(anchor="w", pady=(4, 0))
