@@ -31,6 +31,7 @@ from nif_patcher import (
 
 def _sstring_u8(text: str) -> bytes:
     enc = text.encode("latin-1")
+    enc += b"\x00"
     return struct.pack("B", len(enc)) + enc
 
 
@@ -46,6 +47,7 @@ def _build_minimal_nif(
     flags2: int = 0,
     parallax_scale: float | None = None,
     texture_paths: list[str] | None = None,
+    shader_block_type: str = "BSLightingShaderProperty",
 ) -> bytes:
     """Build a minimal but structurally valid Skyrim SE NIF in memory.
 
@@ -97,9 +99,9 @@ def _build_minimal_nif(
     # 3 export strings (all empty)
     export = _sstring_u8("") + _sstring_u8("") + _sstring_u8("")
     # block types
-    block_types_list = ["BSShaderTextureSet", "BSLightingShaderProperty"]
+    block_types_list = ["BSShaderTextureSet", shader_block_type]
     num_block_types = struct.pack("<H", 2)
-    btypes = b"".join(_sstring_u8(t) for t in block_types_list)
+    btypes = b"".join(_sstring_u32(t) for t in block_types_list)
     # type indices
     type_indices = struct.pack("<HH", 0, 1)  # block 0 = type 0, block 1 = type 1
     # block sizes
@@ -213,6 +215,21 @@ class TestValidateNifForParallax(unittest.TestCase):
         bad.write_bytes(b"\x00\x00")
         v = validate_nif_for_parallax(bad)
         self.assertFalse(v.valid)
+
+    def test_reports_actionable_resolution_for_truncated_header(self) -> None:
+        nif = _write_nif(self.tmp)
+        broken = self.tmp / "broken.nif"
+        broken.write_bytes(nif.read_bytes()[:80])
+        v = validate_nif_for_parallax(broken)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("re-save", joined)
+
+    def test_reports_legacy_shader_property_when_no_bslighting_blocks_exist(self) -> None:
+        nif = _write_nif(self.tmp, shader_block_type="BSShaderPPLightingProperty")
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("bsshaderpplightingproperty", joined)
+        self.assertIn("convert", joined)
 
 
 # ---------------------------------------------------------------------------

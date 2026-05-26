@@ -17,12 +17,14 @@ from generate_textures import (
     auto_patch_related_nifs_for_texture,
     apply_recommendations_by_auto_flags,
     build_nif_patch_options_for_generated_outputs,
+    build_render_profile_recommendation_message,
     build_complex_preview_image,
     build_complex_output_path,
     build_environment_mask_output_path,
     classify_material_type,
     collect_source_textures,
     compute_wrapped_preview_index,
+    describe_render_profile_default_outputs,
     detect_workflow_profile,
     detect_mod_manager_context,
     enforce_skyrim_output_profile,
@@ -48,6 +50,7 @@ from generate_textures import (
     recommend_generation_settings,
     recommend_render_profile,
     resolve_render_profile_mode_selection,
+    resolve_render_profile_output_defaults,
     resolve_render_profile_options,
     load_gui_state,
     run_batch_with_options,
@@ -157,6 +160,26 @@ def _color_sign_image() -> Image.Image:
                 pixels[x, y] = (0, 129, 0)
             elif 16 <= x <= 31 and 16 <= y <= 31:
                 pixels[x, y] = (0, 129, 0)
+    return image
+
+
+def _shield_art_image() -> Image.Image:
+    image = Image.new("RGB", (64, 64), color=(90, 40, 30))
+    pixels = image.load()
+    centre = 32
+    for y in range(64):
+        for x in range(64):
+            dx = x - centre
+            dy = y - centre
+            distance_sq = (dx * dx) + (dy * dy)
+            if distance_sq <= 26 * 26:
+                pixels[x, y] = (140, 110, 58)
+            if distance_sq <= 18 * 18 and abs(dx) <= 2:
+                pixels[x, y] = (200, 28, 28)
+            if distance_sq <= 18 * 18 and abs(dy) <= 2:
+                pixels[x, y] = (230, 220, 175)
+            if 9 * 9 <= distance_sq <= 11 * 11:
+                pixels[x, y] = (30, 30, 30)
     return image
 
 
@@ -536,6 +559,32 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(auto["parallax_mode"], "standard")
         self.assertEqual(auto["complex_format"], "msn")
         self.assertEqual(auto["env_mask_mode"], "complex")
+
+    def test_resolve_render_profile_output_defaults_returns_expected_checkboxes(self) -> None:
+        vanilla = resolve_render_profile_output_defaults("vanilla")
+        self.assertTrue(bool(vanilla["include_diffuse"]))
+        self.assertTrue(bool(vanilla["include_normal"]))
+        self.assertFalse(bool(vanilla["include_parallax"]))
+        self.assertFalse(bool(vanilla["include_complex"]))
+
+        enb = resolve_render_profile_output_defaults("enb")
+        self.assertTrue(bool(enb["include_parallax"]))
+        self.assertTrue(bool(enb["include_environment_mask"]))
+        self.assertTrue(bool(enb["include_complex"]))
+        self.assertFalse(bool(enb["include_normal"]))
+
+    def test_build_render_profile_recommendation_message_lists_renderer_guidance(self) -> None:
+        message = build_render_profile_recommendation_message("community_shaders")
+        self.assertIn("Suggested target: Community Shaders", message)
+        self.assertIn("Renderer quick guide:", message)
+        self.assertIn("Vanilla:", message)
+        self.assertIn("ENB:", message)
+        self.assertIn("Auto-check:", message)
+
+    def test_describe_render_profile_default_outputs_mentions_auto_checked_outputs(self) -> None:
+        summary = describe_render_profile_default_outputs("enb")
+        self.assertIn("Auto-check:", summary)
+        self.assertIn("parallax/_p", summary)
 
     def test_resolve_render_profile_mode_selection_preserves_current_modes_without_preset_apply(self) -> None:
         resolved = resolve_render_profile_mode_selection(
@@ -1849,6 +1898,13 @@ class ReliefModeTests(unittest.TestCase):
         specular = generate_specular(_color_sign_image(), strength=2.0)
         minimum, maximum = specular.getextrema()
         self.assertGreater(maximum - minimum, 10)
+
+    def test_generate_normal_shield_art_image_is_not_near_flat(self) -> None:
+        normal = generate_normal(_shield_art_image(), strength=3.0)
+        red, green, blue = normal.split()
+        self.assertGreater(red.getextrema()[1] - red.getextrema()[0], 12)
+        self.assertGreater(green.getextrema()[1] - green.getextrema()[0], 12)
+        self.assertGreaterEqual(blue.getextrema()[0], 128)
 
 
 class TooltipPositionTests(unittest.TestCase):

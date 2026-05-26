@@ -818,6 +818,42 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     "enb": "Files: diffuse + normal + _p. Add _msn for ENB complex-material workflows; use complex _m for ENB reflections/material masks; add _g only for emissive assets.",
 }
 
+_RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
+    "vanilla": {
+        "include_diffuse": True,
+        "include_normal": True,
+        "include_parallax": False,
+        "include_glow": False,
+        "include_environment_mask": False,
+        "include_complex": False,
+    },
+    "community_shaders": {
+        "include_diffuse": True,
+        "include_normal": True,
+        "include_parallax": True,
+        "include_glow": False,
+        "include_environment_mask": False,
+        "include_complex": True,
+    },
+    "enb": {
+        "include_diffuse": True,
+        "include_normal": False,
+        "include_parallax": True,
+        "include_glow": False,
+        "include_environment_mask": True,
+        "include_complex": True,
+    },
+}
+
+_RENDER_PROFILE_OUTPUT_LABELS: dict[str, str] = {
+    "include_diffuse": "diffuse",
+    "include_normal": "normal/_n",
+    "include_parallax": "parallax/_p",
+    "include_glow": "glow/_g",
+    "include_environment_mask": "env mask/_m",
+    "include_complex": "complex material",
+}
+
 _RENDER_PROFILE_PATH_HINTS: dict[str, tuple[str, ...]] = {
     "enb": ("enb", "enbseries"),
     "community_shaders": ("communityshaders", "community_shaders", "community-shaders", "cs"),
@@ -838,6 +874,69 @@ def describe_render_profile_output_recommendation(profile: str) -> str:
     if normalized == "auto":
         normalized = "vanilla"
     return _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS.get(normalized, _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS["vanilla"])
+
+
+def resolve_render_profile_output_defaults(
+    selected_profile: str,
+    *,
+    recommended_profile: str | None = None,
+) -> dict[str, bool | str]:
+    normalized_selected = _normalize_render_profile(selected_profile)
+    normalized_recommended = _normalize_render_profile(recommended_profile)
+    effective_profile = normalized_recommended if normalized_selected == "auto" else normalized_selected
+    if effective_profile == "auto":
+        effective_profile = "vanilla"
+    defaults = _RENDER_PROFILE_OUTPUT_DEFAULTS.get(effective_profile, _RENDER_PROFILE_OUTPUT_DEFAULTS["vanilla"])
+    return {"selected_profile": normalized_selected, "effective_profile": effective_profile, **defaults}
+
+
+def describe_render_profile_default_outputs(profile: str) -> str:
+    normalized = _normalize_render_profile(profile)
+    if normalized == "auto":
+        normalized = "vanilla"
+    defaults = _RENDER_PROFILE_OUTPUT_DEFAULTS.get(normalized, _RENDER_PROFILE_OUTPUT_DEFAULTS["vanilla"])
+    enabled = [
+        label for key, label in _RENDER_PROFILE_OUTPUT_LABELS.items()
+        if defaults.get(key, False)
+    ]
+    disabled = [
+        label for key, label in _RENDER_PROFILE_OUTPUT_LABELS.items()
+        if not defaults.get(key, False)
+    ]
+    enabled_text = ", ".join(enabled) if enabled else "nothing"
+    disabled_text = ", ".join(disabled) if disabled else "nothing"
+    return f"Auto-check: {enabled_text}. Auto-uncheck: {disabled_text}."
+
+
+def build_render_profile_recommendation_message(recommended_profile: str) -> str:
+    normalized = _normalize_render_profile(recommended_profile)
+    if normalized == "auto":
+        normalized = "vanilla"
+    label = _RENDER_PROFILE_LABELS.get(normalized, normalized.replace("_", " ").title())
+    resolved = resolve_render_profile_options("auto", recommended_profile=normalized)
+    workflow_hint = {
+        "vanilla": "best for stock Skyrim SE / safest defaults",
+        "community_shaders": "best for Community Shaders packed-material workflows",
+        "enb": "best for ENB complex material + POM workflows",
+    }.get(normalized, "recommended workflow")
+    tuple_hint = (
+        f"{resolved['complex_format']} / env {resolved['env_mask_mode']} / "
+        f"parallax {resolved['parallax_mode']}"
+    )
+    lines = [
+        f"Suggested target: {label} ({workflow_hint}) → {tuple_hint}.",
+        describe_render_profile_output_recommendation(normalized),
+        describe_render_profile_default_outputs(normalized),
+        "",
+        "Renderer quick guide:",
+    ]
+    for profile in ("vanilla", "community_shaders", "enb"):
+        lines.append(
+            f"- {_RENDER_PROFILE_LABELS[profile]}: "
+            f"{describe_render_profile_default_outputs(profile)} "
+            f"{describe_render_profile_output_recommendation(profile)}"
+        )
+    return "\n".join(lines)
 
 
 def recommend_render_profile(
@@ -1156,9 +1255,11 @@ def _detail_spans(source: Image.Image) -> tuple[int, int]:
 
 def _combined_detail_source(source: Image.Image) -> Image.Image:
     _, grayscale, chroma = _split_detail_images(source)
-    boosted_chroma = ImageEnhance.Contrast(chroma).enhance(1.35)
-    edge_drive = ImageChops.lighter(grayscale, boosted_chroma)
-    return Image.blend(grayscale, edge_drive, alpha=0.38)
+    boosted_chroma = ImageEnhance.Contrast(chroma).enhance(1.55)
+    grayscale_edges = grayscale.filter(ImageFilter.FIND_EDGES).filter(ImageFilter.GaussianBlur(radius=0.45))
+    chroma_edges = boosted_chroma.filter(ImageFilter.FIND_EDGES).filter(ImageFilter.GaussianBlur(radius=0.45))
+    edge_drive = ImageChops.lighter(ImageChops.lighter(grayscale, boosted_chroma), ImageChops.lighter(grayscale_edges, chroma_edges))
+    return Image.blend(grayscale, edge_drive, alpha=0.46)
 
 
 def _detail_pressure(source: Image.Image) -> float:
@@ -3115,10 +3216,7 @@ if GUI_AVAILABLE:
             self.parallax_mode_var = tk.StringVar(value="standard")
             self.render_profile_var = tk.StringVar(value="auto")
             self.render_profile_suggestion_var = tk.StringVar(
-                value=(
-                    "Suggested target: Vanilla (best for stock Skyrim SE / safest defaults).\n"
-                    + describe_render_profile_output_recommendation("vanilla")
-                )
+                value=build_render_profile_recommendation_message("vanilla")
             )
             self.auto_suggestions_var = tk.BooleanVar(value=True)
             self.auto_normal_suggestion_var = tk.BooleanVar(value=True)
@@ -4397,41 +4495,43 @@ if GUI_AVAILABLE:
             )
             return resolved["effective_profile"]
 
+        def _apply_render_profile_output_toggles(
+            self,
+            selected_profile: str,
+            recommended_profile: str | None = None,
+        ) -> str:
+            resolved = resolve_render_profile_output_defaults(
+                selected_profile,
+                recommended_profile=recommended_profile,
+            )
+            self.include_diffuse_var.set(bool(resolved["include_diffuse"]))
+            self.include_normal_var.set(bool(resolved["include_normal"]))
+            self.include_parallax_var.set(bool(resolved["include_parallax"]))
+            self.include_glow_var.set(bool(resolved["include_glow"]))
+            self.include_environment_mask_var.set(bool(resolved["include_environment_mask"]))
+            self.include_complex_var.set(bool(resolved["include_complex"]))
+            return str(resolved["effective_profile"])
+
         def _update_render_profile_recommendation(self, *, apply_auto: bool) -> str:
             preview_path = self._current_preview_path()
             recommended_profile = self._recommended_render_profile_for_preview(preview_path)
-            label = _RENDER_PROFILE_LABELS.get(recommended_profile, recommended_profile.replace("_", " ").title())
-            resolved = resolve_render_profile_options("auto", recommended_profile=recommended_profile)
-            workflow_hint = {
-                "vanilla": "best for stock Skyrim SE / safest defaults",
-                "community_shaders": "best for Community Shaders packed-material workflows",
-                "enb": "best for ENB complex material + POM workflows",
-            }.get(recommended_profile, "recommended workflow")
-            output_hint = describe_render_profile_output_recommendation(recommended_profile)
-            tuple_hint = (
-                f"{resolved['complex_format']} / env {resolved['env_mask_mode']} / "
-                f"parallax {resolved['parallax_mode']}"
-            )
+            message = build_render_profile_recommendation_message(recommended_profile)
             if self.render_profile_var.get() == "auto":
-                self.render_profile_suggestion_var.set(
-                    f"Suggested target: {label} ({workflow_hint}) → {tuple_hint}.\n"
-                    f"{output_hint}\n"
-                    "Current mode selections stay locked until you change Target renderer."
-                )
+                self.render_profile_suggestion_var.set(message)
                 if apply_auto:
                     effective = self._apply_render_profile_modes(
                         "auto",
                         recommended_profile=recommended_profile,
                         apply_preset=True,
                     )
+                    self._apply_render_profile_output_toggles(
+                        "auto",
+                        recommended_profile=recommended_profile,
+                    )
                     if effective == "enb":
                         self.emboss_mode_var.set(False)
             else:
-                self.render_profile_suggestion_var.set(
-                    f"Suggested target: {label} ({workflow_hint}) → {tuple_hint}.\n"
-                    f"{output_hint}\n"
-                    "Current mode selections stay locked until you change Target renderer."
-                )
+                self.render_profile_suggestion_var.set(message)
             return recommended_profile
 
         def _on_render_profile_changed(self, _event: object | None = None) -> None:
@@ -4443,14 +4543,18 @@ if GUI_AVAILABLE:
                 recommended_profile=recommended_profile,
                 apply_preset=True,
             )
+            self._apply_render_profile_output_toggles(
+                selected,
+                recommended_profile=recommended_profile,
+            )
             if selected == "auto":
                 self.status_var.set(
-                    f"Target renderer set to auto-detect; applied the current {_RENDER_PROFILE_LABELS.get(effective, effective)} preset."
+                    f"Target renderer set to auto-detect; applied the current {_RENDER_PROFILE_LABELS.get(effective, effective)} preset and matching output checkboxes."
                 )
             else:
                 self.status_var.set(
                     f"Target renderer set to {_RENDER_PROFILE_LABELS.get(effective, effective)}. "
-                    f"Complex naming, env mask mode, and parallax mode were updated to match that renderer. "
+                    f"Complex naming, env mask mode, parallax mode, and output checkboxes were updated to match that renderer. "
                     f"{describe_render_profile_output_recommendation(effective)}"
                 )
             self._request_preview_refresh()
@@ -5193,31 +5297,61 @@ if GUI_AVAILABLE:
                 normal_tex_var = tk.StringVar()
                 env_mask_tex_var = tk.StringVar()
 
-                def _tex_row(parent: ttk.Frame, label: str, var: tk.StringVar) -> None:
+                def _browse_texture_path(target_var: tk.StringVar, title: str) -> None:
+                    selected = filedialog.askopenfilename(
+                        title=title,
+                        filetypes=[("DDS files", "*.dds"), ("All files", "*.*")],
+                    )
+                    if selected:
+                        target_var.set(selected.replace("/", "\\"))
+
+                def _tex_row(parent: ttk.Frame, label: str, var: tk.StringVar, browse_title: str) -> None:
                     row = ttk.Frame(parent)
                     row.pack(fill="x", pady=2)
                     ttk.Label(row, text=label, width=18).pack(side="left")
                     ttk.Entry(row, textvariable=var).pack(side="left", fill="x", expand=True, padx=(4, 4))
+                    ttk.Button(
+                        row,
+                        text="Browse…",
+                        command=lambda: _browse_texture_path(var, browse_title),
+                    ).pack(side="left")
 
-                _tex_row(tex_frame, "Parallax / _p.dds:", parallax_tex_var)
-                _tex_row(tex_frame, "Normal / _n or _msn:", normal_tex_var)
-                _tex_row(tex_frame, "Env mask / _m.dds:", env_mask_tex_var)
+                _tex_row(tex_frame, "Parallax / _p.dds:", parallax_tex_var, "Select parallax texture")
+                _tex_row(tex_frame, "Normal / _n or _msn:", normal_tex_var, "Select normal or MSN texture")
+                _tex_row(tex_frame, "Env mask / _m.dds:", env_mask_tex_var, "Select environment mask texture")
 
                 def _auto_fill_paths() -> None:
                     path_value = nif_path_var.get().strip()
                     if not path_value:
+                        status_var.set("Pick a NIF file or folder first, then use Auto-fill.")
                         return
-                    nif_path = Path(path_value)
-                    if nif_path.is_dir():
-                        nifs = list(nif_path.rglob("*.nif"))
-                        nif_path = nifs[0] if nifs else None
-                    if nif_path and nif_path.exists():
-                        guessed_parallax = guess_parallax_path_for_nif(nif_path)
-                        guessed_normal = guess_normal_path_for_nif(nif_path)
-                        if guessed_parallax and not parallax_tex_var.get():
-                            parallax_tex_var.set(guessed_parallax)
-                        if guessed_normal and not normal_tex_var.get():
-                            normal_tex_var.set(guessed_normal)
+                    selected_path = Path(path_value)
+                    nifs = list(selected_path.rglob("*.nif")) if selected_path.is_dir() else [selected_path]
+                    guessed_from: Path | None = None
+                    guessed_parallax = ""
+                    guessed_normal = ""
+                    for nif_candidate in nifs:
+                        if not nif_candidate.exists():
+                            continue
+                        candidate_parallax = guess_parallax_path_for_nif(nif_candidate) or ""
+                        candidate_normal = guess_normal_path_for_nif(nif_candidate) or ""
+                        if candidate_parallax or candidate_normal:
+                            guessed_from = nif_candidate
+                            guessed_parallax = candidate_parallax
+                            guessed_normal = candidate_normal
+                            break
+                    if not guessed_from:
+                        status_var.set("Auto-fill could not find any usable diffuse/normal texture slots in the selected NIF(s).")
+                        return
+                    if guessed_parallax:
+                        parallax_tex_var.set(guessed_parallax)
+                    if guessed_normal:
+                        normal_tex_var.set(guessed_normal)
+                    if guessed_parallax:
+                        env_mask_guess = guessed_parallax[:-6] + "_m.dds" if guessed_parallax.lower().endswith("_p.dds") else ""
+                        if env_mask_guess:
+                            env_mask_tex_var.set(env_mask_guess)
+                    status_var.set(f"Auto-filled texture paths from {guessed_from.name}.")
 
                 auto_fill_button = ttk.Button(tex_frame, text="Auto-fill paths from selected NIF", command=_auto_fill_paths)
                 auto_fill_button.pack(anchor="w", pady=(4, 0))
@@ -5344,6 +5478,9 @@ if GUI_AVAILABLE:
                     _set_detail_text(summary)
 
                 results_tree.bind("<<TreeviewSelect>>", _on_result_selected)
+                results_tree.bind("<Button-3>", _show_tree_context_menu)
+                detail_entry.bind("<Button-3>", lambda event: _show_text_context_menu(event, detail_entry))
+                detail_text.bind("<Button-3>", lambda event: _show_text_context_menu(event, detail_text))
 
                 def _copy_selected_result() -> None:
                     text = detail_text.get("1.0", "end").strip() or selected_detail_var.get().strip()
@@ -5369,6 +5506,34 @@ if GUI_AVAILABLE:
                     win.clipboard_append("\n".join(lines))
                     status_var.set(f"Copied {len(lines)} result row(s) to clipboard.")
 
+                context_menu = tk.Menu(win, tearoff=False)
+                context_menu.add_command(label="Copy selected row", command=_copy_selected_result)
+                context_menu.add_command(label="Copy all rows", command=_copy_all_results)
+
+                def _show_tree_context_menu(event: tk.Event[tk.Misc]) -> None:
+                    item_id = results_tree.identify_row(event.y)
+                    if item_id:
+                        results_tree.selection_set(item_id)
+                        results_tree.focus(item_id)
+                        _on_result_selected()
+                    context_menu.tk_popup(event.x_root, event.y_root)
+
+                def _copy_widget_selection(widget: tk.Entry | tk.Text) -> None:
+                    try:
+                        selected_text = widget.selection_get()
+                    except Exception:
+                        selected_text = widget.get("1.0", "end").strip() if isinstance(widget, tk.Text) else widget.get().strip()
+                    if not selected_text:
+                        return
+                    win.clipboard_clear()
+                    win.clipboard_append(selected_text)
+                    status_var.set("Copied selected text to clipboard.")
+
+                def _show_text_context_menu(event: tk.Event[tk.Misc], widget: tk.Entry | tk.Text) -> None:
+                    text_menu = tk.Menu(win, tearoff=False)
+                    text_menu.add_command(label="Copy text", command=lambda: _copy_widget_selection(widget))
+                    text_menu.tk_popup(event.x_root, event.y_root)
+
                 def _resolve_nifs() -> list[Path]:
                     path_value = nif_path_var.get().strip()
                     if not path_value:
@@ -5393,6 +5558,9 @@ if GUI_AVAILABLE:
                     for index, nif in enumerate(nifs[:50], start=1):
                         try:
                             validation = validate_nif_for_parallax(nif)
+                            combined_detail_lines = list(validation.issues[:4])
+                            if validation.suggestions:
+                                combined_detail_lines.extend(f"Suggestion: {text}" for text in validation.suggestions[:2])
                             if validation.ready_count == validation.shader_count and validation.shader_count > 0:
                                 _add_result_row(
                                     "OK",
@@ -5400,12 +5568,12 @@ if GUI_AVAILABLE:
                                     f"{validation.ready_count}/{validation.shader_count} shader(s) already parallax-ready",
                                 )
                             elif validation.shader_count == 0:
-                                if validation.issues:
-                                    _add_result_row("SKIP", nif.name, "\n".join(validation.issues[:4]))
+                                if combined_detail_lines:
+                                    _add_result_row("SKIP", nif.name, "\n".join(combined_detail_lines))
                                 else:
                                     _add_result_row("SKIP", nif.name, "No BSLightingShaderProperty found.")
                             else:
-                                issue_text = "\n".join(validation.issues[:5]) if validation.issues else "Needs patching."
+                                issue_text = "\n".join(combined_detail_lines[:6]) if combined_detail_lines else "Needs patching."
                                 _add_result_row(
                                     "WARN",
                                     nif.name,

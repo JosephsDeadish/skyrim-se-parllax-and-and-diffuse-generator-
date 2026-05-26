@@ -310,7 +310,7 @@ class _Buf:
         self._require(n, context="short string read")
         raw = bytes(self._b[self._pos: self._pos + n])
         self._pos += n
-        return raw.decode("latin-1")
+        return raw.decode("latin-1").rstrip("\x00")
 
     def read_sstring_u32(self) -> str:
         n = self.read_u32()
@@ -376,6 +376,74 @@ class _NifHeader:
     block_sizes_offset: int  # byte offset of block_sizes[0] in the file
 
 
+def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
+    diagnostics = [f"Malformed or truncated NIF: {exc}"]
+    if len(data) < 64:
+        diagnostics.append(
+            "The file is shorter than a normal Skyrim NIF header. It is probably truncated, corrupt, or not really a NIF."
+        )
+        return diagnostics
+    try:
+        header_line_end = data.find(b"\n")
+        if header_line_end == -1:
+            diagnostics.append("The NIF header line is incomplete. Re-export or re-save the mesh before patching.")
+            return diagnostics
+        header_line = data[: header_line_end + 1]
+        if not any(header_line.startswith(prefix) for prefix in _HEADER_PREFIXES):
+            diagnostics.append("Header prefix is not a Skyrim/Gamebryo 20.2.0.7 NIF. This file is unsupported for auto-patching.")
+            return diagnostics
+        version_offset = header_line_end + 1
+        version = struct.unpack_from("<I", data, version_offset)[0]
+        if version != _NIF_VERSION_20_2_0_7:
+            diagnostics.append(f"NIF version is 0x{version:08X}, not Skyrim SE 20.2.0.7.")
+            return diagnostics
+        user_version = struct.unpack_from("<I", data, version_offset + 5)[0]
+        user_version_2 = struct.unpack_from("<I", data, version_offset + 13)[0]
+        if user_version_2 == _SKYRIM_LE_USER_VERSION_2:
+            diagnostics.append("This looks like a Skyrim Legendary Edition / Oldrim NIF. Convert it to SSE before patching.")
+        elif user_version != _SKYRIM_USER_VERSION or user_version_2 != _SKYRIM_SE_USER_VERSION_2:
+            diagnostics.append(
+                f"Unexpected user version values ({user_version}, {user_version_2}). The file may use a different game/export format."
+            )
+    except Exception:
+        pass
+    diagnostics.append(
+        "Resolution: open the mesh in NifSkope or the Creation Kit and re-save/export it as a clean Skyrim SE NIF, then run the patch again."
+    )
+    return diagnostics
+
+
+def _summarize_non_patchable_block_types(header: _NifHeader) -> list[str]:
+    used_types = sorted(
+        {
+            header.block_types[type_idx]
+            for type_idx in header.block_type_indices
+            if 0 <= type_idx < len(header.block_types)
+        }
+    )
+    if not used_types:
+        return []
+    shaderish = [name for name in used_types if "Shader" in name or "TexturingProperty" in name]
+    diagnostics: list[str] = []
+    if shaderish:
+        diagnostics.append(f"Detected shader/material blocks: {', '.join(shaderish[:5])}.")
+    if any("BSShaderPPLightingProperty" in name for name in used_types):
+        diagnostics.append(
+            "This mesh uses BSShaderPPLightingProperty instead of BSLightingShaderProperty, so this app cannot patch parallax automatically."
+        )
+        diagnostics.append(
+            "Resolution: convert the mesh to use BSLightingShaderProperty in NifSkope/CK, then patch it again."
+        )
+    elif any("NiTexturingProperty" in name for name in used_types):
+        diagnostics.append(
+            "This mesh uses legacy NiTexturingProperty blocks instead of Skyrim shader properties, so Skyrim SE parallax cannot be auto-patched here."
+        )
+        diagnostics.append(
+            "Resolution: re-export or modernize the mesh so it uses BSLightingShaderProperty before patching."
+        )
+    return diagnostics
+
+
 def _read_header(buf: _Buf) -> _NifHeader | None:
     """Parse the NIF header; return ``None`` if not a supported Skyrim SE NIF."""
     header_line: bytearray = bytearray()
@@ -410,7 +478,7 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
         buf.read_sstring_u8()  # export strings
 
     num_block_types = buf.read_u16()
-    block_types = [buf.read_sstring_u8() for _ in range(num_block_types)]
+    block_types = [buf.read_sstring_u32() for _ in range(num_block_types)]
     block_type_indices = [buf.read_u16() for _ in range(num_blocks)]
 
     block_sizes_offset = buf.pos
@@ -418,7 +486,7 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
 
     num_strings = buf.read_u32()
     _max_str_len = buf.read_u32()
-    strings = [buf.read_sstring_u8() for _ in range(num_strings)]
+    strings = [buf.read_sstring_u32() for _ in range(num_strings)]
 
     num_groups = buf.read_u32()
     for _ in range(num_groups):
@@ -864,8 +932,9 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
     try:
         header = _read_header(buf)
     except (ValueError, struct.error, IndexError) as exc:
-        result.errors.append(f"Malformed or truncated NIF: {exc}")
-        result.message = result.errors[-1]
+        header_diagnostics = _diagnose_header_parse_failure(original_data, exc)
+        result.errors.extend(header_diagnostics)
+        result.message = header_diagnostics[0]
         return result
     if header is None:
         result.errors.append("Not a supported Skyrim SE NIF (requires 20.2.0.7).")
@@ -881,6 +950,10 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
             result.message = f"No patchable BSLightingShaderProperty blocks found ({parse_errors[0]})."
         else:
             result.message = "No BSLightingShaderProperty blocks found — nothing to patch."
+        extra_hints = _summarize_non_patchable_block_types(header)
+        if extra_hints:
+            result.errors.extend(extra_hints)
+            result.message = f"{result.message} {extra_hints[0]}"
         return result
 
     try:
@@ -948,11 +1021,13 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
     try:
         header = _read_header(buf)
     except (ValueError, struct.error, IndexError) as exc:
-        return [], [f"Malformed or truncated NIF: {exc}"]
+        return [], _diagnose_header_parse_failure(data, exc)
     if header is None:
         return [], ["Not a supported Skyrim SE NIF (requires 20.2.0.7)."]
     shader_props, texture_sets, parse_errors = _build_block_map(data, header)
     diagnostics.extend(parse_errors)
+    if not shader_props:
+        diagnostics.extend(_summarize_non_patchable_block_types(header))
     results: list[NifShaderInfo] = []
     for sp in shader_props:
         ts = texture_sets.get(sp.texture_set_ref)
@@ -993,6 +1068,10 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
     if not infos:
         if not diagnostics:
             result.issues.append("No BSLightingShaderProperty blocks found or not a Skyrim SE NIF.")
+        for diagnostic in diagnostics:
+            lowered = diagnostic.lower()
+            if "resolution:" in lowered or "convert" in lowered or "re-save" in lowered or "re-export" in lowered:
+                _append_unique(result.suggestions, diagnostic)
         return result
 
     result.shader_count = len(infos)
