@@ -39,6 +39,7 @@ from generate_textures import (
     recommend_generation_settings,
     run_batch_with_options,
     run_with_options,
+    select_generation_context_source,
 )
 
 
@@ -900,6 +901,18 @@ class GenerateTexturesTests(unittest.TestCase):
                 sorted(path.relative_to(root).as_posix() for path in discovered),
                 ["nested/brick.dds", "nested/deeper/stone.dds", "top.dds"],
             )
+
+    def test_select_generation_context_source_prefers_first_selected_input(self) -> None:
+        folder_path = Path("textures/architecture")
+        selected = [
+            Path("textures/architecture/stone.dds"),
+            Path("textures/architecture/brick.dds"),
+        ]
+        self.assertEqual(select_generation_context_source(folder_path, selected), selected[0])
+
+    def test_select_generation_context_source_falls_back_to_input_path(self) -> None:
+        input_path = Path("textures/architecture/stone.dds")
+        self.assertEqual(select_generation_context_source(input_path, []), input_path)
 
     def test_run_batch_with_options_processes_subfolder_sources(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

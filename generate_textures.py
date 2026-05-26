@@ -1568,6 +1568,11 @@ def collect_source_textures(input_path: Path) -> list[Path]:
     return source_files
 
 
+def select_generation_context_source(input_path: Path, selected_inputs: list[Path]) -> Path:
+    """Choose the source path used for generation warnings and role hints."""
+    return selected_inputs[0] if selected_inputs else input_path
+
+
 def _to_dds_compatible_image(image: Image.Image) -> Image.Image:
     if image.mode == "RGBA":
         return image
@@ -3011,7 +3016,7 @@ if GUI_AVAILABLE:
             if self.auto_suggestions_var.get():
                 self._apply_recommended_settings()
                 self.status_var.set("Automatic suggestions updated for checked sliders.")
-            self._refresh_preview()
+            self._request_preview_refresh()
 
         def _on_emboss_mode_changed(self) -> None:
             if self.emboss_mode_var.get():
@@ -3106,8 +3111,20 @@ if GUI_AVAILABLE:
                 return
             resolved_index = max(0, min(index, len(self.selected_inputs) - 1))
             preview_path = self.selected_inputs[resolved_index]
-            with Image.open(preview_path) as src:
-                self.source_image = prepare_preview_source(src)
+            try:
+                with Image.open(preview_path) as src:
+                    self.source_image = prepare_preview_source(src)
+            except Exception as exc:
+                self.source_image = None
+                self.current_preview_index = resolved_index
+                self.preview_source_name_var.set(f"{preview_path.name} (preview load failed)")
+                self.before_image_label.configure(image="", text="Preview unavailable")
+                self.preview_output_images.clear()
+                for label in self.preview_output_labels.values():
+                    label.configure(image="", text="No preview")
+                self.status_var.set(f"Could not load preview for {preview_path.name}: {exc}")
+                self._update_preview_navigation_state()
+                return
             self.current_preview_index = resolved_index
             if len(self.selected_inputs) > 1:
                 self.preview_source_name_var.set(
@@ -3305,8 +3322,9 @@ if GUI_AVAILABLE:
                     return
                 output_dir = Path(output_value)
 
-            _material_type = classify_material_type(Path(input_value))
-            _role_info = identify_skyrim_texture_role(self.selected_inputs[0]) if self.selected_inputs else None
+            _context_source = select_generation_context_source(Path(input_value), self.selected_inputs)
+            _material_type = classify_material_type(_context_source)
+            _role_info = identify_skyrim_texture_role(_context_source)
             _source_role = _role_info["role"] if _role_info is not None else None
             _source_hint = _role_info["hint"] if _role_info is not None else None
             if not self._check_and_show_generation_warnings(
