@@ -2914,6 +2914,7 @@ if GUI_AVAILABLE:
                 width=20,
             )
             complex_format.grid(row=4, column=1, sticky=tk.W)
+            complex_format.bind("<<ComboboxSelected>>", self._on_complex_format_changed)
             self._add_tooltip(complex_format, "🏷 Choose 'msn' for RGBA normal+specular, 'cm' for packed AO/rough/metal/height-spec.\nWhen in doubt, use the format your target shader expects.")
 
             _env_mode_row = ttk.Frame(options_frame)
@@ -2929,6 +2930,7 @@ if GUI_AVAILABLE:
                 width=20,
             )
             env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
+            env_mask_mode_combo.bind("<<ComboboxSelected>>", self._on_env_mask_mode_changed)
             self._add_tooltip(env_mask_mode_combo, "🌍 'standard' = single grey channel for vanilla Skyrim SE.\n'complex' = RGBA for ENBSeries. Using complex without ENB produces… nothing useful.")
             ttk.Label(
                 options_frame,
@@ -3927,6 +3929,28 @@ if GUI_AVAILABLE:
                 self.status_var.set("Parallax mode: occlusion (ENBSeries POM-optimized heightmap).")
             else:
                 self.status_var.set("Parallax mode: standard (vanilla Skyrim SE parallax heightmap).")
+            self._request_preview_refresh()
+
+        def _on_complex_format_changed(self, _event: object | None = None) -> None:
+            selected = self.complex_format_var.get().strip().lower()
+            if selected not in {"msn", "cm"}:
+                selected = "msn"
+                self.complex_format_var.set(selected)
+            if selected == "msn":
+                self.status_var.set("Complex format: msn (_msn, normal RGB + specular alpha preview split).")
+            else:
+                self.status_var.set("Complex format: cm (_cm, packed complex-material preview).")
+            self._request_preview_refresh()
+
+        def _on_env_mask_mode_changed(self, _event: object | None = None) -> None:
+            selected = self.env_mask_mode_var.get().strip().lower()
+            if selected not in {"standard", "complex"}:
+                selected = "standard"
+                self.env_mask_mode_var.set(selected)
+            if selected == "complex":
+                self.status_var.set("Environment mask mode: complex (ENB-style RGBA preview).")
+            else:
+                self.status_var.set("Environment mask mode: standard (vanilla grayscale preview).")
             self._request_preview_refresh()
 
         def _update_slider_auto_states(self) -> None:
