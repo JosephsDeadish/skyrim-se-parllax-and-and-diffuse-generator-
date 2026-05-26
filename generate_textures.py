@@ -108,6 +108,30 @@ def _coerce_int(value: object, default: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, resolved))
 
 
+def _compute_tooltip_position(
+    *,
+    pointer_x: int,
+    pointer_y: int,
+    tip_width: int,
+    tip_height: int,
+    screen_width: int,
+    screen_height: int,
+    cursor_offset_x: int = 16,
+    cursor_offset_y: int = 20,
+    screen_margin: int = 10,
+) -> tuple[int, int]:
+    desired_x = pointer_x + cursor_offset_x
+    desired_y = pointer_y + cursor_offset_y
+    min_x = max(0, screen_margin)
+    min_y = max(0, screen_margin)
+    max_x = max(min_x, screen_width - tip_width - screen_margin)
+    max_y = max(min_y, screen_height - tip_height - screen_margin)
+    return (
+        int(_clamp(float(desired_x), float(min_x), float(max_x))),
+        int(_clamp(float(desired_y), float(min_y), float(max_y))),
+    )
+
+
 def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     state = dict(_GUI_STATE_DEFAULTS)
     if raw is None:
@@ -898,29 +922,29 @@ def generate_parallax_occlusion(source: Image.Image, strength: float = 1.35) -> 
         grazing angles with POM and are best reserved for strongly sculptured
         surfaces such as heavy carved stone.
     """
-    grayscale = ImageOps.grayscale(source)
+    base_height = _prepare_height_map(source)
+    pressure = _detail_pressure(source)
     resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.6)
 
-    # Wide Gaussian eliminates the high-frequency noise that appears as stepped
-    # depth layers in POM ray-marching.
-    broad = grayscale.filter(ImageFilter.GaussianBlur(radius=3.0 * resolution_scale))
-
-    # A medium-scale pass preserves overall surface shape (hills, dips, panel
-    # edges) without reintroducing micro-detail noise.
-    medium = grayscale.filter(ImageFilter.GaussianBlur(radius=0.8 * resolution_scale))
-
-    # Blend 70 % broad for smoothness + 30 % medium for shape retention.
-    blended = Image.blend(broad, medium, alpha=0.3)
+    # Multi-scale smoothing keeps large silhouette/macro gradients while reducing
+    # high-frequency stair-stepping artefacts under ENB POM ray-marching.
+    broad = base_height.filter(ImageFilter.GaussianBlur(radius=(2.7 + (pressure * 1.35)) * resolution_scale))
+    medium = base_height.filter(ImageFilter.GaussianBlur(radius=(1.0 + (pressure * 0.35)) * resolution_scale))
+    macro = Image.blend(broad, medium, alpha=_clamp(0.35 + (pressure * 0.14), 0.35, 0.5))
+    slope = ImageChops.difference(medium, broad)
+    slope = ImageEnhance.Contrast(slope).enhance(_clamp(0.55 - (pressure * 0.2), 0.3, 0.55))
+    blended = ImageChops.add(macro, slope, scale=1.0, offset=-16)
 
     # Full 0–255 dynamic range gives ENB POM the widest usable depth field.
     normalized = ImageOps.autocontrast(blended, cutoff=0)
 
     # Contrast enhancement proportional to requested strength, clamped so that
     # extreme values do not produce depth artefacts at steep view angles.
-    contrasted = ImageEnhance.Contrast(normalized).enhance(_clamp(strength, 0.5, 2.5))
+    contrasted = ImageEnhance.Contrast(normalized).enhance(_clamp(strength * (0.94 - (pressure * 0.14)), 0.5, 2.25))
 
     # Final light smooth pass removes any residual pixel-edge artefacts.
-    return contrasted.filter(ImageFilter.GaussianBlur(radius=0.5))
+    final = contrasted.filter(ImageFilter.GaussianBlur(radius=0.65 + (pressure * 0.35)))
+    return ImageOps.autocontrast(final, cutoff=0)
 
 
 def _prepare_emboss_height_map(source: Image.Image) -> Image.Image:
@@ -2734,30 +2758,46 @@ if GUI_AVAILABLE:
         def _add_tooltip(self, widget: tk.Widget, text: str) -> None:
             tip_window: list[tk.Toplevel | None] = [None]
 
-            def _show(_event: object) -> None:
-                if tip_window[0] is not None:
-                    return
+            def _position_tip(tip: tk.Toplevel, pointer_x: int, pointer_y: int) -> None:
+                tip.update_idletasks()
+                x, y = _compute_tooltip_position(
+                    pointer_x=pointer_x,
+                    pointer_y=pointer_y,
+                    tip_width=tip.winfo_reqwidth(),
+                    tip_height=tip.winfo_reqheight(),
+                    screen_width=self.root.winfo_screenwidth(),
+                    screen_height=self.root.winfo_screenheight(),
+                )
+                tip.wm_geometry(f"+{x}+{y}")
+
+            def _show(event: object) -> None:
                 try:
-                    x = widget.winfo_rootx() + 20
-                    y = widget.winfo_rooty() + widget.winfo_height() + 4
-                    tip = tk.Toplevel(widget)
-                    tip.wm_overrideredirect(True)
-                    tip.wm_geometry(f"+{x}+{y}")
-                    label = tk.Label(
-                        tip,
-                        text=text,
-                        justify=tk.LEFT,
-                        background=self._tooltip_bg,
-                        foreground=self._tooltip_fg,
-                        relief=tk.SOLID,
-                        borderwidth=1,
-                        font=("TkDefaultFont", 9),
-                        wraplength=340,
-                        padx=6,
-                        pady=4,
-                    )
-                    label.pack()
-                    tip_window[0] = tip
+                    tip = tip_window[0]
+                    if tip is None:
+                        tip = tk.Toplevel(widget)
+                        tip.wm_overrideredirect(True)
+                        try:
+                            tip.wm_attributes("-topmost", True)
+                        except Exception:
+                            pass
+                        label = tk.Label(
+                            tip,
+                            text=text,
+                            justify=tk.LEFT,
+                            background=self._tooltip_bg,
+                            foreground=self._tooltip_fg,
+                            relief=tk.SOLID,
+                            borderwidth=1,
+                            font=("TkDefaultFont", 9),
+                            wraplength=340,
+                            padx=6,
+                            pady=4,
+                        )
+                        label.pack()
+                        tip_window[0] = tip
+                    pointer_x = int(getattr(event, "x_root", widget.winfo_pointerx()))
+                    pointer_y = int(getattr(event, "y_root", widget.winfo_pointery()))
+                    _position_tip(tip, pointer_x, pointer_y)
                 except Exception:
                     tip_window[0] = None
 
@@ -2771,6 +2811,7 @@ if GUI_AVAILABLE:
                         pass
 
             widget.bind("<Enter>", _show, add="+")
+            widget.bind("<Motion>", _show, add="+")
             widget.bind("<Leave>", _hide, add="+")
             widget.bind("<ButtonPress>", _hide, add="+")
 

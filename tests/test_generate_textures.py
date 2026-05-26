@@ -9,6 +9,7 @@ from generate_textures import (
     APP_VERSION,
     PATREON_URL,
     _create_panda_icon_image,
+    _compute_tooltip_position,
     _run_cli,
     _normalize_gui_state,
     analyze_image_content,
@@ -1388,6 +1389,33 @@ class EmbossNormalTests(unittest.TestCase):
         self.assertGreater(emboss_variation, standard_variation)
 
 
+class TooltipPositionTests(unittest.TestCase):
+    def test_compute_tooltip_position_uses_cursor_offset_when_room_exists(self) -> None:
+        x, y = _compute_tooltip_position(
+            pointer_x=120,
+            pointer_y=150,
+            tip_width=200,
+            tip_height=60,
+            screen_width=1920,
+            screen_height=1080,
+        )
+        self.assertEqual((x, y), (136, 170))
+
+    def test_compute_tooltip_position_clamps_inside_screen_bounds(self) -> None:
+        x, y = _compute_tooltip_position(
+            pointer_x=1910,
+            pointer_y=1070,
+            tip_width=260,
+            tip_height=120,
+            screen_width=1920,
+            screen_height=1080,
+        )
+        self.assertGreaterEqual(x, 10)
+        self.assertGreaterEqual(y, 10)
+        self.assertLessEqual(x + 260, 1910)
+        self.assertLessEqual(y + 120, 1070)
+
+
 class ParallaxOcclusionTests(unittest.TestCase):
     def test_generate_parallax_occlusion_returns_l_same_size(self) -> None:
         result = generate_parallax_occlusion(_sample_image())
@@ -1414,6 +1442,12 @@ class ParallaxOcclusionTests(unittest.TestCase):
         std_diffs = [abs(std_bytes[i + 1] - std_bytes[i]) for i in range(len(std_bytes) - 1)]
         pom_diffs = [abs(pom_bytes[i + 1] - pom_bytes[i]) for i in range(len(pom_bytes) - 1)]
         self.assertLessEqual(statistics.mean(pom_diffs), statistics.mean(std_diffs))
+
+    def test_parallax_occlusion_keeps_mean_depth_near_standard(self) -> None:
+        detail = _detailed_bright_image()
+        standard_mean = ImageStat.Stat(generate_parallax(detail, strength=1.35)).mean[0]
+        pom_mean = ImageStat.Stat(generate_parallax_occlusion(detail, strength=1.35)).mean[0]
+        self.assertLess(abs(pom_mean - standard_mean), 40.0)
 
     def test_parallax_mode_occlusion_threads_through_preview_outputs(self) -> None:
         detail = _detailed_bright_image()
