@@ -176,6 +176,18 @@ class GenerateTexturesTests(unittest.TestCase):
                     "output_path": "/tmp/out",
                     "use_custom_output": True,
                     "dark_mode": True,
+                    "show_batch_preview": True,
+                    "preview_size": "XL",
+                    "complex_format": "cm",
+                    "env_mask_mode": "complex",
+                    "parallax_mode": "occlusion",
+                    "emboss_mode": True,
+                    "include_diffuse": False,
+                    "include_normal": True,
+                    "include_parallax": False,
+                    "include_glow": True,
+                    "include_environment_mask": True,
+                    "include_complex": True,
                     "auto_suggestions": True,
                     "auto_normal": False,
                     "auto_parallax": True,
@@ -183,6 +195,12 @@ class GenerateTexturesTests(unittest.TestCase):
                     "auto_environment_mask": True,
                     "auto_complex": False,
                     "auto_specular": True,
+                    "normal_strength": 3.5,
+                    "parallax_strength": 2.25,
+                    "glow_threshold": 140,
+                    "environment_mask_strength": 2.4,
+                    "complex_strength": 2.2,
+                    "specular_strength": 2.3,
                 },
                 state_file,
             )
@@ -191,6 +209,18 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(loaded["output_path"], "/tmp/out")
         self.assertTrue(bool(loaded["use_custom_output"]))
         self.assertTrue(bool(loaded["dark_mode"]))
+        self.assertTrue(bool(loaded["show_batch_preview"]))
+        self.assertEqual(str(loaded["preview_size"]), "XL")
+        self.assertEqual(str(loaded["complex_format"]), "cm")
+        self.assertEqual(str(loaded["env_mask_mode"]), "complex")
+        self.assertEqual(str(loaded["parallax_mode"]), "occlusion (ENB/POM)")
+        self.assertTrue(bool(loaded["emboss_mode"]))
+        self.assertFalse(bool(loaded["include_diffuse"]))
+        self.assertTrue(bool(loaded["include_normal"]))
+        self.assertFalse(bool(loaded["include_parallax"]))
+        self.assertTrue(bool(loaded["include_glow"]))
+        self.assertTrue(bool(loaded["include_environment_mask"]))
+        self.assertTrue(bool(loaded["include_complex"]))
         self.assertTrue(bool(loaded["auto_suggestions"]))
         self.assertFalse(bool(loaded["auto_normal"]))
         self.assertTrue(bool(loaded["auto_parallax"]))
@@ -198,6 +228,38 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(loaded["auto_environment_mask"]))
         self.assertFalse(bool(loaded["auto_complex"]))
         self.assertTrue(bool(loaded["auto_specular"]))
+        self.assertAlmostEqual(float(loaded["normal_strength"]), 3.5)
+        self.assertAlmostEqual(float(loaded["parallax_strength"]), 2.25)
+        self.assertEqual(int(loaded["glow_threshold"]), 140)
+        self.assertAlmostEqual(float(loaded["environment_mask_strength"]), 2.4)
+        self.assertAlmostEqual(float(loaded["complex_strength"]), 2.2)
+        self.assertAlmostEqual(float(loaded["specular_strength"]), 2.3)
+
+    def test_normalize_gui_state_clamps_slider_values_and_sanitizes_modes(self) -> None:
+        normalized = _normalize_gui_state(
+            {
+                "preview_size": "NOPE",
+                "complex_format": "bad",
+                "env_mask_mode": "invalid",
+                "parallax_mode": "occlusion",
+                "normal_strength": 500,
+                "parallax_strength": -10,
+                "glow_threshold": 999,
+                "environment_mask_strength": 99,
+                "complex_strength": -99,
+                "specular_strength": 0,
+            }
+        )
+        self.assertEqual(str(normalized["preview_size"]), "Medium")
+        self.assertEqual(str(normalized["complex_format"]), "msn")
+        self.assertEqual(str(normalized["env_mask_mode"]), "standard")
+        self.assertEqual(str(normalized["parallax_mode"]), "occlusion (ENB/POM)")
+        self.assertAlmostEqual(float(normalized["normal_strength"]), 4.0)
+        self.assertAlmostEqual(float(normalized["parallax_strength"]), 0.5)
+        self.assertEqual(int(normalized["glow_threshold"]), 255)
+        self.assertAlmostEqual(float(normalized["environment_mask_strength"]), 3.0)
+        self.assertAlmostEqual(float(normalized["complex_strength"]), 0.5)
+        self.assertAlmostEqual(float(normalized["specular_strength"]), 0.5)
 
     def test_generate_diffuse_returns_rgb_same_size(self) -> None:
         diffuse = generate_diffuse(_sample_image())

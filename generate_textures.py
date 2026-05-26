@@ -45,11 +45,23 @@ PREVIEW_SIZE_PRESETS: dict[str, tuple[int, int]] = {
     "XL": (620, 460),
 }
 GUI_STATE_FILE = Path.home() / ".skyrim_texture_generator_gui_state.json"
-_GUI_STATE_DEFAULTS: dict[str, str | bool] = {
+_GUI_STATE_DEFAULTS: dict[str, object] = {
     "input_path": "",
     "output_path": "",
     "use_custom_output": False,
     "dark_mode": False,
+    "show_batch_preview": False,
+    "preview_size": "Medium",
+    "complex_format": "msn",
+    "env_mask_mode": "standard",
+    "parallax_mode": "standard",
+    "emboss_mode": False,
+    "include_diffuse": True,
+    "include_normal": True,
+    "include_parallax": True,
+    "include_glow": False,
+    "include_environment_mask": False,
+    "include_complex": False,
     "auto_suggestions": True,
     "auto_normal": True,
     "auto_parallax": True,
@@ -57,6 +69,12 @@ _GUI_STATE_DEFAULTS: dict[str, str | bool] = {
     "auto_environment_mask": True,
     "auto_complex": True,
     "auto_specular": True,
+    "normal_strength": 2.0,
+    "parallax_strength": 1.35,
+    "glow_threshold": 190,
+    "environment_mask_strength": 1.2,
+    "complex_strength": 1.15,
+    "specular_strength": 1.15,
 }
 
 
@@ -74,7 +92,23 @@ def _coerce_bool(value: object, default: bool) -> bool:
     return default
 
 
-def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, str | bool]:
+def _coerce_float(value: object, default: float, minimum: float, maximum: float) -> float:
+    try:
+        resolved = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, resolved))
+
+
+def _coerce_int(value: object, default: int, minimum: int, maximum: int) -> int:
+    try:
+        resolved = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, resolved))
+
+
+def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     state = dict(_GUI_STATE_DEFAULTS)
     if raw is None:
         return state
@@ -83,6 +117,14 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, str | bo
     for key in (
         "use_custom_output",
         "dark_mode",
+        "show_batch_preview",
+        "emboss_mode",
+        "include_diffuse",
+        "include_normal",
+        "include_parallax",
+        "include_glow",
+        "include_environment_mask",
+        "include_complex",
         "auto_suggestions",
         "auto_normal",
         "auto_parallax",
@@ -107,10 +149,33 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, str | bo
         state["use_custom_output"] = False
     state["input_path"] = input_path
     state["output_path"] = output_path
+    preview_size = str(raw.get("preview_size", state["preview_size"]) or state["preview_size"])
+    if preview_size not in PREVIEW_SIZE_PRESETS:
+        preview_size = str(_GUI_STATE_DEFAULTS["preview_size"])
+    state["preview_size"] = preview_size
+    complex_format = str(raw.get("complex_format", state["complex_format"]) or state["complex_format"]).strip().lower()
+    state["complex_format"] = complex_format if complex_format in {"msn", "cm"} else str(_GUI_STATE_DEFAULTS["complex_format"])
+    env_mask_mode = str(raw.get("env_mask_mode", state["env_mask_mode"]) or state["env_mask_mode"]).strip().lower()
+    state["env_mask_mode"] = env_mask_mode if env_mask_mode in {"standard", "complex"} else str(_GUI_STATE_DEFAULTS["env_mask_mode"])
+    parallax_mode = str(raw.get("parallax_mode", state["parallax_mode"]) or state["parallax_mode"]).strip().lower()
+    if "occlusion" in parallax_mode:
+        state["parallax_mode"] = "occlusion (ENB/POM)"
+    elif parallax_mode == "standard":
+        state["parallax_mode"] = "standard"
+    else:
+        state["parallax_mode"] = str(_GUI_STATE_DEFAULTS["parallax_mode"])
+    state["normal_strength"] = _coerce_float(raw.get("normal_strength"), float(state["normal_strength"]), 0.5, 4.0)
+    state["parallax_strength"] = _coerce_float(raw.get("parallax_strength"), float(state["parallax_strength"]), 0.5, 3.0)
+    state["glow_threshold"] = _coerce_int(raw.get("glow_threshold"), int(state["glow_threshold"]), 0, 255)
+    state["environment_mask_strength"] = _coerce_float(
+        raw.get("environment_mask_strength"), float(state["environment_mask_strength"]), 0.5, 3.0
+    )
+    state["complex_strength"] = _coerce_float(raw.get("complex_strength"), float(state["complex_strength"]), 0.5, 3.0)
+    state["specular_strength"] = _coerce_float(raw.get("specular_strength"), float(state["specular_strength"]), 0.5, 3.0)
     return state
 
 
-def load_gui_state(state_file: Path = GUI_STATE_FILE) -> dict[str, str | bool]:
+def load_gui_state(state_file: Path = GUI_STATE_FILE) -> dict[str, object]:
     try:
         if not state_file.exists():
             return dict(_GUI_STATE_DEFAULTS)
@@ -2748,6 +2813,18 @@ if GUI_AVAILABLE:
             self.output_var.set(str(state["output_path"]))
             self.use_custom_output_var.set(bool(state["use_custom_output"]))
             self.dark_mode_var.set(bool(state["dark_mode"]))
+            self.show_batch_preview_var.set(bool(state["show_batch_preview"]))
+            self.preview_size_var.set(str(state["preview_size"]))
+            self.complex_format_var.set(str(state["complex_format"]))
+            self.env_mask_mode_var.set(str(state["env_mask_mode"]))
+            self.parallax_mode_var.set(str(state["parallax_mode"]))
+            self.emboss_mode_var.set(bool(state["emboss_mode"]))
+            self.include_diffuse_var.set(bool(state["include_diffuse"]))
+            self.include_normal_var.set(bool(state["include_normal"]))
+            self.include_parallax_var.set(bool(state["include_parallax"]))
+            self.include_glow_var.set(bool(state["include_glow"]))
+            self.include_environment_mask_var.set(bool(state["include_environment_mask"]))
+            self.include_complex_var.set(bool(state["include_complex"]))
             self.auto_suggestions_var.set(bool(state["auto_suggestions"]))
             self.auto_normal_suggestion_var.set(bool(state["auto_normal"]))
             self.auto_parallax_suggestion_var.set(bool(state["auto_parallax"]))
@@ -2755,6 +2832,12 @@ if GUI_AVAILABLE:
             self.auto_environment_mask_suggestion_var.set(bool(state["auto_environment_mask"]))
             self.auto_complex_suggestion_var.set(bool(state["auto_complex"]))
             self.auto_specular_suggestion_var.set(bool(state["auto_specular"]))
+            self.normal_strength_var.set(float(state["normal_strength"]))
+            self.parallax_strength_var.set(float(state["parallax_strength"]))
+            self.glow_threshold_var.set(int(state["glow_threshold"]))
+            self.environment_mask_strength_var.set(float(state["environment_mask_strength"]))
+            self.complex_strength_var.set(float(state["complex_strength"]))
+            self.specular_strength_var.set(float(state["specular_strength"]))
 
         def _build_gui_state(self) -> dict[str, object]:
             return {
@@ -2762,6 +2845,18 @@ if GUI_AVAILABLE:
                 "output_path": self.output_var.get().strip(),
                 "use_custom_output": self.use_custom_output_var.get(),
                 "dark_mode": self.dark_mode_var.get(),
+                "show_batch_preview": self.show_batch_preview_var.get(),
+                "preview_size": self.preview_size_var.get(),
+                "complex_format": self.complex_format_var.get(),
+                "env_mask_mode": self.env_mask_mode_var.get(),
+                "parallax_mode": self.parallax_mode_var.get(),
+                "emboss_mode": self.emboss_mode_var.get(),
+                "include_diffuse": self.include_diffuse_var.get(),
+                "include_normal": self.include_normal_var.get(),
+                "include_parallax": self.include_parallax_var.get(),
+                "include_glow": self.include_glow_var.get(),
+                "include_environment_mask": self.include_environment_mask_var.get(),
+                "include_complex": self.include_complex_var.get(),
                 "auto_suggestions": self.auto_suggestions_var.get(),
                 "auto_normal": self.auto_normal_suggestion_var.get(),
                 "auto_parallax": self.auto_parallax_suggestion_var.get(),
@@ -2769,6 +2864,12 @@ if GUI_AVAILABLE:
                 "auto_environment_mask": self.auto_environment_mask_suggestion_var.get(),
                 "auto_complex": self.auto_complex_suggestion_var.get(),
                 "auto_specular": self.auto_specular_suggestion_var.get(),
+                "normal_strength": self.normal_strength_var.get(),
+                "parallax_strength": self.parallax_strength_var.get(),
+                "glow_threshold": self.glow_threshold_var.get(),
+                "environment_mask_strength": self.environment_mask_strength_var.get(),
+                "complex_strength": self.complex_strength_var.get(),
+                "specular_strength": self.specular_strength_var.get(),
             }
 
         def _save_persisted_gui_state(self) -> None:
