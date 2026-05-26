@@ -15,6 +15,7 @@ from generate_textures import (
     _run_cli,
     _normalize_gui_state,
     _save_with_dds_fallback,
+    _to_dds_compatible_image,
     analyze_image_content,
     auto_patch_related_nifs_for_texture,
     apply_recommendations_by_auto_flags,
@@ -1608,10 +1609,10 @@ class GenerateTexturesTests(unittest.TestCase):
                 complex_strength=None,
                 specular_strength=None,
                 complex_format="msn",
-                environment_mask_mode="standard",
+                environment_mask_mode="complex",
                 emboss_mode=False,
                 relief_mode=False,
-                parallax_mode="standard",
+                parallax_mode="occlusion",
                 no_diffuse=False,
                 no_normal=False,
                 no_parallax=False,
@@ -1626,6 +1627,8 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertTrue(args.complex_material)
         self.assertEqual(args.complex_format, "cm")
+        self.assertEqual(args.environment_mask_mode, "standard")
+        self.assertEqual(args.parallax_mode, "standard")
         run_with_options_mock.assert_called_once()
         self.assertTrue(bool(run_with_options_mock.call_args.kwargs["include_complex"]))
         self.assertEqual(str(run_with_options_mock.call_args.kwargs["complex_format"]), "cm")
@@ -1668,6 +1671,14 @@ class GenerateTexturesTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Specular buffer size mismatch"):
                 generate_specular(_detailed_bright_image())
 
+    def test_to_dds_compatible_image_uses_rgb_for_dxt1(self) -> None:
+        converted = _to_dds_compatible_image(Image.new("L", (4, 4), color=128), pixel_format="DXT1")
+        self.assertEqual(converted.mode, "RGB")
+
+    def test_to_dds_compatible_image_uses_rgba_for_dxt5(self) -> None:
+        converted = _to_dds_compatible_image(Image.new("L", (4, 4), color=128), pixel_format="DXT5")
+        self.assertEqual(converted.mode, "RGBA")
+
     def test_save_with_dds_fallback_returns_dds_path_on_success(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir) / "stone.dds"
@@ -1677,6 +1688,25 @@ class GenerateTexturesTests(unittest.TestCase):
 
             with mock.patch.object(Image.Image, "save", autospec=True, side_effect=fake_save):
                 saved_path = _save_with_dds_fallback(_sample_image(), target)
+
+        self.assertEqual(saved_path, target)
+
+    def test_save_with_dds_fallback_uses_rgb_for_dxt1_attempts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "stone.dds"
+
+            def fake_save(image_self, fp, format=None, **kwargs):
+                self.assertEqual(format, "DDS")
+                self.assertEqual(kwargs.get("pixel_format"), "DXT1")
+                self.assertEqual(image_self.mode, "RGB")
+                Path(fp).write_bytes(b"DDS")
+
+            with mock.patch.object(Image.Image, "save", autospec=True, side_effect=fake_save):
+                saved_path = _save_with_dds_fallback(
+                    Image.new("L", (8, 8), color=120),
+                    target,
+                    preferred_pixel_formats=("DXT1",),
+                )
 
         self.assertEqual(saved_path, target)
 

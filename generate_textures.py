@@ -2715,12 +2715,21 @@ def select_generation_context_source(input_path: Path, selected_inputs: list[Pat
     return selected_inputs[0] if selected_inputs else input_path
 
 
-def _to_dds_compatible_image(image: Image.Image) -> Image.Image:
-    if image.mode == "RGBA":
-        return image
-    if image.mode in {"RGB", "L", "LA"}:
+def _dds_pixel_format_uses_alpha(pixel_format: str) -> bool:
+    normalized = pixel_format.strip().upper()
+    return normalized not in {"DXT1", "BC1", "BC1_UNORM"}
+
+
+def _to_dds_compatible_image(image: Image.Image, *, pixel_format: str) -> Image.Image:
+    if _dds_pixel_format_uses_alpha(pixel_format):
+        if image.mode == "RGBA":
+            return image
+        if image.mode in {"RGB", "L", "LA"}:
+            return image.convert("RGBA")
         return image.convert("RGBA")
-    return image.convert("RGBA")
+    if image.mode == "RGB":
+        return image
+    return image.convert("RGB")
 
 
 def _save_with_dds_fallback(
@@ -2739,10 +2748,10 @@ def _save_with_dds_fallback(
             if temp_path.exists():
                 temp_path.unlink(missing_ok=True)
 
-    dds_image = _to_dds_compatible_image(image)
     dds_target = output_path.with_suffix(DDS_EXTENSION)
     for pixel_format in preferred_pixel_formats:
         try:
+            dds_image = _to_dds_compatible_image(image, pixel_format=pixel_format)
             _atomic_save(dds_target, dds_image, format="DDS", pixel_format=pixel_format)
             return dds_target
         except Exception:
@@ -2917,7 +2926,12 @@ def run_with_options(
                 complex_name=complex_name,
                 complex_format=complex_format,
             )
-            outputs["complex_material"] = _save_with_dds_fallback(complex_material, complex_path)
+            complex_formats = ("BC7", "DXT5", "DXT3") if complex_format == "cm" else ("DXT5", "DXT3")
+            outputs["complex_material"] = _save_with_dds_fallback(
+                complex_material,
+                complex_path,
+                preferred_pixel_formats=complex_formats,
+            )
 
     gc.collect()
     return outputs
@@ -3182,6 +3196,9 @@ def _apply_cli_pbr_overrides(args: argparse.Namespace) -> argparse.Namespace:
     if getattr(args, "pbr_material", False):
         args.complex_material = True
         args.complex_format = "cm"
+        args.environment_mask_mode = "standard"
+        if getattr(args, "parallax_mode", "standard") == "occlusion":
+            args.parallax_mode = "standard"
     return args
 
 

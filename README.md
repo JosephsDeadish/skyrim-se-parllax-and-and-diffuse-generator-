@@ -103,7 +103,7 @@ Optional arguments:
 - `--glow-map` (include glow output)
 - `--environment-mask` (include environment mask output)
 - `--complex-material` (include complex material output)
-- `--pbr-material` (shortcut for PBR-style output: enables complex material and forces `--complex-format cm`)
+- `--pbr-material` (shortcut for Community Shaders PBR-style output: enables complex material, forces `--complex-format cm`, and keeps compatible standard env/parallax modes)
 - `--batch-workers` (parallel workers for folder mode; `0` = automatic)
 - `--gui` (force GUI mode)
 
@@ -123,7 +123,7 @@ This app already supports a practical PBR-style packed workflow via `_cm` output
 `_cm` packs channels for modern shader workflows (AO/roughness/metallic/height-spec proxies).  
 For ENB complex material workflows, use `_msn` instead (`--complex-format msn`).
 
-Generated outputs default to `.dds` filenames regardless of the input format. Most outputs are written as DXT5 DDS for broad compatibility; standard (`--environment-mask-mode standard`) `_m` masks prefer DXT1 (with automatic DXT5 fallback if needed). If DDS export is unavailable on the current Pillow build, the tool falls back to PNG output.
+Generated outputs default to `.dds` filenames regardless of the input format. Most outputs are written as DXT5 DDS for broad compatibility; standard (`--environment-mask-mode standard`) `_m` masks prefer DXT1 (with automatic DXT5 fallback if needed). `_cm` PBR-style complex maps now prefer BC7 when available, then fall back to DXT5/DXT3 for compatibility. If DDS export is unavailable on the current Pillow build, the tool falls back to PNG output.
 
 - click **❤ Support on Patreon** in the toolbar to open the creator's Patreon page
 
