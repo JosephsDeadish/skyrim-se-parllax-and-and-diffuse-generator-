@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from PIL import Image
+from PIL import Image, ImageStat
 
 from generate_textures import (
     APP_VERSION,
@@ -107,6 +107,18 @@ def _normal_like_image() -> Image.Image:
             g = 120 + ((x * 2 + y) % 12)
             b = 210 + ((x * y) % 25)
             pixels[x, y] = (r, g, b)
+    return image
+
+
+def _emboss_pattern_image() -> Image.Image:
+    image = Image.new("RGB", (48, 48), color=(132, 132, 132))
+    pixels = image.load()
+    for y in range(8, 40):
+        for x in range(8, 40):
+            if x in (8, 16, 24, 32, 39) or y in (8, 16, 24, 32, 39):
+                pixels[x, y] = (215, 215, 215)
+            elif (x + y) % 7 == 0:
+                pixels[x, y] = (95, 95, 95)
     return image
 
 
@@ -1215,6 +1227,16 @@ class EmbossNormalTests(unittest.TestCase):
                     emboss_mode=True,
                 )
             self.assertIn("normal", outputs)
+
+    def test_emboss_mode_produces_stronger_edge_response_for_printed_pattern(self) -> None:
+        pattern = _emboss_pattern_image()
+        standard = generate_normal(pattern, strength=2.0, emboss_mode=False)
+        emboss = generate_normal(pattern, strength=2.0, emboss_mode=True)
+        std_r, std_g, _ = standard.split()
+        emb_r, emb_g, _ = emboss.split()
+        standard_variation = sum(ImageStat.Stat(channel).stddev[0] for channel in (std_r, std_g))
+        emboss_variation = sum(ImageStat.Stat(channel).stddev[0] for channel in (emb_r, emb_g))
+        self.assertGreater(emboss_variation, standard_variation)
 
 
 class ParallaxOcclusionTests(unittest.TestCase):

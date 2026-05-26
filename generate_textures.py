@@ -783,12 +783,19 @@ def _prepare_emboss_height_map(source: Image.Image) -> Image.Image:
     edges at design element boundaries produce strong directional normals that
     simulate physically embossed or debossed detail.
     """
-    grayscale = ImageOps.grayscale(source)
-    # Pass 1: fine-edge sharpening — catches text outlines and thin borders.
-    pass1 = grayscale.filter(ImageFilter.UnsharpMask(radius=0.5, percent=500, threshold=0))
-    # Pass 2: medium-scale reinforcement — catches broader design element boundaries.
-    pass2 = pass1.filter(ImageFilter.UnsharpMask(radius=1.5, percent=200, threshold=1))
-    return ImageOps.autocontrast(pass2, cutoff=0)
+    grayscale = ImageOps.grayscale(source).filter(ImageFilter.MedianFilter(size=3))
+    softened = grayscale.filter(ImageFilter.GaussianBlur(radius=0.45))
+    # Fine and medium unsharp passes catch both thin glyph strokes and broader ornaments.
+    fine = softened.filter(ImageFilter.UnsharpMask(radius=0.7, percent=360, threshold=2))
+    medium = softened.filter(ImageFilter.UnsharpMask(radius=1.9, percent=220, threshold=3))
+    edge_energy = softened.filter(ImageFilter.FIND_EDGES).filter(ImageFilter.GaussianBlur(radius=0.6))
+    edge_energy = ImageOps.autocontrast(edge_energy, cutoff=3)
+    edge_energy = ImageEnhance.Contrast(edge_energy).enhance(1.35)
+    reinforced = ImageChops.add(Image.blend(fine, medium, alpha=0.45), edge_energy, scale=1.35, offset=0)
+    normalized = ImageOps.autocontrast(reinforced, cutoff=1)
+    # Keep flat regions close to neutral to avoid "always bumpy" paper surfaces.
+    neutral = Image.new("L", source.size, color=128)
+    return Image.blend(neutral, normalized, alpha=0.78)
 
 
 def generate_normal(source: Image.Image, strength: float = 2.0, directx: bool = True, emboss_mode: bool = False) -> Image.Image:
@@ -817,11 +824,10 @@ def generate_normal(source: Image.Image, strength: float = 2.0, directx: bool = 
         return Image.new("RGB", source.size, color=(128, 128, 255))
 
     if emboss_mode:
-        # Strength is used directly — pressure suppression is not appropriate for
-        # emboss mode since we *want* the edges to remain crisp and prominent.
-        effective_strength = _clamp(strength, 0.9, 4.0)
-        # Very slight blur removes pixel-level noise while preserving ridge sharpness.
-        height_map = _prepare_emboss_height_map(source).filter(ImageFilter.GaussianBlur(radius=0.4))
+        pressure = _detail_pressure(source)
+        effective_strength = _clamp(strength * (1.0 - (pressure * 0.08)), 0.9, 4.2)
+        # Slight adaptive blur keeps crisp embossed ridges while suppressing pixel chatter.
+        height_map = _prepare_emboss_height_map(source).filter(ImageFilter.GaussianBlur(radius=0.30 + (pressure * 0.30)))
     else:
         pressure = _detail_pressure(source)
         resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.8)
@@ -2059,6 +2065,7 @@ _LIGHT_THEME: dict[str, str] = {
     "field_bg": "#ffffff",
     "button_bg": "#e0e0e0",
     "trough": "#c8c8c8",
+    "auto_trough": "#66b7ff",
     "tooltip_bg": "#ffffcc",
     "tooltip_fg": "#000000",
     "disabled_fg": "#888888",
@@ -2069,6 +2076,7 @@ _DARK_THEME: dict[str, str] = {
     "field_bg": "#313244",
     "button_bg": "#45475a",
     "trough": "#585b70",
+    "auto_trough": "#2b7da8",
     "tooltip_bg": "#313244",
     "tooltip_fg": "#cdd6f4",
     "disabled_fg": "#6c7086",
@@ -2179,6 +2187,14 @@ if GUI_AVAILABLE:
                 command=lambda: webbrowser.open(PATREON_URL),
             )
             _patreon_button.pack(side=tk.RIGHT, padx=4)
+            _theme_top_check = ttk.Checkbutton(
+                top_bar,
+                text="🌙 Dark mode",
+                variable=self.dark_mode_var,
+                command=self._toggle_theme,
+            )
+            _theme_top_check.pack(side=tk.RIGHT, padx=(0, 8))
+            self._add_tooltip(_theme_top_check, "🌙 Toggle dark/light mode.\nEasy on the eyes during those 3am modding sessions.")
             self._add_tooltip(
                 _patreon_button,
                 "❤ Fuel the project on Patreon.\n"
@@ -2256,7 +2272,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(_complex_check, "🔮 Generate complex material for ENBSeries parallax.\nRequires ENB. If you don't know what ENB is, you will soon, and there's no going back.")
             _auto_sugg_check = ttk.Checkbutton(
                 options_frame,
-                text="Automatic suggestions (analyze image and set sliders)",
+                text="Automatic suggestions (master switch: enables per-slider Auto toggles)",
                 variable=self.auto_suggestions_var,
                 command=self._toggle_auto_suggestions,
             )
@@ -2302,9 +2318,9 @@ if GUI_AVAILABLE:
             self._add_tooltip(self.normal_scale, "💪 Drag right for epic bumps, left for subtle detail.\nLive value is shown next to the slider so you can stop guessing.")
             self.normal_strength_display_label = ttk.Label(options_frame, textvariable=self.normal_strength_display_var)
             self.normal_strength_display_label.grid(row=4, column=3, sticky=tk.W, padx=8)
-            _auto_normal = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_normal_suggestion_var, command=self._on_auto_slider_preference_changed)
-            _auto_normal.grid(row=4, column=4, sticky=tk.W)
-            self._add_tooltip(_auto_normal, "🤖 Let the app analyse the image and choose this value.\nUncheck to manually control, as the control freak you truly are.")
+            self.auto_normal_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_normal_suggestion_var, command=self._on_auto_slider_preference_changed)
+            self.auto_normal_check.grid(row=4, column=4, sticky=tk.W)
+            self._add_tooltip(self.auto_normal_check, "🤖 Let the app analyse the image and choose this value.\nUncheck to manually control, as the control freak you truly are.")
 
             _parallax_label = ttk.Label(options_frame, text="Parallax strength")
             _parallax_label.grid(row=5, column=0, sticky=tk.W, pady=8)
@@ -2314,9 +2330,9 @@ if GUI_AVAILABLE:
             self._add_tooltip(self.parallax_scale, "🏔 Slide right for deeper depth illusion, left for subtle relief.\nYes, this can absolutely make stones look dramatic.")
             self.parallax_strength_display_label = ttk.Label(options_frame, textvariable=self.parallax_strength_display_var)
             self.parallax_strength_display_label.grid(row=5, column=3, sticky=tk.W, padx=8)
-            _auto_parallax = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_parallax_suggestion_var, command=self._on_auto_slider_preference_changed)
-            _auto_parallax.grid(row=5, column=4, sticky=tk.W)
-            self._add_tooltip(_auto_parallax, "🤖 Automatic parallax strength suggestion.\nBased on actual image analysis, not a horoscope.")
+            self.auto_parallax_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_parallax_suggestion_var, command=self._on_auto_slider_preference_changed)
+            self.auto_parallax_check.grid(row=5, column=4, sticky=tk.W)
+            self._add_tooltip(self.auto_parallax_check, "🤖 Automatic parallax strength suggestion.\nBased on actual image analysis, not a horoscope.")
 
             _glow_label = ttk.Label(options_frame, text="Glow threshold")
             _glow_label.grid(row=6, column=0, sticky=tk.W, pady=8)
@@ -2326,9 +2342,9 @@ if GUI_AVAILABLE:
             self._add_tooltip(self.glow_scale, "💡 0 means everything glows like a rave. 255 means almost nothing glows.\nUse the live value display to tune precisely.")
             self.glow_threshold_display_label = ttk.Label(options_frame, textvariable=self.glow_threshold_display_var)
             self.glow_threshold_display_label.grid(row=6, column=3, sticky=tk.W, padx=8)
-            _auto_glow = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_glow_suggestion_var, command=self._on_auto_slider_preference_changed)
-            _auto_glow.grid(row=6, column=4, sticky=tk.W)
-            self._add_tooltip(_auto_glow, "🤖 Auto-detect the ideal glow threshold.\nBased on luminance analysis. The computer is trying its best.")
+            self.auto_glow_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_glow_suggestion_var, command=self._on_auto_slider_preference_changed)
+            self.auto_glow_check.grid(row=6, column=4, sticky=tk.W)
+            self._add_tooltip(self.auto_glow_check, "🤖 Auto-detect the ideal glow threshold.\nBased on luminance analysis. The computer is trying its best.")
 
             _env_mask_label = ttk.Label(options_frame, text="Environment mask strength")
             _env_mask_label.grid(row=7, column=0, sticky=tk.W, pady=8)
@@ -2338,9 +2354,9 @@ if GUI_AVAILABLE:
             self._add_tooltip(self.environment_mask_scale, "🪞 Slide right for stronger reflection contrast.\nSlide left for chill, less dramatic materials.")
             self.environment_mask_strength_display_label = ttk.Label(options_frame, textvariable=self.environment_mask_strength_display_var)
             self.environment_mask_strength_display_label.grid(row=7, column=3, sticky=tk.W, padx=8)
-            _auto_env_mask = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_environment_mask_suggestion_var, command=self._on_auto_slider_preference_changed)
-            _auto_env_mask.grid(row=7, column=4, sticky=tk.W)
-            self._add_tooltip(_auto_env_mask, "🤖 Auto-select environment mask strength.\nThe machine will judge your texture's reflective potential.")
+            self.auto_environment_mask_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_environment_mask_suggestion_var, command=self._on_auto_slider_preference_changed)
+            self.auto_environment_mask_check.grid(row=7, column=4, sticky=tk.W)
+            self._add_tooltip(self.auto_environment_mask_check, "🤖 Auto-select environment mask strength.\nThe machine will judge your texture's reflective potential.")
 
             _complex_label = ttk.Label(options_frame, text="Complex strength")
             _complex_label.grid(row=8, column=0, sticky=tk.W, pady=8)
@@ -2350,9 +2366,9 @@ if GUI_AVAILABLE:
             self._add_tooltip(self.complex_scale, "🔮 Right = louder material definition.\nLeft = quieter output for restrained legends.")
             self.complex_strength_display_label = ttk.Label(options_frame, textvariable=self.complex_strength_display_var)
             self.complex_strength_display_label.grid(row=8, column=3, sticky=tk.W, padx=8)
-            _auto_complex = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_complex_suggestion_var, command=self._on_auto_slider_preference_changed)
-            _auto_complex.grid(row=8, column=4, sticky=tk.W)
-            self._add_tooltip(_auto_complex, "🤖 Auto-set complex strength. Let the algorithm\nscrutinise your texture's material complexity.")
+            self.auto_complex_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_complex_suggestion_var, command=self._on_auto_slider_preference_changed)
+            self.auto_complex_check.grid(row=8, column=4, sticky=tk.W)
+            self._add_tooltip(self.auto_complex_check, "🤖 Auto-set complex strength. Let the algorithm\nscrutinise your texture's material complexity.")
 
             _specular_label = ttk.Label(options_frame, text="Specular strength (_msn alpha)")
             _specular_label.grid(row=9, column=0, sticky=tk.W, pady=8)
@@ -2362,9 +2378,9 @@ if GUI_AVAILABLE:
             self._add_tooltip(self.specular_scale, "✨ Turn it up for glorious shine, down for ancient weathered stone.\nLive value shown beside slider.")
             self.specular_strength_display_label = ttk.Label(options_frame, textvariable=self.specular_strength_display_var)
             self.specular_strength_display_label.grid(row=9, column=3, sticky=tk.W, padx=8)
-            _auto_specular = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_specular_suggestion_var, command=self._on_auto_slider_preference_changed)
-            _auto_specular.grid(row=9, column=4, sticky=tk.W)
-            self._add_tooltip(_auto_specular, "🤖 Auto-set specular strength. The AI ponders how shiny\nyour texture DESERVES to be.")
+            self.auto_specular_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_specular_suggestion_var, command=self._on_auto_slider_preference_changed)
+            self.auto_specular_check.grid(row=9, column=4, sticky=tk.W)
+            self._add_tooltip(self.auto_specular_check, "🤖 Auto-set specular strength. The AI ponders how shiny\nyour texture DESERVES to be.")
 
             # --- Emboss depth + parallax mode options (row 10) ---
             _emboss_check = ttk.Checkbutton(
@@ -2413,12 +2429,27 @@ if GUI_AVAILABLE:
             options_frame.columnconfigure(2, weight=1)
             self._update_slider_auto_states()
 
+            actions = ttk.Frame(wrapper, padding=(4, 8, 4, 4))
+            actions.pack(fill=tk.X)
+            self.generate_button = ttk.Button(actions, text="Generate", command=self._generate)
+            self.generate_button.pack(side=tk.LEFT)
+            self._add_tooltip(self.generate_button, "🚀 ENGAGE! Click to process your textures.\nWARNING: May cause excitement, temporary CPU warming, and beautiful Skyrim textures.")
+            self.cancel_button = ttk.Button(actions, text="Cancel Process", command=self._cancel_processing, state=tk.DISABLED)
+            self.cancel_button.pack(side=tk.LEFT, padx=(6, 0))
+            self._add_tooltip(self.cancel_button, "🛑 Ask the current batch to stop after the active file completes.\nUseful when you realize things have gone terribly wrong.")
+            self.revert_button = ttk.Button(actions, text="Revert Process", command=self._revert_last_generation, state=tk.DISABLED)
+            self.revert_button.pack(side=tk.LEFT, padx=(6, 0))
+            self._add_tooltip(self.revert_button, "↩ Restore files from the most recent generation run.\nDisabled until a generation run has something to undo.")
+            ttk.Label(actions, textvariable=self.status_var).pack(side=tk.LEFT, padx=14)
+
             preview_frame = ttk.LabelFrame(wrapper, text="Preview (Source vs Generated)", padding=10)
             preview_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-            ttk.Label(preview_frame, text="Before (source texture)").grid(row=0, column=0, columnspan=2, padx=6, pady=(2, 3), sticky=tk.W)
-            self.before_image_label = ttk.Label(preview_frame, text="No source loaded")
-            self.before_image_label.grid(row=1, column=0, columnspan=2, padx=6, pady=(0, 3), sticky=tk.W)
+            ttk.Label(preview_frame, text="Before (source texture)", anchor=tk.CENTER, justify=tk.CENTER).grid(
+                row=0, column=0, columnspan=2, padx=6, pady=(2, 3), sticky=""
+            )
+            self.before_image_label = ttk.Label(preview_frame, text="No source loaded", anchor=tk.CENTER, justify=tk.CENTER)
+            self.before_image_label.grid(row=1, column=0, columnspan=2, padx=6, pady=(0, 3), sticky="")
             self._add_tooltip(
                 self.before_image_label,
                 "👀 This is the original input texture.\n"
@@ -2426,7 +2457,7 @@ if GUI_AVAILABLE:
             )
 
             source_controls = ttk.Frame(preview_frame)
-            source_controls.grid(row=2, column=0, columnspan=2, pady=(0, 4), sticky=tk.W)
+            source_controls.grid(row=2, column=0, columnspan=2, pady=(0, 4), sticky="")
             self.prev_source_button = ttk.Button(source_controls, text="◀ Prev", command=self._show_previous_preview_source)
             self.prev_source_button.pack(side=tk.LEFT, padx=4)
             self._add_tooltip(
@@ -2478,11 +2509,11 @@ if GUI_AVAILABLE:
             )
 
             ttk.Label(preview_frame, text="Generated outputs (after processing)").grid(
-                row=3, column=0, columnspan=2, padx=6, pady=(2, 2), sticky=tk.W
+                row=3, column=0, columnspan=2, padx=6, pady=(2, 2), sticky=""
             )
             self.preview_output_labels: dict[str, ttk.Label] = {}
             output_grid = ttk.Frame(preview_frame)
-            output_grid.grid(row=4, column=0, columnspan=2, sticky=tk.W)
+            output_grid.grid(row=4, column=0, columnspan=2, sticky="")
             output_specs = (
                 ("diffuse", "Diffuse"),
                 ("normal", "Normal"),
@@ -2502,11 +2533,11 @@ if GUI_AVAILABLE:
             for index, (output_key, output_label) in enumerate(output_specs):
                 row = (index // 2) * 2
                 column = index % 2
-                _out_title = ttk.Label(output_grid, text=output_label)
-                _out_title.grid(row=row, column=column, padx=3, pady=(1, 0), sticky=tk.W)
+                _out_title = ttk.Label(output_grid, text=output_label, anchor=tk.CENTER, justify=tk.CENTER)
+                _out_title.grid(row=row, column=column, padx=3, pady=(1, 0), sticky="")
                 self._add_tooltip(_out_title, _output_tooltips.get(output_key, f"Preview of {output_label} output."))
-                label = ttk.Label(output_grid, text="No preview")
-                label.grid(row=row + 1, column=column, padx=3, pady=(0, 2), sticky=tk.W)
+                label = ttk.Label(output_grid, text="No preview", anchor=tk.CENTER, justify=tk.CENTER)
+                label.grid(row=row + 1, column=column, padx=3, pady=(0, 2), sticky="")
                 self._add_tooltip(label, _output_tooltips.get(output_key, f"Preview of {output_label} output."))
                 self.preview_output_labels[output_key] = label
 
@@ -2516,26 +2547,6 @@ if GUI_AVAILABLE:
             output_grid.columnconfigure(1, weight=0)
             self._update_preview_navigation_state()
 
-            actions = ttk.Frame(wrapper, padding=(4, 10))
-            actions.pack(fill=tk.X)
-            self.generate_button = ttk.Button(actions, text="Generate", command=self._generate)
-            self.generate_button.pack(side=tk.LEFT)
-            self._add_tooltip(self.generate_button, "🚀 ENGAGE! Click to process your textures.\nWARNING: May cause excitement, temporary CPU warming, and beautiful Skyrim textures.")
-            self.cancel_button = ttk.Button(actions, text="Cancel Process", command=self._cancel_processing, state=tk.DISABLED)
-            self.cancel_button.pack(side=tk.LEFT, padx=(6, 0))
-            self._add_tooltip(self.cancel_button, "🛑 Ask the current batch to stop after the active file completes.\nUseful when you realize things have gone terribly wrong.")
-            self.revert_button = ttk.Button(actions, text="Revert Process", command=self._revert_last_generation, state=tk.DISABLED)
-            self.revert_button.pack(side=tk.LEFT, padx=(6, 0))
-            self._add_tooltip(self.revert_button, "↩ Restore files from the most recent generation run.\nDisabled until a generation run has something to undo.")
-            _theme_check = ttk.Checkbutton(
-                actions,
-                text="🌙 Dark mode",
-                variable=self.dark_mode_var,
-                command=self._toggle_theme,
-            )
-            _theme_check.pack(side=tk.LEFT, padx=(12, 4))
-            self._add_tooltip(_theme_check, "🌙 Toggle dark/light mode.\nEasy on the eyes during those 3am modding sessions.")
-            ttk.Label(actions, textvariable=self.status_var).pack(side=tk.LEFT, padx=14)
             self._apply_theme()
 
         def _set_app_icon(self) -> None:
@@ -2625,8 +2636,11 @@ if GUI_AVAILABLE:
             style.map("TCombobox", fieldbackground=[("readonly", colors["field_bg"])], foreground=[("readonly", colors["fg"])])
             style.configure("TEntry", fieldbackground=colors["field_bg"], foreground=colors["fg"])
             style.configure("Horizontal.TScale", background=colors["bg"], troughcolor=colors["trough"])
+            style.configure("Manual.Horizontal.TScale", background=colors["bg"], troughcolor=colors["trough"])
+            style.configure("Auto.Horizontal.TScale", background=colors["bg"], troughcolor=colors["auto_trough"])
             style.configure("TScrollbar", background=colors["button_bg"], troughcolor=colors["bg"])
             style.map("TScrollbar", background=[("active", colors["trough"])])
+            self._update_slider_auto_states()
 
         def _toggle_theme(self) -> None:
             self._apply_theme()
@@ -2973,7 +2987,8 @@ if GUI_AVAILABLE:
                 if self.source_image is not None:
                     self.status_var.set("Automatic suggestions enabled for all sliders. Uncheck any Auto box to keep manual values.")
             else:
-                self.status_var.set("Automatic suggestions disabled. Manual slider values will be kept.")
+                self._set_all_auto_slider_flags(False)
+                self.status_var.set("Automatic suggestions disabled. Per-slider Auto toggles are now off; all sliders are manual.")
             self._update_slider_auto_states()
             self._refresh_preview()
 
@@ -3038,17 +3053,24 @@ if GUI_AVAILABLE:
             auto_fg = "#1e88e5"   # vivid blue: "the computer owns this value"
             manual_fg = ""        # reset to theme default
             slider_specs = (
-                (self.normal_scale, self.auto_normal_suggestion_var, self.normal_strength_display_label),
-                (self.parallax_scale, self.auto_parallax_suggestion_var, self.parallax_strength_display_label),
-                (self.glow_scale, self.auto_glow_suggestion_var, self.glow_threshold_display_label),
-                (self.environment_mask_scale, self.auto_environment_mask_suggestion_var, self.environment_mask_strength_display_label),
-                (self.complex_scale, self.auto_complex_suggestion_var, self.complex_strength_display_label),
-                (self.specular_scale, self.auto_specular_suggestion_var, self.specular_strength_display_label),
+                (self.normal_scale, self.auto_normal_suggestion_var, self.normal_strength_display_label, self.auto_normal_check),
+                (self.parallax_scale, self.auto_parallax_suggestion_var, self.parallax_strength_display_label, self.auto_parallax_check),
+                (self.glow_scale, self.auto_glow_suggestion_var, self.glow_threshold_display_label, self.auto_glow_check),
+                (
+                    self.environment_mask_scale,
+                    self.auto_environment_mask_suggestion_var,
+                    self.environment_mask_strength_display_label,
+                    self.auto_environment_mask_check,
+                ),
+                (self.complex_scale, self.auto_complex_suggestion_var, self.complex_strength_display_label, self.auto_complex_check),
+                (self.specular_scale, self.auto_specular_suggestion_var, self.specular_strength_display_label, self.auto_specular_check),
             )
-            for slider, auto_var, display_label in slider_specs:
+            for slider, auto_var, display_label, auto_check in slider_specs:
                 is_auto = auto_enabled and auto_var.get()
                 slider.configure(state=tk.DISABLED if is_auto else tk.NORMAL)
+                slider.configure(style="Auto.Horizontal.TScale" if is_auto else "Manual.Horizontal.TScale")
                 display_label.configure(foreground=auto_fg if is_auto else manual_fg)
+                auto_check.configure(state=tk.NORMAL if auto_enabled else tk.DISABLED)
             self._update_slider_value_labels()
 
         def _apply_recommended_settings(self) -> None:
