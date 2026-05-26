@@ -322,13 +322,14 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertLessEqual(max(preview.size), 1024)
 
     def test_get_preview_size_limits_returns_expected_preset_sizes(self) -> None:
-        self.assertEqual(get_preview_size_limits("Small"), (220, 170))
-        self.assertEqual(get_preview_size_limits("Medium"), (300, 220))
-        self.assertEqual(get_preview_size_limits("Large"), (380, 280))
-        self.assertEqual(get_preview_size_limits("XL"), (460, 340))
+        self.assertEqual(get_preview_size_limits("XS"), (160, 120))
+        self.assertEqual(get_preview_size_limits("Small"), (240, 180))
+        self.assertEqual(get_preview_size_limits("Medium"), (340, 250))
+        self.assertEqual(get_preview_size_limits("Large"), (460, 340))
+        self.assertEqual(get_preview_size_limits("XL"), (620, 460))
 
     def test_get_preview_size_limits_falls_back_to_medium_for_unknown_values(self) -> None:
-        self.assertEqual(get_preview_size_limits("Unknown"), (300, 220))
+        self.assertEqual(get_preview_size_limits("Unknown"), (340, 250))
 
     def test_generate_preview_outputs_only_includes_requested_outputs(self) -> None:
         outputs = generate_preview_outputs(

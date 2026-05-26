@@ -7,7 +7,9 @@ import math
 import os
 import queue
 import re
+import shutil
 import sys
+import tempfile
 import threading
 import uuid
 from dataclasses import dataclass
@@ -34,10 +36,11 @@ SUPPORTED_INPUT_EXTENSIONS = {DDS_EXTENSION, ".png", ".jpg", ".jpeg", ".tga", ".
 GENERATED_TEXTURE_SUFFIXES = ("_msn", "_cm", "_n", "_p", "_g", "_m")
 PREVIEW_MAX_DIMENSION = 1024
 PREVIEW_SIZE_PRESETS: dict[str, tuple[int, int]] = {
-    "Small": (220, 170),
-    "Medium": (300, 220),
-    "Large": (380, 280),
-    "XL": (460, 340),
+    "XS": (160, 120),
+    "Small": (240, 180),
+    "Medium": (340, 250),
+    "Large": (460, 340),
+    "XL": (620, 460),
 }
 
 
@@ -1554,6 +1557,10 @@ if GUI_AVAILABLE:
             self.processing_thread: threading.Thread | None = None
             self.processing_queue: queue.Queue[tuple[str, object]] = queue.Queue()
             self.is_processing = False
+            self.cancel_requested = False
+            self.last_generation_backup_dir: Path | None = None
+            self.last_generation_backups: dict[Path, Path] = {}
+            self.last_generation_created_files: set[Path] = set()
             self.manager_context = detect_mod_manager_context()
             self.last_input_browse_dir: Path | None = None
             self.preview_size_var = tk.StringVar(value="Medium")
@@ -1804,7 +1811,7 @@ if GUI_AVAILABLE:
 
             ttk.Label(preview_frame, text="Before").grid(row=0, column=0, columnspan=2, padx=10, pady=(2, 4))
             self.before_image_label = ttk.Label(preview_frame, text="No source loaded")
-            self.before_image_label.grid(row=1, column=0, columnspan=2, padx=10, pady=8)
+            self.before_image_label.grid(row=1, column=0, columnspan=2, padx=6, pady=4)
             self._add_tooltip(self.before_image_label, "👀 Your raw source texture before the magic happens.\nLook upon it. Appreciate its unprocessed beauty.")
 
             source_controls = ttk.Frame(preview_frame)
@@ -1828,7 +1835,7 @@ if GUI_AVAILABLE:
             )
             preview_size_combo.pack(side=tk.LEFT)
             preview_size_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_preview_size_changed())
-            self._add_tooltip(preview_size_combo, "📐 Choose thumbnail size: Small (fast), Medium (default), Large, XL (impressive).\nNote: XL does not make your textures better, just easier to admire.")
+            self._add_tooltip(preview_size_combo, "📐 Choose thumbnail size: XS, Small, Medium (default), Large, XL.\nNote: XL does not make your textures better, just easier to admire.")
             _batch_prev_check = ttk.Checkbutton(
                 source_controls,
                 text="Show preview during batch",
@@ -1866,10 +1873,10 @@ if GUI_AVAILABLE:
                 row = (index // 2) * 2
                 column = index % 2
                 _out_title = ttk.Label(output_grid, text=output_label)
-                _out_title.grid(row=row, column=column, padx=10, pady=(4, 2))
+                _out_title.grid(row=row, column=column, padx=6, pady=(2, 1))
                 self._add_tooltip(_out_title, _output_tooltips.get(output_key, f"Preview of {output_label} output."))
                 label = ttk.Label(output_grid, text="No preview")
-                label.grid(row=row + 1, column=column, padx=10, pady=(0, 8))
+                label.grid(row=row + 1, column=column, padx=6, pady=(0, 4))
                 self._add_tooltip(label, _output_tooltips.get(output_key, f"Preview of {output_label} output."))
                 self.preview_output_labels[output_key] = label
 
@@ -1884,6 +1891,12 @@ if GUI_AVAILABLE:
             self.generate_button = ttk.Button(actions, text="Generate", command=self._generate)
             self.generate_button.pack(side=tk.LEFT)
             self._add_tooltip(self.generate_button, "🚀 ENGAGE! Click to process your textures.\nWARNING: May cause excitement, temporary CPU warming, and beautiful Skyrim textures.")
+            self.cancel_button = ttk.Button(actions, text="Cancel Process", command=self._cancel_processing, state=tk.DISABLED)
+            self.cancel_button.pack(side=tk.LEFT, padx=(6, 0))
+            self._add_tooltip(self.cancel_button, "🛑 Ask the current batch to stop after the active file completes.\nUseful when you realize things have gone terribly wrong.")
+            self.revert_button = ttk.Button(actions, text="Revert Process", command=self._revert_last_generation, state=tk.DISABLED)
+            self.revert_button.pack(side=tk.LEFT, padx=(6, 0))
+            self._add_tooltip(self.revert_button, "↩ Restore files from the most recent generation run.\nDisabled until a generation run has something to undo.")
             ttk.Label(actions, textvariable=self.status_var).pack(side=tk.LEFT, padx=14)
             _patreon_button = ttk.Button(
                 actions,
@@ -2113,25 +2126,116 @@ if GUI_AVAILABLE:
             self.generate_button.configure(state=state)
             self.input_file_button.configure(state=state)
             self.input_folder_button.configure(state=state)
+            self.cancel_button.configure(state=(tk.NORMAL if processing else tk.DISABLED))
+            self.revert_button.configure(
+                state=(tk.DISABLED if processing or not self._has_revert_snapshot() else tk.NORMAL)
+            )
             self.detected_mod_button.configure(
                 state=(tk.DISABLED if processing or not self.manager_context.loaded_texture_dirs else tk.NORMAL)
             )
             self._update_output_location_controls()
             self._update_preview_navigation_state()
 
-        def _process_generation_batch(self, input_path: Path, generation_kwargs: dict[str, object]) -> None:
+        def _has_revert_snapshot(self) -> bool:
+            return bool(self.last_generation_backups or self.last_generation_created_files)
+
+        def _discard_last_generation_snapshot(self) -> None:
+            if self.last_generation_backup_dir is not None:
+                shutil.rmtree(self.last_generation_backup_dir, ignore_errors=True)
+            self.last_generation_backup_dir = None
+            self.last_generation_backups = {}
+            self.last_generation_created_files = set()
+
+        def _prepare_generation_snapshot(self, input_files: list[Path], generation_kwargs: dict[str, object]) -> None:
+            self._discard_last_generation_snapshot()
+            backup_dir = Path(tempfile.mkdtemp(prefix="skyrim-texture-revert-"))
+            backups: dict[Path, Path] = {}
+            includes = {
+                "diffuse": bool(generation_kwargs["include_diffuse"]),
+                "normal": bool(generation_kwargs["include_normal"]),
+                "parallax": bool(generation_kwargs["include_parallax"]),
+                "glow": bool(generation_kwargs["include_glow"]),
+                "environment_mask": bool(generation_kwargs["include_environment_mask"]),
+                "complex_material": bool(generation_kwargs["include_complex"]),
+            }
+            for input_file in input_files:
+                expected_paths: list[Path] = []
+                if includes["diffuse"]:
+                    diffuse_path, _ = build_output_paths(
+                        input_path=input_file,
+                        output_dir=generation_kwargs["output_dir"],
+                    )
+                    expected_paths.append(diffuse_path)
+                if includes["normal"]:
+                    expected_paths.append(
+                        build_normal_output_path(
+                            input_path=input_file,
+                            output_dir=generation_kwargs["output_dir"],
+                        )
+                    )
+                if includes["parallax"]:
+                    _, parallax_path = build_output_paths(
+                        input_path=input_file,
+                        output_dir=generation_kwargs["output_dir"],
+                    )
+                    expected_paths.append(parallax_path)
+                if includes["glow"]:
+                    expected_paths.append(
+                        build_glow_output_path(
+                            input_path=input_file,
+                            output_dir=generation_kwargs["output_dir"],
+                        )
+                    )
+                if includes["environment_mask"]:
+                    expected_paths.append(
+                        build_environment_mask_output_path(
+                            input_path=input_file,
+                            output_dir=generation_kwargs["output_dir"],
+                        )
+                    )
+                if includes["complex_material"]:
+                    expected_paths.append(
+                        build_complex_output_path(
+                            input_path=input_file,
+                            output_dir=generation_kwargs["output_dir"],
+                            complex_format=str(generation_kwargs["complex_format"]),
+                        )
+                    )
+                for candidate in expected_paths:
+                    for possible in (candidate, candidate.with_suffix(".png")):
+                        if not possible.exists() or possible in backups:
+                            continue
+                        backup_target = backup_dir / f"{len(backups):05d}{possible.suffix}"
+                        backup_target.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(possible, backup_target)
+                        backups[possible] = backup_target
+            self.last_generation_backup_dir = backup_dir
+            self.last_generation_backups = backups
+            self.last_generation_created_files = set()
+
+        def _record_created_outputs(self, output_paths: list[Path]) -> None:
+            for output_path in output_paths:
+                if output_path not in self.last_generation_backups:
+                    self.last_generation_created_files.add(output_path)
+
+        def _process_generation_batch(self, input_files: list[Path], generation_kwargs: dict[str, object]) -> None:
             try:
-                results = run_batch_with_options(
-                    input_path=input_path,
-                    progress_callback=lambda index, total, current: self.processing_queue.put(
-                        ("progress", (index, total, current))
-                    ),
-                    error_callback=lambda index, total, current, exc: self.processing_queue.put(
-                        ("file_error", (index, total, current.name, str(exc)))
-                    ),
-                    continue_on_error=True,
-                    **generation_kwargs,
-                )
+                total = len(input_files)
+                results: dict[Path, dict[str, Path]] = {}
+                for index, input_file in enumerate(input_files, start=1):
+                    if self.cancel_requested:
+                        self.processing_queue.put(("cancelled", results))
+                        return
+                    self.processing_queue.put(("progress", (index, total, input_file)))
+                    try:
+                        outputs = run_with_options(
+                            input_file=input_file,
+                            **generation_kwargs,
+                        )
+                        results[input_file] = outputs
+                        self._record_created_outputs(list(outputs.values()))
+                    except Exception as exc:
+                        self.processing_queue.put(("file_error", (index, total, input_file.name, str(exc))))
                 self.processing_queue.put(("done", results))
             except Exception as exc:
                 self.processing_queue.put(("error", str(exc)))
@@ -2179,6 +2283,19 @@ if GUI_AVAILABLE:
                                 lines.append(f"...and {total_failed - 5} more.")
                     messagebox.showinfo("Generation complete", "\n".join(lines))
                     self._refresh_preview()
+                    keep_polling = False
+                elif event_type == "cancelled":
+                    results = payload
+                    self._set_processing_state(False)
+                    total_sources = len(results)
+                    total_outputs = sum(len(output_set) for output_set in results.values())
+                    self.status_var.set(
+                        f"Generation cancelled. Finished {total_sources} source texture(s) and wrote {total_outputs} file(s)."
+                    )
+                    messagebox.showinfo(
+                        "Generation cancelled",
+                        "Processing was cancelled.\nUse Revert Process to undo files from this run if needed.",
+                    )
                     keep_polling = False
                 elif event_type == "error":
                     self._set_processing_state(False)
@@ -2448,9 +2565,10 @@ if GUI_AVAILABLE:
                 "include_glow": include_glow,
                 "include_environment_mask": include_environment_mask,
                 "include_complex": include_complex,
-                "batch_workers": 1,
             }
             self.batch_failures = []
+            self.cancel_requested = False
+            self._prepare_generation_snapshot(self.selected_inputs, generation_kwargs)
             self._set_processing_state(True)
             if self.show_batch_preview_var.get():
                 self.status_var.set(
@@ -2460,11 +2578,51 @@ if GUI_AVAILABLE:
                 self.status_var.set(f"Queued {len(self.selected_inputs)} source texture(s) for processing...")
             self.processing_thread = threading.Thread(
                 target=self._process_generation_batch,
-                args=(input_path, generation_kwargs),
+                args=(self.selected_inputs.copy(), generation_kwargs),
                 daemon=True,
             )
             self.processing_thread.start()
             self.root.after(100, self._poll_processing_queue)
+
+        def _cancel_processing(self) -> None:
+            if not self.is_processing:
+                return
+            self.cancel_requested = True
+            self.cancel_button.configure(state=tk.DISABLED)
+            self.status_var.set("Cancellation requested. Current file will finish, then processing stops.")
+
+        def _revert_last_generation(self) -> None:
+            if self.is_processing:
+                return
+            if not self._has_revert_snapshot():
+                self.revert_button.configure(state=tk.DISABLED)
+                return
+            if not messagebox.askyesno(
+                "Revert generated files",
+                "Revert files from the last generation run?\nThis will delete newly generated files and restore overwritten files.",
+            ):
+                return
+            errors: list[str] = []
+            for generated_path in sorted(self.last_generation_created_files):
+                try:
+                    generated_path.unlink(missing_ok=True)
+                except Exception as exc:
+                    errors.append(f"Could not remove {generated_path.name}: {exc}")
+            for original_path, backup_path in self.last_generation_backups.items():
+                try:
+                    original_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(backup_path, original_path)
+                except Exception as exc:
+                    errors.append(f"Could not restore {original_path.name}: {exc}")
+            if errors:
+                messagebox.showerror("Revert incomplete", "\n".join(errors[:8]))
+                self.status_var.set("Revert completed with errors.")
+            else:
+                messagebox.showinfo("Revert complete", "Last generation outputs were reverted.")
+                self.status_var.set("Reverted files from the last generation run.")
+            self._discard_last_generation_snapshot()
+            self._set_processing_state(False)
+            self._refresh_preview()
 
         def run(self) -> None:
             self.root.mainloop()
