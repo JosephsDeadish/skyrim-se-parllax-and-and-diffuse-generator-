@@ -390,6 +390,82 @@ def _adjust_recommendations_for_role(
     return adjusted
 
 
+_MATERIAL_CATEGORY_TOKENS: dict[str, tuple[str, ...]] = {
+    "stone": ("stone", "brick", "rock", "cobble", "slate", "granite", "marble", "limestone", "pebble", "rubble", "dungeon", "wall", "cave", "cliff"),
+    "wood": ("wood", "timber", "plank", "log", "bark", "trunk", "beam", "wooden", "oak", "pine", "lumber"),
+    "plants": ("leaf", "leaves", "grass", "vine", "plant", "moss", "fern", "weed", "shrub", "bush", "flora", "foliage", "lichen"),
+    "metal": ("metal", "iron", "steel", "copper", "bronze", "gold", "silver", "ore", "chain", "blade", "sword", "axe", "armor", "helmet", "shield"),
+    "glass": ("glass", "crystal", "gem", "jewel", "diamond", "ruby", "sapphire", "emerald", "amethyst", "quartz"),
+    "cloth": ("cloth", "fabric", "silk", "linen", "wool", "robe", "cloak", "cape", "leather", "hide", "fur"),
+    "skin": ("skin", "body", "face", "head", "hand", "flesh", "creature", "humanoid"),
+    "snow": ("snow", "ice", "frost", "frozen", "blizzard", "glacial"),
+    "sand": ("sand", "dirt", "mud", "earth", "soil", "ground", "terrain", "dust"),
+}
+
+
+def classify_material_type(path: Path) -> str:
+    """Classify the likely Skyrim material category from a texture file path.
+
+    Returns one of: ``'stone'``, ``'wood'``, ``'plants'``, ``'metal'``,
+    ``'glass'``, ``'cloth'``, ``'skin'``, ``'snow'``, ``'sand'``, or
+    ``'general'``.
+    """
+    combined = " ".join(path.parts).lower()
+    for category, tokens in _MATERIAL_CATEGORY_TOKENS.items():
+        for token in tokens:
+            if token in combined:
+                return category
+    return "general"
+
+
+def _adjust_recommendations_for_material_type(
+    recommended: dict[str, float | int], material_type: str
+) -> dict[str, float | int]:
+    """Fine-tune generated slider recommendations for common Skyrim material categories."""
+    adjusted = dict(recommended)
+    if material_type == "stone":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 1.1, 1.1, 3.8)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 1.1, 0.8, 2.4)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.85, 0.9, 2.4)
+        adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]) * 1.05, 140, 235))
+    elif material_type == "wood":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 1.05, 1.1, 3.8)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 1.0, 0.8, 2.4)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.7, 0.9, 2.4)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.75, 0.9, 2.2)
+    elif material_type == "plants":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.85, 1.1, 3.8)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.6, 0.8, 2.4)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.5, 0.9, 2.4)
+        adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]) * 1.1, 140, 235))
+    elif material_type == "metal":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 1.15, 1.1, 3.8)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.45, 0.9, 2.4)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.4, 0.9, 2.2)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.9, 0.8, 2.4)
+    elif material_type == "glass":
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.6, 0.9, 2.4)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.5, 0.9, 2.2)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.7, 0.8, 2.4)
+    elif material_type == "cloth":
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.55, 0.9, 2.4)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.65, 0.9, 2.2)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.75, 0.8, 2.4)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.9, 1.1, 3.8)
+    elif material_type == "skin":
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.65, 0.9, 2.4)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.8, 0.9, 2.2)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.5, 0.8, 2.4)
+    elif material_type == "snow":
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.2, 0.9, 2.4)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 1.15, 0.8, 2.4)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.1, 0.9, 2.2)
+    elif material_type == "sand":
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 1.05, 0.8, 2.4)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.8, 0.9, 2.4)
+    return adjusted
+
+
 def recommend_generation_settings(source: Image.Image, input_path: Path | None = None) -> dict[str, float | int]:
     analysis = analyze_image_content(source)
     brightness = analysis["brightness"]
@@ -498,13 +574,18 @@ def recommend_generation_settings(source: Image.Image, input_path: Path | None =
         "glow_threshold": glow_threshold,
     }
     detected_role: str | None = None
+    material_type = "general"
     if input_path is not None:
         detected_role = identify_skyrim_texture_role(input_path)["role"]
+        if detected_role in {None, "diffuse"}:
+            material_type = classify_material_type(input_path)
     if detected_role in {None, "diffuse"}:
         inferred_from_image = _infer_likely_role_from_image(source)
         if inferred_from_image is not None:
             detected_role = inferred_from_image
-    return _adjust_recommendations_for_role(recommended, detected_role)
+    role_adjusted = _adjust_recommendations_for_role(recommended, detected_role)
+    material_adjusted = _adjust_recommendations_for_material_type(role_adjusted, material_type)
+    return _adjust_recommendations_for_role(material_adjusted, detected_role)
 
 
 def _resolve_batch_workers(batch_workers: int | None, total: int) -> int:
@@ -703,27 +784,33 @@ def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Im
     minimum = ImageChops.darker(ImageChops.darker(red, green), blue)
     chroma = ImageChops.subtract(maximum, minimum)
 
-    specular = generate_specular(rgb_source, strength=max(0.9, min(2.1, 0.95 + (strength * 0.55))))
+    specular_drive = max(0.9, min(2.4, 0.7 + (strength * 0.6)))
+    specular = generate_specular(rgb_source, strength=specular_drive)
+
+    roughness_contrast = 0.7 + (strength * 0.38)
     roughness = ImageOps.invert(specular)
-    roughness = ImageEnhance.Contrast(roughness).enhance(0.95 + (strength * 0.25))
-    roughness = _lift_black_floor(ImageOps.autocontrast(roughness, cutoff=1), floor=20)
+    roughness = ImageEnhance.Contrast(roughness).enhance(roughness_contrast)
+    roughness = _lift_black_floor(ImageOps.autocontrast(roughness, cutoff=0), floor=20)
 
-    metallic = Image.blend(chroma, specular, alpha=0.35)
-    metallic = ImageEnhance.Contrast(metallic).enhance(0.85 + (strength * 0.3))
-    metallic = _lift_black_floor(ImageOps.autocontrast(metallic, cutoff=1), floor=3)
+    metallic_contrast = 0.7 + (strength * 0.4)
+    metallic = Image.blend(chroma, specular, alpha=_clamp(0.2 + (strength * 0.1), 0.2, 0.5))
+    metallic = ImageEnhance.Contrast(metallic).enhance(metallic_contrast)
+    metallic = _lift_black_floor(ImageOps.autocontrast(metallic, cutoff=0), floor=3)
 
+    cavity_contrast = 1.1 + (strength * 0.28)
     local_detail = ImageChops.difference(grayscale, grayscale.filter(ImageFilter.GaussianBlur(radius=2.4)))
-    cavity = ImageOps.invert(ImageEnhance.Contrast(local_detail).enhance(1.3 + (strength * 0.18)))
-    ao = Image.blend(grayscale, cavity, alpha=0.68)
-    ao = _lift_black_floor(ImageOps.autocontrast(ao, cutoff=1), floor=24)
+    cavity = ImageOps.invert(ImageEnhance.Contrast(local_detail).enhance(cavity_contrast))
+    ao_alpha = _clamp(0.5 + (strength * 0.14), 0.5, 0.92)
+    ao = Image.blend(grayscale, cavity, alpha=ao_alpha)
+    ao = _lift_black_floor(ImageOps.autocontrast(ao, cutoff=0), floor=24)
 
+    height_specular_alpha = _clamp(0.2 + (strength * 0.12), 0.2, 0.56)
     raw_height = generate_parallax(rgb_source, strength=max(0.85, min(2.0, strength)))
-    height_or_spec = Image.blend(raw_height, specular, alpha=0.35)
-    height_or_spec = Image.blend(Image.new("L", raw_height.size, color=127), height_or_spec, alpha=0.8)
+    height_or_spec = Image.blend(raw_height, specular, alpha=height_specular_alpha)
+    blend_alpha = _clamp(0.65 + (strength * 0.1), 0.65, 0.95)
+    height_or_spec = Image.blend(Image.new("L", raw_height.size, color=127), height_or_spec, alpha=blend_alpha)
     height_or_spec = _lift_black_floor(height_or_spec, floor=8)
 
-    # Packed channel order for modern PBR-style complex materials:
-    # R = ambient occlusion, G = roughness, B = metallic, A = height/specular proxy.
     return Image.merge("RGBA", (ao, roughness, metallic, height_or_spec))
 
 
@@ -1085,6 +1172,84 @@ def identify_skyrim_texture_role(path: Path) -> dict[str, str]:
         ),
         "hint": _get_skyrim_path_hint(path),
     }
+
+
+def get_generation_warnings(
+    material_type: str,
+    *,
+    include_glow: bool,
+    include_environment_mask: bool,
+    env_mask_mode: str,
+    env_mask_strength: float,
+    include_parallax: bool,
+    include_complex: bool,
+) -> list[tuple[str, str]]:
+    """Return a list of (warning_id, human-readable message) pairs for suspicious generation choices.
+
+    The caller is responsible for filtering out dismissed warnings and
+    presenting remaining ones to the user.  Warning IDs are stable strings
+    so they can be stored in a ``dismissed_warnings`` set.
+    """
+    warnings: list[tuple[str, str]] = []
+
+    organic_types = {"plants", "cloth", "skin"}
+
+    if include_glow and material_type in {"stone", "wood", "plants", "metal", "sand", "snow", "cloth"}:
+        warnings.append((
+            "glow_non_magical",
+            f"Glow map enabled for a '{material_type}' texture.\n\n"
+            "Most stone, wood, metal, foliage, and fabric textures don't glow in Skyrim — "
+            "only emissive/magical surfaces should. The result may look strange in-game.\n\n"
+            "Tip: Only use glow maps for fire, magic, candles, or intentionally glowing objects.",
+        ))
+
+    if include_environment_mask and material_type in organic_types and env_mask_strength > 1.4:
+        warnings.append((
+            "high_env_mask_organic",
+            f"High environment mask strength ({env_mask_strength:.2f}) on a '{material_type}' texture.\n\n"
+            "Plants, cloth, and skin surfaces are not shiny — high environment masks "
+            "will make them look like polished metal or glass in-game.\n\n"
+            "Tip: Keep environment mask strength below 1.3 for organic materials.",
+        ))
+
+    if include_environment_mask and env_mask_mode == "complex" and material_type in organic_types:
+        warnings.append((
+            "complex_env_mask_organic",
+            f"Complex environment mask mode on a '{material_type}' texture.\n\n"
+            "Complex mode generates an ENBSeries RGBA mask suited for hard, shiny surfaces. "
+            "Organic surfaces like plants and cloth rarely benefit from complex mode and may look over-specced.\n\n"
+            "Tip: Use 'standard' env mask mode for organic materials.",
+        ))
+
+    if include_parallax and material_type == "plants":
+        warnings.append((
+            "parallax_flat_plants",
+            "Parallax height map enabled for a plant/foliage texture.\n\n"
+            "Plant textures (leaves, grass, vines) are typically flat alpha-masked polygons — "
+            "parallax height maps usually have no visible effect on them and only waste disk space.\n\n"
+            "Tip: Disable parallax for plant and foliage textures.",
+        ))
+
+    if include_complex and material_type in organic_types:
+        warnings.append((
+            "complex_material_organic",
+            f"Complex material enabled for a '{material_type}' texture.\n\n"
+            "Complex material is designed for hard surfaces with distinct PBR channels "
+            "(AO, roughness, metallic). Organic surfaces like skin and cloth rarely benefit "
+            "and the result may look incorrect without careful ENB configuration.\n\n"
+            "Tip: Complex material works best on stone, metal, and glass.",
+        ))
+
+    if include_environment_mask and material_type == "glass" and env_mask_strength < 1.5:
+        warnings.append((
+            "low_env_mask_glass",
+            f"Low environment mask strength ({env_mask_strength:.2f}) for a glass/crystal texture.\n\n"
+            "Glass and crystal surfaces are highly reflective — a low environment mask strength "
+            "will make them look dull and unrealistic in-game.\n\n"
+            "Tip: Use environment mask strength above 1.6 for glass and crystal materials.",
+        ))
+
+    return warnings
 
 
 def collect_source_textures(input_path: Path) -> list[Path]:
@@ -1542,6 +1707,28 @@ def _create_panda_icon_image(size: int = 128) -> Image.Image:
     return img
 
 
+_LIGHT_THEME: dict[str, str] = {
+    "bg": "#f0f0f0",
+    "fg": "#000000",
+    "field_bg": "#ffffff",
+    "button_bg": "#e0e0e0",
+    "trough": "#c8c8c8",
+    "tooltip_bg": "#ffffcc",
+    "tooltip_fg": "#000000",
+    "disabled_fg": "#888888",
+}
+_DARK_THEME: dict[str, str] = {
+    "bg": "#1e1e2e",
+    "fg": "#cdd6f4",
+    "field_bg": "#313244",
+    "button_bg": "#45475a",
+    "trough": "#585b70",
+    "tooltip_bg": "#313244",
+    "tooltip_fg": "#cdd6f4",
+    "disabled_fg": "#6c7086",
+}
+
+
 if GUI_AVAILABLE:
     class TextureGeneratorGUI:
         def __init__(self) -> None:
@@ -1566,6 +1753,10 @@ if GUI_AVAILABLE:
             self.preview_size_var = tk.StringVar(value="Medium")
             self.preview_refresh_after_id: str | None = None
             self.show_batch_preview_var = tk.BooleanVar(value=False)
+            self.dark_mode_var = tk.BooleanVar(value=False)
+            self._tooltip_bg = _LIGHT_THEME["tooltip_bg"]
+            self._tooltip_fg = _LIGHT_THEME["tooltip_fg"]
+            self.dismissed_warnings: set[str] = set()
 
             self.input_var = tk.StringVar()
             self.output_var = tk.StringVar()
@@ -1897,6 +2088,14 @@ if GUI_AVAILABLE:
             self.revert_button = ttk.Button(actions, text="Revert Process", command=self._revert_last_generation, state=tk.DISABLED)
             self.revert_button.pack(side=tk.LEFT, padx=(6, 0))
             self._add_tooltip(self.revert_button, "↩ Restore files from the most recent generation run.\nDisabled until a generation run has something to undo.")
+            _theme_check = ttk.Checkbutton(
+                actions,
+                text="🌙 Dark mode",
+                variable=self.dark_mode_var,
+                command=self._toggle_theme,
+            )
+            _theme_check.pack(side=tk.LEFT, padx=(12, 4))
+            self._add_tooltip(_theme_check, "🌙 Toggle dark/light mode.\nEasy on the eyes during those 3am modding sessions.")
             ttk.Label(actions, textvariable=self.status_var).pack(side=tk.LEFT, padx=14)
             _patreon_button = ttk.Button(
                 actions,
@@ -1905,6 +2104,7 @@ if GUI_AVAILABLE:
             )
             _patreon_button.pack(side=tk.RIGHT, padx=4)
             self._add_tooltip(_patreon_button, "❤ Support the developer on Patreon.\nBecause caffeine and texture generation both cost money.")
+            self._apply_theme()
 
         def _set_app_icon(self) -> None:
             try:
@@ -1946,7 +2146,8 @@ if GUI_AVAILABLE:
                         tip,
                         text=text,
                         justify=tk.LEFT,
-                        background="#ffffcc",
+                        background=self._tooltip_bg,
+                        foreground=self._tooltip_fg,
                         relief=tk.SOLID,
                         borderwidth=1,
                         font=("TkDefaultFont", 9),
@@ -1971,6 +2172,34 @@ if GUI_AVAILABLE:
             widget.bind("<Enter>", _show, add="+")
             widget.bind("<Leave>", _hide, add="+")
             widget.bind("<ButtonPress>", _hide, add="+")
+
+        def _apply_theme(self) -> None:
+            colors = _DARK_THEME if self.dark_mode_var.get() else _LIGHT_THEME
+            self._tooltip_bg = colors["tooltip_bg"]
+            self._tooltip_fg = colors["tooltip_fg"]
+            style = ttk.Style(self.root)
+            style.theme_use("clam")
+            self.root.configure(background=colors["bg"])
+            style.configure(".", background=colors["bg"], foreground=colors["fg"])
+            style.configure("TFrame", background=colors["bg"])
+            style.configure("TLabelFrame", background=colors["bg"], foreground=colors["fg"])
+            style.configure("TLabelFrame.Label", background=colors["bg"], foreground=colors["fg"])
+            style.configure("TLabel", background=colors["bg"], foreground=colors["fg"])
+            style.configure("TButton", background=colors["button_bg"], foreground=colors["fg"])
+            style.map("TButton", background=[("active", colors["trough"])])
+            style.configure("TCheckbutton", background=colors["bg"], foreground=colors["fg"])
+            style.map("TCheckbutton", background=[("active", colors["bg"])])
+            style.configure("TCombobox", fieldbackground=colors["field_bg"], foreground=colors["fg"], background=colors["button_bg"])
+            style.map("TCombobox", fieldbackground=[("readonly", colors["field_bg"])], foreground=[("readonly", colors["fg"])])
+            style.configure("TEntry", fieldbackground=colors["field_bg"], foreground=colors["fg"])
+            style.configure("Horizontal.TScale", background=colors["bg"], troughcolor=colors["trough"])
+            style.configure("TScrollbar", background=colors["button_bg"], troughcolor=colors["bg"])
+            style.map("TScrollbar", background=[("active", colors["trough"])])
+
+        def _toggle_theme(self) -> None:
+            self._apply_theme()
+            theme_name = "dark" if self.dark_mode_var.get() else "light"
+            self.status_var.set(f"Switched to {theme_name} mode.")
 
         def _pick_input(self) -> None:
             selected = filedialog.askopenfilename(
@@ -2504,6 +2733,78 @@ if GUI_AVAILABLE:
             except Exception as exc:
                 self.status_var.set(f"Preview update failed: {exc}")
 
+        def _check_and_show_generation_warnings(
+            self,
+            material_type: str,
+            include_glow: bool,
+            include_environment_mask: bool,
+            env_mask_mode: str,
+            env_mask_strength: float,
+            include_parallax: bool,
+            include_complex: bool,
+        ) -> bool:
+            """Show any applicable sanity warnings. Returns False if user chose to abort."""
+            warnings = get_generation_warnings(
+                material_type,
+                include_glow=include_glow,
+                include_environment_mask=include_environment_mask,
+                env_mask_mode=env_mask_mode,
+                env_mask_strength=env_mask_strength,
+                include_parallax=include_parallax,
+                include_complex=include_complex,
+            )
+            for warning_id, message in warnings:
+                if warning_id in self.dismissed_warnings:
+                    continue
+                dismiss_var = tk.BooleanVar(value=False)
+                dialog = tk.Toplevel(self.root)
+                dialog.title("Generation Warning")
+                dialog.transient(self.root)
+                dialog.resizable(False, False)
+                dialog_result: list[bool] = [True]
+                colors = _DARK_THEME if self.dark_mode_var.get() else _LIGHT_THEME
+                dialog.configure(background=colors["bg"])
+                tk.Label(
+                    dialog,
+                    text=f"⚠ {message}",
+                    justify=tk.LEFT,
+                    wraplength=420,
+                    padx=14,
+                    pady=10,
+                    background=colors["bg"],
+                    foreground=colors["fg"],
+                ).pack(anchor=tk.W)
+                check_frame = tk.Frame(dialog, background=colors["bg"])
+                check_frame.pack(anchor=tk.W, padx=14, pady=(0, 6))
+                tk.Checkbutton(
+                    check_frame,
+                    text="Don't show this warning again",
+                    variable=dismiss_var,
+                    background=colors["bg"],
+                    foreground=colors["fg"],
+                    activebackground=colors["bg"],
+                    selectcolor=colors["field_bg"],
+                ).pack(side=tk.LEFT)
+                btn_frame = tk.Frame(dialog, background=colors["bg"])
+                btn_frame.pack(pady=(4, 12), padx=14, anchor=tk.E)
+
+                def _continue(d: tk.Toplevel = dialog, wid: str = warning_id) -> None:
+                    if dismiss_var.get():
+                        self.dismissed_warnings.add(wid)
+                    d.destroy()
+
+                def _abort(d: tk.Toplevel = dialog) -> None:
+                    dialog_result[0] = False
+                    d.destroy()
+
+                ttk.Button(btn_frame, text="Continue anyway", command=_continue).pack(side=tk.LEFT, padx=(0, 8))
+                ttk.Button(btn_frame, text="Cancel generation", command=_abort).pack(side=tk.LEFT)
+                dialog.grab_set()
+                self.root.wait_window(dialog)
+                if not dialog_result[0]:
+                    return False
+            return True
+
         def _generate(self) -> None:
             input_value = self.input_var.get().strip()
             if not input_value:
@@ -2536,6 +2837,18 @@ if GUI_AVAILABLE:
                     messagebox.showwarning("Missing output folder", "Choose an output folder or disable custom output location.")
                     return
                 output_dir = Path(output_value)
+
+            _material_type = classify_material_type(Path(input_value))
+            if not self._check_and_show_generation_warnings(
+                _material_type,
+                include_glow=include_glow,
+                include_environment_mask=include_environment_mask,
+                env_mask_mode=self.env_mask_mode_var.get(),
+                env_mask_strength=float(self.environment_mask_strength_var.get()),
+                include_parallax=include_parallax,
+                include_complex=include_complex,
+            ):
+                return
 
             generation_kwargs = {
                 "output_dir": output_dir,

@@ -13,6 +13,7 @@ from generate_textures import (
     apply_recommendations_by_auto_flags,
     build_complex_output_path,
     build_environment_mask_output_path,
+    classify_material_type,
     collect_source_textures,
     detect_mod_manager_context,
     build_glow_output_path,
@@ -27,6 +28,7 @@ from generate_textures import (
     generate_parallax,
     generate_preview_outputs,
     generate_specular,
+    get_generation_warnings,
     get_preview_size_limits,
     identify_skyrim_texture_role,
     prepare_preview_source,
@@ -231,6 +233,98 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertLessEqual(float(settings["specular_strength"]), 2.2)
         self.assertGreaterEqual(int(settings["glow_threshold"]), 140)
         self.assertLessEqual(int(settings["glow_threshold"]), 235)
+
+    def test_classify_material_type_returns_stone_for_brick_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/architecture/brick_wall.dds")), "stone")
+
+    def test_classify_material_type_returns_metal_for_iron_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/armor/iron_helmet.dds")), "metal")
+
+    def test_classify_material_type_returns_plants_for_leaf_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/plants/leaf01.dds")), "plants")
+
+    def test_classify_material_type_returns_wood_for_timber_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/clutter/timber_plank.dds")), "wood")
+
+    def test_classify_material_type_returns_general_for_unknown_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/misc/unknown.dds")), "general")
+
+    def test_get_generation_warnings_glow_on_stone_triggers_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_glow=True,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.2,
+            include_parallax=False,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("glow_non_magical", ids)
+
+    def test_get_generation_warnings_glow_on_plants_triggers_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "plants",
+            include_glow=True,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.2,
+            include_parallax=False,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("glow_non_magical", ids)
+
+    def test_get_generation_warnings_high_env_mask_on_plants(self) -> None:
+        warnings = get_generation_warnings(
+            "plants",
+            include_glow=False,
+            include_environment_mask=True,
+            env_mask_mode="standard",
+            env_mask_strength=1.8,
+            include_parallax=False,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("high_env_mask_organic", ids)
+
+    def test_get_generation_warnings_no_false_positives_for_metal(self) -> None:
+        warnings = get_generation_warnings(
+            "metal",
+            include_glow=False,
+            include_environment_mask=True,
+            env_mask_mode="standard",
+            env_mask_strength=1.8,
+            include_parallax=False,
+            include_complex=False,
+        )
+        self.assertEqual(warnings, [])
+
+    def test_get_generation_warnings_parallax_on_plants(self) -> None:
+        warnings = get_generation_warnings(
+            "plants",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("parallax_flat_plants", ids)
+
+    def test_generate_complex_material_slider_produces_visible_change(self) -> None:
+        source = _large_high_detail_image()
+        low_strength = generate_complex_material(source, strength=0.5)
+        high_strength = generate_complex_material(source, strength=3.0)
+        low_r, _, _, _ = low_strength.split()
+        high_r, _, _, _ = high_strength.split()
+        import numpy as np
+
+        low_arr = np.asarray(low_r, dtype=np.float32)
+        high_arr = np.asarray(high_r, dtype=np.float32)
+        mean_diff = float(np.abs(low_arr - high_arr).mean())
+        self.assertGreater(mean_diff, 2.0)
 
     def test_analyze_image_content_exposes_expected_metrics(self) -> None:
         metrics = analyze_image_content(_sample_image())
