@@ -54,12 +54,12 @@ jobs:
         run: python assets/create_panda_ico.py
 
       - name: Build executable with PyInstaller
-        run: pyinstaller --onefile --windowed --collect-all numpy --name generate_textures --icon assets\panda.ico generate_textures.py
+        run: pyinstaller --onefile --windowed --collect-all numpy --add-data "nif_patcher.py;." --name generate_textures --icon assets\panda.ico generate_textures.py
 
       - name: Create zip archive
         run: |
           Copy-Item dist\generate_textures.exe generate_textures.exe
-          Compress-Archive -Path generate_textures.exe, generate_textures.py, README.md, requirements.txt, assets, fomod -DestinationPath skyrim-texture-generator.zip
+          Compress-Archive -Path generate_textures.exe, generate_textures.py, nif_patcher.py, README.md, requirements.txt, assets, fomod -DestinationPath skyrim-texture-generator.zip
         shell: pwsh
 
       - name: Upload artifact

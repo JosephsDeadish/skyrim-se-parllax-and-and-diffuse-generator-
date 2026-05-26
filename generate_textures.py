@@ -31,9 +31,23 @@ try:
 except Exception:
     GUI_AVAILABLE = False
 
+try:
+    from nif_patcher import (
+        NifPatchOptions,
+        find_nif_files,
+        guess_normal_path_for_nif,
+        guess_parallax_path_for_nif,
+        patch_nif,
+        scan_nif,
+        validate_nif_for_parallax,
+    )
+    NIF_PATCHER_AVAILABLE = True
+except ImportError:
+    NIF_PATCHER_AVAILABLE = False
+
 
 DDS_EXTENSION = ".dds"
-APP_VERSION = "0.5.5"
+APP_VERSION = "0.6"
 SUPPORTED_INPUT_EXTENSIONS = {DDS_EXTENSION, ".png", ".jpg", ".jpeg", ".tga", ".bmp"}
 GENERATED_TEXTURE_SUFFIXES = ("_msn", "_cm", "_n", "_p", "_g", "_m")
 PREVIEW_MAX_DIMENSION = 1024
@@ -274,6 +288,7 @@ class ModManagerContext:
     output_dir: Path | None = None
     loaded_mods: tuple[str, ...] = ()
     loaded_texture_dirs: tuple[Path, ...] = ()
+    loaded_mesh_dirs: tuple[Path, ...] = ()
 
     @property
     def summary(self) -> str:
@@ -286,6 +301,8 @@ class ModManagerContext:
             details.append(f"{len(self.loaded_texture_dirs)} loaded mod texture folder(s)")
         elif self.loaded_mods:
             details.append(f"{len(self.loaded_mods)} loaded mod(s)")
+        if self.loaded_mesh_dirs:
+            details.append(f"{len(self.loaded_mesh_dirs)} mesh folder(s)")
         return " — ".join(details)
 
 
@@ -399,6 +416,10 @@ def _detect_mo2_context(
         loaded_texture_dirs = _unique_existing_paths(
             [instance_root / "mods" / mod_name / "textures" for mod_name in loaded_mods]
         )
+    loaded_mesh_dirs = _unique_existing_paths(
+        [instance_root / "mods" / mod_name / "meshes" for mod_name in loaded_mods]
+        if instance_root is not None else []
+    )
 
     output_dir = instance_root / "overwrite" if instance_root is not None else None
     return ModManagerContext(
@@ -409,6 +430,7 @@ def _detect_mo2_context(
         output_dir=output_dir,
         loaded_mods=loaded_mods,
         loaded_texture_dirs=loaded_texture_dirs,
+        loaded_mesh_dirs=loaded_mesh_dirs,
     )
 
 
@@ -445,12 +467,17 @@ def _detect_vortex_context(
     loaded_mods = _parse_enabled_modlist(profile_dir / "modlist.txt") if profile_dir is not None else ()
     if staging_root is not None and loaded_mods:
         texture_dirs = _unique_existing_paths([staging_root / mod_name / "textures" for mod_name in loaded_mods])
+        mesh_dirs = _unique_existing_paths([staging_root / mod_name / "meshes" for mod_name in loaded_mods])
     elif staging_root is not None:
         texture_dirs = _unique_existing_paths(
             [path / "textures" for path in staging_root.iterdir() if path.is_dir() and (path / "textures").exists()]
         )
+        mesh_dirs = _unique_existing_paths(
+            [path / "meshes" for path in staging_root.iterdir() if path.is_dir() and (path / "meshes").exists()]
+        )
     else:
         texture_dirs = ()
+        mesh_dirs = ()
 
     return ModManagerContext(
         manager="Vortex",
@@ -460,6 +487,7 @@ def _detect_vortex_context(
         output_dir=executable_path.parent / "generated_textures",
         loaded_mods=loaded_mods,
         loaded_texture_dirs=texture_dirs,
+        loaded_mesh_dirs=mesh_dirs,
     )
 
 
@@ -3112,6 +3140,14 @@ if GUI_AVAILABLE:
             self.revert_button = ttk.Button(actions, text="Revert Process", command=self._revert_last_generation, state=tk.DISABLED)
             self.revert_button.pack(side=tk.LEFT, padx=(6, 0))
             self._add_tooltip(self.revert_button, "↩ Restore files from the most recent generation run.\nDisabled until a generation run has something to undo.")
+            nif_editor_button = ttk.Button(actions, text="NIF Editor…", command=self._open_nif_editor)
+            nif_editor_button.pack(side=tk.LEFT, padx=(12, 0))
+            self._add_tooltip(
+                nif_editor_button,
+                "🔧 Open the NIF Editor window.\n"
+                "Patch BSLightingShaderProperty flags and texture slots in Skyrim SE\n"
+                "mesh files so mods that shipped without parallax/ENB support gain it.",
+            )
             _status_label = ttk.Label(actions, textvariable=self.status_var, justify=tk.LEFT, anchor=tk.W)
             _status_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=14)
             self._add_tooltip(
@@ -4571,6 +4607,268 @@ if GUI_AVAILABLE:
             self._discard_last_generation_snapshot()
             self._set_processing_state(False)
             self._refresh_preview()
+
+        def _open_nif_editor(self) -> None:
+            """Open the NIF Editor in a separate Toplevel window."""
+            if not NIF_PATCHER_AVAILABLE:
+                messagebox.showerror(
+                    "NIF Editor unavailable",
+                    "nif_patcher.py was not found alongside generate_textures.py.\n"
+                    "Make sure nif_patcher.py is in the same folder.",
+                )
+                return
+
+            win = tk.Toplevel(self.root)
+            win.title(f"NIF Editor — Skyrim Texture Generator v{APP_VERSION}")
+            win.geometry("780x680")
+            win.resizable(True, True)
+            win.grab_set()
+
+            dark = self.dark_mode_var.get()
+            bg = _DARK_THEME["bg"] if dark else _LIGHT_THEME["bg"]
+            fg = _DARK_THEME["fg"] if dark else _LIGHT_THEME["fg"]
+            entry_bg = _DARK_THEME["entry_bg"] if dark else _LIGHT_THEME["entry_bg"]
+            win.configure(bg=bg)
+
+            # ── NIF path ────────────────────────────────────────────────────
+            path_frame = ttk.LabelFrame(win, text="NIF Target", padding=6)
+            path_frame.pack(fill="x", padx=10, pady=(10, 4))
+
+            nif_path_var = tk.StringVar()
+            nif_scan_mode = tk.StringVar(value="file")  # "file" or "folder"
+
+            row0 = ttk.Frame(path_frame)
+            row0.pack(fill="x")
+            ttk.Radiobutton(row0, text="Single file", variable=nif_scan_mode, value="file").pack(side="left")
+            ttk.Radiobutton(row0, text="Folder (recursive)", variable=nif_scan_mode, value="folder").pack(side="left", padx=(8, 0))
+
+            # pre-populate from detected mesh dirs
+            if self.manager_context.loaded_mesh_dirs:
+                nif_path_var.set(str(self.manager_context.loaded_mesh_dirs[0]))
+                nif_scan_mode.set("folder")
+
+            row1 = ttk.Frame(path_frame)
+            row1.pack(fill="x", pady=(4, 0))
+            ttk.Label(row1, text="Path:").pack(side="left")
+            nif_entry = ttk.Entry(row1, textvariable=nif_path_var)
+            nif_entry.pack(side="left", fill="x", expand=True, padx=(4, 4))
+
+            def _browse_nif() -> None:
+                if nif_scan_mode.get() == "folder":
+                    d = filedialog.askdirectory(title="Select mesh folder")
+                    if d:
+                        nif_path_var.set(d)
+                else:
+                    f = filedialog.askopenfilename(
+                        title="Select NIF file",
+                        filetypes=[("NIF files", "*.nif"), ("All files", "*.*")],
+                    )
+                    if f:
+                        nif_path_var.set(f)
+
+            ttk.Button(row1, text="Browse…", command=_browse_nif).pack(side="left")
+
+            # ── Options ─────────────────────────────────────────────────────
+            opt_frame = ttk.LabelFrame(win, text="Patch Options", padding=6)
+            opt_frame.pack(fill="x", padx=10, pady=4)
+
+            enable_parallax_var = tk.BooleanVar(value=True)
+            enable_pom_var = tk.BooleanVar(value=False)
+            enable_env_var = tk.BooleanVar(value=False)
+            force_type3_var = tk.BooleanVar(value=False)
+            backup_var = tk.BooleanVar(value=True)
+            dry_run_var = tk.BooleanVar(value=False)
+
+            flag_row = ttk.Frame(opt_frame)
+            flag_row.pack(fill="x")
+            ttk.Checkbutton(flag_row, text="Enable Parallax (SLSF1_Parallax)", variable=enable_parallax_var).pack(side="left")
+            ttk.Checkbutton(flag_row, text="ENB POM (+ Occlusion flag)", variable=enable_pom_var).pack(side="left", padx=(12, 0))
+
+            flag_row2 = ttk.Frame(opt_frame)
+            flag_row2.pack(fill="x", pady=(2, 0))
+            ttk.Checkbutton(flag_row2, text="Environment Mapping", variable=enable_env_var).pack(side="left")
+            ttk.Checkbutton(flag_row2, text="Force Shader Type 3 (enables Parallax Scale)", variable=force_type3_var).pack(side="left", padx=(12, 0))
+
+            misc_row = ttk.Frame(opt_frame)
+            misc_row.pack(fill="x", pady=(4, 0))
+            ttk.Checkbutton(misc_row, text="Backup originals (.nif.bak)", variable=backup_var).pack(side="left")
+            ttk.Checkbutton(misc_row, text="Dry run (preview only)", variable=dry_run_var).pack(side="left", padx=(12, 0))
+
+            # ── Parallax scale ───────────────────────────────────────────────
+            scale_frame = ttk.LabelFrame(win, text="Parallax Scale  (0.1 – 10.0 · type-3 blocks only)", padding=6)
+            scale_frame.pack(fill="x", padx=10, pady=4)
+
+            pscale_var = tk.DoubleVar(value=1.5)
+            pscale_label_var = tk.StringVar(value="1.50")
+
+            def _on_pscale_change(*_: object) -> None:
+                pscale_label_var.set(f"{pscale_var.get():.2f}")
+
+            pscale_var.trace_add("write", _on_pscale_change)
+            pscale_row = ttk.Frame(scale_frame)
+            pscale_row.pack(fill="x")
+            ttk.Scale(pscale_row, from_=0.1, to=10.0, variable=pscale_var, orient="horizontal").pack(
+                side="left", fill="x", expand=True
+            )
+            ttk.Label(pscale_row, textvariable=pscale_label_var, width=5).pack(side="left", padx=(6, 0))
+            self._add_tooltip(
+                scale_frame,
+                "Controls how deep the parallax offset appears in-game.\n"
+                "1.0 = default. 2-4 = noticeably deeper. 6-10 = extreme relief effect.\n"
+                "Only written when the shader block is (or becomes) type 3 (Heightmap).\n"
+                "Enable 'Force Shader Type 3' to apply this to vanilla/default blocks.",
+            )
+
+            # ── Texture paths ────────────────────────────────────────────────
+            tex_frame = ttk.LabelFrame(win, text="Texture Paths  (leave blank to keep existing)", padding=6)
+            tex_frame.pack(fill="x", padx=10, pady=4)
+
+            parallax_tex_var = tk.StringVar()
+            normal_tex_var = tk.StringVar()
+            env_mask_tex_var = tk.StringVar()
+
+            def _tex_row(parent: ttk.Frame, label: str, var: tk.StringVar) -> None:
+                r = ttk.Frame(parent)
+                r.pack(fill="x", pady=2)
+                ttk.Label(r, text=label, width=14).pack(side="left")
+                ttk.Entry(r, textvariable=var).pack(side="left", fill="x", expand=True, padx=(4, 4))
+
+            _tex_row(tex_frame, "Parallax (slot 3):", parallax_tex_var)
+            _tex_row(tex_frame, "Normal (slot 1):", normal_tex_var)
+            _tex_row(tex_frame, "Env mask (slot 5):", env_mask_tex_var)
+
+            def _auto_fill_paths() -> None:
+                p = nif_path_var.get().strip()
+                if not p:
+                    return
+                nif_p = Path(p)
+                if nif_p.is_dir():
+                    nifs = list(nif_p.rglob("*.nif"))
+                    nif_p = nifs[0] if nifs else None
+                if nif_p and nif_p.exists():
+                    guess_p = guess_parallax_path_for_nif(nif_p)
+                    guess_n = guess_normal_path_for_nif(nif_p)
+                    if guess_p and not parallax_tex_var.get():
+                        parallax_tex_var.set(guess_p)
+                    if guess_n and not normal_tex_var.get():
+                        normal_tex_var.set(guess_n)
+
+            ttk.Button(tex_frame, text="Auto-fill paths from NIF", command=_auto_fill_paths).pack(
+                anchor="w", pady=(4, 0)
+            )
+
+            # ── Results ──────────────────────────────────────────────────────
+            res_frame = ttk.LabelFrame(win, text="Results", padding=6)
+            res_frame.pack(fill="both", expand=True, padx=10, pady=(4, 6))
+
+            results_text = tk.Text(
+                res_frame, height=10, state="disabled", wrap="word",
+                bg=entry_bg, fg=fg, font=("Courier New", 9),
+            )
+            results_scroll = ttk.Scrollbar(res_frame, command=results_text.yview)
+            results_text.configure(yscrollcommand=results_scroll.set)
+            results_scroll.pack(side="right", fill="y")
+            results_text.pack(fill="both", expand=True)
+
+            results_text.tag_configure("ok", foreground="#22aa44")
+            results_text.tag_configure("fail", foreground="#cc3333")
+            results_text.tag_configure("skip", foreground="#888888")
+            results_text.tag_configure("warn", foreground="#cc8800")
+
+            def _log(msg: str, tag: str = "") -> None:
+                results_text.configure(state="normal")
+                results_text.insert("end", msg + "\n", tag)
+                results_text.see("end")
+                results_text.configure(state="disabled")
+
+            def _clear_log() -> None:
+                results_text.configure(state="normal")
+                results_text.delete("1.0", "end")
+                results_text.configure(state="disabled")
+
+            # ── Action buttons ───────────────────────────────────────────────
+            btn_frame = ttk.Frame(win)
+            btn_frame.pack(fill="x", padx=10, pady=(0, 8))
+
+            def _scan_nifs() -> None:
+                p = nif_path_var.get().strip()
+                if not p:
+                    messagebox.showwarning("No path", "Enter a NIF file or folder path first.", parent=win)
+                    return
+                _clear_log()
+                root_p = Path(p)
+                nifs = list(root_p.rglob("*.nif")) if root_p.is_dir() else ([root_p] if root_p.suffix.lower() == ".nif" else [])
+                if not nifs:
+                    _log("No NIF files found.", "warn")
+                    return
+                _log(f"Scanning {len(nifs)} NIF file(s)…", "skip")
+                for nif in nifs[:50]:  # cap to first 50 for UI responsiveness
+                    v = validate_nif_for_parallax(nif)
+                    if v.ready_count == v.shader_count and v.shader_count > 0:
+                        _log(f"  ✓ {nif.name}: {v.ready_count}/{v.shader_count} shader(s) parallax-ready", "ok")
+                    elif v.shader_count == 0:
+                        _log(f"  — {nif.name}: no BSLightingShaderProperty found", "skip")
+                    else:
+                        _log(f"  ⚠ {nif.name}: {v.ready_count}/{v.shader_count} shader(s) ready — {'; '.join(v.issues[:2])}", "warn")
+                if len(nifs) > 50:
+                    _log(f"  … and {len(nifs) - 50} more (showing first 50 only)", "skip")
+
+            def _run_patch() -> None:
+                p = nif_path_var.get().strip()
+                if not p:
+                    messagebox.showwarning("No path", "Enter a NIF file or folder path first.", parent=win)
+                    return
+                _clear_log()
+                root_p = Path(p)
+                if root_p.is_dir():
+                    nifs = list(root_p.rglob("*.nif"))
+                elif root_p.suffix.lower() == ".nif":
+                    nifs = [root_p]
+                else:
+                    nifs = []
+
+                if not nifs:
+                    _log("No NIF files found at the specified path.", "warn")
+                    return
+
+                opts = NifPatchOptions(
+                    enable_parallax=enable_parallax_var.get(),
+                    enable_pom=enable_pom_var.get(),
+                    enable_env_mapping=enable_env_var.get(),
+                    parallax_scale=pscale_var.get() if force_type3_var.get() or True else None,
+                    force_shader_type_3=force_type3_var.get(),
+                    parallax_texture_path=parallax_tex_var.get().strip() or None,
+                    normal_texture_path=normal_tex_var.get().strip() or None,
+                    env_mask_texture_path=env_mask_tex_var.get().strip() or None,
+                    backup=backup_var.get(),
+                    dry_run=dry_run_var.get(),
+                )
+
+                prefix = "[DRY RUN] " if opts.dry_run else ""
+                _log(f"{prefix}Patching {len(nifs)} NIF file(s)…", "skip")
+                ok = skip = fail = 0
+                for nif in nifs:
+                    res = patch_nif(nif, opts)
+                    if res.already_up_to_date:
+                        _log(f"  = {nif.name}: already up-to-date", "skip")
+                        skip += 1
+                    elif res.success:
+                        _log(f"  ✓ {nif.name}: {res.message}", "ok")
+                        ok += 1
+                    else:
+                        _log(f"  ✗ {nif.name}: {res.message}", "fail")
+                        for err in res.errors:
+                            _log(f"      {err}", "fail")
+                        fail += 1
+
+                summary = f"\nDone — {ok} patched, {skip} skipped, {fail} failed."
+                tag = "ok" if fail == 0 else "warn"
+                _log(summary, tag)
+
+            ttk.Button(btn_frame, text="Scan NIFs", command=_scan_nifs).pack(side="left", padx=(0, 6))
+            ttk.Button(btn_frame, text="Patch NIFs", command=_run_patch).pack(side="left", padx=(0, 6))
+            ttk.Button(btn_frame, text="Clear log", command=_clear_log).pack(side="left")
+            ttk.Button(btn_frame, text="Close", command=win.destroy).pack(side="right")
 
         def run(self) -> None:
             self.root.mainloop()

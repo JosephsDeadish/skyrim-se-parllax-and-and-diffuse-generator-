@@ -144,8 +144,8 @@ def _emboss_pattern_image() -> Image.Image:
 
 
 class GenerateTexturesTests(unittest.TestCase):
-    def test_app_version_is_0_5_5(self) -> None:
-        self.assertEqual(APP_VERSION, "0.5.5")
+    def test_app_version_is_0_6(self) -> None:
+        self.assertEqual(APP_VERSION, "0.6")
 
     def test_normalize_gui_state_turns_off_individual_auto_flags_when_master_off(self) -> None:
         normalized = _normalize_gui_state(
