@@ -6,6 +6,7 @@ from unittest import mock
 from PIL import Image
 
 from generate_textures import (
+    APP_VERSION,
     PATREON_URL,
     _create_panda_icon_image,
     _run_cli,
@@ -16,6 +17,7 @@ from generate_textures import (
     classify_material_type,
     collect_source_textures,
     detect_mod_manager_context,
+    enforce_skyrim_output_profile,
     build_glow_output_path,
     build_normal_output_path,
     build_output_paths,
@@ -106,6 +108,9 @@ def _normal_like_image() -> Image.Image:
 
 
 class GenerateTexturesTests(unittest.TestCase):
+    def test_app_version_is_0_5(self) -> None:
+        self.assertEqual(APP_VERSION, "0.5")
+
     def test_generate_diffuse_returns_rgb_same_size(self) -> None:
         diffuse = generate_diffuse(_sample_image())
         self.assertEqual(diffuse.mode, "RGB")
@@ -147,6 +152,24 @@ class GenerateTexturesTests(unittest.TestCase):
         _, _, blue = normal.split()
         minimum_blue, _ = blue.getextrema()
         self.assertGreaterEqual(minimum_blue, 128)
+
+    def test_enforce_skyrim_output_profile_normal_lifts_blue_floor(self) -> None:
+        bad_normal = Image.new("RGB", (8, 8), color=(120, 120, 40))
+        conformed = enforce_skyrim_output_profile("normal", bad_normal)
+        _, _, blue = conformed.split()
+        minimum_blue, _ = blue.getextrema()
+        self.assertEqual(conformed.mode, "RGB")
+        self.assertGreaterEqual(minimum_blue, 128)
+
+    def test_enforce_skyrim_output_profile_standard_env_mask_is_l_mode(self) -> None:
+        rgba_mask = Image.new("RGBA", (8, 8), color=(120, 80, 40, 255))
+        conformed = enforce_skyrim_output_profile("environment_mask", rgba_mask, env_mask_mode="standard")
+        self.assertEqual(conformed.mode, "L")
+
+    def test_enforce_skyrim_output_profile_complex_material_is_rgba(self) -> None:
+        rgb_complex = Image.new("RGB", (8, 8), color=(40, 60, 80))
+        conformed = enforce_skyrim_output_profile("complex_material", rgb_complex, complex_format="cm")
+        self.assertEqual(conformed.mode, "RGBA")
 
     def test_generate_normal_flat_surface_stays_near_neutral(self) -> None:
         normal = generate_normal(_flat_dark_image(), strength=2.0)
@@ -312,6 +335,36 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         ids = [w[0] for w in warnings]
         self.assertIn("parallax_flat_plants", ids)
+
+    def test_get_generation_warnings_diffuse_from_normal_source(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            source_role="normal",
+            include_diffuse=True,
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("diffuse_from_derived_source", ids)
+
+    def test_get_generation_warnings_normal_from_normal_source(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            source_role="normal",
+            include_normal=True,
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("normal_from_normal_source", ids)
 
     def test_generate_complex_material_slider_produces_visible_change(self) -> None:
         source = _large_high_detail_image()

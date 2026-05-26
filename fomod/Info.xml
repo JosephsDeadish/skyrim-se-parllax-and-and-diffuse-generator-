@@ -2,7 +2,7 @@
 <fomod>
     <Name>Skyrim SE Parallax and Diffuse Texture Generator</Name>
     <Author>JosephsDeadish</Author>
-    <Version>0.4</Version>
+    <Version>0.5</Version>
     <Description>A standalone Windows tool that generates parallax, normal, glow, environment mask, and complex material textures for Skyrim Special Edition from DDS, PNG, TGA, or BMP source textures. Includes FoMod packaging for MO2/Vortex and detects mod-manager context on launch so loaded mod texture folders are easier to browse.</Description>
     <Website>https://www.patreon.com/cw/DeadOnTheInside</Website>
     <Groups/>

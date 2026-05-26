@@ -32,6 +32,7 @@ except Exception:
 
 
 DDS_EXTENSION = ".dds"
+APP_VERSION = "0.5"
 SUPPORTED_INPUT_EXTENSIONS = {DDS_EXTENSION, ".png", ".jpg", ".jpeg", ".tga", ".bmp"}
 GENERATED_TEXTURE_SUFFIXES = ("_msn", "_cm", "_n", "_p", "_g", "_m")
 PREVIEW_MAX_DIMENSION = 1024
@@ -911,22 +912,62 @@ def generate_preview_outputs(
 ) -> dict[str, Image.Image]:
     outputs: dict[str, Image.Image] = {}
     if include_diffuse:
-        outputs["diffuse"] = generate_diffuse(source)
+        outputs["diffuse"] = enforce_skyrim_output_profile("diffuse", generate_diffuse(source))
     if include_normal:
-        outputs["normal"] = generate_normal(source, strength=normal_strength)
+        outputs["normal"] = enforce_skyrim_output_profile(
+            "normal", generate_normal(source, strength=normal_strength)
+        )
     if include_parallax:
-        outputs["parallax"] = generate_parallax(source, strength=parallax_strength)
+        outputs["parallax"] = enforce_skyrim_output_profile(
+            "parallax", generate_parallax(source, strength=parallax_strength)
+        )
     if include_glow:
-        outputs["glow"] = generate_glow(source, threshold=glow_threshold)
+        outputs["glow"] = enforce_skyrim_output_profile("glow", generate_glow(source, threshold=glow_threshold))
     if include_environment_mask:
-        outputs["environment_mask"] = generate_environment_mask(source, strength=environment_mask_strength, mode=env_mask_mode)
+        outputs["environment_mask"] = enforce_skyrim_output_profile(
+            "environment_mask",
+            generate_environment_mask(source, strength=environment_mask_strength, mode=env_mask_mode),
+            env_mask_mode=env_mask_mode,
+        )
     if include_complex:
-        outputs["complex_material"] = (
-            generate_msn(source, normal_strength=normal_strength, specular_strength=specular_strength)
-            if complex_format == "msn"
-            else generate_complex_material(source, strength=complex_strength)
+        outputs["complex_material"] = enforce_skyrim_output_profile(
+            "complex_material",
+            (
+                generate_msn(source, normal_strength=normal_strength, specular_strength=specular_strength)
+                if complex_format == "msn"
+                else generate_complex_material(source, strength=complex_strength)
+            ),
+            complex_format=complex_format,
         )
     return outputs
+
+
+def enforce_skyrim_output_profile(
+    output_type: str,
+    image: Image.Image,
+    *,
+    env_mask_mode: str = "standard",
+    complex_format: str = "msn",
+) -> Image.Image:
+    """Normalize generated output to a Skyrim-safe channel/mode profile."""
+    if output_type == "diffuse":
+        return image.convert("RGB")
+    if output_type == "normal":
+        normal_rgb = image.convert("RGB")
+        red, green, blue = normal_rgb.split()
+        blue_floor = blue.point(lambda value: int(_clamp(float(value), 128.0, 255.0)))
+        return Image.merge("RGB", (red, green, blue_floor))
+    if output_type in {"parallax", "glow"}:
+        return ImageOps.grayscale(image)
+    if output_type == "environment_mask":
+        if env_mask_mode == "standard":
+            return ImageOps.grayscale(image)
+        return image.convert("RGBA")
+    if output_type == "complex_material":
+        if complex_format not in {"msn", "cm"}:
+            raise ValueError("complex_format must be 'msn' or 'cm'.")
+        return image.convert("RGBA")
+    return image
 
 
 def build_output_paths(
@@ -1177,6 +1218,9 @@ def identify_skyrim_texture_role(path: Path) -> dict[str, str]:
 def get_generation_warnings(
     material_type: str,
     *,
+    source_role: str | None = None,
+    include_diffuse: bool = False,
+    include_normal: bool = False,
     include_glow: bool,
     include_environment_mask: bool,
     env_mask_mode: str,
@@ -1247,6 +1291,60 @@ def get_generation_warnings(
             "Glass and crystal surfaces are highly reflective — a low environment mask strength "
             "will make them look dull and unrealistic in-game.\n\n"
             "Tip: Use environment mask strength above 1.6 for glass and crystal materials.",
+        ))
+
+    resolved_source_role = source_role or "diffuse"
+    derived_roles = {
+        "normal",
+        "parallax",
+        "glow",
+        "environment_mask",
+        "subsurface",
+        "skin_specular",
+        "complex_material",
+        "complex_material_cm",
+    }
+    if include_diffuse and resolved_source_role in derived_roles:
+        warnings.append((
+            "diffuse_from_derived_source",
+            f"The selected input appears to be a '{resolved_source_role}' texture, not a diffuse/albedo source.\n\n"
+            "Generating a diffuse output from an already derived map usually produces incorrect colours/shading in-game.\n\n"
+            "Tip: Use an albedo/diffuse source texture (no _n/_p/_g/_m/_msn/_cm suffix) for best results.",
+        ))
+    if include_normal and resolved_source_role == "normal":
+        warnings.append((
+            "normal_from_normal_source",
+            "Input already looks like a normal map (_n).\n\n"
+            "Regenerating a normal map from a normal map compounds artifacts and can break lighting response.\n\n"
+            "Tip: Generate normals from the diffuse/albedo source instead.",
+        ))
+    if include_parallax and resolved_source_role == "parallax":
+        warnings.append((
+            "parallax_from_parallax_source",
+            "Input already looks like a parallax/height map (_p).\n\n"
+            "Regenerating parallax from an existing height map can reduce useful depth range.\n\n"
+            "Tip: Generate parallax from the diffuse source when possible.",
+        ))
+    if include_glow and resolved_source_role == "glow":
+        warnings.append((
+            "glow_from_glow_source",
+            "Input already looks like a glow/emissive map (_g).\n\n"
+            "Regenerating glow from a glow map can over-compress emissive range.\n\n"
+            "Tip: Generate glow from diffuse/albedo unless intentionally post-processing a glow texture.",
+        ))
+    if include_environment_mask and resolved_source_role == "environment_mask":
+        warnings.append((
+            "env_mask_from_env_mask_source",
+            "Input already looks like an environment mask (_m).\n\n"
+            "Regenerating a mask from a mask can flatten reflection response.\n\n"
+            "Tip: Build environment masks from diffuse/albedo sources for better material separation.",
+        ))
+    if include_complex and resolved_source_role in {"complex_material", "complex_material_cm"}:
+        warnings.append((
+            "complex_from_complex_source",
+            "Input already looks like a complex material map (_msn/_cm).\n\n"
+            "Regenerating complex material from packed complex inputs often damages channel meaning.\n\n"
+            "Tip: Start from diffuse/albedo source when creating new complex materials.",
         ))
 
     return warnings
@@ -1384,7 +1482,7 @@ def run_with_options(
         resolved_specular_strength = specular_strength if specular_strength is not None else float(recommended["specular_strength"])
 
         if include_diffuse:
-            diffuse = generate_diffuse(source)
+            diffuse = enforce_skyrim_output_profile("diffuse", generate_diffuse(source))
             diffuse_path, _ = build_output_paths(
                 input_path=input_file,
                 output_dir=output_dir,
@@ -1394,7 +1492,7 @@ def run_with_options(
             outputs["diffuse"] = _save_with_dds_fallback(diffuse, diffuse_path)
 
         if include_normal:
-            normal = generate_normal(source, strength=resolved_normal_strength)
+            normal = enforce_skyrim_output_profile("normal", generate_normal(source, strength=resolved_normal_strength))
             normal_path = build_normal_output_path(
                 input_path=input_file,
                 output_dir=output_dir,
@@ -1403,7 +1501,7 @@ def run_with_options(
             outputs["normal"] = _save_with_dds_fallback(normal, normal_path)
 
         if include_parallax:
-            parallax = generate_parallax(source, strength=resolved_parallax_strength)
+            parallax = enforce_skyrim_output_profile("parallax", generate_parallax(source, strength=resolved_parallax_strength))
             _, parallax_path = build_output_paths(
                 input_path=input_file,
                 output_dir=output_dir,
@@ -1413,7 +1511,7 @@ def run_with_options(
             outputs["parallax"] = _save_with_dds_fallback(parallax, parallax_path)
 
         if include_glow:
-            glow = generate_glow(source, threshold=resolved_glow_threshold)
+            glow = enforce_skyrim_output_profile("glow", generate_glow(source, threshold=resolved_glow_threshold))
             glow_path = build_glow_output_path(
                 input_path=input_file,
                 output_dir=output_dir,
@@ -1422,7 +1520,11 @@ def run_with_options(
             outputs["glow"] = _save_with_dds_fallback(glow, glow_path)
 
         if include_environment_mask:
-            environment_mask = generate_environment_mask(source, strength=resolved_environment_mask_strength, mode=env_mask_mode)
+            environment_mask = enforce_skyrim_output_profile(
+                "environment_mask",
+                generate_environment_mask(source, strength=resolved_environment_mask_strength, mode=env_mask_mode),
+                env_mask_mode=env_mask_mode,
+            )
             environment_mask_path = build_environment_mask_output_path(
                 input_path=input_file,
                 output_dir=output_dir,
@@ -1437,13 +1539,21 @@ def run_with_options(
 
         if include_complex:
             if complex_format == "msn":
-                complex_material = generate_msn(
-                    source,
-                    normal_strength=resolved_normal_strength,
-                    specular_strength=resolved_specular_strength,
+                complex_material = enforce_skyrim_output_profile(
+                    "complex_material",
+                    generate_msn(
+                        source,
+                        normal_strength=resolved_normal_strength,
+                        specular_strength=resolved_specular_strength,
+                    ),
+                    complex_format=complex_format,
                 )
             else:
-                complex_material = generate_complex_material(source, strength=resolved_complex_strength)
+                complex_material = enforce_skyrim_output_profile(
+                    "complex_material",
+                    generate_complex_material(source, strength=resolved_complex_strength),
+                    complex_format=complex_format,
+                )
             complex_path = build_complex_output_path(
                 input_path=input_file,
                 output_dir=output_dir,
@@ -1652,6 +1762,7 @@ def parse_args() -> argparse.Namespace:
         help="Parallel workers for folder batch mode (0 = automatic).",
     )
     parser.add_argument("--gui", action="store_true", help="Launch graphical interface.")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {APP_VERSION}")
     return parser.parse_args()
 
 
@@ -1733,7 +1844,7 @@ if GUI_AVAILABLE:
     class TextureGeneratorGUI:
         def __init__(self) -> None:
             self.root = tk.Tk()
-            self.root.title("Skyrim Texture Generator")
+            self.root.title(f"Skyrim Texture Generator v{APP_VERSION}")
             self.root.geometry("960x700")
             self.source_image: Image.Image | None = None
             self.preview_before: ImageTk.PhotoImage | None = None
@@ -2736,6 +2847,9 @@ if GUI_AVAILABLE:
         def _check_and_show_generation_warnings(
             self,
             material_type: str,
+            source_role: str | None,
+            include_diffuse: bool,
+            include_normal: bool,
             include_glow: bool,
             include_environment_mask: bool,
             env_mask_mode: str,
@@ -2746,6 +2860,9 @@ if GUI_AVAILABLE:
             """Show any applicable sanity warnings. Returns False if user chose to abort."""
             warnings = get_generation_warnings(
                 material_type,
+                source_role=source_role,
+                include_diffuse=include_diffuse,
+                include_normal=include_normal,
                 include_glow=include_glow,
                 include_environment_mask=include_environment_mask,
                 env_mask_mode=env_mask_mode,
@@ -2839,8 +2956,12 @@ if GUI_AVAILABLE:
                 output_dir = Path(output_value)
 
             _material_type = classify_material_type(Path(input_value))
+            _source_role = identify_skyrim_texture_role(self.selected_inputs[0])["role"] if self.selected_inputs else None
             if not self._check_and_show_generation_warnings(
                 _material_type,
+                source_role=_source_role,
+                include_diffuse=include_diffuse,
+                include_normal=include_normal,
                 include_glow=include_glow,
                 include_environment_mask=include_environment_mask,
                 env_mask_mode=self.env_mask_mode_var.get(),

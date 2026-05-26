@@ -1,5 +1,7 @@
 # skyrim-se-parllax-and-and-diffuse-generator-
 
+Current version: **0.5**
+
 Texture generator that supports both GUI and command-line usage. It can generate:
 - a diffuse texture
 - a normal map (DirectX-style tangent-space, correct for Skyrim SE)
@@ -56,6 +58,8 @@ This opens a desktop interface where you can:
 - switch preview source images in folder mode, with automatic preview switching to the current file while batch processing
 - when a folder is selected, only process original `.dds` source textures and skip generated `_n`, `_p`, `_g`, `_m`, `_msn`, and `_cm` variants
 - continue processing remaining files in folder mode even if one file is corrupt/unreadable
+- toggle **dark mode** for low-light modding sessions
+- get file-type sanity warnings (with per-warning “don’t show again”) for combinations that usually produce incorrect in-game results
 
 ### Command line
 
@@ -101,6 +105,7 @@ Generated outputs default to `.dds` filenames regardless of the input format. Mo
 - Normal map output (`*_n`) uses **DirectX-style tangent-space orientation** by default (green channel flipped vs OpenGL workflows), which is what Skyrim expects.
 - Neutral normal color remains centered around `RGB(128, 128,255)` so flat areas stay visually flat in-game.
 - Parallax output (`*_p`) is generated as a grayscale height map (`L` mode), suitable for Skyrim SE parallax workflows.
+- Output generation now enforces per-map Skyrim-safe channel profiles during preview and file export (for example: normal maps always RGB with blue channel floor, standard env masks always greyscale, complex outputs always RGBA).
 - **Environment mask** (`*_m`) has two modes:
   - **Standard** (default) — greyscale `L`-mode texture. Texture Slot 5 in the NIF. Controls per-pixel environment/specular reflection intensity (brighter = more reflection). Requires `SLSF1_Environment_Mapping` shader flag. Works with vanilla Skyrim SE — **no ENBSeries required**. Typically stored as DXT1.
   - **Complex** (select in GUI or via `--environment-mask-mode complex`) — RGBA channel-packed for ENBSeries Complex Parallax Material workflows: R=env amount, G=glossiness, B=metallic proxy, A=parallax height. **ENBSeries required** with complex material support enabled.
