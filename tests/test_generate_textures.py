@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import numpy as np
 from PIL import Image, ImageStat
 
 from generate_textures import (
@@ -13,6 +14,7 @@ from generate_textures import (
     _compute_tooltip_position,
     _run_cli,
     _normalize_gui_state,
+    _save_with_dds_fallback,
     analyze_image_content,
     auto_patch_related_nifs_for_texture,
     apply_recommendations_by_auto_flags,
@@ -1536,6 +1538,56 @@ class GenerateTexturesTests(unittest.TestCase):
                 exit_code = _run_cli()
         self.assertEqual(exit_code, 1)
         self.assertIn("Error: boom", "".join(call.args[0] for call in mock_stderr.write.call_args_list))
+
+    def test_run_cli_reports_headless_gui_startup_failure(self) -> None:
+        class FakeTclError(Exception):
+            pass
+
+        args = mock.Mock(gui=True, input_file=None)
+        with mock.patch("generate_textures.parse_args", return_value=args):
+            with mock.patch("generate_textures.GUI_AVAILABLE", True):
+                with mock.patch("generate_textures.tk", mock.Mock(TclError=FakeTclError)):
+                    with mock.patch("generate_textures.TextureGeneratorGUI", side_effect=FakeTclError("no display")):
+                        with mock.patch("sys.stderr") as mock_stderr:
+                            exit_code = _run_cli()
+        self.assertEqual(exit_code, 1)
+        self.assertIn("no desktop display", "".join(call.args[0] for call in mock_stderr.write.call_args_list))
+
+    def test_generate_normal_raises_clear_error_for_buffer_size_mismatch(self) -> None:
+        with mock.patch("generate_textures.np.frombuffer", return_value=np.zeros(1, dtype=np.uint8)):
+            with self.assertRaisesRegex(RuntimeError, "Normal map red buffer size mismatch"):
+                generate_normal(_sample_image())
+
+    def test_generate_specular_raises_clear_error_for_buffer_size_mismatch(self) -> None:
+        with mock.patch("generate_textures.np.frombuffer", return_value=np.zeros(1, dtype=np.uint8)):
+            with self.assertRaisesRegex(RuntimeError, "Specular buffer size mismatch"):
+                generate_specular(_sample_image())
+
+    def test_save_with_dds_fallback_returns_dds_path_on_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "stone.dds"
+
+            def fake_save(_self, fp, format=None, **_kwargs):
+                Path(fp).write_bytes(f"{format}".encode("utf-8"))
+
+            with mock.patch.object(Image.Image, "save", autospec=True, side_effect=fake_save):
+                saved_path = _save_with_dds_fallback(_sample_image(), target)
+
+        self.assertEqual(saved_path, target)
+
+    def test_save_with_dds_fallback_returns_png_path_when_dds_save_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "stone.dds"
+
+            def fake_save(_self, fp, format=None, **_kwargs):
+                if format == "DDS":
+                    raise OSError("dds unavailable")
+                Path(fp).write_bytes(f"{format}".encode("utf-8"))
+
+            with mock.patch.object(Image.Image, "save", autospec=True, side_effect=fake_save):
+                saved_path = _save_with_dds_fallback(_sample_image(), target)
+
+        self.assertEqual(saved_path, target.with_suffix(".png"))
 
 
     def test_generate_specular_no_black_holes_on_detailed_image(self) -> None:

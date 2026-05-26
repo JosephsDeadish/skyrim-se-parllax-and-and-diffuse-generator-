@@ -29,6 +29,11 @@ try:
 
     GUI_AVAILABLE = True
 except Exception:
+    tk = None
+    filedialog = None
+    messagebox = None
+    ttk = None
+    ImageTk = None
     GUI_AVAILABLE = False
 
 try:
@@ -310,6 +315,14 @@ class ModManagerContext:
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
+
+
+def _reshape_image_channel(array: np.ndarray, size: tuple[int, int], *, label: str) -> np.ndarray:
+    width, height = size
+    expected = width * height
+    if int(array.size) != expected:
+        raise RuntimeError(f"{label} buffer size mismatch: expected {expected} pixels, got {int(array.size)}.")
+    return array.reshape(height, width)
 
 
 def get_preview_size_limits(size_preset: str) -> tuple[int, int]:
@@ -1578,10 +1591,9 @@ def generate_normal(
     normal_z = np.sqrt(np.clip(1.0 - np.clip(horizontal_sq, 0.0, 1.0), 0.0, None))
     blue_arr = np.clip(128.0 + normal_z * 127.0, 128.0, 255.0).astype(np.uint8)
 
-    h, w = height_map.size[1], height_map.size[0]
-    red = Image.fromarray(red_arr.reshape(h, w), mode="L")
-    green = Image.fromarray(green_arr.reshape(h, w), mode="L")
-    blue = Image.fromarray(blue_arr.reshape(h, w), mode="L")
+    red = Image.fromarray(_reshape_image_channel(red_arr, height_map.size, label="Normal map red"), mode="L")
+    green = Image.fromarray(_reshape_image_channel(green_arr, height_map.size, label="Normal map green"), mode="L")
+    blue = Image.fromarray(_reshape_image_channel(blue_arr, height_map.size, label="Normal map blue"), mode="L")
     return Image.merge("RGB", (red, green, blue))
 
 
@@ -1726,7 +1738,6 @@ def generate_specular(source: Image.Image, strength: float = 1.15) -> Image.Imag
     local_detail = ImageChops.difference(detail_source, detail_source.filter(ImageFilter.GaussianBlur(radius=broad_blur_radius)))
 
     # --- numpy path: float32 throughout so no integer-rounding holes ---
-    h, w = grayscale.size[1], grayscale.size[0]
     sm_arr = np.frombuffer(smoothed.tobytes(), dtype=np.uint8).astype(np.float32)
     ld_arr = np.frombuffer(local_detail.tobytes(), dtype=np.uint8).astype(np.float32)
 
@@ -1745,7 +1756,10 @@ def generate_specular(source: Image.Image, strength: float = 1.15) -> Image.Imag
 
     # GaussianBlur softening step — bounce through PIL (no native numpy FFT)
     soft_radius = 1.2 + (pressure * 0.4)
-    specular_img = Image.fromarray(specular_arr.reshape(h, w).astype(np.uint8), mode="L")
+    specular_img = Image.fromarray(
+        _reshape_image_channel(specular_arr, grayscale.size, label="Specular").astype(np.uint8),
+        mode="L",
+    )
     softened = specular_img.filter(ImageFilter.GaussianBlur(radius=soft_radius))
     soft_arr = np.frombuffer(softened.tobytes(), dtype=np.uint8).astype(np.float32)
 
@@ -1770,7 +1784,10 @@ def generate_specular(source: Image.Image, strength: float = 1.15) -> Image.Imag
     # Absolute final floor — no pixel may be a true black hole
     normalized_arr = np.maximum(normalized_arr, 8.0)
 
-    return Image.fromarray(normalized_arr.reshape(h, w).astype(np.uint8), mode="L")
+    return Image.fromarray(
+        _reshape_image_channel(normalized_arr, grayscale.size, label="Specular").astype(np.uint8),
+        mode="L",
+    )
 
 
 def generate_msn(
@@ -2679,7 +2696,7 @@ def _save_with_dds_fallback(
     for pixel_format in preferred_pixel_formats:
         try:
             _atomic_save(dds_target, dds_image, format="DDS", pixel_format=pixel_format)
-            return output_path
+            return dds_target
         except Exception:
             continue
     fallback = output_path.with_suffix(".png")
@@ -5688,7 +5705,14 @@ def main() -> int:
     if args.gui or args.input_file is None:
         if not GUI_AVAILABLE:
             raise RuntimeError("GUI dependencies are unavailable in this environment.")
-        TextureGeneratorGUI().run()
+        try:
+            TextureGeneratorGUI().run()
+        except Exception as exc:
+            if tk is not None and isinstance(exc, tk.TclError):
+                raise RuntimeError(
+                    "GUI could not start because no desktop display is available in this environment."
+                ) from exc
+            raise
         return 0
 
     if args.input_file.is_dir():
