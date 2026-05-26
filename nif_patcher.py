@@ -488,10 +488,6 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
     _max_str_len = buf.read_u32()
     strings = [buf.read_sstring_u32() for _ in range(num_strings)]
 
-    num_groups = buf.read_u32()
-    for _ in range(num_groups):
-        buf.read_u32()
-
     return _NifHeader(
         version=version,
         user_version=user_version,

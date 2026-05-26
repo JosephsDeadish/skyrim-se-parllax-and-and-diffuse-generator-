@@ -108,13 +108,11 @@ def _build_minimal_nif(
     block_sizes = struct.pack("<II", len(ts_body), len(sp_body))
     # string table (empty)
     string_table = struct.pack("<II", 0, 0)
-    # groups (0)
-    groups = struct.pack("<I", 0)
 
     header = (
         header_str + version + endian + user_ver + num_blocks
         + user_ver2 + export + num_block_types + btypes
-        + type_indices + block_sizes + string_table + groups
+        + type_indices + block_sizes + string_table
     )
     return header + ts_body + sp_body
 
