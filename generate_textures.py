@@ -401,6 +401,20 @@ _MATERIAL_CATEGORY_TOKENS: dict[str, tuple[str, ...]] = {
     "skin": ("skin", "body", "face", "head", "hand", "flesh", "creature", "humanoid"),
     "snow": ("snow", "ice", "frost", "frozen", "blizzard", "glacial"),
     "sand": ("sand", "dirt", "mud", "earth", "soil", "ground", "terrain", "dust"),
+    "paper": (
+        "paper",
+        "parchment",
+        "scroll",
+        "note",
+        "book",
+        "bookart",
+        "card",
+        "cards",
+        "collectible",
+        "waifu",
+        "bbr",
+        "poster",
+    ),
 }
 
 
@@ -412,9 +426,10 @@ def classify_material_type(path: Path) -> str:
     ``'general'``.
     """
     combined = " ".join(path.parts).lower()
+    words = tuple(token for token in re.split(r"[^a-z0-9]+", combined) if token)
     for category, tokens in _MATERIAL_CATEGORY_TOKENS.items():
         for token in tokens:
-            if token in combined:
+            if any((word == token) or word.startswith(token) for word in words):
                 return category
     return "general"
 
@@ -464,6 +479,55 @@ def _adjust_recommendations_for_material_type(
     elif material_type == "sand":
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 1.05, 0.8, 2.4)
         adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.8, 0.9, 2.4)
+    elif material_type == "paper":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.8, 1.1, 2.2)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.55, 0.8, 1.35)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.45, 0.9, 1.3)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.6, 0.9, 1.3)
+        adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]) * 0.75, 1.0, 1.6)
+        adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]) * 1.1, 160, 235))
+    return adjusted
+
+
+_WORKFLOW_PROFILE_TOKENS: dict[str, tuple[str, ...]] = {
+    "interface": (
+        "interface",
+        "ui",
+        "menu",
+        "menus",
+        "hud",
+        "inventory",
+        "bookart",
+        "card",
+        "cards",
+        "collectible",
+        "waifu",
+        "bbr",
+    ),
+}
+
+
+def detect_workflow_profile(path: Path) -> str | None:
+    combined = " ".join(path.parts).lower()
+    for profile, tokens in _WORKFLOW_PROFILE_TOKENS.items():
+        if any(token in combined for token in tokens):
+            return profile
+    return None
+
+
+def _adjust_recommendations_for_workflow_profile(
+    recommended: dict[str, float | int], workflow_profile: str | None
+) -> dict[str, float | int]:
+    if workflow_profile is None:
+        return recommended
+    adjusted = dict(recommended)
+    if workflow_profile == "interface":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]), 1.1, 1.5)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]), 0.8, 1.0)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]), 0.9, 1.15)
+        adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]), 1.0, 1.35)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]), 0.9, 1.15)
+        adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]), 200.0, 235.0))
     return adjusted
 
 
@@ -576,8 +640,10 @@ def recommend_generation_settings(source: Image.Image, input_path: Path | None =
     }
     detected_role: str | None = None
     material_type = "general"
+    workflow_profile: str | None = None
     if input_path is not None:
         detected_role = identify_skyrim_texture_role(input_path)["role"]
+        workflow_profile = detect_workflow_profile(input_path)
         if detected_role in {None, "diffuse"}:
             material_type = classify_material_type(input_path)
     if detected_role in {None, "diffuse"}:
@@ -586,7 +652,8 @@ def recommend_generation_settings(source: Image.Image, input_path: Path | None =
             detected_role = inferred_from_image
     role_adjusted = _adjust_recommendations_for_role(recommended, detected_role)
     material_adjusted = _adjust_recommendations_for_material_type(role_adjusted, material_type)
-    return _adjust_recommendations_for_role(material_adjusted, detected_role)
+    workflow_adjusted = _adjust_recommendations_for_workflow_profile(material_adjusted, workflow_profile)
+    return _adjust_recommendations_for_role(workflow_adjusted, detected_role)
 
 
 def _resolve_batch_workers(batch_workers: int | None, total: int) -> int:
@@ -1219,6 +1286,7 @@ def get_generation_warnings(
     material_type: str,
     *,
     source_role: str | None = None,
+    source_hint: str | None = None,
     include_diffuse: bool = False,
     include_normal: bool = False,
     include_glow: bool,
@@ -1292,6 +1360,20 @@ def get_generation_warnings(
             "will make them look dull and unrealistic in-game.\n\n"
             "Tip: Use environment mask strength above 1.6 for glass and crystal materials.",
         ))
+    if include_environment_mask and material_type == "paper" and env_mask_strength > 1.2:
+        warnings.append((
+            "high_env_mask_paper",
+            f"High environment mask strength ({env_mask_strength:.2f}) on a paper/card texture.\n\n"
+            "Paper-based textures usually have low reflectivity in Skyrim. High mask strength can create unrealistic glossy highlights.\n\n"
+            "Tip: Keep environment mask strength near 0.9–1.1 for paper/card assets.",
+        ))
+    if include_parallax and material_type == "paper":
+        warnings.append((
+            "parallax_flat_paper",
+            "Parallax enabled for a paper/card texture.\n\n"
+            "Most cards, notes, and book-art surfaces are effectively flat and gain little from parallax.\n\n"
+            "Tip: Disable parallax unless the source has clear embossed depth detail.",
+        ))
 
     resolved_source_role = source_role or "diffuse"
     derived_roles = {
@@ -1345,6 +1427,14 @@ def get_generation_warnings(
             "Input already looks like a complex material map (_msn/_cm).\n\n"
             "Regenerating complex material from packed complex inputs often damages channel meaning.\n\n"
             "Tip: Start from diffuse/albedo source when creating new complex materials.",
+        ))
+    hint_text = (source_hint or "").lower()
+    if "ui/interface texture" in hint_text and (include_parallax or include_environment_mask or include_complex):
+        warnings.append((
+            "ui_texture_advanced_maps",
+            "Input path looks like a UI/interface texture.\n\n"
+            "Parallax, environment mask, and complex material outputs are usually meant for in-world 3D surfaces, not menu/interface assets.\n\n"
+            "Tip: For UI/interface textures, prefer diffuse and only add glow when intentionally needed.",
         ))
 
     return warnings
@@ -2848,6 +2938,7 @@ if GUI_AVAILABLE:
             self,
             material_type: str,
             source_role: str | None,
+            source_hint: str | None,
             include_diffuse: bool,
             include_normal: bool,
             include_glow: bool,
@@ -2861,6 +2952,7 @@ if GUI_AVAILABLE:
             warnings = get_generation_warnings(
                 material_type,
                 source_role=source_role,
+                source_hint=source_hint,
                 include_diffuse=include_diffuse,
                 include_normal=include_normal,
                 include_glow=include_glow,
@@ -2956,10 +3048,13 @@ if GUI_AVAILABLE:
                 output_dir = Path(output_value)
 
             _material_type = classify_material_type(Path(input_value))
-            _source_role = identify_skyrim_texture_role(self.selected_inputs[0])["role"] if self.selected_inputs else None
+            _role_info = identify_skyrim_texture_role(self.selected_inputs[0]) if self.selected_inputs else None
+            _source_role = _role_info["role"] if _role_info is not None else None
+            _source_hint = _role_info["hint"] if _role_info is not None else None
             if not self._check_and_show_generation_warnings(
                 _material_type,
                 source_role=_source_role,
+                source_hint=_source_hint,
                 include_diffuse=include_diffuse,
                 include_normal=include_normal,
                 include_glow=include_glow,

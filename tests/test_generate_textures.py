@@ -16,6 +16,7 @@ from generate_textures import (
     build_environment_mask_output_path,
     classify_material_type,
     collect_source_textures,
+    detect_workflow_profile,
     detect_mod_manager_context,
     enforce_skyrim_output_profile,
     build_glow_output_path,
@@ -272,6 +273,18 @@ class GenerateTexturesTests(unittest.TestCase):
     def test_classify_material_type_returns_general_for_unknown_path(self) -> None:
         self.assertEqual(classify_material_type(Path("textures/misc/unknown.dds")), "general")
 
+    def test_classify_material_type_returns_paper_for_cards_path(self) -> None:
+        self.assertEqual(
+            classify_material_type(Path("textures/interface/cards/collectible_waifu_card_01.dds")),
+            "paper",
+        )
+
+    def test_detect_workflow_profile_detects_interface_paths(self) -> None:
+        self.assertEqual(
+            detect_workflow_profile(Path("textures/interface/cards/deck01.dds")),
+            "interface",
+        )
+
     def test_get_generation_warnings_glow_on_stone_triggers_warning(self) -> None:
         warnings = get_generation_warnings(
             "stone",
@@ -365,6 +378,29 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         ids = [w[0] for w in warnings]
         self.assertIn("normal_from_normal_source", ids)
+
+    def test_get_generation_warnings_ui_hint_flags_advanced_maps(self) -> None:
+        warnings = get_generation_warnings(
+            "general",
+            source_hint="UI/interface texture (not for in-world use)",
+            include_glow=False,
+            include_environment_mask=True,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("ui_texture_advanced_maps", ids)
+
+    def test_recommend_generation_settings_clamps_interface_workflow_strengths(self) -> None:
+        settings = recommend_generation_settings(
+            _detailed_bright_image(),
+            input_path=Path("textures/interface/cards/collectible_waifu_card_01.dds"),
+        )
+        self.assertLessEqual(float(settings["parallax_strength"]), 1.0)
+        self.assertLessEqual(float(settings["environment_mask_strength"]), 1.15)
+        self.assertLessEqual(float(settings["specular_strength"]), 1.15)
 
     def test_generate_complex_material_slider_produces_visible_change(self) -> None:
         source = _large_high_detail_image()

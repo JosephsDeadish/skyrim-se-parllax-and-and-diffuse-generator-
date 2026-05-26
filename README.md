@@ -53,6 +53,7 @@ This opens a desktop interface where you can:
 - get adaptive recommended defaults based on richer image-content analysis
 - use a clearly labeled **Automatic suggestions (analyze image and set sliders)** toggle to turn auto slider updates on/off
 - use **Auto** checkboxes beside each slider to choose exactly which sliders receive automatic suggestions
+- apply extra-safe recommendation clamping for UI/interface/card-style paths (for example collectibles/book art) to avoid over-shiny/parallax-heavy outputs
 - batch-process folder inputs in the background so the UI stays responsive on larger files or larger sets
 - load oversized preview sources with automatic downscaling to keep the GUI responsive when opening very large textures
 - switch preview source images in folder mode, with automatic preview switching to the current file while batch processing
@@ -110,6 +111,7 @@ Generated outputs default to `.dds` filenames regardless of the input format. Mo
   - **Standard** (default) — greyscale `L`-mode texture. Texture Slot 5 in the NIF. Controls per-pixel environment/specular reflection intensity (brighter = more reflection). Requires `SLSF1_Environment_Mapping` shader flag. Works with vanilla Skyrim SE — **no ENBSeries required**. Typically stored as DXT1.
   - **Complex** (select in GUI or via `--environment-mask-mode complex`) — RGBA channel-packed for ENBSeries Complex Parallax Material workflows: R=env amount, G=glossiness, B=metallic proxy, A=parallax height. **ENBSeries required** with complex material support enabled.
 - For large/high-detail sources (2K/4K/8K), generation applies adaptive detail dampening to reduce over-sharpened normals/parallax and complex-material sparkle artifacts. Analysis and auto-recommendation calculations are automatically performed on a downscaled copy so large textures are processed faster without sacrificing output quality.
+- Generation warnings now include extra guardrails for UI/interface texture paths and paper/card-like assets when map combinations are likely to look incorrect in-game.
 - Specular generation uses numpy float32 arithmetic with percentile-based range normalisation so true-black hole artefacts cannot be introduced by integer rounding, regardless of texture size or content.
 - `_msn` output stores normal RGB with specular in alpha; `_cm` stores packed complex-material channels (R=ambient occlusion proxy, G=roughness proxy, B=metallic proxy, A=height/specular proxy).
 
