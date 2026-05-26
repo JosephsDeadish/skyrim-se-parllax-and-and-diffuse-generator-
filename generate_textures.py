@@ -5000,6 +5000,9 @@ if GUI_AVAILABLE:
                 btn_frame.pack(fill="x", padx=10, pady=(4, 2))
                 status_var = tk.StringVar(value="Ready. Pick a NIF file/folder, then Scan or Patch.")
                 ttk.Label(win, textvariable=status_var, wraplength=860).pack(fill="x", padx=10, pady=(0, 4))
+                progress_var = tk.DoubleVar(value=0.0)
+                progress_bar = ttk.Progressbar(win, orient="horizontal", mode="determinate", variable=progress_var, maximum=100)
+                progress_bar.pack(fill="x", padx=10, pady=(0, 6))
 
                 res_frame = ttk.LabelFrame(win, text="Results (select a row to copy details)", padding=6)
                 res_frame.pack(fill="both", expand=True, padx=10, pady=(0, 8))
@@ -5038,6 +5041,7 @@ if GUI_AVAILABLE:
                         results_tree.delete(item)
                     selected_detail_var.set("")
                     status_var.set("Results cleared.")
+                    progress_var.set(0.0)
 
                 def _on_result_selected(_event: object | None = None) -> None:
                     selected = results_tree.selection()
@@ -5093,23 +5097,30 @@ if GUI_AVAILABLE:
                         _add_result_row("WARN", "—", "No NIF files found.")
                         return
                     status_var.set(f"Scanning {len(nifs)} NIF file(s)…")
+                    progress_bar.configure(maximum=max(1, min(len(nifs), 50)))
+                    progress_var.set(0.0)
                     win.update_idletasks()
-                    for nif in nifs[:50]:
-                        validation = validate_nif_for_parallax(nif)
-                        if validation.ready_count == validation.shader_count and validation.shader_count > 0:
-                            _add_result_row(
-                                "OK",
-                                nif.name,
-                                f"{validation.ready_count}/{validation.shader_count} shader(s) already parallax-ready",
-                            )
-                        elif validation.shader_count == 0:
-                            _add_result_row("SKIP", nif.name, "No BSLightingShaderProperty found.")
-                        else:
-                            _add_result_row(
-                                "WARN",
-                                nif.name,
-                                f"{validation.ready_count}/{validation.shader_count} ready; {'; '.join(validation.issues[:2])}",
-                            )
+                    for index, nif in enumerate(nifs[:50], start=1):
+                        try:
+                            validation = validate_nif_for_parallax(nif)
+                            if validation.ready_count == validation.shader_count and validation.shader_count > 0:
+                                _add_result_row(
+                                    "OK",
+                                    nif.name,
+                                    f"{validation.ready_count}/{validation.shader_count} shader(s) already parallax-ready",
+                                )
+                            elif validation.shader_count == 0:
+                                _add_result_row("SKIP", nif.name, "No BSLightingShaderProperty found.")
+                            else:
+                                _add_result_row(
+                                    "WARN",
+                                    nif.name,
+                                    f"{validation.ready_count}/{validation.shader_count} ready; {'; '.join(validation.issues[:2])}",
+                                )
+                        except Exception as exc:
+                            _add_result_row("FAIL", nif.name, f"Scan failed: {exc}")
+                        progress_var.set(float(index))
+                        win.update_idletasks()
                     if len(nifs) > 50:
                         _add_result_row("SKIP", "—", f"{len(nifs) - 50} more files not shown (first 50 displayed).")
                     status_var.set(f"Scan complete: {min(len(nifs), 50)} shown of {len(nifs)} file(s).")
@@ -5134,21 +5145,29 @@ if GUI_AVAILABLE:
                     )
                     mode_label = "dry-run patching" if options.dry_run else "patching"
                     status_var.set(f"Starting {mode_label} for {len(nifs)} NIF file(s)…")
+                    progress_bar.configure(maximum=max(1, len(nifs)))
+                    progress_var.set(0.0)
                     win.update_idletasks()
                     ok = skip = fail = 0
-                    for nif in nifs:
-                        result = patch_nif(nif, options)
-                        if result.already_up_to_date:
-                            skip += 1
-                            _add_result_row("SKIP", nif.name, "Already up-to-date.")
-                        elif result.success:
-                            ok += 1
-                            _add_result_row("OK", nif.name, result.message)
-                        else:
+                    for index, nif in enumerate(nifs, start=1):
+                        try:
+                            result = patch_nif(nif, options)
+                            if result.already_up_to_date:
+                                skip += 1
+                                _add_result_row("SKIP", nif.name, "Already up-to-date.")
+                            elif result.success:
+                                ok += 1
+                                _add_result_row("OK", nif.name, result.message)
+                            else:
+                                fail += 1
+                                _add_result_row("FAIL", nif.name, result.message)
+                                for err in result.errors:
+                                    _add_result_row("FAIL", nif.name, err)
+                        except Exception as exc:
                             fail += 1
-                            _add_result_row("FAIL", nif.name, result.message)
-                            for err in result.errors:
-                                _add_result_row("FAIL", nif.name, err)
+                            _add_result_row("FAIL", nif.name, f"Patch failed: {exc}")
+                        progress_var.set(float(index))
+                        win.update_idletasks()
                     status_var.set(f"Done — {ok} patched, {skip} skipped, {fail} failed.")
 
                 scan_button = ttk.Button(btn_frame, text="Scan NIFs", command=_scan_nifs)
