@@ -1571,7 +1571,8 @@ def build_complex_preview_image(image: Image.Image, *, complex_format: str = "ms
 
     For ``msn`` format, RGB is the normal map and alpha is specular. Most image viewers
     hide alpha, so MSN can appear identical to the normal map. This helper creates a
-    side-by-side preview: normal RGB (left) and specular alpha visualisation (right).
+    side-by-side preview with labels: normal RGB (left) and specular alpha visualisation
+    (right).
     """
     if complex_format.strip().lower() != "msn":
         return image
@@ -1586,6 +1587,14 @@ def build_complex_preview_image(image: Image.Image, *, complex_format: str = "ms
     preview.paste(normal_rgb, (0, 0))
     preview.paste(separator, (msn.width, 0))
     preview.paste(alpha_preview, (msn.width + separator.width, 0))
+    if msn.height >= 14:
+        draw = ImageDraw.Draw(preview)
+        label_top = 1
+        label_bottom = min(msn.height - 1, 13)
+        draw.rectangle((0, label_top, msn.width - 1, label_bottom), fill=(16, 16, 20))
+        draw.rectangle((msn.width + separator.width, label_top, preview.width - 1, label_bottom), fill=(16, 16, 20))
+        draw.text((3, label_top + 1), "RGB normal", fill=(235, 235, 245))
+        draw.text((msn.width + separator.width + 3, label_top + 1), "A specular", fill=(235, 235, 245))
     return preview
 
 
@@ -3073,13 +3082,25 @@ if GUI_AVAILABLE:
             self.revert_button = ttk.Button(actions, text="Revert Process", command=self._revert_last_generation, state=tk.DISABLED)
             self.revert_button.pack(side=tk.LEFT, padx=(6, 0))
             self._add_tooltip(self.revert_button, "↩ Restore files from the most recent generation run.\nDisabled until a generation run has something to undo.")
-            ttk.Label(actions, textvariable=self.status_var).pack(side=tk.LEFT, padx=14)
+            _status_label = ttk.Label(actions, textvariable=self.status_var)
+            _status_label.pack(side=tk.LEFT, padx=14)
+            self._add_tooltip(
+                _status_label,
+                "📢 Live status feed.\n"
+                "If something explodes, this line tells you what and where before panic mode fully activates.",
+            )
 
             preview_frame = ttk.LabelFrame(wrapper, text="Preview (Source vs Generated)", padding=10)
             preview_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-            ttk.Label(preview_frame, text="Before (source texture)", anchor=tk.CENTER, justify=tk.CENTER).grid(
+            _before_title = ttk.Label(preview_frame, text="Before (source texture)", anchor=tk.CENTER, justify=tk.CENTER)
+            _before_title.grid(
                 row=0, column=0, columnspan=2, padx=6, pady=(2, 3), sticky=""
+            )
+            self._add_tooltip(
+                _before_title,
+                "🧾 Source preview header.\n"
+                "This is your control sample — the 'before' shot before sliders and wizardry get involved.",
             )
             self.before_image_label = ttk.Label(preview_frame, text="No source loaded", anchor=tk.CENTER, justify=tk.CENTER)
             self.before_image_label.grid(row=2, column=0, columnspan=2, padx=6, pady=(0, 3), sticky="")
@@ -3098,7 +3119,13 @@ if GUI_AVAILABLE:
                 "⏮ Show the previous source file in folder mode.\n"
                 "Perfect for side-eyeing what your last texture looked like before your artistic decisions escalated.",
             )
-            ttk.Label(source_controls, textvariable=self.preview_source_name_var).pack(side=tk.LEFT, padx=8)
+            _source_name_label = ttk.Label(source_controls, textvariable=self.preview_source_name_var)
+            _source_name_label.pack(side=tk.LEFT, padx=8)
+            self._add_tooltip(
+                _source_name_label,
+                "🏷 Shows which source file you're previewing right now.\n"
+                "In folder mode it's index/total, so you can keep your sanity during big batches.",
+            )
             self.next_source_button = ttk.Button(source_controls, text="Next ▶", command=self._show_next_preview_source)
             self.next_source_button.pack(side=tk.LEFT, padx=4)
             self._add_tooltip(
@@ -3163,8 +3190,14 @@ if GUI_AVAILABLE:
                 "Default is OFF for speed; enable only when you want to watch the magic happen.",
             )
 
-            ttk.Label(preview_frame, text="Generated outputs (after processing)").grid(
+            _generated_title = ttk.Label(preview_frame, text="Generated outputs (after processing)")
+            _generated_title.grid(
                 row=3, column=0, columnspan=2, padx=6, pady=(2, 2), sticky=""
+            )
+            self._add_tooltip(
+                _generated_title,
+                "🧪 These are previews of what will be written to disk.\n"
+                "If one pane looks cursed, fix settings now instead of discovering it in-game three load screens later.",
             )
             self.preview_output_labels: dict[str, ttk.Label] = {}
             output_grid = ttk.Frame(preview_frame)
@@ -3183,7 +3216,7 @@ if GUI_AVAILABLE:
                 "parallax": "🏔 Height/parallax preview.\nDarker = lower, lighter = higher. Think of it as tiny grayscale topography for your texture.",
                 "glow": "✨ Emissive/glow preview.\nBright pixels glow in darkness; dark pixels mind their own business like respectable citizens.",
                 "environment_mask": "🪞 Reflection mask preview.\nBrighter = shinier, darker = matte. Basically a \"where may I sparkle\" permit.",
-                "complex_material": "🔮 ENB complex-material preview.\nUseful only with ENB complex features enabled, otherwise it's a very mysterious abstract painting.",
+                "complex_material": "🔮 Complex-material preview.\nFor MSN format this pane is split: LEFT = RGB normal channels, RIGHT = alpha/specular channel.\nFor CM format it shows the packed texture directly. Not a bug — just advanced wizard math.",
             }
             for index, (output_key, output_label) in enumerate(output_specs):
                 row = (index // 2) * 2
