@@ -3101,7 +3101,7 @@ if GUI_AVAILABLE:
                                 lines.append(f"- {filename}: {error_message}")
                             if total_failed > 5:
                                 lines.append(f"...and {total_failed - 5} more.")
-                    messagebox.showinfo("Generation complete", "\n".join(lines))
+                    messagebox.showinfo("Generation complete", "\n".join(lines), parent=self.root)
                     self._refresh_preview()
                     keep_polling = False
                 elif event_type == "cancelled":
@@ -3115,11 +3115,12 @@ if GUI_AVAILABLE:
                     messagebox.showinfo(
                         "Generation cancelled",
                         "Processing was cancelled.\nUse Revert Process to undo files from this run if needed.",
+                        parent=self.root,
                     )
                     keep_polling = False
                 elif event_type == "error":
                     self._set_processing_state(False)
-                    messagebox.showerror("Generation failed", str(payload))
+                    messagebox.showerror("Generation failed", str(payload), parent=self.root)
                     keep_polling = False
 
             if keep_polling and self.is_processing:
@@ -3463,6 +3464,12 @@ if GUI_AVAILABLE:
                     messagebox.showwarning("Missing input", "Please choose an input DDS texture first.", parent=self.root)
                     return
                 if self.is_processing:
+                    self.status_var.set("Generation already running. Please wait for the current batch to finish.")
+                    messagebox.showwarning(
+                        "Generation already running",
+                        "A generation task is already in progress. Please wait for it to finish or cancel it first.",
+                        parent=self.root,
+                    )
                     return
 
                 include_diffuse = self.include_diffuse_var.get()
