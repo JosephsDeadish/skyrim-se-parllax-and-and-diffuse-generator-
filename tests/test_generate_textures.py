@@ -48,6 +48,7 @@ from generate_textures import (
     run_batch_with_options,
     run_with_options,
     save_gui_state,
+    should_apply_preview_recommendations,
     select_generation_context_source,
     get_output_folder_format_warnings,
 )
@@ -515,6 +516,24 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(compute_wrapped_preview_index(-1, 3), 2)
         self.assertEqual(compute_wrapped_preview_index(3, 3), 0)
         self.assertEqual(compute_wrapped_preview_index(1, 3), 1)
+
+    def test_should_apply_preview_recommendations_disabled_when_processing(self) -> None:
+        self.assertFalse(should_apply_preview_recommendations(
+            auto_suggestions_enabled=True,
+            is_processing=True,
+        ))
+
+    def test_should_apply_preview_recommendations_enabled_when_idle_and_auto_on(self) -> None:
+        self.assertTrue(should_apply_preview_recommendations(
+            auto_suggestions_enabled=True,
+            is_processing=False,
+        ))
+
+    def test_should_apply_preview_recommendations_disabled_when_auto_off(self) -> None:
+        self.assertFalse(should_apply_preview_recommendations(
+            auto_suggestions_enabled=False,
+            is_processing=False,
+        ))
 
     def test_get_generation_warnings_glow_on_stone_triggers_warning(self) -> None:
         warnings = get_generation_warnings(

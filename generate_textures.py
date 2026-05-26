@@ -132,6 +132,15 @@ def parse_preview_jump_input(value: str, total: int) -> int | None:
     return requested - 1
 
 
+def should_apply_preview_recommendations(*, auto_suggestions_enabled: bool, is_processing: bool) -> bool:
+    """Return whether preview navigation should auto-apply recommendations.
+
+    During active generation/batch processing, preview updates should not mutate
+    user-controlled toggles (for example emboss/relief) while files are running.
+    """
+    return auto_suggestions_enabled and not is_processing
+
+
 def _compute_tooltip_position(
     *,
     pointer_x: int,
@@ -4015,7 +4024,13 @@ if GUI_AVAILABLE:
         def _set_preview_source_by_path(self, path: Path) -> None:
             for index, selected in enumerate(self.selected_inputs):
                 if selected == path:
-                    self._set_preview_source(index, apply_recommendations=self.auto_suggestions_var.get())
+                    self._set_preview_source(
+                        index,
+                        apply_recommendations=should_apply_preview_recommendations(
+                            auto_suggestions_enabled=self.auto_suggestions_var.get(),
+                            is_processing=self.is_processing,
+                        ),
+                    )
                     self._request_preview_refresh()
                     return
 
