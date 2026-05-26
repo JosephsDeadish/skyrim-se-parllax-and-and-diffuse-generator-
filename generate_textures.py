@@ -99,6 +99,14 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, str | bo
         state["auto_environment_mask"] = False
         state["auto_complex"] = False
         state["auto_specular"] = False
+    input_path = str(state["input_path"]).strip()
+    output_path = str(state["output_path"]).strip()
+    if input_path and not Path(input_path).exists():
+        input_path = ""
+    if bool(state["use_custom_output"]) and not output_path:
+        state["use_custom_output"] = False
+    state["input_path"] = input_path
+    state["output_path"] = output_path
     return state
 
 
@@ -2776,6 +2784,7 @@ if GUI_AVAILABLE:
                 return
             saved_input_path = Path(saved_input)
             if not saved_input_path.exists():
+                self.input_var.set("")
                 self.status_var.set(f"Saved input path not found: {saved_input_path}")
                 return
             self._load_input_selection(saved_input_path, show_error=False)
@@ -3448,108 +3457,117 @@ if GUI_AVAILABLE:
             return True
 
         def _generate(self) -> None:
-            input_value = self.input_var.get().strip()
-            if not input_value:
-                messagebox.showwarning("Missing input", "Please choose an input DDS texture first.")
-                return
-            if self.is_processing:
-                return
-
-            include_diffuse = self.include_diffuse_var.get()
-            include_normal = self.include_normal_var.get()
-            include_parallax = self.include_parallax_var.get()
-            include_glow = self.include_glow_var.get()
-            include_environment_mask = self.include_environment_mask_var.get()
-            include_complex = self.include_complex_var.get()
-            if not any((include_diffuse, include_normal, include_parallax, include_glow, include_environment_mask, include_complex)):
-                messagebox.showwarning("No outputs selected", "Select at least one output type.")
-                return
-
             try:
+                input_value = self.input_var.get().strip()
+                if not input_value:
+                    messagebox.showwarning("Missing input", "Please choose an input DDS texture first.", parent=self.root)
+                    return
+                if self.is_processing:
+                    return
+
+                include_diffuse = self.include_diffuse_var.get()
+                include_normal = self.include_normal_var.get()
+                include_parallax = self.include_parallax_var.get()
+                include_glow = self.include_glow_var.get()
+                include_environment_mask = self.include_environment_mask_var.get()
+                include_complex = self.include_complex_var.get()
+                if not any((include_diffuse, include_normal, include_parallax, include_glow, include_environment_mask, include_complex)):
+                    messagebox.showwarning("No outputs selected", "Select at least one output type.", parent=self.root)
+                    return
+
                 input_path = Path(input_value)
                 self.selected_inputs = collect_source_textures(input_path)
-            except Exception as exc:
-                messagebox.showerror("Generation failed", str(exc))
-                return
-
-            output_dir: Path | None = None
-            if self.use_custom_output_var.get():
-                output_value = self.output_var.get().strip()
-                if not output_value:
-                    messagebox.showwarning("Missing output folder", "Choose an output folder or disable custom output location.")
+                if not self.selected_inputs:
+                    self.status_var.set("No source textures found to process.")
+                    messagebox.showwarning("No source textures found", "No valid source textures were found for the selected input.", parent=self.root)
                     return
-                output_dir = Path(output_value)
 
-            _context_source = select_generation_context_source(Path(input_value), self.selected_inputs)
-            _material_type = classify_material_type(_context_source)
-            _role_info = identify_skyrim_texture_role(_context_source)
-            _source_role = _role_info["role"] if _role_info is not None else None
-            _source_hint = _role_info["hint"] if _role_info is not None else None
-            if not self._check_and_show_generation_warnings(
-                _material_type,
-                source_role=_source_role,
-                source_hint=_source_hint,
-                include_diffuse=include_diffuse,
-                include_normal=include_normal,
-                include_glow=include_glow,
-                include_environment_mask=include_environment_mask,
-                env_mask_mode=self.env_mask_mode_var.get(),
-                env_mask_strength=float(self.environment_mask_strength_var.get()),
-                include_parallax=include_parallax,
-                include_complex=include_complex,
-            ):
-                return
+                output_dir: Path | None = None
+                if self.use_custom_output_var.get():
+                    output_value = self.output_var.get().strip()
+                    if not output_value:
+                        messagebox.showwarning(
+                            "Missing output folder",
+                            "Choose an output folder or disable custom output location.",
+                            parent=self.root,
+                        )
+                        return
+                    output_dir = Path(output_value)
 
-            _pm_raw = self.parallax_mode_var.get()
-            _parallax_mode_key = "occlusion" if "occlusion" in _pm_raw else "standard"
-            generation_kwargs = {
-                "output_dir": output_dir,
-                "normal_strength": self._resolve_generation_value(
-                    self.normal_strength_var.get(), self.auto_normal_suggestion_var
-                ),
-                "parallax_strength": self._resolve_generation_value(
-                    self.parallax_strength_var.get(), self.auto_parallax_suggestion_var
-                ),
-                "glow_threshold": self._resolve_generation_value(
-                    self.glow_threshold_var.get(), self.auto_glow_suggestion_var
-                ),
-                "environment_mask_strength": self._resolve_generation_value(
-                    self.environment_mask_strength_var.get(), self.auto_environment_mask_suggestion_var
-                ),
-                "complex_strength": self._resolve_generation_value(
-                    self.complex_strength_var.get(), self.auto_complex_suggestion_var
-                ),
-                "specular_strength": self._resolve_generation_value(
-                    self.specular_strength_var.get(), self.auto_specular_suggestion_var
-                ),
-                "complex_format": self.complex_format_var.get(),
-                "env_mask_mode": self.env_mask_mode_var.get(),
-                "emboss_mode": self.emboss_mode_var.get(),
-                "parallax_mode": _parallax_mode_key,
-                "include_diffuse": include_diffuse,
-                "include_normal": include_normal,
-                "include_parallax": include_parallax,
-                "include_glow": include_glow,
-                "include_environment_mask": include_environment_mask,
-                "include_complex": include_complex,
-            }
-            self.batch_failures = []
-            self.cancel_requested = False
-            self._prepare_generation_snapshot(self.selected_inputs, generation_kwargs)
-            self._set_processing_state(True)
-            if self.show_batch_preview_var.get():
-                self.status_var.set(
-                    f"Queued {len(self.selected_inputs)} source texture(s). Live batch preview is ON and may slow processing."
+                _context_source = select_generation_context_source(Path(input_value), self.selected_inputs)
+                _material_type = classify_material_type(_context_source)
+                _role_info = identify_skyrim_texture_role(_context_source)
+                _source_role = _role_info["role"] if _role_info is not None else None
+                _source_hint = _role_info["hint"] if _role_info is not None else None
+                if not self._check_and_show_generation_warnings(
+                    _material_type,
+                    source_role=_source_role,
+                    source_hint=_source_hint,
+                    include_diffuse=include_diffuse,
+                    include_normal=include_normal,
+                    include_glow=include_glow,
+                    include_environment_mask=include_environment_mask,
+                    env_mask_mode=self.env_mask_mode_var.get(),
+                    env_mask_strength=float(self.environment_mask_strength_var.get()),
+                    include_parallax=include_parallax,
+                    include_complex=include_complex,
+                ):
+                    return
+
+                _pm_raw = self.parallax_mode_var.get()
+                _parallax_mode_key = "occlusion" if "occlusion" in _pm_raw else "standard"
+                generation_kwargs = {
+                    "output_dir": output_dir,
+                    "normal_strength": self._resolve_generation_value(
+                        self.normal_strength_var.get(), self.auto_normal_suggestion_var
+                    ),
+                    "parallax_strength": self._resolve_generation_value(
+                        self.parallax_strength_var.get(), self.auto_parallax_suggestion_var
+                    ),
+                    "glow_threshold": self._resolve_generation_value(
+                        self.glow_threshold_var.get(), self.auto_glow_suggestion_var
+                    ),
+                    "environment_mask_strength": self._resolve_generation_value(
+                        self.environment_mask_strength_var.get(), self.auto_environment_mask_suggestion_var
+                    ),
+                    "complex_strength": self._resolve_generation_value(
+                        self.complex_strength_var.get(), self.auto_complex_suggestion_var
+                    ),
+                    "specular_strength": self._resolve_generation_value(
+                        self.specular_strength_var.get(), self.auto_specular_suggestion_var
+                    ),
+                    "complex_format": self.complex_format_var.get(),
+                    "env_mask_mode": self.env_mask_mode_var.get(),
+                    "emboss_mode": self.emboss_mode_var.get(),
+                    "parallax_mode": _parallax_mode_key,
+                    "include_diffuse": include_diffuse,
+                    "include_normal": include_normal,
+                    "include_parallax": include_parallax,
+                    "include_glow": include_glow,
+                    "include_environment_mask": include_environment_mask,
+                    "include_complex": include_complex,
+                }
+                self.batch_failures = []
+                self.cancel_requested = False
+                self._prepare_generation_snapshot(self.selected_inputs, generation_kwargs)
+                self._set_processing_state(True)
+                if self.show_batch_preview_var.get():
+                    self.status_var.set(
+                        f"Queued {len(self.selected_inputs)} source texture(s). Live batch preview is ON and may slow processing."
+                    )
+                else:
+                    self.status_var.set(f"Queued {len(self.selected_inputs)} source texture(s) for processing...")
+                self.processing_thread = threading.Thread(
+                    target=self._process_generation_batch,
+                    args=(self.selected_inputs.copy(), generation_kwargs),
+                    daemon=True,
                 )
-            else:
-                self.status_var.set(f"Queued {len(self.selected_inputs)} source texture(s) for processing...")
-            self.processing_thread = threading.Thread(
-                target=self._process_generation_batch,
-                args=(self.selected_inputs.copy(), generation_kwargs),
-                daemon=True,
-            )
-            self.processing_thread.start()
-            self.root.after(100, self._poll_processing_queue)
+                self.processing_thread.start()
+                self.root.after(100, self._poll_processing_queue)
+            except Exception as exc:
+                self._set_processing_state(False)
+                self.status_var.set(f"Generation failed before start: {exc}")
+                messagebox.showerror("Generation failed", str(exc), parent=self.root)
 
         def _cancel_processing(self) -> None:
             if not self.is_processing:

@@ -149,6 +149,14 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(bool(normalized["auto_complex"]))
         self.assertFalse(bool(normalized["auto_specular"]))
 
+    def test_normalize_gui_state_clears_missing_input_path(self) -> None:
+        normalized = _normalize_gui_state({"input_path": "/definitely/not/a/real/path.dds"})
+        self.assertEqual(normalized["input_path"], "")
+
+    def test_normalize_gui_state_disables_custom_output_without_output_path(self) -> None:
+        normalized = _normalize_gui_state({"use_custom_output": True, "output_path": ""})
+        self.assertFalse(bool(normalized["use_custom_output"]))
+
     def test_load_gui_state_defaults_when_file_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             state = load_gui_state(Path(temp_dir) / "missing-state.json")
@@ -159,10 +167,12 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_save_gui_state_round_trips_expected_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
+            input_file = Path(temp_dir) / "in.dds"
+            input_file.write_bytes(b"fake")
             state_file = Path(temp_dir) / "gui-state.json"
             save_gui_state(
                 {
-                    "input_path": "/tmp/in.dds",
+                    "input_path": str(input_file),
                     "output_path": "/tmp/out",
                     "use_custom_output": True,
                     "dark_mode": True,
@@ -177,7 +187,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 state_file,
             )
             loaded = load_gui_state(state_file)
-        self.assertEqual(loaded["input_path"], "/tmp/in.dds")
+        self.assertEqual(loaded["input_path"], str(input_file))
         self.assertEqual(loaded["output_path"], "/tmp/out")
         self.assertTrue(bool(loaded["use_custom_output"]))
         self.assertTrue(bool(loaded["dark_mode"]))
