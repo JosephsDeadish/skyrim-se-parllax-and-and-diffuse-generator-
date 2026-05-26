@@ -813,9 +813,18 @@ _RENDER_PROFILE_LABELS: dict[str, str] = {
 }
 
 _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
-    "vanilla": "Files: diffuse + normal. Add _p only for meshes patched for parallax; add _m for reflective materials; add _g only for emissive assets.",
-    "community_shaders": "Files: diffuse + normal + _p. Add _cm for Community Shaders packed-material/PBR workflows; add _g only for emissive assets.",
-    "enb": "Files: diffuse + normal + _p. Add _msn for ENB complex-material workflows; use complex _m for ENB reflections/material masks; add _g only for emissive assets.",
+    "vanilla": (
+        "Files: diffuse + normal. Add _p only for meshes patched for parallax; "
+        "add standard _m for reflective materials; add _g only for emissive assets."
+    ),
+    "community_shaders": (
+        "Files: diffuse + normal + _p. Add _cm for Community Shaders packed-material/PBR workflows; "
+        "use standard _m only when your shader setup expects a separate reflection mask; add _g only for emissive assets."
+    ),
+    "enb": (
+        "Files: diffuse + _p + _msn (RGB normal + alpha specular/height proxy). "
+        "Use complex _m only for ENB workflows that explicitly expect it; add _g only for emissive assets."
+    ),
 }
 
 _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
@@ -2380,6 +2389,8 @@ def get_generation_warnings(
     so they can be stored in a ``dismissed_warnings`` set.
     """
     warnings: list[tuple[str, str]] = []
+    normalized_complex_format = complex_format.strip().lower()
+    is_enb_complex_combo = include_complex and normalized_complex_format == "msn" and env_mask_mode == "complex"
 
     organic_types = {"plants", "cloth", "skin"}
 
@@ -2533,22 +2544,29 @@ def get_generation_warnings(
             "Tip: Enable 'Normal map' output to use depth mode, or disable the depth mode toggle.",
         ))
 
-    if include_environment_mask and include_complex:
+    if include_environment_mask and include_complex and not is_enb_complex_combo:
         warnings.append((
             "env_mask_with_complex_material",
             "Both 'Environment mask' and 'Complex material' outputs are enabled.\n\n"
-            "Complex material maps already encode specular/reflectivity information in their channels. "
-            "Generating a separate environment mask alongside a complex material map is usually redundant "
-            "and may cause double-specular artefacts with ENB.\n\n"
-            "Tip: Use either the environment mask OR the complex material — not both — unless you know your shader expects both.",
+            "This combination is often redundant outside ENB complex-material workflows and can produce double-specular artefacts.\n\n"
+            "Tip: For ENB complex workflows use _msn + complex env mode; for Community Shaders use _cm with standard env mode "
+            "only when your shader setup explicitly expects a separate env mask.",
         ))
 
-    if include_complex and include_normal and complex_format.strip().lower() == "msn":
+    if include_complex and normalized_complex_format == "cm" and env_mask_mode == "complex":
         warnings.append((
-            "msn_matches_normal_rgb",
-            "Complex material format is set to 'msn' while normal output is also enabled.\n\n"
-            "This is expected: _msn stores the normal map in RGB and specular in alpha, so the RGB view can look almost identical to _n.\n\n"
-            "Tip: This is not a generation bug. To get a visibly different packed complex texture, switch Complex naming to 'cm'.",
+            "cm_with_complex_env_mode",
+            "Complex material format is set to '_cm' while environment mask mode is set to 'complex'.\n\n"
+            "_cm is the Community Shaders-style packed map, while complex env mode is aimed at ENB complex-material workflows.\n\n"
+            "Tip: Switch env mask mode to 'standard' for _cm, or switch complex format to '_msn' for ENB-style complex workflows.",
+        ))
+
+    if include_complex and normalized_complex_format == "msn" and env_mask_mode == "standard":
+        warnings.append((
+            "msn_with_standard_env_mode",
+            "Complex material format is set to '_msn' but environment mask mode is 'standard'.\n\n"
+            "_msn is typically used in ENB complex-material setups, which usually pair with complex env mode.\n\n"
+            "Tip: If targeting ENB complex workflows, switch env mask mode to 'complex'.",
         ))
 
     return warnings
@@ -5477,11 +5495,6 @@ if GUI_AVAILABLE:
                     selected_detail_var.set(summary)
                     _set_detail_text(summary)
 
-                results_tree.bind("<<TreeviewSelect>>", _on_result_selected)
-                results_tree.bind("<Button-3>", _show_tree_context_menu)
-                detail_entry.bind("<Button-3>", lambda event: _show_text_context_menu(event, detail_entry))
-                detail_text.bind("<Button-3>", lambda event: _show_text_context_menu(event, detail_text))
-
                 def _copy_selected_result() -> None:
                     text = detail_text.get("1.0", "end").strip() or selected_detail_var.get().strip()
                     if not text:
@@ -5533,6 +5546,11 @@ if GUI_AVAILABLE:
                     text_menu = tk.Menu(win, tearoff=False)
                     text_menu.add_command(label="Copy text", command=lambda: _copy_widget_selection(widget))
                     text_menu.tk_popup(event.x_root, event.y_root)
+
+                results_tree.bind("<<TreeviewSelect>>", _on_result_selected)
+                results_tree.bind("<Button-3>", _show_tree_context_menu)
+                detail_entry.bind("<Button-3>", lambda event: _show_text_context_menu(event, detail_entry))
+                detail_text.bind("<Button-3>", lambda event: _show_text_context_menu(event, detail_text))
 
                 def _resolve_nifs() -> list[Path]:
                     path_value = nif_path_var.get().strip()

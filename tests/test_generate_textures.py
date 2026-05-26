@@ -2213,9 +2213,24 @@ class ParallaxOcclusionTests(unittest.TestCase):
             env_mask_mode="standard",
             env_mask_strength=1.2,
             include_parallax=False,
+            complex_format="cm",
         )
         ids = [w[0] for w in warnings]
         self.assertIn("env_mask_with_complex_material", ids)
+
+    def test_env_mask_with_enb_complex_combo_does_not_trigger_conflict_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_environment_mask=True,
+            include_complex=True,
+            include_glow=False,
+            env_mask_mode="complex",
+            env_mask_strength=1.2,
+            include_parallax=False,
+            complex_format="msn",
+        )
+        ids = [w[0] for w in warnings]
+        self.assertNotIn("env_mask_with_complex_material", ids)
 
     def test_env_mask_alone_no_complex_conflict_warning(self) -> None:
         warnings = get_generation_warnings(
@@ -2230,7 +2245,7 @@ class ParallaxOcclusionTests(unittest.TestCase):
         ids = [w[0] for w in warnings]
         self.assertNotIn("env_mask_with_complex_material", ids)
 
-    def test_msn_with_normal_enabled_triggers_explanatory_warning(self) -> None:
+    def test_msn_with_standard_env_mode_triggers_renderer_mismatch_warning(self) -> None:
         warnings = get_generation_warnings(
             "stone",
             include_normal=True,
@@ -2243,7 +2258,7 @@ class ParallaxOcclusionTests(unittest.TestCase):
             complex_format="msn",
         )
         ids = [w[0] for w in warnings]
-        self.assertIn("msn_matches_normal_rgb", ids)
+        self.assertIn("msn_with_standard_env_mode", ids)
 
     def test_cm_with_normal_enabled_does_not_trigger_msn_explanatory_warning(self) -> None:
         warnings = get_generation_warnings(
@@ -2258,7 +2273,22 @@ class ParallaxOcclusionTests(unittest.TestCase):
             complex_format="cm",
         )
         ids = [w[0] for w in warnings]
-        self.assertNotIn("msn_matches_normal_rgb", ids)
+        self.assertNotIn("msn_with_standard_env_mode", ids)
+
+    def test_cm_with_complex_env_mode_triggers_renderer_mismatch_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=True,
+            include_environment_mask=True,
+            include_complex=True,
+            include_glow=False,
+            env_mask_mode="complex",
+            env_mask_strength=1.2,
+            include_parallax=False,
+            complex_format="cm",
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("cm_with_complex_env_mode", ids)
 
     def test_get_output_folder_format_warnings_msn_vs_cm_conflict(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
