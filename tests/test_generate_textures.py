@@ -799,6 +799,20 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(diffuse_path.name, "brick.dds")
             self.assertEqual(parallax_path.name, "brick_p.dds")
 
+    def test_build_output_paths_accepts_omitted_name_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.dds"
+            input_path.write_bytes(b"stub")
+
+            diffuse_path, parallax_path = build_output_paths(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+            )
+
+            self.assertEqual(diffuse_path.name, "brick.dds")
+            self.assertEqual(parallax_path.name, "brick_p.dds")
+
     def test_build_normal_output_path_uses_default_name_and_extension(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)

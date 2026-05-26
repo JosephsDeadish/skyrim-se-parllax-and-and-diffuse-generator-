@@ -1301,8 +1301,8 @@ def enforce_skyrim_output_profile(
 def build_output_paths(
     input_path: Path,
     output_dir: Path | None,
-    diffuse_name: str | None,
-    parallax_name: str | None,
+    diffuse_name: str | None = None,
+    parallax_name: str | None = None,
 ) -> tuple[Path, Path]:
     base_output_dir = output_dir or input_path.parent
     base_output_dir.mkdir(parents=True, exist_ok=True)
@@ -3087,6 +3087,8 @@ if GUI_AVAILABLE:
                     diffuse_path, _ = build_output_paths(
                         input_path=input_file,
                         output_dir=generation_kwargs["output_dir"],
+                        diffuse_name=generation_kwargs.get("diffuse_name"),
+                        parallax_name=generation_kwargs.get("parallax_name"),
                     )
                     expected_paths.append(diffuse_path)
                 if includes["normal"]:
@@ -3100,6 +3102,8 @@ if GUI_AVAILABLE:
                     _, parallax_path = build_output_paths(
                         input_path=input_file,
                         output_dir=generation_kwargs["output_dir"],
+                        diffuse_name=generation_kwargs.get("diffuse_name"),
+                        parallax_name=generation_kwargs.get("parallax_name"),
                     )
                     expected_paths.append(parallax_path)
                 if includes["glow"]:
