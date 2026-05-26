@@ -4833,7 +4833,8 @@ if GUI_AVAILABLE:
 
             win = tk.Toplevel(self.root)
             win.title(f"NIF Editor — Skyrim Texture Generator v{APP_VERSION}")
-            win.geometry("780x680")
+            win.geometry("920x760")
+            win.minsize(820, 620)
             win.resizable(True, True)
             win.grab_set()
             try:
@@ -4980,42 +4981,79 @@ if GUI_AVAILABLE:
 
                 ttk.Button(tex_frame, text="Auto-fill paths from selected NIF", command=_auto_fill_paths).pack(anchor="w", pady=(4, 0))
 
-                res_frame = ttk.LabelFrame(win, text="Results", padding=6)
-                res_frame.pack(fill="both", expand=True, padx=10, pady=(4, 6))
-                results_text = tk.Text(
-                    res_frame,
-                    height=10,
-                    state="disabled",
-                    wrap="word",
-                    bg=entry_bg,
-                    fg=fg,
-                    font=("Courier New", 9),
-                )
-                results_scroll = ttk.Scrollbar(res_frame, command=results_text.yview)
-                results_text.configure(yscrollcommand=results_scroll.set)
-                results_scroll.pack(side="right", fill="y")
-                results_text.pack(fill="both", expand=True)
-                for tag, color in {
-                    "ok": "#22aa44",
-                    "fail": "#cc3333",
-                    "skip": "#888888",
-                    "warn": "#cc8800",
-                }.items():
-                    results_text.tag_configure(tag, foreground=color)
+                btn_frame = ttk.Frame(win)
+                btn_frame.pack(fill="x", padx=10, pady=(4, 2))
+                status_var = tk.StringVar(value="Ready. Pick a NIF file/folder, then Scan or Patch.")
+                ttk.Label(win, textvariable=status_var, wraplength=860).pack(fill="x", padx=10, pady=(0, 4))
 
-                def _log(msg: str, tag: str = "") -> None:
-                    results_text.configure(state="normal")
-                    results_text.insert("end", msg + "\n", tag)
-                    results_text.see("end")
-                    results_text.configure(state="disabled")
+                res_frame = ttk.LabelFrame(win, text="Results (select a row to copy details)", padding=6)
+                res_frame.pack(fill="both", expand=True, padx=10, pady=(0, 8))
+                results_tree = ttk.Treeview(
+                    res_frame,
+                    columns=("status", "file", "details"),
+                    show="headings",
+                    selectmode="browse",
+                )
+                results_tree.heading("status", text="Status")
+                results_tree.heading("file", text="File")
+                results_tree.heading("details", text="Details")
+                results_tree.column("status", width=90, minwidth=80, anchor="center")
+                results_tree.column("file", width=220, minwidth=180, anchor="w")
+                results_tree.column("details", width=560, minwidth=260, anchor="w")
+                results_scroll = ttk.Scrollbar(res_frame, command=results_tree.yview)
+                results_tree.configure(yscrollcommand=results_scroll.set)
+                results_scroll.pack(side="right", fill="y")
+                results_tree.pack(fill="both", expand=True)
+                selected_detail_var = tk.StringVar(value="")
+                detail_entry = ttk.Entry(res_frame, textvariable=selected_detail_var)
+                detail_entry.pack(fill="x", pady=(6, 0))
+
+                def _add_result_row(status: str, file_name: str, details: str) -> None:
+                    results_tree.insert("", "end", values=(status, file_name, details))
+                    status_var.set(f"{status}: {file_name} — {details}")
+                    results_tree.yview_moveto(1.0)
 
                 def _clear_log() -> None:
-                    results_text.configure(state="normal")
-                    results_text.delete("1.0", "end")
-                    results_text.configure(state="disabled")
+                    for item in results_tree.get_children():
+                        results_tree.delete(item)
+                    selected_detail_var.set("")
+                    status_var.set("Results cleared.")
 
-                btn_frame = ttk.Frame(win)
-                btn_frame.pack(fill="x", padx=10, pady=(0, 8))
+                def _on_result_selected(_event: object | None = None) -> None:
+                    selected = results_tree.selection()
+                    if not selected:
+                        selected_detail_var.set("")
+                        return
+                    row_values = results_tree.item(selected[0], "values")
+                    if not row_values:
+                        selected_detail_var.set("")
+                        return
+                    selected_detail_var.set(f"[{row_values[0]}] {row_values[1]} — {row_values[2]}")
+
+                results_tree.bind("<<TreeviewSelect>>", _on_result_selected)
+
+                def _copy_selected_result() -> None:
+                    text = selected_detail_var.get().strip()
+                    if not text:
+                        status_var.set("No result row selected to copy.")
+                        return
+                    win.clipboard_clear()
+                    win.clipboard_append(text)
+                    status_var.set("Copied selected result to clipboard.")
+
+                def _copy_all_results() -> None:
+                    items = results_tree.get_children()
+                    if not items:
+                        status_var.set("No results to copy yet.")
+                        return
+                    lines: list[str] = []
+                    for item in items:
+                        row_values = results_tree.item(item, "values")
+                        if row_values:
+                            lines.append(f"[{row_values[0]}] {row_values[1]} — {row_values[2]}")
+                    win.clipboard_clear()
+                    win.clipboard_append("\n".join(lines))
+                    status_var.set(f"Copied {len(lines)} result row(s) to clipboard.")
 
                 def _resolve_nifs() -> list[Path]:
                     path_value = nif_path_var.get().strip()
@@ -5032,28 +5070,35 @@ if GUI_AVAILABLE:
                     nifs = _resolve_nifs()
                     _clear_log()
                     if not nifs:
-                        _log("No NIF files found.", "warn")
+                        _add_result_row("WARN", "—", "No NIF files found.")
                         return
-                    _log(f"Scanning {len(nifs)} NIF file(s)…", "skip")
+                    status_var.set(f"Scanning {len(nifs)} NIF file(s)…")
+                    win.update_idletasks()
                     for nif in nifs[:50]:
                         validation = validate_nif_for_parallax(nif)
                         if validation.ready_count == validation.shader_count and validation.shader_count > 0:
-                            _log(f"  ✓ {nif.name}: {validation.ready_count}/{validation.shader_count} shader(s) ready", "ok")
+                            _add_result_row(
+                                "OK",
+                                nif.name,
+                                f"{validation.ready_count}/{validation.shader_count} shader(s) already parallax-ready",
+                            )
                         elif validation.shader_count == 0:
-                            _log(f"  — {nif.name}: no BSLightingShaderProperty found", "skip")
+                            _add_result_row("SKIP", nif.name, "No BSLightingShaderProperty found.")
                         else:
-                            _log(
-                                f"  ⚠ {nif.name}: {validation.ready_count}/{validation.shader_count} shader(s) ready — {'; '.join(validation.issues[:2])}",
-                                "warn",
+                            _add_result_row(
+                                "WARN",
+                                nif.name,
+                                f"{validation.ready_count}/{validation.shader_count} ready; {'; '.join(validation.issues[:2])}",
                             )
                     if len(nifs) > 50:
-                        _log(f"  … and {len(nifs) - 50} more (showing first 50 only)", "skip")
+                        _add_result_row("SKIP", "—", f"{len(nifs) - 50} more files not shown (first 50 displayed).")
+                    status_var.set(f"Scan complete: {min(len(nifs), 50)} shown of {len(nifs)} file(s).")
 
                 def _run_patch() -> None:
                     nifs = _resolve_nifs()
                     _clear_log()
                     if not nifs:
-                        _log("No NIF files found at the specified path.", "warn")
+                        _add_result_row("WARN", "—", "No NIF files found at the selected path.")
                         return
                     options = NifPatchOptions(
                         enable_parallax=enable_parallax_var.get(),
@@ -5067,26 +5112,30 @@ if GUI_AVAILABLE:
                         backup=backup_var.get(),
                         dry_run=dry_run_var.get(),
                     )
-                    _log(f"{'[DRY RUN] ' if options.dry_run else ''}Patching {len(nifs)} NIF file(s)…", "skip")
+                    mode_label = "dry-run patching" if options.dry_run else "patching"
+                    status_var.set(f"Starting {mode_label} for {len(nifs)} NIF file(s)…")
+                    win.update_idletasks()
                     ok = skip = fail = 0
                     for nif in nifs:
                         result = patch_nif(nif, options)
                         if result.already_up_to_date:
                             skip += 1
-                            _log(f"  = {nif.name}: already up-to-date", "skip")
+                            _add_result_row("SKIP", nif.name, "Already up-to-date.")
                         elif result.success:
                             ok += 1
-                            _log(f"  ✓ {nif.name}: {result.message}", "ok")
+                            _add_result_row("OK", nif.name, result.message)
                         else:
                             fail += 1
-                            _log(f"  ✗ {nif.name}: {result.message}", "fail")
+                            _add_result_row("FAIL", nif.name, result.message)
                             for err in result.errors:
-                                _log(f"      {err}", "fail")
-                    _log(f"\nDone — {ok} patched, {skip} skipped, {fail} failed.", "ok" if fail == 0 else "warn")
+                                _add_result_row("FAIL", nif.name, err)
+                    status_var.set(f"Done — {ok} patched, {skip} skipped, {fail} failed.")
 
                 ttk.Button(btn_frame, text="Scan NIFs", command=_scan_nifs).pack(side="left", padx=(0, 6))
                 ttk.Button(btn_frame, text="Patch NIFs", command=_run_patch).pack(side="left", padx=(0, 6))
                 ttk.Button(btn_frame, text="Clear log", command=_clear_log).pack(side="left")
+                ttk.Button(btn_frame, text="Copy selected", command=_copy_selected_result).pack(side="left", padx=(6, 0))
+                ttk.Button(btn_frame, text="Copy all", command=_copy_all_results).pack(side="left", padx=(6, 0))
                 ttk.Button(btn_frame, text="Close", command=win.destroy).pack(side="right")
             except Exception as exc:
                 try:
