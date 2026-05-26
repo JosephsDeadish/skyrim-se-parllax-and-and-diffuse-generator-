@@ -1,6 +1,6 @@
 # skyrim-se-parllax-and-and-diffuse-generator-
 
-Current version: **0.5**
+Current version: **0.5.5**
 
 Texture generator that supports both GUI and command-line usage. It can generate:
 - a diffuse texture

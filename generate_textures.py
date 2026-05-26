@@ -33,7 +33,7 @@ except Exception:
 
 
 DDS_EXTENSION = ".dds"
-APP_VERSION = "0.5"
+APP_VERSION = "0.5.5"
 SUPPORTED_INPUT_EXTENSIONS = {DDS_EXTENSION, ".png", ".jpg", ".jpeg", ".tga", ".bmp"}
 GENERATED_TEXTURE_SUFFIXES = ("_msn", "_cm", "_n", "_p", "_g", "_m")
 PREVIEW_MAX_DIMENSION = 1024
@@ -743,6 +743,7 @@ def _normalize_render_profile(value: str | None) -> str:
 def recommend_render_profile(
     input_path: Path | None,
     *,
+    source: Image.Image | None = None,
     detected_role: str | None = None,
     material_type: str = "general",
     workflow_profile: str | None = None,
@@ -759,6 +760,22 @@ def recommend_render_profile(
         for profile, tokens in _RENDER_PROFILE_PATH_HINTS.items():
             if any(token in combined for token in tokens):
                 return profile
+    if source is not None:
+        analysis = analyze_image_content(source)
+        low_saturation = float(analysis["low_saturation_ratio"])
+        highlight_ratio = float(analysis["highlight_ratio"])
+        detail_energy = float(analysis["detail_energy"])
+        dog_fine_energy = float(analysis["dog_fine_energy"])
+        contrast = float(analysis["contrast"])
+        saturation_mean = float(analysis["saturation_mean"])
+        detailed_surface = (detail_energy >= 24.0) or (dog_fine_energy >= 15.0)
+        reflective_surface = (highlight_ratio >= 0.2) and (contrast >= 38.0)
+        if detailed_surface and low_saturation >= 0.72 and reflective_surface:
+            return "enb"
+        if detailed_surface and low_saturation >= 0.68:
+            return "community_shaders"
+        if saturation_mean >= 115.0 and low_saturation <= 0.5:
+            return "vanilla"
     return "vanilla"
 
 
@@ -3491,6 +3508,7 @@ if GUI_AVAILABLE:
             material_type = classify_material_type(preview_path)
             return recommend_render_profile(
                 preview_path,
+                source=self.source_image,
                 detected_role=role_info["role"] if role_info is not None else None,
                 material_type=material_type,
                 workflow_profile=workflow_profile,
@@ -3509,14 +3527,21 @@ if GUI_AVAILABLE:
             preview_path = self._current_preview_path()
             recommended_profile = self._recommended_render_profile_for_preview(preview_path)
             label = _RENDER_PROFILE_LABELS.get(recommended_profile, recommended_profile.replace("_", " ").title())
+            resolved = resolve_render_profile_options("auto", recommended_profile=recommended_profile)
+            tuple_hint = (
+                f"{resolved['complex_format']} / env {resolved['env_mask_mode']} / "
+                f"parallax {resolved['parallax_mode']}"
+            )
             if self.render_profile_var.get() == "auto":
-                self.render_profile_suggestion_var.set(f"Render profile recommendation: Auto-detect ({label})")
+                self.render_profile_suggestion_var.set(
+                    f"Render profile recommendation: Auto-detect ({label}) → {tuple_hint}"
+                )
                 if apply_auto:
                     effective = self._apply_render_profile_modes("auto", recommended_profile=recommended_profile)
                     if effective == "enb":
                         self.emboss_mode_var.set(False)
             else:
-                self.render_profile_suggestion_var.set(f"Render profile recommendation: {label}")
+                self.render_profile_suggestion_var.set(f"Render profile recommendation: {label} → {tuple_hint}")
             return recommended_profile
 
         def _on_render_profile_changed(self, _event: object | None = None) -> None:
