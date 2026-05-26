@@ -1101,11 +1101,14 @@ def generate_parallax(source: Image.Image, strength: float = 1.35, relief_mode: 
         for a full bas-relief effect.
     """
     pressure = _detail_pressure(source)
+    normalized_strength = _clamp((float(strength) - 0.1) / (6.0 - 0.1), 0.0, 1.0)
     if relief_mode:
         height_map = _prepare_relief_height_map(source, pressure=pressure)
         smoothed = height_map.filter(ImageFilter.GaussianBlur(radius=0.9))
         contrasted = ImageEnhance.Contrast(smoothed).enhance(_clamp(strength * (1.0 - (pressure * 0.12)), 0.1, 6.0))
-        return ImageOps.autocontrast(contrasted, cutoff=1)
+        normalized = ImageOps.autocontrast(contrasted, cutoff=1)
+        depth_blend = _clamp(0.22 + (normalized_strength * 0.88), 0.22, 1.0)
+        return Image.blend(Image.new("L", normalized.size, color=127), normalized, alpha=depth_blend)
     height_map = _prepare_height_map(source)
     softened = height_map.filter(ImageFilter.GaussianBlur(radius=1.2))
     micro_detail = ImageChops.subtract(
@@ -1116,7 +1119,12 @@ def generate_parallax(source: Image.Image, strength: float = 1.35, relief_mode: 
     )
     merged = ImageChops.add(softened, micro_detail, scale=1.35 - (pressure * 0.35), offset=int(-20 + (pressure * 10.0)))
     contrasted = ImageEnhance.Contrast(merged).enhance(_clamp(strength * (1.0 - (pressure * 0.18)), 0.1, 6.0))
-    return ImageOps.autocontrast(contrasted, cutoff=1)
+    normalized = ImageOps.autocontrast(contrasted, cutoff=1)
+    depth_blend = _clamp(0.2 + (normalized_strength * 0.9), 0.2, 1.0)
+    tuned = Image.blend(Image.new("L", normalized.size, color=127), normalized, alpha=depth_blend)
+    if normalized_strength > 0.78:
+        tuned = ImageEnhance.Contrast(tuned).enhance(1.0 + ((normalized_strength - 0.78) * 1.6))
+    return tuned
 
 
 def generate_parallax_occlusion(source: Image.Image, strength: float = 1.35, *, relief_mode: bool = False) -> Image.Image:
@@ -1156,6 +1164,7 @@ def generate_parallax_occlusion(source: Image.Image, strength: float = 1.35, *, 
     base_height = _prepare_relief_height_map(source) if relief_mode else _prepare_height_map(source)
     pressure = _detail_pressure(source)
     resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.6)
+    normalized_strength = _clamp((float(strength) - 0.1) / (6.0 - 0.1), 0.0, 1.0)
 
     # Multi-scale smoothing keeps large silhouette/macro gradients while reducing
     # high-frequency stair-stepping artefacts under ENB POM ray-marching.
@@ -1176,10 +1185,24 @@ def generate_parallax_occlusion(source: Image.Image, strength: float = 1.35, *, 
     # Final light smooth pass removes any residual pixel-edge artefacts.
     final = contrasted.filter(ImageFilter.GaussianBlur(radius=0.65 + (pressure * 0.35)))
     normalized = ImageOps.autocontrast(final, cutoff=0)
+    depth_blend = _clamp(0.24 + (normalized_strength * 0.84), 0.24, 1.0)
+    normalized = Image.blend(Image.new("L", normalized.size, color=127), normalized, alpha=depth_blend)
     if pressure < 0.1:
         neutral = Image.new("L", source.size, color=127)
         return Image.blend(neutral, normalized, alpha=0.7)
     return normalized
+
+
+def _map_parallax_strength_to_nif_scale(parallax_strength: float | None) -> float | None:
+    """Map GUI/CLI parallax strength (0.1–6.0) to NIF parallax_scale (0.1–10.0)."""
+    if parallax_strength is None:
+        return None
+    strength = _clamp(float(parallax_strength), 0.1, 6.0)
+    if strength <= 1.0:
+        mapped = 0.2 + (strength * 1.4)
+    else:
+        mapped = 1.6 + ((strength - 1.0) * (8.4 / 5.0))
+    return _clamp(mapped, 0.1, 10.0)
 
 
 def _prepare_emboss_height_map(source: Image.Image, pressure: float | None = None) -> Image.Image:
@@ -3989,7 +4012,9 @@ if GUI_AVAILABLE:
                                 complex_format=str(generation_call_kwargs.get("complex_format", "msn")),
                                 env_mask_mode=str(generation_call_kwargs.get("env_mask_mode", "standard")),
                                 parallax_mode=str(generation_call_kwargs.get("parallax_mode", "standard")),
-                                parallax_scale=float(generation_call_kwargs.get("parallax_strength", 1.35) or 1.35),
+                                parallax_scale=_map_parallax_strength_to_nif_scale(
+                                    float(generation_call_kwargs.get("parallax_strength", 1.35) or 1.35)
+                                ),
                             )
                             patched = sum(1 for result in nif_patch_results if getattr(result, "success", False))
                             failed = sum(1 for result in nif_patch_results if not getattr(result, "success", False))

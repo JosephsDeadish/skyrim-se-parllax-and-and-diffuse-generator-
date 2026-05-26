@@ -9,6 +9,7 @@ from generate_textures import (
     APP_VERSION,
     PATREON_URL,
     _create_panda_icon_image,
+    _map_parallax_strength_to_nif_scale,
     _compute_tooltip_position,
     _run_cli,
     _normalize_gui_state,
@@ -300,6 +301,14 @@ class GenerateTexturesTests(unittest.TestCase):
         parallax = generate_parallax(_vertical_gradient_image(), strength=1.35)
         values = set(parallax.tobytes())
         self.assertGreater(len(values), 2)
+
+    def test_generate_parallax_strength_slider_has_stronger_min_max_separation(self) -> None:
+        source = _detailed_bright_image()
+        low = generate_parallax(source, strength=0.2)
+        high = generate_parallax(source, strength=6.0)
+        low_range = low.getextrema()[1] - low.getextrema()[0]
+        high_range = high.getextrema()[1] - high.getextrema()[0]
+        self.assertGreater(high_range, low_range + 20)
 
     def test_generate_normal_returns_rgb_same_size(self) -> None:
         normal = generate_normal(_sample_image())
@@ -1818,6 +1827,19 @@ class ParallaxOcclusionTests(unittest.TestCase):
         standard_mean = ImageStat.Stat(generate_parallax(detail, strength=1.35)).mean[0]
         pom_mean = ImageStat.Stat(generate_parallax_occlusion(detail, strength=1.35)).mean[0]
         self.assertLess(abs(pom_mean - standard_mean), 40.0)
+
+    def test_generate_parallax_occlusion_strength_slider_has_stronger_min_max_separation(self) -> None:
+        source = _detailed_bright_image()
+        low = generate_parallax_occlusion(source, strength=0.2)
+        high = generate_parallax_occlusion(source, strength=6.0)
+        low_range = low.getextrema()[1] - low.getextrema()[0]
+        high_range = high.getextrema()[1] - high.getextrema()[0]
+        self.assertGreater(high_range, low_range + 18)
+
+    def test_map_parallax_strength_to_nif_scale_boosts_in_game_depth(self) -> None:
+        self.assertAlmostEqual(float(_map_parallax_strength_to_nif_scale(0.1) or 0.0), 0.34, places=2)
+        self.assertGreater(float(_map_parallax_strength_to_nif_scale(1.35) or 0.0), 2.0)
+        self.assertAlmostEqual(float(_map_parallax_strength_to_nif_scale(6.0) or 0.0), 10.0, places=3)
 
     def test_parallax_occlusion_flat_input_returns_mid_gray(self) -> None:
         flat = Image.new("RGB", (16, 16), color=(128, 128, 128))
