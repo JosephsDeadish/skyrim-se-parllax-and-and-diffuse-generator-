@@ -14,6 +14,7 @@ from generate_textures import (
     _normalize_gui_state,
     analyze_image_content,
     apply_recommendations_by_auto_flags,
+    build_complex_preview_image,
     build_complex_output_path,
     build_environment_mask_output_path,
     classify_material_type,
@@ -798,6 +799,21 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         self.assertEqual(msn_outputs["complex_material"].mode, "RGBA")
         self.assertEqual(cm_outputs["complex_material"].mode, "RGBA")
+
+    def test_build_complex_preview_image_msn_visualizes_rgb_and_alpha_side_by_side(self) -> None:
+        source = _sample_image()
+        msn = generate_msn(source)
+        preview = build_complex_preview_image(msn, complex_format="msn")
+        self.assertEqual(preview.mode, "RGB")
+        self.assertEqual(preview.size, (source.width * 2 + 2, source.height))
+        left_sample = preview.getpixel((0, 0))
+        right_sample = preview.getpixel((source.width + 2, 0))
+        self.assertNotEqual(left_sample, right_sample)
+
+    def test_build_complex_preview_image_cm_returns_original_image(self) -> None:
+        cm = generate_complex_material(_sample_image())
+        preview = build_complex_preview_image(cm, complex_format="cm")
+        self.assertIs(preview, cm)
 
     def test_generate_preview_outputs_defaults_environment_mask_to_standard_skyrim_se(self) -> None:
         outputs = generate_preview_outputs(
@@ -1876,6 +1892,36 @@ class ConflictingOptionsWarningsTests(unittest.TestCase):
         )
         ids = [w[0] for w in warnings]
         self.assertNotIn("env_mask_with_complex_material", ids)
+
+    def test_msn_with_normal_enabled_triggers_explanatory_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=True,
+            include_environment_mask=False,
+            include_complex=True,
+            include_glow=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.2,
+            include_parallax=False,
+            complex_format="msn",
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("msn_matches_normal_rgb", ids)
+
+    def test_cm_with_normal_enabled_does_not_trigger_msn_explanatory_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=True,
+            include_environment_mask=False,
+            include_complex=True,
+            include_glow=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.2,
+            include_parallax=False,
+            complex_format="cm",
+        )
+        ids = [w[0] for w in warnings]
+        self.assertNotIn("msn_matches_normal_rgb", ids)
 
     def test_get_output_folder_format_warnings_msn_vs_cm_conflict(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

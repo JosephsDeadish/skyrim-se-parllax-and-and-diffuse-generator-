@@ -1557,6 +1557,29 @@ def generate_preview_outputs(
     return outputs
 
 
+def build_complex_preview_image(image: Image.Image, *, complex_format: str = "msn") -> Image.Image:
+    """Build a human-readable preview for complex outputs without changing saved files.
+
+    For ``msn`` format, RGB is the normal map and alpha is specular. Most image viewers
+    hide alpha, so MSN can appear identical to the normal map. This helper creates a
+    side-by-side preview: normal RGB (left) and specular alpha visualisation (right).
+    """
+    if complex_format.strip().lower() != "msn":
+        return image
+
+    msn = image.convert("RGBA")
+    red, green, blue, alpha = msn.split()
+    normal_rgb = Image.merge("RGB", (red, green, blue))
+    alpha_preview = ImageOps.colorize(alpha, black="#050505", white="#f2f2f2")
+    separator = Image.new("RGB", (2, msn.height), color=(68, 114, 196))
+
+    preview = Image.new("RGB", (msn.width * 2 + separator.width, msn.height))
+    preview.paste(normal_rgb, (0, 0))
+    preview.paste(separator, (msn.width, 0))
+    preview.paste(alpha_preview, (msn.width + separator.width, 0))
+    return preview
+
+
 def enforce_skyrim_output_profile(
     output_type: str,
     image: Image.Image,
@@ -1843,6 +1866,7 @@ def get_generation_warnings(
     env_mask_strength: float,
     include_parallax: bool,
     include_complex: bool,
+    complex_format: str = "msn",
     emboss_mode: bool = False,
     relief_mode: bool = False,
 ) -> list[tuple[str, str]]:
@@ -2014,6 +2038,14 @@ def get_generation_warnings(
             "Generating a separate environment mask alongside a complex material map is usually redundant "
             "and may cause double-specular artefacts with ENB.\n\n"
             "Tip: Use either the environment mask OR the complex material — not both — unless you know your shader expects both.",
+        ))
+
+    if include_complex and include_normal and complex_format.strip().lower() == "msn":
+        warnings.append((
+            "msn_matches_normal_rgb",
+            "Complex material format is set to 'msn' while normal output is also enabled.\n\n"
+            "This is expected: _msn stores the normal map in RGB and specular in alpha, so the RGB view can look almost identical to _n.\n\n"
+            "Tip: This is not a generation bug. To get a visibly different packed complex texture, switch Complex naming to 'cm'.",
         ))
 
     return warnings
@@ -2855,7 +2887,7 @@ if GUI_AVAILABLE:
 
             _complex_fmt_label = ttk.Label(options_frame, text="Complex naming")
             _complex_fmt_label.grid(row=4, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_complex_fmt_label, "🏷 Output filename suffix for complex material.\n'msn' = _msn.dds (ENB normal+specular), 'cm' = _cm.dds (packed AO/rough/metal/height-spec).")
+            self._add_tooltip(_complex_fmt_label, "🏷 Output filename suffix for complex material.\n'msn' = _msn.dds (ENB normal+specular alpha; RGB intentionally matches normal), 'cm' = _cm.dds (packed AO/rough/metal/height-spec).")
             complex_format = ttk.Combobox(
                 options_frame,
                 textvariable=self.complex_format_var,
@@ -4073,7 +4105,13 @@ if GUI_AVAILABLE:
                         self.preview_output_images.pop(output_key, None)
                         label.configure(image="", text="No preview")
                         continue
-                    photo = self._photo_image(output_image, max_size=output_max)
+                    display_image = output_image
+                    if output_key == "complex_material":
+                        display_image = build_complex_preview_image(
+                            output_image,
+                            complex_format=self.complex_format_var.get(),
+                        )
+                    photo = self._photo_image(display_image, max_size=output_max)
                     self.preview_output_images[output_key] = photo
                     label.configure(image=photo, text="")
             except Exception as exc:
@@ -4108,6 +4146,7 @@ if GUI_AVAILABLE:
                 env_mask_strength=env_mask_strength,
                 include_parallax=include_parallax,
                 include_complex=include_complex,
+                complex_format=self.complex_format_var.get(),
                 emboss_mode=emboss_mode,
                 relief_mode=relief_mode,
             )
