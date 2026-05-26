@@ -2776,10 +2776,13 @@ if GUI_AVAILABLE:
 
             top_bar = ttk.Frame(wrapper, padding=(4, 0, 4, 6))
             top_bar.pack(fill=tk.X)
-            ttk.Label(
+            top_bar_message = ttk.Label(
                 top_bar,
                 text="Generate Skyrim-ready texture maps from one source image (single file or full folder batch).",
-            ).pack(side=tk.LEFT)
+                justify=tk.LEFT,
+                anchor=tk.W,
+            )
+            top_bar_message.pack(side=tk.LEFT, fill=tk.X, expand=True)
             _patreon_button = ttk.Button(
                 top_bar,
                 text="❤ Support on Patreon",
@@ -2836,12 +2839,14 @@ if GUI_AVAILABLE:
             )
             _custom_out_check.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(2, 0))
             self._add_tooltip(_custom_out_check, "📦 Check this if you want your outputs somewhere other than the input folder.\nUseful when you have strong opinions about folder organisation.")
-            ttk.Label(
+            _detected_context_label = ttk.Label(
                 file_frame,
                 textvariable=self.detected_context_var,
                 foreground="gray",
-                wraplength=760,
-            ).grid(row=3, column=0, columnspan=5, sticky=tk.W, pady=(4, 0))
+                justify=tk.LEFT,
+                anchor=tk.W,
+            )
+            _detected_context_label.grid(row=3, column=0, columnspan=5, sticky=tk.EW, pady=(4, 0))
             file_frame.columnconfigure(1, weight=1)
             self._update_output_location_controls()
             self.detected_mod_button.configure(
@@ -3086,13 +3091,16 @@ if GUI_AVAILABLE:
             self.revert_button = ttk.Button(actions, text="Revert Process", command=self._revert_last_generation, state=tk.DISABLED)
             self.revert_button.pack(side=tk.LEFT, padx=(6, 0))
             self._add_tooltip(self.revert_button, "↩ Restore files from the most recent generation run.\nDisabled until a generation run has something to undo.")
-            _status_label = ttk.Label(actions, textvariable=self.status_var)
-            _status_label.pack(side=tk.LEFT, padx=14)
+            _status_label = ttk.Label(actions, textvariable=self.status_var, justify=tk.LEFT, anchor=tk.W)
+            _status_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=14)
             self._add_tooltip(
                 _status_label,
                 "📢 Live status feed.\n"
                 "If something explodes, this line tells you what and where before panic mode fully activates.",
             )
+            self._bind_responsive_wrap(top_bar, top_bar_message, horizontal_padding=260, min_wrap=220)
+            self._bind_responsive_wrap(file_frame, _detected_context_label, horizontal_padding=28, min_wrap=220)
+            self._bind_responsive_wrap(actions, _status_label, horizontal_padding=360, min_wrap=200)
 
             preview_frame = ttk.LabelFrame(wrapper, text="Preview (Source vs Generated)", padding=10)
             preview_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
@@ -3266,6 +3274,21 @@ if GUI_AVAILABLE:
             canvas.bind_all("<MouseWheel>", _on_mousewheel)
             canvas.bind_all("<Button-4>", _on_mousewheel)
             canvas.bind_all("<Button-5>", _on_mousewheel)
+
+        def _bind_responsive_wrap(
+            self,
+            container: tk.Widget,
+            label: tk.Label | ttk.Label,
+            *,
+            horizontal_padding: int,
+            min_wrap: int = 200,
+        ) -> None:
+            def _update_wrap(_: tk.Event[tk.Misc] | None = None) -> None:
+                width = max(min_wrap, container.winfo_width() - horizontal_padding)
+                label.configure(wraplength=width)
+
+            container.bind("<Configure>", _update_wrap, add="+")
+            self.root.after_idle(_update_wrap)
 
         def _add_tooltip(self, widget: tk.Widget, text: str) -> None:
             tip_window: list[tk.Toplevel | None] = [None]
@@ -3735,11 +3758,16 @@ if GUI_AVAILABLE:
 
         def _poll_processing_queue(self) -> None:
             keep_polling = self.is_processing
+            processed_events = 0
+            max_events_per_poll = 32
             while True:
+                if processed_events >= max_events_per_poll:
+                    break
                 try:
                     event_type, payload = self.processing_queue.get_nowait()
                 except queue.Empty:
                     break
+                processed_events += 1
 
                 if event_type == "progress":
                     index, total, current_path = payload
