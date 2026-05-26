@@ -1556,12 +1556,12 @@ class GenerateTexturesTests(unittest.TestCase):
     def test_generate_normal_raises_clear_error_for_buffer_size_mismatch(self) -> None:
         with mock.patch("generate_textures.np.frombuffer", return_value=np.zeros(1, dtype=np.uint8)):
             with self.assertRaisesRegex(RuntimeError, "Normal map red buffer size mismatch"):
-                generate_normal(_sample_image())
+                generate_normal(_detailed_bright_image())
 
     def test_generate_specular_raises_clear_error_for_buffer_size_mismatch(self) -> None:
         with mock.patch("generate_textures.np.frombuffer", return_value=np.zeros(1, dtype=np.uint8)):
             with self.assertRaisesRegex(RuntimeError, "Specular buffer size mismatch"):
-                generate_specular(_sample_image())
+                generate_specular(_detailed_bright_image())
 
     def test_save_with_dds_fallback_returns_dds_path_on_success(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
