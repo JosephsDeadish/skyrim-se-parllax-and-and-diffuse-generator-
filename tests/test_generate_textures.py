@@ -1273,6 +1273,41 @@ class ParallaxOcclusionTests(unittest.TestCase):
                 )
             self.assertIn("parallax", outputs)
 
+    def test_generate_preview_outputs_rejects_invalid_parallax_mode(self) -> None:
+        with self.assertRaises(ValueError):
+            generate_preview_outputs(
+                _sample_image(),
+                normal_strength=2.0,
+                parallax_strength=1.35,
+                glow_threshold=200,
+                environment_mask_strength=1.0,
+                complex_strength=1.0,
+                specular_strength=1.15,
+                complex_format="msn",
+                parallax_mode="invalid-mode",
+                include_diffuse=False,
+                include_normal=False,
+                include_parallax=True,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+            )
+
+    def test_run_with_options_rejects_invalid_parallax_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "stone.png"
+            _sample_image().save(input_path)
+            with self.assertRaises(ValueError):
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=temp_path / "out",
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=True,
+                    parallax_mode="broken",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

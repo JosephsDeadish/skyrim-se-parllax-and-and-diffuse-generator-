@@ -1078,6 +1078,8 @@ def generate_preview_outputs(
     include_environment_mask: bool,
     include_complex: bool,
 ) -> dict[str, Image.Image]:
+    if parallax_mode not in {"standard", "occlusion"}:
+        raise ValueError("parallax_mode must be 'standard' or 'occlusion'.")
     outputs: dict[str, Image.Image] = {}
     if include_diffuse:
         outputs["diffuse"] = enforce_skyrim_output_profile("diffuse", generate_diffuse(source))
@@ -1653,6 +1655,8 @@ def run_with_options(
 ) -> dict[str, Path]:
     if not any((include_diffuse, include_normal, include_parallax, include_glow, include_environment_mask, include_complex)):
         raise ValueError("Select at least one output.")
+    if parallax_mode not in {"standard", "occlusion"}:
+        raise ValueError("parallax_mode must be 'standard' or 'occlusion'.")
 
     outputs: dict[str, Path] = {}
 
@@ -2370,6 +2374,7 @@ if GUI_AVAILABLE:
                 width=24,
             )
             _parallax_mode_combo.grid(row=11, column=1, columnspan=2, sticky=tk.W)
+            _parallax_mode_combo.bind("<<ComboboxSelected>>", self._on_parallax_mode_changed)
             self._add_tooltip(
                 _parallax_mode_combo,
                 "🏔 'standard' = vanilla Skyrim SE parallax shader.\n"
@@ -2975,9 +2980,17 @@ if GUI_AVAILABLE:
             self._refresh_preview()
 
         def _on_emboss_mode_changed(self) -> None:
+            if self.emboss_mode_var.get():
+                self.status_var.set("Emboss depth mode enabled for flat printed surfaces (books/cards/scrolls).")
+            else:
+                self.status_var.set("Emboss depth mode disabled; using standard normal-map generation.")
             self._request_preview_refresh()
 
-        def _on_parallax_mode_changed(self) -> None:
+        def _on_parallax_mode_changed(self, _event: object | None = None) -> None:
+            if "occlusion" in self.parallax_mode_var.get():
+                self.status_var.set("Parallax mode: occlusion (ENBSeries POM-optimized heightmap).")
+            else:
+                self.status_var.set("Parallax mode: standard (vanilla Skyrim SE parallax heightmap).")
             self._request_preview_refresh()
 
         def _update_slider_auto_states(self) -> None:
