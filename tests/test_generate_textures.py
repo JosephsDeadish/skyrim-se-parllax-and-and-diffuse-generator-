@@ -18,6 +18,7 @@ from generate_textures import (
     build_environment_mask_output_path,
     classify_material_type,
     collect_source_textures,
+    compute_wrapped_preview_index,
     detect_workflow_profile,
     detect_mod_manager_context,
     enforce_skyrim_output_profile,
@@ -38,6 +39,7 @@ from generate_textures import (
     get_preview_size_limits,
     identify_skyrim_texture_role,
     prepare_preview_source,
+    parse_preview_jump_input,
     recommend_generation_settings,
     recommend_render_profile,
     resolve_render_profile_options,
@@ -94,6 +96,16 @@ def _high_saturation_image() -> Image.Image:
     return Image.new("RGB", (24, 24), color=(245, 40, 40))
 
 
+def _detailed_low_saturation_image() -> Image.Image:
+    image = Image.new("RGB", (24, 24))
+    pixels = image.load()
+    for y in range(24):
+        for x in range(24):
+            v = 230 if (x + y) % 2 == 0 else 18
+            pixels[x, y] = (v, v, v)
+    return image
+
+
 def _large_high_detail_image() -> Image.Image:
     image = Image.new("RGB", (512, 512))
     pixels = image.load()
@@ -129,8 +141,8 @@ def _emboss_pattern_image() -> Image.Image:
 
 
 class GenerateTexturesTests(unittest.TestCase):
-    def test_app_version_is_0_5(self) -> None:
-        self.assertEqual(APP_VERSION, "0.5")
+    def test_app_version_is_0_5_5(self) -> None:
+        self.assertEqual(APP_VERSION, "0.5.5")
 
     def test_normalize_gui_state_turns_off_individual_auto_flags_when_master_off(self) -> None:
         normalized = _normalize_gui_state(
@@ -466,6 +478,15 @@ class GenerateTexturesTests(unittest.TestCase):
             "vanilla",
         )
 
+    def test_recommend_render_profile_uses_image_signals_for_enb(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/architecture/metalplate.dds"),
+                source=_detailed_low_saturation_image(),
+            ),
+            "enb",
+        )
+
     def test_resolve_render_profile_options_returns_expected_modes(self) -> None:
         enb = resolve_render_profile_options("enb")
         self.assertEqual(enb["complex_format"], "msn")
@@ -480,6 +501,18 @@ class GenerateTexturesTests(unittest.TestCase):
         auto = resolve_render_profile_options("auto", recommended_profile="enb")
         self.assertEqual(auto["effective_profile"], "enb")
         self.assertEqual(auto["parallax_mode"], "occlusion")
+
+    def test_parse_preview_jump_input_validates_bounds(self) -> None:
+        self.assertEqual(parse_preview_jump_input("1", 5), 0)
+        self.assertEqual(parse_preview_jump_input("5", 5), 4)
+        self.assertIsNone(parse_preview_jump_input("0", 5))
+        self.assertIsNone(parse_preview_jump_input("6", 5))
+        self.assertIsNone(parse_preview_jump_input("abc", 5))
+
+    def test_compute_wrapped_preview_index_wraps_at_boundaries(self) -> None:
+        self.assertEqual(compute_wrapped_preview_index(-1, 3), 2)
+        self.assertEqual(compute_wrapped_preview_index(3, 3), 0)
+        self.assertEqual(compute_wrapped_preview_index(1, 3), 1)
 
     def test_get_generation_warnings_glow_on_stone_triggers_warning(self) -> None:
         warnings = get_generation_warnings(

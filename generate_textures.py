@@ -109,6 +109,27 @@ def _coerce_int(value: object, default: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, resolved))
 
 
+def compute_wrapped_preview_index(index: int, total: int) -> int:
+    if total <= 0:
+        return 0
+    return index % total
+
+
+def parse_preview_jump_input(value: str, total: int) -> int | None:
+    if total <= 0:
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    try:
+        requested = int(stripped)
+    except ValueError:
+        return None
+    if requested < 1 or requested > total:
+        return None
+    return requested - 1
+
+
 def _compute_tooltip_position(
     *,
     pointer_x: int,
@@ -2419,6 +2440,7 @@ if GUI_AVAILABLE:
             self.output_var = tk.StringVar()
             self.use_custom_output_var = tk.BooleanVar(value=False)
             self.preview_source_name_var = tk.StringVar(value="No source loaded")
+            self.preview_jump_var = tk.StringVar(value="")
             self.detected_context_var = tk.StringVar(value=self.manager_context.summary)
             self.normal_strength_var = tk.DoubleVar(value=2.0)
             self.parallax_strength_var = tk.DoubleVar(value=1.35)
@@ -2809,6 +2831,28 @@ if GUI_AVAILABLE:
                 self.next_source_button,
                 "⏭ Show the next source file in folder mode.\n"
                 "Use this to QA your batch without opening fifty windows like a chaos wizard.",
+            )
+            _jump_label = ttk.Label(source_controls, text="Go to #")
+            _jump_label.pack(side=tk.LEFT, padx=(12, 4))
+            self._add_tooltip(
+                _jump_label,
+                "🔢 Jump directly to a source preview number (1-based).\n"
+                "Example: type 12 and press Enter to jump to preview #12.",
+            )
+            self.preview_jump_entry = ttk.Entry(source_controls, textvariable=self.preview_jump_var, width=6)
+            self.preview_jump_entry.pack(side=tk.LEFT, padx=(0, 4))
+            self.preview_jump_entry.bind("<Return>", self._on_preview_jump_submit)
+            self._add_tooltip(
+                self.preview_jump_entry,
+                "🔢 Type a preview index and press Enter.\n"
+                "Valid range is 1 to total loaded previews.",
+            )
+            self.preview_jump_button = ttk.Button(source_controls, text="Go", command=self._jump_to_preview_source)
+            self.preview_jump_button.pack(side=tk.LEFT, padx=(0, 4))
+            self._add_tooltip(
+                self.preview_jump_button,
+                "🚀 Jump to the typed preview number.\n"
+                "Great for large folders where clicking Next 200 times is cruel and unusual punishment.",
             )
             _preview_size_label = ttk.Label(source_controls, text="Preview size")
             _preview_size_label.pack(side=tk.LEFT, padx=(14, 4))
@@ -3234,6 +3278,7 @@ if GUI_AVAILABLE:
                 self.selected_inputs = []
                 self.current_preview_index = 0
                 self.preview_source_name_var.set("No source loaded")
+                self.preview_jump_var.set("")
                 self._update_preview_navigation_state()
                 if show_error:
                     messagebox.showerror("Unable to open texture", str(exc))
@@ -3647,6 +3692,7 @@ if GUI_AVAILABLE:
                 self.source_image = None
                 self.current_preview_index = 0
                 self.preview_source_name_var.set("No source loaded")
+                self.preview_jump_var.set("")
                 self._update_preview_navigation_state()
                 return
             resolved_index = max(0, min(index, len(self.selected_inputs) - 1))
@@ -3666,6 +3712,7 @@ if GUI_AVAILABLE:
                 self._update_preview_navigation_state()
                 return
             self.current_preview_index = resolved_index
+            self.preview_jump_var.set(str(resolved_index + 1))
             if len(self.selected_inputs) > 1:
                 self.preview_source_name_var.set(
                     f"{resolved_index + 1}/{len(self.selected_inputs)}: {preview_path.name}"
@@ -3688,17 +3735,38 @@ if GUI_AVAILABLE:
         def _show_previous_preview_source(self) -> None:
             if not self.selected_inputs:
                 return
+            wrapped_index = compute_wrapped_preview_index(
+                self.current_preview_index - 1, len(self.selected_inputs)
+            )
             self._set_preview_source(
-                self.current_preview_index - 1, apply_recommendations=self.auto_suggestions_var.get()
+                wrapped_index, apply_recommendations=self.auto_suggestions_var.get()
             )
             self._refresh_preview()
 
         def _show_next_preview_source(self) -> None:
             if not self.selected_inputs:
                 return
-            self._set_preview_source(
-                self.current_preview_index + 1, apply_recommendations=self.auto_suggestions_var.get()
+            wrapped_index = compute_wrapped_preview_index(
+                self.current_preview_index + 1, len(self.selected_inputs)
             )
+            self._set_preview_source(
+                wrapped_index, apply_recommendations=self.auto_suggestions_var.get()
+            )
+            self._refresh_preview()
+
+        def _on_preview_jump_submit(self, _event: object | None = None) -> None:
+            self._jump_to_preview_source()
+
+        def _jump_to_preview_source(self) -> None:
+            total = len(self.selected_inputs)
+            target = parse_preview_jump_input(self.preview_jump_var.get(), total)
+            if target is None:
+                if total <= 0:
+                    self.status_var.set("Load textures first before using preview jump.")
+                else:
+                    self.status_var.set(f"Invalid preview number. Enter a value from 1 to {total}.")
+                return
+            self._set_preview_source(target, apply_recommendations=self.auto_suggestions_var.get())
             self._refresh_preview()
 
         def _update_preview_navigation_state(self) -> None:
@@ -3707,6 +3775,10 @@ if GUI_AVAILABLE:
             state = tk.NORMAL if can_navigate else tk.DISABLED
             self.prev_source_button.configure(state=state)
             self.next_source_button.configure(state=state)
+            has_inputs = len(self.selected_inputs) > 0
+            jump_state = tk.NORMAL if (has_inputs and not self.is_processing) else tk.DISABLED
+            self.preview_jump_entry.configure(state=jump_state)
+            self.preview_jump_button.configure(state=jump_state)
 
         def _refresh_preview(self) -> None:
             self.preview_refresh_after_id = None
