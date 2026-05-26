@@ -801,6 +801,12 @@ _RENDER_PROFILE_LABELS: dict[str, str] = {
     "enb": "ENB",
 }
 
+_RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
+    "vanilla": "Files: diffuse + normal. Add _p only for meshes patched for parallax; add _m for reflective materials; add _g only for emissive assets.",
+    "community_shaders": "Files: diffuse + normal + _p. Add _cm for Community Shaders packed-material/PBR workflows; add _g only for emissive assets.",
+    "enb": "Files: diffuse + normal + _p. Add _msn for ENB complex-material workflows; use complex _m for ENB reflections/material masks; add _g only for emissive assets.",
+}
+
 _RENDER_PROFILE_PATH_HINTS: dict[str, tuple[str, ...]] = {
     "enb": ("enb", "enbseries"),
     "community_shaders": ("communityshaders", "community_shaders", "community-shaders", "cs"),
@@ -814,6 +820,13 @@ def _normalize_render_profile(value: str | None) -> str:
     if normalized in {"auto", "vanilla", "community_shaders", "enb"}:
         return normalized
     return "auto"
+
+
+def describe_render_profile_output_recommendation(profile: str) -> str:
+    normalized = _normalize_render_profile(profile)
+    if normalized == "auto":
+        normalized = "vanilla"
+    return _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS.get(normalized, _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS["vanilla"])
 
 
 def recommend_render_profile(
@@ -889,6 +902,44 @@ def resolve_render_profile_options(
         "complex_format": preset["complex_format"],
         "env_mask_mode": preset["env_mask_mode"],
         "parallax_mode": parallax_mode,
+    }
+
+
+def _normalize_complex_format(value: str | None, default: str = "msn") -> str:
+    normalized = (value or "").strip().lower()
+    return normalized if normalized in {"msn", "cm"} else default
+
+
+def _normalize_env_mask_mode(value: str | None, default: str = "standard") -> str:
+    normalized = (value or "").strip().lower()
+    return normalized if normalized in {"standard", "complex"} else default
+
+
+def _normalize_parallax_mode_key(value: str | None, default: str = "standard") -> str:
+    normalized = (value or "").strip().lower()
+    if "occlusion" in normalized:
+        return "occlusion"
+    if normalized == "standard":
+        return "standard"
+    return default
+
+
+def resolve_render_profile_mode_selection(
+    current_modes: Mapping[str, str],
+    *,
+    selected_profile: str,
+    recommended_profile: str | None = None,
+    apply_preset: bool,
+) -> dict[str, str]:
+    resolved = resolve_render_profile_options(selected_profile, recommended_profile=recommended_profile)
+    if apply_preset:
+        return resolved
+    return {
+        "selected_profile": resolved["selected_profile"],
+        "effective_profile": resolved["effective_profile"],
+        "complex_format": _normalize_complex_format(current_modes.get("complex_format"), resolved["complex_format"]),
+        "env_mask_mode": _normalize_env_mask_mode(current_modes.get("env_mask_mode"), resolved["env_mask_mode"]),
+        "parallax_mode": _normalize_parallax_mode_key(current_modes.get("parallax_mode"), resolved["parallax_mode"]),
     }
 
 
@@ -1706,7 +1757,7 @@ def build_output_paths(
     diffuse_name: str | None = None,
     parallax_name: str | None = None,
 ) -> tuple[Path, Path]:
-    base_output_dir = output_dir or input_path.parent
+    base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
 
@@ -1720,7 +1771,7 @@ def build_normal_output_path(
     output_dir: Path | None,
     normal_name: str | None = None,
 ) -> Path:
-    base_output_dir = output_dir or input_path.parent
+    base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
     normal_stem = normal_name or f"{input_path.stem}_n"
@@ -1732,7 +1783,7 @@ def build_glow_output_path(
     output_dir: Path | None,
     glow_name: str | None = None,
 ) -> Path:
-    base_output_dir = output_dir or input_path.parent
+    base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
     glow_stem = glow_name or f"{input_path.stem}_g"
@@ -1744,7 +1795,7 @@ def build_environment_mask_output_path(
     output_dir: Path | None,
     environment_mask_name: str | None = None,
 ) -> Path:
-    base_output_dir = output_dir or input_path.parent
+    base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
     mask_stem = environment_mask_name or f"{input_path.stem}_m"
@@ -1757,7 +1808,7 @@ def build_complex_output_path(
     complex_name: str | None = None,
     complex_format: str = "msn",
 ) -> Path:
-    base_output_dir = output_dir or input_path.parent
+    base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
     if complex_format not in {"msn", "cm"}:
@@ -1791,6 +1842,27 @@ def _normalize_texture_family_stem(path_like: Path | str) -> str:
     return stem
 
 
+def _relative_texture_subpath(path: Path) -> Path | None:
+    parts = list(path.parts)
+    lowered = [part.lower() for part in parts]
+    if "textures" not in lowered:
+        return None
+    textures_index = lowered.index("textures")
+    relative_parts = parts[textures_index + 1 : -1]
+    return Path(*relative_parts) if relative_parts else Path()
+
+
+def _resolve_output_base_dir(input_path: Path, output_dir: Path | None) -> Path:
+    if output_dir is None:
+        return input_path.parent
+    relative_texture_subpath = _relative_texture_subpath(input_path)
+    if relative_texture_subpath is None:
+        return output_dir
+    if output_dir.name.lower() == "textures":
+        return output_dir / relative_texture_subpath
+    return output_dir / "textures" / relative_texture_subpath
+
+
 def _as_skyrim_resource_path(path: Path) -> str:
     parts = list(path.parts)
     lowered = [part.lower() for part in parts]
@@ -1798,6 +1870,20 @@ def _as_skyrim_resource_path(path: Path) -> str:
         start = lowered.index("textures")
         return "\\".join(parts[start:])
     return path.name.replace("/", "\\")
+
+
+def _resolve_generated_skyrim_resource_path(generated_path: Path, *, source_texture: Path | None = None) -> str:
+    direct_resource_path = _as_skyrim_resource_path(generated_path)
+    if direct_resource_path.lower().startswith("textures\\"):
+        return direct_resource_path
+    if source_texture is not None:
+        relative_texture_subpath = _relative_texture_subpath(source_texture)
+        if relative_texture_subpath is not None:
+            relative_parts = relative_texture_subpath.parts
+            if relative_parts:
+                return "\\".join(("textures", *relative_parts, generated_path.name))
+            return "\\".join(("textures", generated_path.name))
+    return direct_resource_path
 
 
 def _candidate_nif_search_roots(
@@ -1863,6 +1949,7 @@ def find_related_nif_files_for_texture(
 
 
 def build_nif_patch_options_for_generated_outputs(
+    source_texture: Path | None,
     outputs: Mapping[str, Path],
     *,
     complex_format: str,
@@ -1881,9 +1968,18 @@ def build_nif_patch_options_for_generated_outputs(
         parallax_scale=parallax_scale if parallax_output is not None else None,
         force_shader_type_3=parallax_output is not None,
         enable_env_mapping=(env_mask_output is not None) or (complex_output is not None),
-        parallax_texture_path=_as_skyrim_resource_path(parallax_output) if parallax_output is not None else None,
-        normal_texture_path=_as_skyrim_resource_path(normal_path) if normal_path is not None else None,
-        env_mask_texture_path=_as_skyrim_resource_path(env_mask_output) if env_mask_output is not None else None,
+        parallax_texture_path=(
+            _resolve_generated_skyrim_resource_path(parallax_output, source_texture=source_texture)
+            if parallax_output is not None else None
+        ),
+        normal_texture_path=(
+            _resolve_generated_skyrim_resource_path(normal_path, source_texture=source_texture)
+            if normal_path is not None else None
+        ),
+        env_mask_texture_path=(
+            _resolve_generated_skyrim_resource_path(env_mask_output, source_texture=source_texture)
+            if env_mask_output is not None else None
+        ),
         backup=True,
         dry_run=False,
     )
@@ -1908,6 +2004,7 @@ def auto_patch_related_nifs_for_texture(
     if not related_nifs:
         return ()
     patch_options = build_nif_patch_options_for_generated_outputs(
+        source_texture,
         outputs,
         complex_format=complex_format,
         env_mask_mode=env_mask_mode,
@@ -2957,7 +3054,12 @@ if GUI_AVAILABLE:
             self.relief_mode_manual_override = False
             self.parallax_mode_var = tk.StringVar(value="standard")
             self.render_profile_var = tk.StringVar(value="auto")
-            self.render_profile_suggestion_var = tk.StringVar(value="Render profile recommendation: Auto-detect (Vanilla)")
+            self.render_profile_suggestion_var = tk.StringVar(
+                value=(
+                    "Suggested target: Vanilla (best for stock Skyrim SE / safest defaults).\n"
+                    + describe_render_profile_output_recommendation("vanilla")
+                )
+            )
             self.auto_suggestions_var = tk.BooleanVar(value=True)
             self.auto_normal_suggestion_var = tk.BooleanVar(value=True)
             self.auto_parallax_suggestion_var = tk.BooleanVar(value=True)
@@ -3117,7 +3219,10 @@ if GUI_AVAILABLE:
             self._add_tooltip(
                 _render_profile_label,
                 "🎯 Select target renderer preset.\n"
-                "Auto-detect suggests the best default mode set for your texture path/content.",
+                "vanilla = safest stock Skyrim SE setup.\n"
+                "community_shaders = packed _cm workflow.\n"
+                "enb = _msn + complex env mask + POM.\n"
+                "Changing this is the only thing that should auto-switch the mode combos.",
             )
             _render_profile_combo = ttk.Combobox(
                 options_frame,
@@ -3130,13 +3235,15 @@ if GUI_AVAILABLE:
             _render_profile_combo.bind("<<ComboboxSelected>>", self._on_render_profile_changed)
             self._add_tooltip(
                 _render_profile_combo,
-                "🎯 auto = detect and suggest/apply renderer defaults.\n"
-                "vanilla = safest defaults; community_shaders = _cm + standard mask/parallax; enb = complex mask + POM.",
+                "🎯 auto = pick the best renderer preset for the current texture, but only when you change this control.\n"
+                "vanilla = safest defaults; community_shaders = _cm + standard env/parallax; enb = _msn + complex env + POM.",
             )
             ttk.Label(
                 options_frame,
                 textvariable=self.render_profile_suggestion_var,
                 foreground="gray",
+                justify=tk.LEFT,
+                wraplength=520,
             ).grid(row=3, column=2, columnspan=3, sticky=tk.W, padx=(4, 0))
 
             _complex_fmt_label = ttk.Label(options_frame, text="Complex naming")
@@ -3151,7 +3258,7 @@ if GUI_AVAILABLE:
             )
             complex_format.grid(row=4, column=1, sticky=tk.W)
             complex_format.bind("<<ComboboxSelected>>", self._on_complex_format_changed)
-            self._add_tooltip(complex_format, "🏷 Choose 'msn' for RGBA normal+specular, 'cm' for packed AO/rough/metal/height-spec.\nWhen in doubt, use the format your target shader expects.")
+            self._add_tooltip(complex_format, "🏷 'msn' = ENB normal/specular texture.\n'cm' = Community Shaders packed material map.\nVanilla Skyrim generally does not use either unless your mesh/shader setup expects them.")
 
             _env_mode_row = ttk.Frame(options_frame)
             _env_mode_row.grid(row=4, column=2, columnspan=2, sticky=tk.W, padx=(20, 4), pady=8)
@@ -3167,7 +3274,7 @@ if GUI_AVAILABLE:
             )
             env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
             env_mask_mode_combo.bind("<<ComboboxSelected>>", self._on_env_mask_mode_changed)
-            self._add_tooltip(env_mask_mode_combo, "🌍 'standard' = single grey channel for vanilla Skyrim SE.\n'complex' = RGBA for ENBSeries. Using complex without ENB produces… nothing useful.")
+            self._add_tooltip(env_mask_mode_combo, "🌍 'standard' = vanilla Skyrim SE reflections.\n'complex' = ENB-only RGBA mask.\nIf you are not targeting ENB, use standard.")
             ttk.Label(
                 options_frame,
                 text="standard = vanilla Skyrim SE  |  complex = ENBSeries RGBA",
@@ -3296,9 +3403,8 @@ if GUI_AVAILABLE:
             _parallax_mode_combo.bind("<<ComboboxSelected>>", self._on_parallax_mode_changed)
             self._add_tooltip(
                 _parallax_mode_combo,
-                "🏔 'standard' = vanilla Skyrim SE parallax shader.\n"
-                "'occlusion (ENB/POM)' = smooth heightmap for ENBSeries POM — requires ENBSeries with\n"
-                "EnableParallax=true in enbseries.ini. Same _p.dds slot, better depth at grazing angles.",
+                "🏔 'standard' = vanilla/community-shaders-friendly heightmap for the normal Skyrim parallax setup.\n"
+                "'occlusion (ENB/POM)' = ENB-only smooth POM heightmap — use this only when the mesh/material is actually set up for ENB parallax occlusion.",
             )
             ttk.Label(
                 options_frame,
@@ -3854,7 +3960,7 @@ if GUI_AVAILABLE:
                 self.relief_mode_manual_override = False
                 self._set_preview_source(0, apply_recommendations=True)
                 if self.render_profile_var.get() != "auto":
-                    self._apply_render_profile_modes(self.render_profile_var.get())
+                    self._apply_render_profile_modes(self.render_profile_var.get(), apply_preset=False)
                 if not self.use_custom_output_var.get():
                     self.output_var.set(str(self._default_output_dir_for_path(path)))
                 preview_path = self.selected_inputs[self.current_preview_index]
@@ -4207,8 +4313,23 @@ if GUI_AVAILABLE:
                 workflow_profile=workflow_profile,
             )
 
-        def _apply_render_profile_modes(self, selected_profile: str, recommended_profile: str | None = None) -> str:
-            resolved = resolve_render_profile_options(selected_profile, recommended_profile=recommended_profile)
+        def _apply_render_profile_modes(
+            self,
+            selected_profile: str,
+            recommended_profile: str | None = None,
+            *,
+            apply_preset: bool,
+        ) -> str:
+            resolved = resolve_render_profile_mode_selection(
+                {
+                    "complex_format": self.complex_format_var.get(),
+                    "env_mask_mode": self.env_mask_mode_var.get(),
+                    "parallax_mode": self.parallax_mode_var.get(),
+                },
+                selected_profile=selected_profile,
+                recommended_profile=recommended_profile,
+                apply_preset=apply_preset,
+            )
             self.complex_format_var.set(resolved["complex_format"])
             self.env_mask_mode_var.set(resolved["env_mask_mode"])
             self.parallax_mode_var.set(
@@ -4221,40 +4342,64 @@ if GUI_AVAILABLE:
             recommended_profile = self._recommended_render_profile_for_preview(preview_path)
             label = _RENDER_PROFILE_LABELS.get(recommended_profile, recommended_profile.replace("_", " ").title())
             resolved = resolve_render_profile_options("auto", recommended_profile=recommended_profile)
+            workflow_hint = {
+                "vanilla": "best for stock Skyrim SE / safest defaults",
+                "community_shaders": "best for Community Shaders packed-material workflows",
+                "enb": "best for ENB complex material + POM workflows",
+            }.get(recommended_profile, "recommended workflow")
+            output_hint = describe_render_profile_output_recommendation(recommended_profile)
             tuple_hint = (
                 f"{resolved['complex_format']} / env {resolved['env_mask_mode']} / "
                 f"parallax {resolved['parallax_mode']}"
             )
             if self.render_profile_var.get() == "auto":
                 self.render_profile_suggestion_var.set(
-                    f"Render profile recommendation: Auto-detect ({label}) → {tuple_hint}"
+                    f"Suggested target: {label} ({workflow_hint}) → {tuple_hint}.\n"
+                    f"{output_hint}\n"
+                    "Current mode selections stay locked until you change Target renderer."
                 )
                 if apply_auto:
-                    effective = self._apply_render_profile_modes("auto", recommended_profile=recommended_profile)
+                    effective = self._apply_render_profile_modes(
+                        "auto",
+                        recommended_profile=recommended_profile,
+                        apply_preset=True,
+                    )
                     if effective == "enb":
                         self.emboss_mode_var.set(False)
             else:
-                self.render_profile_suggestion_var.set(f"Render profile recommendation: {label} → {tuple_hint}")
+                self.render_profile_suggestion_var.set(
+                    f"Suggested target: {label} ({workflow_hint}) → {tuple_hint}.\n"
+                    f"{output_hint}\n"
+                    "Current mode selections stay locked until you change Target renderer."
+                )
             return recommended_profile
 
         def _on_render_profile_changed(self, _event: object | None = None) -> None:
             selected = _normalize_render_profile(self.render_profile_var.get())
             self.render_profile_var.set(selected)
             recommended_profile = self._update_render_profile_recommendation(apply_auto=False)
-            effective = self._apply_render_profile_modes(selected, recommended_profile=recommended_profile)
+            effective = self._apply_render_profile_modes(
+                selected,
+                recommended_profile=recommended_profile,
+                apply_preset=True,
+            )
             if selected == "auto":
                 self.status_var.set(
-                    f"Render profile set to auto-detect; using {_RENDER_PROFILE_LABELS.get(effective, effective)} recommendations."
+                    f"Target renderer set to auto-detect; applied the current {_RENDER_PROFILE_LABELS.get(effective, effective)} preset."
                 )
             else:
-                self.status_var.set(f"Render profile set to {_RENDER_PROFILE_LABELS.get(effective, effective)}.")
+                self.status_var.set(
+                    f"Target renderer set to {_RENDER_PROFILE_LABELS.get(effective, effective)}. "
+                    f"Complex naming, env mask mode, and parallax mode were updated to match that renderer. "
+                    f"{describe_render_profile_output_recommendation(effective)}"
+                )
             self._request_preview_refresh()
 
         def _on_parallax_mode_changed(self, _event: object | None = None) -> None:
             if "occlusion" in self.parallax_mode_var.get():
-                self.status_var.set("Parallax mode: occlusion (ENBSeries POM-optimized heightmap).")
+                self.status_var.set("Parallax mode: occlusion — ENB-only smooth POM heightmap for meshes/materials set up for ENB parallax.")
             else:
-                self.status_var.set("Parallax mode: standard (vanilla Skyrim SE parallax heightmap).")
+                self.status_var.set("Parallax mode: standard — best default for vanilla Skyrim SE and most Community Shaders workflows.")
             self._request_preview_refresh()
 
         def _on_complex_format_changed(self, _event: object | None = None) -> None:
@@ -4263,9 +4408,9 @@ if GUI_AVAILABLE:
                 selected = "msn"
                 self.complex_format_var.set(selected)
             if selected == "msn":
-                self.status_var.set("Complex format: msn (_msn, normal RGB + specular alpha preview split).")
+                self.status_var.set("Complex naming: msn (_msn) — ENB-style normal RGB + specular alpha workflow.")
             else:
-                self.status_var.set("Complex format: cm (_cm, packed complex-material preview).")
+                self.status_var.set("Complex naming: cm (_cm) — Community Shaders packed complex-material workflow.")
             self._request_preview_refresh()
 
         def _on_env_mask_mode_changed(self, _event: object | None = None) -> None:
@@ -4274,9 +4419,9 @@ if GUI_AVAILABLE:
                 selected = "standard"
                 self.env_mask_mode_var.set(selected)
             if selected == "complex":
-                self.status_var.set("Environment mask mode: complex (ENB-style RGBA preview).")
+                self.status_var.set("Environment mask mode: complex — ENB-only RGBA reflection/gloss/metal/height workflow.")
             else:
-                self.status_var.set("Environment mask mode: standard (vanilla grayscale preview).")
+                self.status_var.set("Environment mask mode: standard — vanilla Skyrim SE grayscale reflection mask.")
             self._request_preview_refresh()
 
         def _update_slider_auto_states(self) -> None:
@@ -4345,7 +4490,7 @@ if GUI_AVAILABLE:
             self.complex_strength_var.set(float(resolved["complex_strength"]))
             self.specular_strength_var.set(float(resolved["specular_strength"]))
             if update_toggles:
-                self._update_render_profile_recommendation(apply_auto=True)
+                self._update_render_profile_recommendation(apply_auto=False)
                 # Auto-suggest emboss/relief mode based on material type and image content.
                 if preview_path is not None:
                     material_type = classify_material_type(preview_path)
@@ -4418,7 +4563,7 @@ if GUI_AVAILABLE:
             if apply_recommendations:
                 self._apply_recommended_settings()
             else:
-                self._update_render_profile_recommendation(apply_auto=self.render_profile_var.get() == "auto")
+                self._update_render_profile_recommendation(apply_auto=False)
             self._update_preview_navigation_state()
 
         def _set_preview_source_by_path(self, path: Path) -> None:

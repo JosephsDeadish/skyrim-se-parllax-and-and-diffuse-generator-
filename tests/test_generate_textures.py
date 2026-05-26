@@ -47,6 +47,7 @@ from generate_textures import (
     parse_preview_jump_input,
     recommend_generation_settings,
     recommend_render_profile,
+    resolve_render_profile_mode_selection,
     resolve_render_profile_options,
     load_gui_state,
     run_batch_with_options,
@@ -521,6 +522,22 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(auto["complex_format"], "msn")
         self.assertEqual(auto["env_mask_mode"], "complex")
 
+    def test_resolve_render_profile_mode_selection_preserves_current_modes_without_preset_apply(self) -> None:
+        resolved = resolve_render_profile_mode_selection(
+            {
+                "complex_format": "cm",
+                "env_mask_mode": "standard",
+                "parallax_mode": "occlusion (ENB/POM)",
+            },
+            selected_profile="auto",
+            recommended_profile="vanilla",
+            apply_preset=False,
+        )
+        self.assertEqual(resolved["effective_profile"], "vanilla")
+        self.assertEqual(resolved["complex_format"], "cm")
+        self.assertEqual(resolved["env_mask_mode"], "standard")
+        self.assertEqual(resolved["parallax_mode"], "occlusion")
+
     def test_parse_preview_jump_input_validates_bounds(self) -> None:
         self.assertEqual(parse_preview_jump_input("1", 5), 0)
         self.assertEqual(parse_preview_jump_input("5", 5), 4)
@@ -931,6 +948,25 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(diffuse_path.name, "brick.dds")
             self.assertEqual(parallax_path.name, "brick_p.dds")
 
+    def test_custom_output_paths_preserve_textures_subfolders_for_skyrim_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "mod" / "textures" / "architecture" / "stone" / "brick.dds"
+            input_path.parent.mkdir(parents=True)
+            input_path.write_bytes(b"stub")
+            output_root = temp_path / "out"
+
+            diffuse_path, parallax_path = build_output_paths(input_path=input_path, output_dir=output_root)
+            normal_path = build_normal_output_path(input_path=input_path, output_dir=output_root)
+            environment_mask_path = build_environment_mask_output_path(input_path=input_path, output_dir=output_root)
+            complex_path = build_complex_output_path(input_path=input_path, output_dir=output_root, complex_format="msn")
+
+            self.assertEqual(diffuse_path.relative_to(output_root).as_posix(), "textures/architecture/stone/brick.dds")
+            self.assertEqual(parallax_path.relative_to(output_root).as_posix(), "textures/architecture/stone/brick_p.dds")
+            self.assertEqual(normal_path.relative_to(output_root).as_posix(), "textures/architecture/stone/brick_n.dds")
+            self.assertEqual(environment_mask_path.relative_to(output_root).as_posix(), "textures/architecture/stone/brick_m.dds")
+            self.assertEqual(complex_path.relative_to(output_root).as_posix(), "textures/architecture/stone/brick_msn.dds")
+
     def test_build_output_paths_accepts_omitted_name_arguments(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -1132,6 +1168,7 @@ class GenerateTexturesTests(unittest.TestCase):
         }
 
         options = build_nif_patch_options_for_generated_outputs(
+            None,
             outputs,
             complex_format="msn",
             env_mask_mode="complex",
@@ -1147,6 +1184,25 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(options.parallax_texture_path, "textures\\sign01_p.dds")
         self.assertEqual(options.env_mask_texture_path, "textures\\sign01_m.dds")
         self.assertEqual(options.parallax_scale, 4.0)
+
+    def test_build_nif_patch_options_for_generated_outputs_falls_back_to_source_texture_resource_dir(self) -> None:
+        source_texture = Path("/tmp/mod/textures/architecture/stone/brick.dds")
+        outputs = {
+            "parallax": Path("/tmp/generated/brick_p.dds"),
+            "normal": Path("/tmp/generated/brick_n.dds"),
+        }
+
+        options = build_nif_patch_options_for_generated_outputs(
+            source_texture,
+            outputs,
+            complex_format="msn",
+            env_mask_mode="standard",
+            parallax_mode="standard",
+            parallax_scale=2.0,
+        )
+
+        self.assertEqual(options.parallax_texture_path, "textures\\architecture\\stone\\brick_p.dds")
+        self.assertEqual(options.normal_texture_path, "textures\\architecture\\stone\\brick_n.dds")
 
     def test_auto_patch_related_nifs_for_texture_patches_all_matches(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
