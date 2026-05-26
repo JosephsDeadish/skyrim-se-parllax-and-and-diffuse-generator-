@@ -723,18 +723,63 @@ def generate_parallax(source: Image.Image, strength: float = 1.35) -> Image.Imag
     return ImageOps.autocontrast(contrasted, cutoff=1)
 
 
-def generate_normal(source: Image.Image, strength: float = 2.0, directx: bool = True) -> Image.Image:
+def _prepare_emboss_height_map(source: Image.Image) -> Image.Image:
+    """Prepare a height map optimised for emboss-style normal generation.
+
+    Unlike :func:`_prepare_height_map`, which builds smooth terrain gradients
+    from broad luminance variation, this function exaggerates *edges* —
+    transitions between printed text, artwork borders, decorative elements, and
+    the flat background on book/card/scroll surfaces.  Flat uniform areas
+    remain at mid-grey and produce (128, 128, 255) flat normals; ridge/valley
+    edges at design element boundaries produce strong directional normals that
+    simulate physically embossed or debossed detail.
+    """
+    grayscale = ImageOps.grayscale(source)
+    # Pass 1: fine-edge sharpening — catches text outlines and thin borders.
+    pass1 = grayscale.filter(ImageFilter.UnsharpMask(radius=0.5, percent=500, threshold=0))
+    # Pass 2: medium-scale reinforcement — catches broader design element boundaries.
+    pass2 = pass1.filter(ImageFilter.UnsharpMask(radius=1.5, percent=200, threshold=1))
+    return ImageOps.autocontrast(pass2, cutoff=0)
+
+
+def generate_normal(source: Image.Image, strength: float = 2.0, directx: bool = True, emboss_mode: bool = False) -> Image.Image:
+    """Generate a DirectX-style (default) or OpenGL-style normal map.
+
+    Parameters
+    ----------
+    source:
+        Input diffuse texture.
+    strength:
+        Normal map intensity (higher = more pronounced surface detail).
+    directx:
+        When ``True`` (default) the green channel is DirectX-oriented (Y-up),
+        matching the convention expected by Skyrim SE.  Pass ``False`` for
+        OpenGL-style Y-down.
+    emboss_mode:
+        When ``True``, use an edge-ridge height map instead of a smooth
+        gradient height map.  This gives flat surfaces (books, cards, scrolls,
+        posters) physically plausible embossed/debossed depth detail by
+        raising the edges of printed artwork, text, and borders into the normal
+        map while leaving uniform background areas as flat normals.
+    """
     source_grayscale = ImageOps.grayscale(source)
     source_min, source_max = source_grayscale.getextrema()
     if (source_max - source_min) <= 2:
         return Image.new("RGB", source.size, color=(128, 128, 255))
 
-    pressure = _detail_pressure(source)
-    resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.8)
-    effective_strength = _clamp(strength * (1.0 - (pressure * 0.2)), 0.9, 3.8)
-    height_map = _prepare_height_map(source).filter(
-        ImageFilter.GaussianBlur(radius=0.8 + (pressure * 0.9) + ((resolution_scale - 1.0) * 0.35))
-    )
+    if emboss_mode:
+        # Strength is used directly — pressure suppression is not appropriate for
+        # emboss mode since we *want* the edges to remain crisp and prominent.
+        effective_strength = _clamp(strength, 0.9, 4.0)
+        # Very slight blur removes pixel-level noise while preserving ridge sharpness.
+        height_map = _prepare_emboss_height_map(source).filter(ImageFilter.GaussianBlur(radius=0.4))
+    else:
+        pressure = _detail_pressure(source)
+        resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.8)
+        effective_strength = _clamp(strength * (1.0 - (pressure * 0.2)), 0.9, 3.8)
+        height_map = _prepare_height_map(source).filter(
+            ImageFilter.GaussianBlur(radius=0.8 + (pressure * 0.9) + ((resolution_scale - 1.0) * 0.35))
+        )
     sobel_x = height_map.filter(ImageFilter.Kernel((3, 3), (-1, 0, 1, -2, 0, 2, -1, 0, 1), scale=8, offset=128))
     sobel_y = height_map.filter(ImageFilter.Kernel((3, 3), (-1, -2, -1, 0, 0, 0, 1, 2, 1), scale=8, offset=128))
     green_sign = 1.0 if directx else -1.0
@@ -943,8 +988,13 @@ def generate_specular(source: Image.Image, strength: float = 1.15) -> Image.Imag
     return Image.fromarray(normalized_arr.reshape(h, w).astype(np.uint8), mode="L")
 
 
-def generate_msn(source: Image.Image, normal_strength: float = 2.0, specular_strength: float = 1.15) -> Image.Image:
-    normal_rgb = generate_normal(source, strength=normal_strength)
+def generate_msn(
+    source: Image.Image,
+    normal_strength: float = 2.0,
+    specular_strength: float = 1.15,
+    emboss_mode: bool = False,
+) -> Image.Image:
+    normal_rgb = generate_normal(source, strength=normal_strength, emboss_mode=emboss_mode)
     specular_alpha = generate_specular(source, strength=specular_strength)
     r, g, b = normal_rgb.split()
     return Image.merge("RGBA", (r, g, b, specular_alpha))
@@ -970,6 +1020,7 @@ def generate_preview_outputs(
     specular_strength: float,
     complex_format: str,
     env_mask_mode: str = "standard",
+    emboss_mode: bool = False,
     include_diffuse: bool,
     include_normal: bool,
     include_parallax: bool,
@@ -982,7 +1033,7 @@ def generate_preview_outputs(
         outputs["diffuse"] = enforce_skyrim_output_profile("diffuse", generate_diffuse(source))
     if include_normal:
         outputs["normal"] = enforce_skyrim_output_profile(
-            "normal", generate_normal(source, strength=normal_strength)
+            "normal", generate_normal(source, strength=normal_strength, emboss_mode=emboss_mode)
         )
     if include_parallax:
         outputs["parallax"] = enforce_skyrim_output_profile(
@@ -1000,7 +1051,7 @@ def generate_preview_outputs(
         outputs["complex_material"] = enforce_skyrim_output_profile(
             "complex_material",
             (
-                generate_msn(source, normal_strength=normal_strength, specular_strength=specular_strength)
+                generate_msn(source, normal_strength=normal_strength, specular_strength=specular_strength, emboss_mode=emboss_mode)
                 if complex_format == "msn"
                 else generate_complex_material(source, strength=complex_strength)
             ),
@@ -1540,6 +1591,7 @@ def run_with_options(
     specular_strength: float | None = None,
     complex_format: str = "msn",
     env_mask_mode: str = "standard",
+    emboss_mode: bool = False,
     include_diffuse: bool = True,
     include_normal: bool = True,
     include_parallax: bool = True,
@@ -1582,7 +1634,9 @@ def run_with_options(
             outputs["diffuse"] = _save_with_dds_fallback(diffuse, diffuse_path)
 
         if include_normal:
-            normal = enforce_skyrim_output_profile("normal", generate_normal(source, strength=resolved_normal_strength))
+            normal = enforce_skyrim_output_profile(
+                "normal", generate_normal(source, strength=resolved_normal_strength, emboss_mode=emboss_mode)
+            )
             normal_path = build_normal_output_path(
                 input_path=input_file,
                 output_dir=output_dir,
@@ -1635,6 +1689,7 @@ def run_with_options(
                         source,
                         normal_strength=resolved_normal_strength,
                         specular_strength=resolved_specular_strength,
+                        emboss_mode=emboss_mode,
                     ),
                     complex_format=complex_format,
                 )
@@ -1673,6 +1728,7 @@ def run_batch_with_options(
     specular_strength: float | None = None,
     complex_format: str = "msn",
     env_mask_mode: str = "standard",
+    emboss_mode: bool = False,
     include_diffuse: bool = True,
     include_normal: bool = True,
     include_parallax: bool = True,
@@ -1711,6 +1767,7 @@ def run_batch_with_options(
                     specular_strength=specular_strength,
                     complex_format=complex_format,
                     env_mask_mode=env_mask_mode,
+                    emboss_mode=emboss_mode,
                     include_diffuse=include_diffuse,
                     include_normal=include_normal,
                     include_parallax=include_parallax,
@@ -1743,6 +1800,7 @@ def run_batch_with_options(
             specular_strength=specular_strength,
             complex_format=complex_format,
             env_mask_mode=env_mask_mode,
+            emboss_mode=emboss_mode,
             include_diffuse=include_diffuse,
             include_normal=include_normal,
             include_parallax=include_parallax,
@@ -1845,6 +1903,17 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--complex-material", action="store_true", help="Generate complex material output.")
+    parser.add_argument(
+        "--emboss-mode",
+        action="store_true",
+        help=(
+            "Enable emboss depth mode for normal map generation. "
+            "Replaces smooth gradient height maps with edge-ridge height maps that exaggerate "
+            "printed text, borders, and artwork detail on flat surfaces such as books, cards, "
+            "scrolls, and posters — giving them physically plausible embossed/debossed depth. "
+            "Recommended for paper/book/card textures; leave off for terrain, stone, and wood."
+        ),
+    )
     parser.add_argument(
         "--batch-workers",
         type=int,
