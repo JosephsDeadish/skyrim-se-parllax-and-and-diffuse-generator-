@@ -1340,7 +1340,7 @@ def build_output_paths(
 def build_normal_output_path(
     input_path: Path,
     output_dir: Path | None,
-    normal_name: str | None,
+    normal_name: str | None = None,
 ) -> Path:
     base_output_dir = output_dir or input_path.parent
     base_output_dir.mkdir(parents=True, exist_ok=True)
@@ -1352,7 +1352,7 @@ def build_normal_output_path(
 def build_glow_output_path(
     input_path: Path,
     output_dir: Path | None,
-    glow_name: str | None,
+    glow_name: str | None = None,
 ) -> Path:
     base_output_dir = output_dir or input_path.parent
     base_output_dir.mkdir(parents=True, exist_ok=True)
@@ -1364,7 +1364,7 @@ def build_glow_output_path(
 def build_environment_mask_output_path(
     input_path: Path,
     output_dir: Path | None,
-    environment_mask_name: str | None,
+    environment_mask_name: str | None = None,
 ) -> Path:
     base_output_dir = output_dir or input_path.parent
     base_output_dir.mkdir(parents=True, exist_ok=True)
@@ -1376,7 +1376,7 @@ def build_environment_mask_output_path(
 def build_complex_output_path(
     input_path: Path,
     output_dir: Path | None,
-    complex_name: str | None,
+    complex_name: str | None = None,
     complex_format: str = "msn",
 ) -> Path:
     base_output_dir = output_dir or input_path.parent

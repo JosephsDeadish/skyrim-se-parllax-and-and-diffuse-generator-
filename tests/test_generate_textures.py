@@ -886,6 +886,23 @@ class GenerateTexturesTests(unittest.TestCase):
 
             self.assertEqual(complex_path.name, "brick_cm.dds")
 
+    def test_build_single_output_paths_accept_omitted_name_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.dds"
+            input_path.write_bytes(b"stub")
+            output_dir = temp_path / "out"
+
+            normal_path = build_normal_output_path(input_path=input_path, output_dir=output_dir)
+            glow_path = build_glow_output_path(input_path=input_path, output_dir=output_dir)
+            environment_mask_path = build_environment_mask_output_path(input_path=input_path, output_dir=output_dir)
+            complex_path = build_complex_output_path(input_path=input_path, output_dir=output_dir, complex_format="msn")
+
+            self.assertEqual(normal_path.name, "brick_n.dds")
+            self.assertEqual(glow_path.name, "brick_g.dds")
+            self.assertEqual(environment_mask_path.name, "brick_m.dds")
+            self.assertEqual(complex_path.name, "brick_msn.dds")
+
     def test_collect_source_textures_from_directory_skips_generated_suffixes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
