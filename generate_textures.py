@@ -2162,6 +2162,24 @@ if GUI_AVAILABLE:
             canvas.bind("<Configure>", _resize_window)
             self._bind_mousewheel(canvas)
 
+            top_bar = ttk.Frame(wrapper, padding=(4, 0, 4, 6))
+            top_bar.pack(fill=tk.X)
+            ttk.Label(
+                top_bar,
+                text="Generate Skyrim-ready texture maps from one source image (single file or full folder batch).",
+            ).pack(side=tk.LEFT)
+            _patreon_button = ttk.Button(
+                top_bar,
+                text="❤ Support on Patreon",
+                command=lambda: webbrowser.open(PATREON_URL),
+            )
+            _patreon_button.pack(side=tk.RIGHT, padx=4)
+            self._add_tooltip(
+                _patreon_button,
+                "❤ Fuel the project on Patreon.\n"
+                "Your support buys bug-fixing time, feature upgrades, and enough caffeine to keep the texture goblin alive.",
+            )
+
             file_frame = ttk.LabelFrame(wrapper, text="Files", padding=10)
             file_frame.pack(fill=tk.X, padx=4, pady=4)
 
@@ -2390,26 +2408,42 @@ if GUI_AVAILABLE:
             options_frame.columnconfigure(2, weight=1)
             self._update_slider_auto_states()
 
-            preview_frame = ttk.LabelFrame(wrapper, text="Preview", padding=10)
+            preview_frame = ttk.LabelFrame(wrapper, text="Preview (Source vs Generated)", padding=10)
             preview_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
-            ttk.Label(preview_frame, text="Before").grid(row=0, column=0, columnspan=2, padx=10, pady=(2, 4))
+            ttk.Label(preview_frame, text="Before (source texture)").grid(row=0, column=0, columnspan=2, padx=6, pady=(2, 3), sticky=tk.W)
             self.before_image_label = ttk.Label(preview_frame, text="No source loaded")
-            self.before_image_label.grid(row=1, column=0, columnspan=2, padx=6, pady=4)
-            self._add_tooltip(self.before_image_label, "👀 Your raw source texture before the magic happens.\nLook upon it. Appreciate its unprocessed beauty.")
+            self.before_image_label.grid(row=1, column=0, columnspan=2, padx=6, pady=(0, 3), sticky=tk.W)
+            self._add_tooltip(
+                self.before_image_label,
+                "👀 This is the original input texture.\n"
+                "Use it as your baseline: if the generated maps look weird, compare here first before blaming your GPU, ENB, or moon phases.",
+            )
 
             source_controls = ttk.Frame(preview_frame)
-            source_controls.grid(row=2, column=0, columnspan=2, pady=(0, 8))
+            source_controls.grid(row=2, column=0, columnspan=2, pady=(0, 4), sticky=tk.W)
             self.prev_source_button = ttk.Button(source_controls, text="◀ Prev", command=self._show_previous_preview_source)
             self.prev_source_button.pack(side=tk.LEFT, padx=4)
-            self._add_tooltip(self.prev_source_button, "⏮ Preview the previous texture in your batch.\nBecause forward isn't always the right direction.")
+            self._add_tooltip(
+                self.prev_source_button,
+                "⏮ Show the previous source file in folder mode.\n"
+                "Perfect for side-eyeing what your last texture looked like before your artistic decisions escalated.",
+            )
             ttk.Label(source_controls, textvariable=self.preview_source_name_var).pack(side=tk.LEFT, padx=8)
             self.next_source_button = ttk.Button(source_controls, text="Next ▶", command=self._show_next_preview_source)
             self.next_source_button.pack(side=tk.LEFT, padx=4)
-            self._add_tooltip(self.next_source_button, "⏭ Preview the next texture in your batch.\nOnward! To the next texture frontier!")
+            self._add_tooltip(
+                self.next_source_button,
+                "⏭ Show the next source file in folder mode.\n"
+                "Use this to QA your batch without opening fifty windows like a chaos wizard.",
+            )
             _preview_size_label = ttk.Label(source_controls, text="Preview size")
             _preview_size_label.pack(side=tk.LEFT, padx=(14, 4))
-            self._add_tooltip(_preview_size_label, "📐 How large the preview thumbnails appear.\nBigger = easier to see details. Smaller = fits more on screen. Life is full of trade-offs.")
+            self._add_tooltip(
+                _preview_size_label,
+                "📐 Controls preview thumbnail scale only (not output resolution).\n"
+                "Large helps inspection; small helps fit more panes. Your exported DDS quality stays the same either way.",
+            )
             preview_size_combo = ttk.Combobox(
                 source_controls,
                 textvariable=self.preview_size_var,
@@ -2419,7 +2453,11 @@ if GUI_AVAILABLE:
             )
             preview_size_combo.pack(side=tk.LEFT)
             preview_size_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_preview_size_changed())
-            self._add_tooltip(preview_size_combo, "📐 Choose thumbnail size: XS, Small, Medium (default), Large, XL.\nNote: XL does not make your textures better, just easier to admire.")
+            self._add_tooltip(
+                preview_size_combo,
+                "📐 XS→XL changes how big previews look in this window.\n"
+                "It does NOT change generated file quality, but XL can make you feel like a very serious texture scientist.",
+            )
             _batch_prev_check = ttk.Checkbutton(
                 source_controls,
                 text="Show preview during batch",
@@ -2434,9 +2472,12 @@ if GUI_AVAILABLE:
                 "Default is OFF for speed; enable only when you want to watch the magic happen.",
             )
 
+            ttk.Label(preview_frame, text="Generated outputs (after processing)").grid(
+                row=3, column=0, columnspan=2, padx=6, pady=(2, 2), sticky=tk.W
+            )
             self.preview_output_labels: dict[str, ttk.Label] = {}
             output_grid = ttk.Frame(preview_frame)
-            output_grid.grid(row=3, column=0, columnspan=2, sticky=tk.NSEW)
+            output_grid.grid(row=4, column=0, columnspan=2, sticky=tk.W)
             output_specs = (
                 ("diffuse", "Diffuse"),
                 ("normal", "Normal"),
@@ -2446,28 +2487,28 @@ if GUI_AVAILABLE:
                 ("complex_material", "Complex Material"),
             )
             _output_tooltips = {
-                "diffuse": "🎨 Preview of the diffuse (colour) output.\nIf this looks wrong you should probably re-examine your life choices.",
-                "normal": "🗻 Preview of the normal map output.\nThat psychedelic blue-purple soup is actually geometric data. Science!",
-                "parallax": "🏔 Preview of the parallax/height map.\nDarker = deeper, lighter = higher. A greyscale height map of greatness.",
-                "glow": "✨ Preview of the glow map.\nWhite = glows in darkness. Black = does not glow. Simple, powerful, disco.",
-                "environment_mask": "🪞 Preview of the environment mask.\nTells the engine where to apply reflections. Grey = shiny, black = matte.",
-                "complex_material": "🔮 Preview of the complex material output.\nRequires ENB to see in-game. Without ENB it just… sits there, looking important.",
+                "diffuse": "🎨 Final colour/albedo preview.\nIf this looks off, every other map will inherit the drama. Start here.",
+                "normal": "🗻 Normal-map preview (fake surface depth).\nBlue-purple space magic that tells light where bumps should pretend to exist.",
+                "parallax": "🏔 Height/parallax preview.\nDarker = lower, lighter = higher. Think of it as tiny grayscale topography for your texture.",
+                "glow": "✨ Emissive/glow preview.\nBright pixels glow in darkness; dark pixels mind their own business like respectable citizens.",
+                "environment_mask": "🪞 Reflection mask preview.\nBrighter = shinier, darker = matte. Basically a \"where may I sparkle\" permit.",
+                "complex_material": "🔮 ENB complex-material preview.\nUseful only with ENB complex features enabled, otherwise it's a very mysterious abstract painting.",
             }
             for index, (output_key, output_label) in enumerate(output_specs):
                 row = (index // 2) * 2
                 column = index % 2
                 _out_title = ttk.Label(output_grid, text=output_label)
-                _out_title.grid(row=row, column=column, padx=6, pady=(2, 1))
+                _out_title.grid(row=row, column=column, padx=3, pady=(1, 0), sticky=tk.W)
                 self._add_tooltip(_out_title, _output_tooltips.get(output_key, f"Preview of {output_label} output."))
                 label = ttk.Label(output_grid, text="No preview")
-                label.grid(row=row + 1, column=column, padx=6, pady=(0, 4))
+                label.grid(row=row + 1, column=column, padx=3, pady=(0, 2), sticky=tk.W)
                 self._add_tooltip(label, _output_tooltips.get(output_key, f"Preview of {output_label} output."))
                 self.preview_output_labels[output_key] = label
 
             preview_frame.columnconfigure(0, weight=1)
             preview_frame.columnconfigure(1, weight=1)
-            output_grid.columnconfigure(0, weight=1)
-            output_grid.columnconfigure(1, weight=1)
+            output_grid.columnconfigure(0, weight=0)
+            output_grid.columnconfigure(1, weight=0)
             self._update_preview_navigation_state()
 
             actions = ttk.Frame(wrapper, padding=(4, 10))
@@ -2490,13 +2531,6 @@ if GUI_AVAILABLE:
             _theme_check.pack(side=tk.LEFT, padx=(12, 4))
             self._add_tooltip(_theme_check, "🌙 Toggle dark/light mode.\nEasy on the eyes during those 3am modding sessions.")
             ttk.Label(actions, textvariable=self.status_var).pack(side=tk.LEFT, padx=14)
-            _patreon_button = ttk.Button(
-                actions,
-                text="❤ Support on Patreon",
-                command=lambda: webbrowser.open(PATREON_URL),
-            )
-            _patreon_button.pack(side=tk.RIGHT, padx=4)
-            self._add_tooltip(_patreon_button, "❤ Support the developer on Patreon.\nBecause caffeine and texture generation both cost money.")
             self._apply_theme()
 
         def _set_app_icon(self) -> None:
