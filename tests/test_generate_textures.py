@@ -56,6 +56,7 @@ from generate_textures import (
     resolve_render_profile_mode_selection,
     resolve_render_profile_output_defaults,
     resolve_render_profile_options,
+    restore_nif_backups,
     load_gui_state,
     main,
     parse_args,
@@ -634,6 +635,28 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(compute_wrapped_preview_index(-1, 3), 2)
         self.assertEqual(compute_wrapped_preview_index(3, 3), 0)
         self.assertEqual(compute_wrapped_preview_index(1, 3), 1)
+
+    def test_restore_nif_backups_restores_from_nif_bak(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mesh_path = Path(tmpdir) / "test_mesh.nif"
+            backup_path = mesh_path.with_suffix(".nif.bak")
+            mesh_path.write_bytes(b"new-data")
+            backup_path.write_bytes(b"old-data")
+
+            rows = restore_nif_backups([mesh_path])
+
+            self.assertEqual(rows[0][0], "OK")
+            self.assertEqual(mesh_path.read_bytes(), b"old-data")
+
+    def test_restore_nif_backups_skips_when_backup_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mesh_path = Path(tmpdir) / "test_mesh.nif"
+            mesh_path.write_bytes(b"current-data")
+
+            rows = restore_nif_backups([mesh_path])
+
+            self.assertEqual(rows[0], ("SKIP", "test_mesh.nif", "No .nif.bak backup found."))
+            self.assertEqual(mesh_path.read_bytes(), b"current-data")
 
     def test_should_apply_preview_recommendations_disabled_when_processing(self) -> None:
         self.assertFalse(should_apply_preview_recommendations(

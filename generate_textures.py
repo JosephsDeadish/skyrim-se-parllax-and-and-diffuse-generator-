@@ -152,6 +152,23 @@ def parse_preview_jump_input(value: str, total: int) -> int | None:
     return requested - 1
 
 
+def restore_nif_backups(nif_paths: list[Path]) -> list[tuple[str, str, str]]:
+    """Restore ``.nif`` files from sibling ``.nif.bak`` backups."""
+    results: list[tuple[str, str, str]] = []
+    for nif_path in nif_paths:
+        backup_path = nif_path.with_suffix(".nif.bak")
+        if not backup_path.exists():
+            results.append(("SKIP", nif_path.name, "No .nif.bak backup found."))
+            continue
+        try:
+            shutil.copy2(backup_path, nif_path)
+        except Exception as exc:
+            results.append(("FAIL", nif_path.name, f"Restore failed: {exc}"))
+            continue
+        results.append(("OK", nif_path.name, f"Restored from {backup_path.name}."))
+    return results
+
+
 def should_apply_preview_recommendations(*, auto_suggestions_enabled: bool, is_processing: bool) -> bool:
     """Return whether preview navigation should auto-apply recommendations.
 
@@ -5303,8 +5320,8 @@ if GUI_AVAILABLE:
 
             win = tk.Toplevel(self.root)
             win.title(f"NIF Editor — Skyrim Texture Generator v{APP_VERSION}")
-            win.geometry("920x760")
-            win.minsize(820, 620)
+            win.geometry("1040x820")
+            win.minsize(920, 680)
             win.resizable(True, True)
             win.grab_set()
             try:
@@ -5317,8 +5334,10 @@ if GUI_AVAILABLE:
                 tk.Label(
                     win,
                     text=(
-                        "Patch Skyrim SE NIF files so generated textures actually work in game.\n"
-                        "Use this for mods that shipped without parallax, complex parallax, ENB POM, or environment-mapping flags."
+                        "Patch Skyrim SE NIF files so generated textures work in-game.\n"
+                        "Quick start: choose your target renderer first, then use Scan NIFs to review, "
+                        "Apply patch to enable features, Remove features to disable them, and Restore backups "
+                        "to roll back .nif.bak copies."
                     ),
                     justify=tk.LEFT,
                     wraplength=740,
@@ -5370,7 +5389,7 @@ if GUI_AVAILABLE:
                 self._add_tooltip(nif_path_entry, "⌨ Paste a full path here. Yes, even that scary MO2 path with 400 folders.")
                 self._add_tooltip(browse_nif_button, "🧭 Opens file/folder picker so your fingers don’t have to type all that.")
 
-                opt_frame = ttk.LabelFrame(win, text="Patch Options", padding=6)
+                opt_frame = ttk.LabelFrame(win, text="Patch Options (what to enable)", padding=6)
                 opt_frame.pack(fill="x", padx=10, pady=4)
                 renderer_profile_var = tk.StringVar(value=_normalize_render_profile(self.render_profile_var.get()))
                 if renderer_profile_var.get() not in _RENDER_PROFILE_LABELS:
@@ -5407,18 +5426,30 @@ if GUI_AVAILABLE:
 
                 flag_row = ttk.Frame(opt_frame)
                 flag_row.pack(fill="x")
-                enable_parallax_check = ttk.Checkbutton(flag_row, text="Enable standard parallax", variable=enable_parallax_var)
+                enable_parallax_check = ttk.Checkbutton(
+                    flag_row,
+                    text="Enable standard parallax (vanilla/CS)",
+                    variable=enable_parallax_var,
+                )
                 enable_parallax_check.pack(side="left")
-                enable_pom_check = ttk.Checkbutton(flag_row, text="Enable ENB POM / occlusion", variable=enable_pom_var)
+                enable_pom_check = ttk.Checkbutton(
+                    flag_row,
+                    text="Enable ENB POM / occlusion (ENB only)",
+                    variable=enable_pom_var,
+                )
                 enable_pom_check.pack(side="left", padx=(12, 0))
 
                 flag_row2 = ttk.Frame(opt_frame)
                 flag_row2.pack(fill="x", pady=(2, 0))
-                enable_env_check = ttk.Checkbutton(flag_row2, text="Enable environment mapping", variable=enable_env_var)
+                enable_env_check = ttk.Checkbutton(
+                    flag_row2,
+                    text="Enable environment mapping (_m slot)",
+                    variable=enable_env_var,
+                )
                 enable_env_check.pack(side="left")
                 force_type3_check = ttk.Checkbutton(
                     flag_row2,
-                    text="Force shader type 3 (needed for stronger parallax scale)",
+                    text="Force shader type 3 (required for stronger parallax scale on some meshes)",
                     variable=force_type3_var,
                 )
                 force_type3_check.pack(side="left", padx=(12, 0))
@@ -5432,10 +5463,9 @@ if GUI_AVAILABLE:
                 guide_label = ttk.Label(
                     opt_frame,
                     text=(
-                        "Checkbox quick guide: Parallax = SLSF1_Parallax + slot 3 (_p), "
-                        "ENB POM = SLSF1_Parallax_Occlusion (ENB only), "
-                        "Environment mapping = SLSF1_Environment_Mapping + slot 5 (_m), "
-                        "Force type 3 writes parallax scale on BSLighting blocks."
+                        "Option guide: Enable standard parallax for vanilla/community shaders workflows. "
+                        "Enable ENB POM only for ENB setups. Enable environment mapping only when using slot 5 (_m). "
+                        "Force shader type 3 lets the tool write stronger parallax scale values."
                     ),
                     justify=tk.LEFT,
                     wraplength=860,
@@ -5450,7 +5480,7 @@ if GUI_AVAILABLE:
                 )
                 option_warning_label.pack(fill="x", pady=(2, 0))
 
-                unpatch_frame = ttk.LabelFrame(win, text="Remove Features (Unpatch)", padding=6)
+                unpatch_frame = ttk.LabelFrame(win, text="Remove Features (what to disable)", padding=6)
                 unpatch_frame.pack(fill="x", padx=10, pady=(2, 4))
                 unpatch_row = ttk.Frame(unpatch_frame)
                 unpatch_row.pack(fill="x")
@@ -5733,7 +5763,11 @@ if GUI_AVAILABLE:
                 progress_bar = ttk.Progressbar(win, orient="horizontal", mode="determinate", variable=progress_var, maximum=100)
                 progress_bar.pack(fill="x", padx=10, pady=(0, 6))
 
-                res_frame = ttk.LabelFrame(win, text="Results (select a row to copy details)", padding=6)
+                res_frame = ttk.LabelFrame(
+                    win,
+                    text="Results Log (scrollable; right-click rows to copy)",
+                    padding=6,
+                )
                 res_frame.pack(fill="both", expand=True, padx=10, pady=(0, 8))
                 style = ttk.Style(win)
                 tree_style_name = "NifEditor.Treeview"
@@ -5762,51 +5796,20 @@ if GUI_AVAILABLE:
                 results_tree.heading("file", text="File")
                 results_tree.heading("details", text="Details")
                 results_tree.column("status", width=90, minwidth=80, anchor="center")
-                results_tree.column("file", width=220, minwidth=180, anchor="w")
-                results_tree.column("details", width=560, minwidth=260, anchor="w")
+                results_tree.column("file", width=260, minwidth=200, anchor="w")
+                results_tree.column("details", width=820, minwidth=320, anchor="w")
                 results_scroll = ttk.Scrollbar(res_frame, command=results_tree.yview)
                 results_scroll_x = ttk.Scrollbar(res_frame, command=results_tree.xview, orient="horizontal")
                 results_tree.configure(yscrollcommand=results_scroll.set, xscrollcommand=results_scroll_x.set)
                 results_scroll.pack(side="right", fill="y")
                 results_scroll_x.pack(side="bottom", fill="x")
                 results_tree.pack(fill="both", expand=True, side="left")
-                selected_detail_var = tk.StringVar(value="")
-                detail_entry = tk.Entry(
-                    res_frame,
-                    textvariable=selected_detail_var,
-                    bg=entry_bg,
-                    fg=fg,
-                    insertbackground=fg,
-                    relief="solid",
-                    borderwidth=1,
-                )
-                detail_entry.pack(fill="x", pady=(6, 0))
-                detail_text = tk.Text(
-                    res_frame,
-                    height=6,
-                    wrap="word",
-                    bg=entry_bg,
-                    fg=fg,
-                    insertbackground=fg,
-                    relief="solid",
-                    borderwidth=1,
-                )
-                detail_text_scroll = ttk.Scrollbar(res_frame, command=detail_text.yview)
-                detail_text.configure(yscrollcommand=detail_text_scroll.set)
-                detail_text_scroll.pack(side="right", fill="y", pady=(6, 0))
-                detail_text.pack(fill="both", expand=False, pady=(6, 0))
                 self._add_tooltip(
                     results_tree,
-                    "📋 Click any row to inspect/copy it.\nThis table is intentionally boring and readable so your future self says thanks.",
+                    "Results log for scan/patch/restore actions. Scroll to inspect all rows.",
                 )
-                self._add_tooltip(detail_entry, "✂ Selected row details land here for easy copy/paste.")
-                self._add_tooltip(detail_text, "🧾 Full details appear here with wrapping so error messages stop getting chopped in half.")
 
                 full_row_details: dict[str, str] = {}
-
-                def _set_detail_text(value: str) -> None:
-                    detail_text.delete("1.0", "end")
-                    detail_text.insert("1.0", value)
 
                 def _add_result_row(status: str, file_name: str, details: str) -> None:
                     normalized_details = details.strip() or "(no details)"
@@ -5822,31 +5825,30 @@ if GUI_AVAILABLE:
                     for item in results_tree.get_children():
                         results_tree.delete(item)
                     full_row_details.clear()
-                    selected_detail_var.set("")
-                    _set_detail_text("")
                     status_var.set("Results cleared.")
                     progress_var.set(0.0)
 
                 def _on_result_selected(_event: object | None = None) -> None:
                     selected = results_tree.selection()
                     if not selected:
-                        selected_detail_var.set("")
                         return
                     row_values = results_tree.item(selected[0], "values")
                     if not row_values:
-                        selected_detail_var.set("")
-                        _set_detail_text("")
                         return
                     full_details = full_row_details.get(str(selected[0]), str(row_values[2]))
-                    summary = f"[{row_values[0]}] {row_values[1]} — {full_details}"
-                    selected_detail_var.set(summary)
-                    _set_detail_text(summary)
+                    status_var.set(f"[{row_values[0]}] {row_values[1]} — {full_details}")
 
                 def _copy_selected_result() -> None:
-                    text = detail_text.get("1.0", "end").strip() or selected_detail_var.get().strip()
-                    if not text:
+                    selected = results_tree.selection()
+                    if not selected:
                         status_var.set("No result row selected to copy.")
                         return
+                    row_values = results_tree.item(selected[0], "values")
+                    if not row_values:
+                        status_var.set("No result row selected to copy.")
+                        return
+                    full_details = full_row_details.get(str(selected[0]), str(row_values[2]))
+                    text = f"[{row_values[0]}] {row_values[1]} — {full_details}"
                     win.clipboard_clear()
                     win.clipboard_append(text)
                     status_var.set("Copied selected result to clipboard.")
@@ -5878,26 +5880,8 @@ if GUI_AVAILABLE:
                         _on_result_selected()
                     context_menu.tk_popup(event.x_root, event.y_root)
 
-                def _copy_widget_selection(widget: tk.Entry | tk.Text) -> None:
-                    try:
-                        selected_text = widget.selection_get()
-                    except Exception:
-                        selected_text = widget.get("1.0", "end").strip() if isinstance(widget, tk.Text) else widget.get().strip()
-                    if not selected_text:
-                        return
-                    win.clipboard_clear()
-                    win.clipboard_append(selected_text)
-                    status_var.set("Copied selected text to clipboard.")
-
-                def _show_text_context_menu(event: tk.Event[tk.Misc], widget: tk.Entry | tk.Text) -> None:
-                    text_menu = tk.Menu(win, tearoff=False)
-                    text_menu.add_command(label="Copy text", command=lambda: _copy_widget_selection(widget))
-                    text_menu.tk_popup(event.x_root, event.y_root)
-
                 results_tree.bind("<<TreeviewSelect>>", _on_result_selected)
                 results_tree.bind("<Button-3>", _show_tree_context_menu)
-                detail_entry.bind("<Button-3>", lambda event: _show_text_context_menu(event, detail_entry))
-                detail_text.bind("<Button-3>", lambda event: _show_text_context_menu(event, detail_text))
 
                 def _resolve_nifs() -> list[Path]:
                     path_value = nif_path_var.get().strip()
@@ -6063,12 +6047,46 @@ if GUI_AVAILABLE:
                         win.update_idletasks()
                     status_var.set(f"Done — {ok} unpatched, {skip} skipped, {fail} failed.")
 
+                def _run_restore_backups() -> None:
+                    nifs = _resolve_nifs()
+                    _clear_log()
+                    if not nifs:
+                        _add_result_row("WARN", "—", "No NIF files found at the selected path.")
+                        return
+                    proceed = messagebox.askyesno(
+                        "Restore from backups",
+                        "Restore selected NIF file(s) from sibling .nif.bak backups?\n"
+                        "This will overwrite current .nif files.",
+                        parent=win,
+                    )
+                    if not proceed:
+                        status_var.set("Restore cancelled.")
+                        return
+                    status_var.set(f"Restoring backups for {len(nifs)} NIF file(s)…")
+                    progress_bar.configure(maximum=max(1, len(nifs)))
+                    progress_var.set(0.0)
+                    win.update_idletasks()
+                    ok = skip = fail = 0
+                    for index, (row_status, file_name, details) in enumerate(restore_nif_backups(nifs), start=1):
+                        _add_result_row(row_status, file_name, details)
+                        if row_status == "OK":
+                            ok += 1
+                        elif row_status == "SKIP":
+                            skip += 1
+                        else:
+                            fail += 1
+                        progress_var.set(float(index))
+                        win.update_idletasks()
+                    status_var.set(f"Restore complete — {ok} restored, {skip} skipped, {fail} failed.")
+
                 scan_button = ttk.Button(btn_frame, text="Scan NIFs", command=_scan_nifs)
                 scan_button.pack(side="left", padx=(0, 6))
                 patch_button = ttk.Button(btn_frame, text="Apply patch", command=_run_patch)
                 patch_button.pack(side="left", padx=(0, 6))
                 unpatch_button = ttk.Button(btn_frame, text="Remove features (unpatch)", command=_run_unpatch)
                 unpatch_button.pack(side="left", padx=(0, 6))
+                restore_button = ttk.Button(btn_frame, text="Restore from .bak", command=_run_restore_backups)
+                restore_button.pack(side="left", padx=(0, 6))
                 clear_button = ttk.Button(btn_frame, text="Clear log", command=_clear_log)
                 clear_button.pack(side="left")
                 copy_selected_button = ttk.Button(btn_frame, text="Copy selected", command=_copy_selected_result)
@@ -6080,6 +6098,7 @@ if GUI_AVAILABLE:
                 self._add_tooltip(scan_button, "🔍 Read-only analysis pass. No file changes, just receipts.")
                 self._add_tooltip(patch_button, "🛠 Actually writes patch changes. This is the button with consequences.")
                 self._add_tooltip(unpatch_button, "↩ Removes selected flags/slots so you can undo or simplify prior NIF patching.")
+                self._add_tooltip(restore_button, "♻ Restores .nif files from sibling .nif.bak backups.")
                 self._add_tooltip(clear_button, "🧽 Clears rows so your brain can breathe again.")
                 self._add_tooltip(copy_selected_button, "📎 Copies only the selected row — ideal for Discord bragging or bug reports.")
                 self._add_tooltip(copy_all_button, "📦 Copies every row in one go for logs/changelists.")
