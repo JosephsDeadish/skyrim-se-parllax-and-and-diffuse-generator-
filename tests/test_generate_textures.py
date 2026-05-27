@@ -623,7 +623,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(any("absolute" in text.lower() for text in warnings))
         self.assertTrue(any("start with textures\\" in text.lower() for text in warnings))
         self.assertTrue(any("_p.dds" in text for text in warnings))
-        self.assertTrue(any("_m.dds" in text for text in warnings))
+        self.assertTrue(any("env mask slot" in text.lower() for text in warnings))
 
     def test_get_nif_patch_option_warnings_reports_diffuse_slot_misuse(self) -> None:
         warnings = get_nif_patch_option_warnings(
