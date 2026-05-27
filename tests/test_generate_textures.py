@@ -1286,7 +1286,7 @@ class GenerateTexturesTests(unittest.TestCase):
 
             self.assertEqual(environment_mask_path.name, "brick_m.dds")
 
-    def test_build_environment_mask_output_path_uses_rmaos_name_for_complex_mode(self) -> None:
+    def test_build_environment_mask_output_path_uses_m_name_for_enb_complex_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             input_path = temp_path / "brick.dds"
@@ -1297,6 +1297,25 @@ class GenerateTexturesTests(unittest.TestCase):
                 output_dir=temp_path / "out",
                 environment_mask_name=None,
                 env_mask_mode="complex",
+                complex_format="msn",
+                render_profile="enb",
+            )
+
+            self.assertEqual(environment_mask_path.name, "brick_m.dds")
+
+    def test_build_environment_mask_output_path_uses_rmaos_name_for_truepbr_complex_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.dds"
+            input_path.write_bytes(b"stub")
+
+            environment_mask_path = build_environment_mask_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+                environment_mask_name=None,
+                env_mask_mode="complex",
+                complex_format="cm",
+                render_profile="truepbr",
             )
 
             self.assertEqual(environment_mask_path.name, "brick_rmaos.dds")
@@ -2149,11 +2168,10 @@ class GenerateTexturesTests(unittest.TestCase):
         result = identify_skyrim_texture_role(Path("textures/armor/iron_rmaos.dds"))
         self.assertEqual(result["role"], "environment_mask")
         self.assertEqual(result["suffix"], "_rmaos")
-        # Notes must describe the RGBA channel layout for the ENB complex mask
+        # Notes must describe the TruePBR RMAOS channel layout.
         self.assertIn("Roughness", result["notes"])
         self.assertIn("Metallic", result["notes"])
         self.assertIn("Ambient Occlusion", result["notes"])
-        self.assertIn("ENBSeries", result["notes"])
         self.assertIn("TruePBR", result["notes"])
 
     def test_identify_skyrim_texture_role_cm_has_channel_notes(self) -> None:
@@ -2237,7 +2255,7 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(save_mock.call_count, 1)
             self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT1", "DXT5"))
 
-    def test_run_with_options_complex_env_mask_uses_dxt5(self) -> None:
+    def test_run_with_options_complex_env_mask_uses_dxt5_and_defaults_to_m_for_enb_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             input_path = temp_path / "brick.png"
@@ -2258,6 +2276,35 @@ class GenerateTexturesTests(unittest.TestCase):
                     include_environment_mask=True,
                     include_complex=False,
                     env_mask_mode="complex",
+                )
+
+            self.assertEqual(save_mock.call_count, 1)
+            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT5",))
+            self.assertEqual(save_mock.call_args.args[1].name, "brick_m.dds")
+
+    def test_run_with_options_truepbr_complex_env_mask_defaults_to_rmaos_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ) as save_mock:
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=True,
+                    include_complex=False,
+                    env_mask_mode="complex",
+                    complex_format="cm",
+                    render_profile="truepbr",
                 )
 
             self.assertEqual(save_mock.call_count, 1)

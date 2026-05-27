@@ -884,7 +884,7 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "How files should look: _n stays purple/blue, _p stays greyscale, and _cm/_c/_C should NOT look like a normal map — "
         "it should read as packed grayscale data with reflective areas bright in red, glossy areas bright in green, metallic areas bright in blue, and a non-white alpha height channel.\n"
         "Add _g.dds only for emissive assets.\n"
-        "Do NOT generate _msn or ENB-style _rmaos for this preset. Community Shaders and ENB are separate renderer paths and should not be mixed.\n"
+        "Do NOT generate _msn or TruePBR-style _rmaos for this preset. Community Shaders and ENB are separate renderer paths and should not be mixed.\n"
         "If you specifically need Community Shaders TruePBR _rmaos, that is a different JSON-driven workflow than this _cm/_c/_C preset."
     ),
     "truepbr": (
@@ -897,17 +897,16 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     "enb": (
         "ENBSeries workflow presets in this tool target _msn plus complex env-mask mode.\n"
         "Some ENB material pipelines in the wild use different channel packing/naming, so verify against your ENB setup.\n"
-        "Preset files here: diffuse.dds + _msn.dds + _p.dds + _rmaos.dds.\n"
+        "Preset files here: diffuse.dds + _msn.dds + _p.dds + _m.dds.\n"
         "_msn RGBA channel layout (Slot 1, replaces _n): R=Normal X, G=Normal Y, B=Normal Z, "
         "A=Specular intensity.\n"
-        "_rmaos RGBA channel layout (Slot 5): R=Reflection/specular brightness, "
+        "_m RGBA channel layout in this ENB preset (Slot 5): R=Reflection/specular brightness, "
         "G=Glossiness, B=Metalness (cubemap tint), A=Parallax height.\n"
-        "How files should look: _msn should remain a purple/blue normal map with a useful alpha, while _rmaos should look like packed grayscale data — "
+        "How files should look: _msn should remain a purple/blue normal map with a useful alpha, while _m should look like packed grayscale data — "
         "red = reflectivity, green = gloss, blue = metalness, alpha = height. It should not look like a second normal map.\n"
         "Add _g.dds only for emissive assets.\n"
         "This is not Community Shaders and not 'ENB PBR' — it is ENB complex material. Do not mix it with _cm/_c/_C workflows.\n"
-        "Do NOT generate vanilla _n.dds (replaced by _msn) or _cm/_c (Community Shaders format, "
-        "not read by ENB complex material)."
+        "Do NOT generate vanilla _n.dds (replaced by _msn), _cm/_c, or TruePBR-style _rmaos for this preset."
     ),
 }
 
@@ -2262,11 +2261,18 @@ def build_environment_mask_output_path(
     output_dir: Path | None,
     environment_mask_name: str | None = None,
     env_mask_mode: str = "standard",
+    complex_format: str = "msn",
+    render_profile: str = "auto",
 ) -> Path:
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
-    default_suffix = "_rmaos" if env_mask_mode == "complex" else "_m"
+    complex_workflow = resolve_env_mask_complex_workflow(
+        env_mask_mode=env_mask_mode,
+        complex_format=complex_format,
+        render_profile=render_profile,
+    )
+    default_suffix = "_rmaos" if complex_workflow == "truepbr" else "_m"
     mask_stem = environment_mask_name or f"{input_path.stem}{default_suffix}"
     return base_output_dir / f"{mask_stem}{ext}"
 
@@ -2609,12 +2615,11 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
     ),
     "_rmaos": (
         "environment_mask",
-        "Complex Environment Mask — ENBSeries / TruePBR-style (_rmaos)",
-        "Used by both ENBSeries complex-material and Community Shaders TruePBR naming paths, but the channels are NOT interchangeable. "
-        "ENB complex material reads: R=Reflection/specular brightness, G=Glossiness, B=Metalness (cubemap tint), A=Parallax height. "
-        "TruePBR typically reads: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (JSON-driven). "
-        "This generator resolves packing from the selected renderer/profile so ENB and TruePBR outputs don't cross-wire. "
-        "Do NOT mix _rmaos files across ENB and TruePBR setups without repacking.",
+        "Community Shaders TruePBR RMAOS Map (_rmaos)",
+        "Used for Community Shaders TruePBR workflows. "
+        "RGBA channel layout: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (JSON-driven). "
+        "In this generator, _rmaos naming is reserved for TruePBR. ENB preset output uses _m with ENB channel packing. "
+        "Do NOT reuse TruePBR _rmaos maps in ENB complex-material setups.",
     ),
     "_s": (
         "subsurface",
@@ -2648,7 +2653,7 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
         "Requires Community Shaders Extended Materials. "
         "Typically paired with a standard _n.dds (normal map, Slot 1) and optional _p.dds (parallax, Slot 3). "
         "_c.dds is a naming alias with the identical channel layout — use _cm for new mods unless the pack explicitly uses _c. "
-        "Do not mix this format with ENB _msn/_rmaos workflows.",
+        "Do not mix this format with ENB _msn/_m workflows.",
     ),
     "_c": (
         "complex_material_cm",
@@ -2661,7 +2666,7 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
         "Texture Slot 5 in the NIF. Requires Community Shaders Extended Materials. "
         "_C.dds (uppercase C) is treated identically on Windows (case-insensitive filesystem) and by this tool. "
         "Prefer _cm.dds for new mods unless the target shader pack specifically expects _c naming. "
-        "Do not mix this format with ENB _msn/_rmaos workflows.",
+        "Do not mix this format with ENB _msn/_m workflows.",
     ),
 }
 
@@ -2929,9 +2934,8 @@ def get_generation_warnings(
         warnings.append((
             "rmaos_source_requires_renderer_check",
             "Input uses the '_rmaos' suffix.\n\n"
-            "_rmaos is commonly used by Community Shaders TruePBR JSON workflows and may also appear in ENB-oriented packs. "
-            "This is NOT the same thing as Community Shaders _cm/_c Extended Materials.\n\n"
-            "Tip: Verify your intended renderer path (TruePBR JSON vs ENB-style packing) before regenerating this file.",
+            "_rmaos is used for Community Shaders TruePBR JSON workflows and is NOT the same as Community Shaders _cm/_c Extended Materials.\n\n"
+            "Tip: Use the TruePBR renderer/profile path for _rmaos generation and avoid mixing this map into ENB complex-material setups.",
         ))
     hint_text = (source_hint or "").lower()
     if "ui/interface texture" in hint_text and (include_parallax or include_environment_mask or include_complex):
@@ -2974,7 +2978,7 @@ def get_generation_warnings(
         warnings.append((
             "cm_with_complex_env_mode",
             "Complex material format is set to '_cm' while environment mask mode is set to 'complex'.\n\n"
-            "_cm/_c/_C is the Community Shaders Extended Materials packed map, while complex env mode is aimed at ENB complex-material workflows.\n\n"
+            "_cm/_c/_C is the Community Shaders Extended Materials packed map, while complex env mode is renderer-specific packed env-mask output.\n\n"
             "Tip: Switch env mask mode to 'standard' for _cm/_c/_C, or switch complex format to '_msn' for ENB-style complex workflows. Community Shaders and ENB should not be mixed.",
         ))
 
@@ -3006,7 +3010,7 @@ def get_generation_warnings(
         warnings.append((
             "complex_env_without_msn",
             "Complex environment-mask mode is enabled but complex-material output is disabled.\n\n"
-            "In this tool's ENB preset, '_rmaos.dds' is normally paired with '_msn.dds', while TruePBR-style workflows typically use '_n + _rmaos' with JSON config.\n\n"
+            "In this tool, TruePBR-style workflows typically use '_n + _rmaos' with JSON config, while ENB preset output usually pairs '_m' complex env-mask data with '_msn'.\n\n"
             "Tip: If targeting ENB preset output, enable complex-material output; if targeting TruePBR, keep normal-map output and validate your JSON workflow.",
         ))
 
@@ -3316,6 +3320,8 @@ def run_with_options(
                 output_dir=output_dir,
                 environment_mask_name=environment_mask_name,
                 env_mask_mode=env_mask_mode,
+                complex_format=complex_format,
+                render_profile=render_profile,
             )
             env_formats = ("DXT1", "DXT5") if env_mask_mode == "standard" else ("DXT5",)
             outputs["environment_mask"] = _save_with_dds_fallback(
@@ -3505,7 +3511,7 @@ def parse_args() -> argparse.Namespace:
         "--environment-mask-name",
         type=str,
         default=None,
-        help="Environment mask output file stem (_m by default, or _rmaos when --environment-mask-mode=complex).",
+        help="Environment mask output file stem (_m by default; _rmaos is used automatically for TruePBR complex workflows).",
     )
     parser.add_argument("--complex-name", type=str, default=None, help="Complex material output file stem.")
     parser.add_argument(
@@ -3566,7 +3572,7 @@ def parse_args() -> argparse.Namespace:
             "Environment mask output mode. "
             "'standard' (default) = greyscale _m.dds for vanilla Skyrim SE (Texture Slot 5, no ENB required). "
             "'complex' = RGBA channel-packed _rmaos texture for renderer-specific complex workflows "
-            "(ENB complex material and TruePBR use different channel meanings; defaults to _rmaos.dds unless --environment-mask-name overrides it)."
+            "(ENB and TruePBR use different channel meanings; default naming is _rmaos for TruePBR and _m for ENB-style complex output unless --environment-mask-name overrides it)."
         ),
     )
     parser.add_argument(
@@ -4006,7 +4012,7 @@ if GUI_AVAILABLE:
                 "'cm' for Community Shaders Extended Materials setups (_cm default, _c/_C optional via custom naming).\n"
                 "'msn' for ENB complex material setups.\n"
                 "Quick start for Community Shaders: set Target renderer=community_shaders, enable Complex/PBR material, keep format=cm.\n"
-                "Do not use 'cm' together with ENB _rmaos/_msn outputs.",
+                "Do not use 'cm' together with ENB _m/_msn outputs.",
             )
 
             _env_mode_row = ttk.Frame(options_frame)
@@ -4819,6 +4825,9 @@ if GUI_AVAILABLE:
                         build_environment_mask_output_path(
                             input_path=input_file,
                             output_dir=generation_kwargs["output_dir"],
+                            env_mask_mode=str(generation_kwargs.get("env_mask_mode", "standard")),
+                            complex_format=str(generation_kwargs.get("complex_format", "msn")),
+                            render_profile=str(generation_kwargs.get("render_profile", "auto")),
                         )
                     )
                 if includes["complex_material"]:
