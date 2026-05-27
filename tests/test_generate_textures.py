@@ -629,6 +629,39 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         self.assertIsNone(detect_render_profile_from_mod_manager_context(context))
 
+    def test_detect_render_profile_from_mod_manager_context_detects_enb_from_runtime_markers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "d3d11.dll").write_bytes(b"")
+            context = ModManagerContext(
+                manager="MO2",
+                instance_root=root,
+            )
+            self.assertEqual(detect_render_profile_from_mod_manager_context(context), "enb")
+
+    def test_detect_render_profile_from_mod_manager_context_detects_cs_from_skse_plugin_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plugin_dir = root / "SKSE" / "Plugins"
+            plugin_dir.mkdir(parents=True)
+            (plugin_dir / "CommunityShaders.dll").write_bytes(b"")
+            context = ModManagerContext(
+                manager="Vortex",
+                staging_root=root,
+            )
+            self.assertEqual(detect_render_profile_from_mod_manager_context(context), "community_shaders")
+
+    def test_detect_render_profile_from_mod_manager_context_detects_truepbr_from_textures_pbr_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            pbr_dir = root / "textures" / "pbr"
+            pbr_dir.mkdir(parents=True)
+            context = ModManagerContext(
+                manager="MO2",
+                instance_root=root,
+            )
+            self.assertEqual(detect_render_profile_from_mod_manager_context(context), "truepbr")
+
     def test_resolve_render_profile_options_returns_expected_modes(self) -> None:
         enb = resolve_render_profile_options("enb")
         self.assertEqual(enb["complex_format"], "msn")

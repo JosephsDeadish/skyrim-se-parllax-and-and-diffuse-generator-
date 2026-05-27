@@ -1044,6 +1044,26 @@ _RENDER_PROFILE_MANAGER_HINT_TOKENS: dict[str, tuple[str, ...]] = {
     "truepbr": ("truepbr", "true pbr", "pbrnifpatcher", "pbr nif patcher", "rmaos", "ramos"),
 }
 
+_RENDER_PROFILE_ENB_MARKERS: tuple[tuple[str, ...], ...] = (
+    ("d3d11.dll",),
+    ("d3dcompiler_46e.dll",),
+    ("enbseries.ini",),
+    ("enbseries",),
+)
+
+_RENDER_PROFILE_CS_MARKERS: tuple[tuple[str, ...], ...] = (
+    ("skse", "plugins", "communityshaders.dll"),
+    ("skse", "plugins", "complexmaterial.dll"),
+    ("skse", "plugins", "terrainshadows.dll"),
+    ("skse", "plugins", "dynamiccubemaps.dll"),
+)
+
+_RENDER_PROFILE_TRUEPBR_MARKERS: tuple[tuple[str, ...], ...] = (
+    ("skse", "plugins", "pbrnifpatcher.dll"),
+    ("pbrnifpatcher",),
+    ("textures", "pbr"),
+)
+
 
 def _normalize_render_profile(value: str | None) -> str:
     normalized = (value or "").strip().lower()
@@ -1308,8 +1328,6 @@ def detect_render_profile_from_mod_manager_context(context: ModManagerContext | 
         parent_name = path.parent.name.strip().lower()
         if parent_name:
             candidates.append(parent_name)
-    if not candidates:
-        return None
     has_truepbr = any(
         token in candidate
         for candidate in candidates
@@ -1325,6 +1343,31 @@ def detect_render_profile_from_mod_manager_context(context: ModManagerContext | 
         for candidate in candidates
         for token in _RENDER_PROFILE_MANAGER_HINT_TOKENS["enb"]
     )
+    marker_roots: list[Path] = []
+    marker_roots.extend(path for path in (context.instance_root, context.staging_root) if path is not None)
+    marker_roots.extend(path.parent for path in (*context.loaded_texture_dirs, *context.loaded_mesh_dirs))
+    for root in _unique_existing_paths(marker_roots):
+        for parts in _RENDER_PROFILE_ENB_MARKERS:
+            marker = root
+            for part in parts:
+                marker = marker / part
+            if marker.exists():
+                has_enb = True
+                break
+        for parts in _RENDER_PROFILE_CS_MARKERS:
+            marker = root
+            for part in parts:
+                marker = marker / part
+            if marker.exists():
+                has_cs = True
+                break
+        for parts in _RENDER_PROFILE_TRUEPBR_MARKERS:
+            marker = root
+            for part in parts:
+                marker = marker / part
+            if marker.exists():
+                has_truepbr = True
+                break
     if has_truepbr:
         return "truepbr"
     if has_cs and not has_enb:
