@@ -333,6 +333,10 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertAlmostEqual(float(normalized["complex_strength"]), 0.1)
         self.assertAlmostEqual(float(normalized["specular_strength"]), 0.1)
 
+    def test_normalize_gui_state_accepts_truepbr_alias(self) -> None:
+        normalized = _normalize_gui_state({"render_profile": "true pbr"})
+        self.assertEqual(str(normalized["render_profile"]), "truepbr")
+
     def test_generate_diffuse_returns_rgb_same_size(self) -> None:
         diffuse = generate_diffuse(_sample_image())
         self.assertEqual(diffuse.mode, "RGB")
@@ -551,14 +555,14 @@ class GenerateTexturesTests(unittest.TestCase):
             "vanilla",
         )
 
-    def test_recommend_render_profile_detects_enb_from_rmaos_suffix(self) -> None:
+    def test_recommend_render_profile_detects_truepbr_from_rmaos_suffix(self) -> None:
         self.assertEqual(
             recommend_render_profile(
                 Path("textures/architecture/stone_rmaos.dds"),
                 detected_role="environment_mask",
                 detected_suffix="_rmaos",
             ),
-            "enb",
+            "truepbr",
         )
 
     def test_resolve_render_profile_options_returns_expected_modes(self) -> None:
@@ -571,6 +575,11 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(cs["complex_format"], "cm")
         self.assertEqual(cs["env_mask_mode"], "standard")
         self.assertEqual(cs["parallax_mode"], "standard")
+
+        truepbr = resolve_render_profile_options("truepbr")
+        self.assertEqual(truepbr["complex_format"], "cm")
+        self.assertEqual(truepbr["env_mask_mode"], "complex")
+        self.assertEqual(truepbr["parallax_mode"], "standard")
 
         auto = resolve_render_profile_options("auto", recommended_profile="enb")
         self.assertEqual(auto["effective_profile"], "enb")
@@ -593,6 +602,12 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(enb["include_complex"]))
         self.assertFalse(bool(enb["include_normal"]))
 
+        truepbr = resolve_render_profile_output_defaults("truepbr")
+        self.assertTrue(bool(truepbr["include_parallax"]))
+        self.assertTrue(bool(truepbr["include_environment_mask"]))
+        self.assertFalse(bool(truepbr["include_complex"]))
+        self.assertTrue(bool(truepbr["include_normal"]))
+
     def test_resolve_nif_patch_defaults_for_render_profile_returns_expected_toggles(self) -> None:
         vanilla = resolve_nif_patch_defaults_for_render_profile("vanilla")
         self.assertTrue(bool(vanilla["enable_parallax"]))
@@ -607,6 +622,13 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(enb["enable_env_mapping"]))
         self.assertTrue(bool(enb["force_shader_type_3"]))
         self.assertTrue(bool(enb["prefer_msn_normal"]))
+
+        truepbr = resolve_nif_patch_defaults_for_render_profile("truepbr")
+        self.assertTrue(bool(truepbr["enable_parallax"]))
+        self.assertFalse(bool(truepbr["enable_pom"]))
+        self.assertTrue(bool(truepbr["enable_env_mapping"]))
+        self.assertTrue(bool(truepbr["force_shader_type_3"]))
+        self.assertFalse(bool(truepbr["prefer_msn_normal"]))
 
     def test_get_nif_patch_option_warnings_reports_disabled_feature_path_combos(self) -> None:
         warnings = get_nif_patch_option_warnings(
@@ -677,6 +699,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("Suggested target: Community Shaders", message)
         self.assertIn("Renderer quick guide:", message)
         self.assertIn("Vanilla:", message)
+        self.assertIn("Community Shaders TruePBR:", message)
         self.assertIn("ENB:", message)
         self.assertIn("Auto-check:", message)
         self.assertIn("_C.dds", message)
@@ -1499,8 +1522,22 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(options.force_shader_type_3)
         self.assertTrue(options.enable_parallax)
 
+    def test_build_nif_patch_options_render_profile_truepbr_enables_type3(self) -> None:
+        outputs = {"parallax": Path("/tmp/textures/brick_p.dds")}
+        options = build_nif_patch_options_for_generated_outputs(
+            None,
+            outputs,
+            complex_format="cm",
+            env_mask_mode="complex",
+            parallax_mode="standard",
+            parallax_scale=2.0,
+            render_profile="truepbr",
+        )
+        self.assertTrue(options.force_shader_type_3)
+        self.assertTrue(options.enable_parallax)
+
     def test_build_nif_patch_options_no_parallax_never_forces_type3(self) -> None:
-        for profile in ("vanilla", "community_shaders", "enb", "auto"):
+        for profile in ("vanilla", "community_shaders", "truepbr", "enb", "auto"):
             with self.subTest(profile=profile):
                 options = build_nif_patch_options_for_generated_outputs(
                     None,

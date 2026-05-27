@@ -271,8 +271,13 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     else:
         state["parallax_mode"] = str(_GUI_STATE_DEFAULTS["parallax_mode"])
     render_profile = str(raw.get("render_profile", state["render_profile"]) or state["render_profile"]).strip().lower()
-    if render_profile in {"auto", "vanilla", "community_shaders", "community shaders", "enb"}:
-        state["render_profile"] = "community_shaders" if render_profile == "community shaders" else render_profile
+    if render_profile in {"auto", "vanilla", "community_shaders", "community shaders", "truepbr", "true pbr", "enb"}:
+        if render_profile == "community shaders":
+            state["render_profile"] = "community_shaders"
+        elif render_profile == "true pbr":
+            state["render_profile"] = "truepbr"
+        else:
+            state["render_profile"] = render_profile
     else:
         state["render_profile"] = str(_GUI_STATE_DEFAULTS["render_profile"])
     state["normal_strength"] = _coerce_float(raw.get("normal_strength"), float(state["normal_strength"]), 0.1, 8.0)
@@ -838,6 +843,13 @@ _RENDER_PROFILE_PRESETS: dict[str, dict[str, str]] = {
         "env_mask_mode": "standard",
         "parallax_mode": "standard",
     },
+    # Community Shaders TruePBR commonly uses _rmaos plus JSON-driven material
+    # metadata and keeps a standard _n normal map path.
+    "truepbr": {
+        "complex_format": "cm",
+        "env_mask_mode": "complex",
+        "parallax_mode": "standard",
+    },
     # ENB profile favors complex env mask and POM height maps.
     "enb": {
         "complex_format": "msn",
@@ -850,6 +862,7 @@ _RENDER_PROFILE_LABELS: dict[str, str] = {
     "auto": "Auto-detect",
     "vanilla": "Vanilla",
     "community_shaders": "Community Shaders",
+    "truepbr": "Community Shaders TruePBR",
     "enb": "ENB",
 }
 
@@ -874,9 +887,17 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "Do NOT generate _msn or ENB-style _rmaos for this preset. Community Shaders and ENB are separate renderer paths and should not be mixed.\n"
         "If you specifically need Community Shaders TruePBR _rmaos, that is a different JSON-driven workflow than this _cm/_c/_C preset."
     ),
+    "truepbr": (
+        "Community Shaders TruePBR workflow (JSON-driven material path).\n"
+        "Typical files: diffuse.dds + _n.dds + _rmaos.dds (and optional _p.dds depending on your mesh/material setup).\n"
+        "_rmaos is packed data (commonly roughness/metallic/AO in RGB; alpha usage depends on your TruePBR JSON config).\n"
+        "How files should look: _n stays purple/blue, _rmaos should look like packed grayscale channels (not like a normal map).\n"
+        "Do NOT treat this as Community Shaders Extended Materials _cm/_c/_C, and do NOT mix it with ENB _msn workflows."
+    ),
     "enb": (
-        "ENBSeries Complex Parallax Material — requires ENBSeries + ComplexParallaxMaterial=true in enbseries.ini.\n"
-        "Files: diffuse.dds + _msn.dds + _p.dds + _rmaos.dds.\n"
+        "ENBSeries workflow presets in this tool target _msn plus complex env-mask mode.\n"
+        "Some ENB material pipelines in the wild use different channel packing/naming, so verify against your ENB setup.\n"
+        "Preset files here: diffuse.dds + _msn.dds + _p.dds + _rmaos.dds.\n"
         "_msn RGBA channel layout (Slot 1, replaces _n): R=Normal X, G=Normal Y, B=Normal Z, "
         "A=Specular intensity.\n"
         "_rmaos RGBA channel layout (Slot 5): R=Roughness (0=smooth, 255=rough), "
@@ -900,6 +921,13 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "prefer_msn_normal": False,
     },
     "community_shaders": {
+        "enable_parallax": True,
+        "enable_pom": False,
+        "enable_env_mapping": True,
+        "force_shader_type_3": True,
+        "prefer_msn_normal": False,
+    },
+    "truepbr": {
         "enable_parallax": True,
         "enable_pom": False,
         "enable_env_mapping": True,
@@ -932,6 +960,14 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_environment_mask": False,
         "include_complex": True,
     },
+    "truepbr": {
+        "include_diffuse": True,
+        "include_normal": True,
+        "include_parallax": True,
+        "include_glow": False,
+        "include_environment_mask": True,
+        "include_complex": False,
+    },
     "enb": {
         "include_diffuse": True,
         "include_normal": False,
@@ -947,13 +983,14 @@ _RENDER_PROFILE_OUTPUT_LABELS: dict[str, str] = {
     "include_normal": "normal/_n",
     "include_parallax": "parallax/_p",
     "include_glow": "glow/_g",
-    "include_environment_mask": "env mask/_m",
+    "include_environment_mask": "env mask/_m/_rmaos",
     "include_complex": "complex material",
 }
 
 _RENDER_PROFILE_PATH_HINTS: dict[str, tuple[str, ...]] = {
     "enb": ("enb", "enbseries"),
     "community_shaders": ("communityshaders", "community_shaders", "community-shaders", "cs"),
+    "truepbr": ("truepbr", "true_pbr", "true-pbr"),
 }
 
 
@@ -961,7 +998,9 @@ def _normalize_render_profile(value: str | None) -> str:
     normalized = (value or "").strip().lower()
     if normalized in {"community shaders", "community_shaders"}:
         return "community_shaders"
-    if normalized in {"auto", "vanilla", "community_shaders", "enb"}:
+    if normalized in {"true pbr", "truepbr"}:
+        return "truepbr"
+    if normalized in {"auto", "vanilla", "community_shaders", "truepbr", "enb"}:
         return normalized
     return "auto"
 
@@ -1112,6 +1151,7 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
     workflow_hint = {
         "vanilla": "best for stock Skyrim SE / safest defaults",
         "community_shaders": "best for Community Shaders packed-material workflows",
+        "truepbr": "best for Community Shaders TruePBR JSON-driven workflows",
         "enb": "best for ENB complex material + POM workflows",
     }.get(normalized, "recommended workflow")
     tuple_hint = (
@@ -1125,7 +1165,7 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
         "",
         "Renderer quick guide:",
     ]
-    for profile in ("vanilla", "community_shaders", "enb"):
+    for profile in ("vanilla", "community_shaders", "truepbr", "enb"):
         lines.append(
             f"- {_RENDER_PROFILE_LABELS[profile]}: "
             f"{describe_render_profile_default_outputs(profile)} "
@@ -1147,8 +1187,10 @@ def recommend_render_profile(
     normalized_suffix = (detected_suffix or "").strip().lower()
     if normalized_suffix in {"_cm", "_c"}:
         return "community_shaders"
-    if normalized_suffix in {"_msn", "_rmaos"}:
+    if normalized_suffix == "_msn":
         return "enb"
+    if normalized_suffix == "_rmaos":
+        return "truepbr"
     if detected_role == "complex_material_cm":
         return "community_shaders"
     if detected_role == "complex_material":
@@ -2822,9 +2864,9 @@ def get_generation_warnings(
         warnings.append((
             "rmaos_source_requires_renderer_check",
             "Input uses the '_rmaos' suffix.\n\n"
-            "_rmaos is usually ENB complex-material data, but some Community Shaders TruePBR setups also use it via JSON configs. "
+            "_rmaos is commonly used by Community Shaders TruePBR JSON workflows and may also appear in ENB-oriented packs. "
             "This is NOT the same thing as Community Shaders _cm/_c Extended Materials.\n\n"
-            "Tip: Treat '_rmaos + _msn' as ENB, or verify that you intentionally have a separate TruePBR JSON workflow.",
+            "Tip: Verify your intended renderer path (TruePBR JSON vs ENB-style packing) before regenerating this file.",
         ))
     hint_text = (source_hint or "").lower()
     if "ui/interface texture" in hint_text and (include_parallax or include_environment_mask or include_complex):
@@ -2859,8 +2901,8 @@ def get_generation_warnings(
             "env_mask_with_complex_material",
             "Both 'Environment mask' and 'Complex material' outputs are enabled.\n\n"
             "This combination is often redundant outside ENB complex-material workflows and can produce double-specular artefacts.\n\n"
-            "Tip: For ENB complex workflows use _msn + _rmaos (complex env mode); for Community Shaders use _cm/_c/_C with standard env mode "
-            "only when your shader setup explicitly expects a separate env mask.",
+            "Tip: For ENB-style complex workflows use the renderer-specific profile/settings; for Community Shaders use _cm/_c/_C or TruePBR JSON "
+            "workflows separately instead of mixing paths.",
         ))
 
     if include_complex and normalized_complex_format == "cm" and env_mask_mode == "complex":
@@ -2899,8 +2941,8 @@ def get_generation_warnings(
         warnings.append((
             "complex_env_without_msn",
             "Complex environment-mask mode is enabled but complex-material output is disabled.\n\n"
-            "ENB '_rmaos.dds' is normally paired with '_msn.dds'. Without '_msn', the result is usually an incomplete ENB setup.\n\n"
-            "Tip: Enable complex-material output for ENB '_msn + _rmaos', or switch env mask mode back to 'standard'.",
+            "In this tool's ENB preset, '_rmaos.dds' is normally paired with '_msn.dds', while TruePBR-style workflows typically use '_n + _rmaos' with JSON config.\n\n"
+            "Tip: If targeting ENB preset output, enable complex-material output; if targeting TruePBR, keep normal-map output and validate your JSON workflow.",
         ))
 
     if include_parallax and normalized_parallax_mode == "occlusion" and normalized_complex_format == "cm":
@@ -3820,14 +3862,15 @@ if GUI_AVAILABLE:
                 "🎯 Select target renderer preset.\n"
                 "vanilla = safest stock Skyrim SE setup.\n"
                 "community_shaders = Community Shaders Extended Materials _cm/_c/_C workflow.\n"
-                "enb = _msn + complex _rmaos env mask + POM.\n"
+                "truepbr = Community Shaders TruePBR JSON-driven _rmaos workflow.\n"
+                "enb = tool ENB preset (_msn + complex env-mask mode + optional POM).\n"
                 "Community Shaders and ENB are separate workflows and should not be combined.\n"
                 "Changing this is the only thing that should auto-switch the mode combos.",
             )
             _render_profile_combo = ttk.Combobox(
                 options_frame,
                 textvariable=self.render_profile_var,
-                values=("auto", "vanilla", "community_shaders", "enb"),
+                values=("auto", "vanilla", "community_shaders", "truepbr", "enb"),
                 state="readonly",
                 width=20,
             )
@@ -3836,7 +3879,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(
                 _render_profile_combo,
                 "🎯 auto = pick the best renderer preset for the current texture, but only when you change this control.\n"
-                "vanilla = safest defaults; community_shaders = _cm/_c/_C + standard parallax; enb = _msn + _rmaos + ENB POM.\n"
+                "vanilla = safest defaults; community_shaders = _cm/_c/_C; truepbr = _n + _rmaos JSON-driven path; enb = tool ENB preset _msn + complex env + optional POM.\n"
                 "Community Shaders and ENB are separate workflows and should not be mixed.",
             )
             ttk.Label(
@@ -5734,7 +5777,7 @@ if GUI_AVAILABLE:
                 renderer_combo = ttk.Combobox(
                     render_row,
                     textvariable=renderer_profile_var,
-                    values=("auto", "vanilla", "community_shaders", "enb"),
+                    values=("auto", "vanilla", "community_shaders", "truepbr", "enb"),
                     state="readonly",
                     width=20,
                 )
@@ -5782,8 +5825,8 @@ if GUI_AVAILABLE:
                     opt_frame,
                     text=(
                         "Option guide: Slot 0=diffuse/albedo, 1=normal/_n or _msn, 2=glow/_g, "
-                        "3=parallax/_p, 4=cubemap, 5=environment mask/_m. "
-                        "Enable standard parallax for vanilla/community shaders workflows. Enable ENB POM only for ENB setups. "
+                        "3=parallax/_p, 4=cubemap, 5=environment mask/_m or _rmaos. "
+                        "Enable standard parallax for vanilla/community shaders/truepbr workflows. Enable ENB POM only for ENB setups. "
                         "Enable environment mapping only when using slot 5 (_m/_rmaos). Force shader type 3 lets the tool write stronger parallax scale values."
                     ),
                     justify=tk.LEFT,
