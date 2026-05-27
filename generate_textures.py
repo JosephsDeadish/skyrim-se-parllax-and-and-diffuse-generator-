@@ -85,18 +85,21 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "include_parallax": True,
     "include_glow": False,
     "include_environment_mask": False,
+    "include_rmaos": False,
     "include_complex": False,
     "auto_suggestions": True,
     "auto_normal": True,
     "auto_parallax": True,
     "auto_glow": True,
     "auto_environment_mask": True,
+    "auto_rmaos": True,
     "auto_complex": True,
     "auto_specular": True,
     "normal_strength": 2.0,
     "parallax_strength": 1.35,
     "glow_threshold": 190,
     "environment_mask_strength": 1.2,
+    "rmaos_strength": 1.2,
     "complex_strength": 1.15,
     "specular_strength": 1.15,
     "dismissed_warnings": [],
@@ -230,12 +233,14 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         "include_parallax",
         "include_glow",
         "include_environment_mask",
+        "include_rmaos",
         "include_complex",
         "auto_suggestions",
         "auto_normal",
         "auto_parallax",
         "auto_glow",
         "auto_environment_mask",
+        "auto_rmaos",
         "auto_complex",
         "auto_specular",
     ):
@@ -245,6 +250,7 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         state["auto_parallax"] = False
         state["auto_glow"] = False
         state["auto_environment_mask"] = False
+        state["auto_rmaos"] = False
         state["auto_complex"] = False
         state["auto_specular"] = False
     input_path = str(state["input_path"]).strip()
@@ -286,6 +292,9 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     state["auto_patch_nifs"] = _coerce_bool(raw.get("auto_patch_nifs"), bool(state["auto_patch_nifs"]))
     state["environment_mask_strength"] = _coerce_float(
         raw.get("environment_mask_strength"), float(state["environment_mask_strength"]), 0.1, 6.0
+    )
+    state["rmaos_strength"] = _coerce_float(
+        raw.get("rmaos_strength"), float(state["rmaos_strength"]), 0.1, 6.0
     )
     state["complex_strength"] = _coerce_float(raw.get("complex_strength"), float(state["complex_strength"]), 0.1, 6.0)
     state["specular_strength"] = _coerce_float(raw.get("specular_strength"), float(state["specular_strength"]), 0.1, 6.0)
@@ -948,6 +957,7 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_parallax": False,
         "include_glow": False,
         "include_environment_mask": False,
+        "include_rmaos": False,
         "include_complex": False,
     },
     "community_shaders": {
@@ -956,6 +966,7 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_parallax": True,
         "include_glow": False,
         "include_environment_mask": False,
+        "include_rmaos": False,
         "include_complex": True,
     },
     "truepbr": {
@@ -963,7 +974,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_normal": True,
         "include_parallax": True,
         "include_glow": False,
-        "include_environment_mask": True,
+        "include_environment_mask": False,
+        "include_rmaos": True,
         "include_complex": False,
     },
     "enb": {
@@ -972,6 +984,7 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_parallax": True,
         "include_glow": False,
         "include_environment_mask": True,
+        "include_rmaos": False,
         "include_complex": True,
     },
 }
@@ -981,7 +994,8 @@ _RENDER_PROFILE_OUTPUT_LABELS: dict[str, str] = {
     "include_normal": "normal/_n",
     "include_parallax": "parallax/_p",
     "include_glow": "glow/_g",
-    "include_environment_mask": "env mask/_m/_rmaos",
+    "include_environment_mask": "env mask/_m",
+    "include_rmaos": "rmaos/_rmaos",
     "include_complex": "complex material",
 }
 
@@ -1428,6 +1442,7 @@ def recommend_generation_settings(source: Image.Image, input_path: Path | None =
         "normal_strength": normal_strength,
         "parallax_strength": parallax_strength,
         "environment_mask_strength": environment_mask_strength,
+        "rmaos_strength": environment_mask_strength,
         "complex_strength": complex_strength,
         "specular_strength": specular_strength,
         "glow_threshold": glow_threshold,
@@ -1447,7 +1462,9 @@ def recommend_generation_settings(source: Image.Image, input_path: Path | None =
     role_adjusted = _adjust_recommendations_for_role(recommended, detected_role)
     material_adjusted = _adjust_recommendations_for_material_type(role_adjusted, material_type)
     workflow_adjusted = _adjust_recommendations_for_workflow_profile(material_adjusted, workflow_profile)
-    return _adjust_recommendations_for_role(workflow_adjusted, detected_role)
+    final = _adjust_recommendations_for_role(workflow_adjusted, detected_role)
+    final["rmaos_strength"] = float(final["environment_mask_strength"])
+    return final
 
 
 def _resolve_batch_workers(batch_workers: int | None, total: int) -> int:
@@ -2106,6 +2123,8 @@ def generate_preview_outputs(
     include_environment_mask: bool,
     include_complex: bool,
     render_profile: str = "auto",
+    include_rmaos: bool = False,
+    rmaos_strength: float = 1.2,
 ) -> dict[str, Image.Image]:
     if parallax_mode not in {"standard", "occlusion"}:
         raise ValueError("parallax_mode must be 'standard' or 'occlusion'.")
@@ -2128,21 +2147,26 @@ def generate_preview_outputs(
     if include_glow:
         outputs["glow"] = enforce_skyrim_output_profile("glow", generate_glow(source, threshold=glow_threshold))
     if include_environment_mask:
-        env_mask_workflow = resolve_env_mask_complex_workflow(
-            env_mask_mode=env_mask_mode,
-            complex_format=complex_format,
-            render_profile=render_profile,
-            include_complex=include_complex,
-        )
         outputs["environment_mask"] = enforce_skyrim_output_profile(
             "environment_mask",
             generate_environment_mask_for_workflow(
                 source,
                 strength=environment_mask_strength,
                 mode=env_mask_mode,
-                complex_workflow=env_mask_workflow,
+                complex_workflow="enb" if _normalize_env_mask_mode(env_mask_mode) == "complex" else "standard",
             ),
             env_mask_mode=env_mask_mode,
+        )
+    if include_rmaos:
+        outputs["rmaos"] = enforce_skyrim_output_profile(
+            "environment_mask",
+            generate_environment_mask_for_workflow(
+                source,
+                strength=rmaos_strength,
+                mode="complex",
+                complex_workflow="truepbr",
+            ),
+            env_mask_mode="complex",
         )
     if include_complex:
         outputs["complex_material"] = enforce_skyrim_output_profile(
@@ -2274,15 +2298,21 @@ def build_environment_mask_output_path(
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
-    complex_workflow = resolve_env_mask_complex_workflow(
-        env_mask_mode=env_mask_mode,
-        complex_format=complex_format,
-        render_profile=render_profile,
-        include_complex=include_complex,
-    )
-    default_suffix = "_rmaos" if complex_workflow == "truepbr" else "_m"
+    default_suffix = "_m"
     mask_stem = environment_mask_name or f"{input_path.stem}{default_suffix}"
     return base_output_dir / f"{mask_stem}{ext}"
+
+
+def build_rmaos_output_path(
+    input_path: Path,
+    output_dir: Path | None,
+    rmaos_name: str | None = None,
+) -> Path:
+    base_output_dir = _resolve_output_base_dir(input_path, output_dir)
+    base_output_dir.mkdir(parents=True, exist_ok=True)
+    ext = DDS_EXTENSION
+    rmaos_stem = rmaos_name or f"{input_path.stem}_rmaos"
+    return base_output_dir / f"{rmaos_stem}{ext}"
 
 
 def build_complex_output_path(
@@ -2480,12 +2510,15 @@ def build_nif_patch_options_for_generated_outputs(
     normal_output = outputs.get("normal")
     parallax_output = outputs.get("parallax")
     env_mask_output = outputs.get("environment_mask")
+    rmaos_output = outputs.get("rmaos")
     glow_output = outputs.get("glow")
     normal_path = complex_output if complex_output is not None and normalized_complex_format == "msn" else normal_output
     parallax_disabled_by_options = include_parallax is False
     env_mask_disabled_by_options = include_environment_mask is False
     glow_disabled_by_options = include_glow is False
     enable_env_mapping = env_mask_output is not None
+    if rmaos_output is not None:
+        enable_env_mapping = True
     if normalized_env_mask_mode == "complex" and env_mask_output is None and not env_mask_disabled_by_options:
         enable_env_mapping = complex_output is not None and normalized_complex_format == "msn"
     enable_glow_map = glow_output is not None and not glow_disabled_by_options
@@ -2520,8 +2553,11 @@ def build_nif_patch_options_for_generated_outputs(
             if normal_path is not None else None
         ),
         env_mask_texture_path=(
-            _resolve_generated_dds_resource_path(env_mask_output, source_texture=source_texture)
-            if env_mask_output is not None else None
+            _resolve_generated_dds_resource_path(
+                env_mask_output if env_mask_output is not None else rmaos_output,
+                source_texture=source_texture,
+            )
+            if env_mask_output is not None or rmaos_output is not None else None
         ),
         glow_texture_path=(
             _resolve_generated_dds_resource_path(glow_output, source_texture=source_texture)
@@ -3214,11 +3250,13 @@ def run_with_options(
     parallax_name: str | None = None,
     glow_name: str | None = None,
     environment_mask_name: str | None = None,
+    rmaos_name: str | None = None,
     complex_name: str | None = None,
     normal_strength: float | None = None,
     parallax_strength: float | None = None,
     glow_threshold: int | None = None,
     environment_mask_strength: float | None = None,
+    rmaos_strength: float | None = None,
     complex_strength: float | None = None,
     specular_strength: float | None = None,
     complex_format: str = "msn",
@@ -3231,10 +3269,11 @@ def run_with_options(
     include_parallax: bool = True,
     include_glow: bool = False,
     include_environment_mask: bool = False,
+    include_rmaos: bool = False,
     include_complex: bool = False,
     render_profile: str = "auto",
 ) -> dict[str, Path]:
-    if not any((include_diffuse, include_normal, include_parallax, include_glow, include_environment_mask, include_complex)):
+    if not any((include_diffuse, include_normal, include_parallax, include_glow, include_environment_mask, include_rmaos, include_complex)):
         raise ValueError("Select at least one output.")
     if parallax_mode not in {"standard", "occlusion"}:
         raise ValueError("parallax_mode must be 'standard' or 'occlusion'.")
@@ -3256,6 +3295,9 @@ def run_with_options(
         resolved_glow_threshold = glow_threshold if glow_threshold is not None else int(recommended["glow_threshold"])
         resolved_environment_mask_strength = (
             environment_mask_strength if environment_mask_strength is not None else float(recommended["environment_mask_strength"])
+        )
+        resolved_rmaos_strength = (
+            rmaos_strength if rmaos_strength is not None else float(recommended["rmaos_strength"])
         )
         resolved_complex_strength = complex_strength if complex_strength is not None else float(recommended["complex_strength"])
         resolved_specular_strength = specular_strength if specular_strength is not None else float(recommended["specular_strength"])
@@ -3308,19 +3350,13 @@ def run_with_options(
             outputs["glow"] = _save_with_dds_fallback(glow, glow_path)
 
         if include_environment_mask:
-            env_mask_workflow = resolve_env_mask_complex_workflow(
-                env_mask_mode=env_mask_mode,
-                complex_format=complex_format,
-                render_profile=render_profile,
-                include_complex=include_complex,
-            )
             environment_mask = enforce_skyrim_output_profile(
                 "environment_mask",
                 generate_environment_mask_for_workflow(
                     source,
                     strength=resolved_environment_mask_strength,
                     mode=env_mask_mode,
-                    complex_workflow=env_mask_workflow,
+                    complex_workflow="enb" if _normalize_env_mask_mode(env_mask_mode) == "complex" else "standard",
                 ),
                 env_mask_mode=env_mask_mode,
             )
@@ -3338,6 +3374,28 @@ def run_with_options(
                 environment_mask,
                 environment_mask_path,
                 preferred_pixel_formats=env_formats,
+            )
+
+        if include_rmaos:
+            rmaos_map = enforce_skyrim_output_profile(
+                "environment_mask",
+                generate_environment_mask_for_workflow(
+                    source,
+                    strength=resolved_rmaos_strength,
+                    mode="complex",
+                    complex_workflow="truepbr",
+                ),
+                env_mask_mode="complex",
+            )
+            rmaos_path = build_rmaos_output_path(
+                input_path=input_file,
+                output_dir=output_dir,
+                rmaos_name=rmaos_name,
+            )
+            outputs["rmaos"] = _save_with_dds_fallback(
+                rmaos_map,
+                rmaos_path,
+                preferred_pixel_formats=("DXT5",),
             )
 
         if include_complex:
@@ -3384,11 +3442,13 @@ def run_batch_with_options(
     parallax_name: str | None = None,
     glow_name: str | None = None,
     environment_mask_name: str | None = None,
+    rmaos_name: str | None = None,
     complex_name: str | None = None,
     normal_strength: float | None = None,
     parallax_strength: float | None = None,
     glow_threshold: int | None = None,
     environment_mask_strength: float | None = None,
+    rmaos_strength: float | None = None,
     complex_strength: float | None = None,
     specular_strength: float | None = None,
     complex_format: str = "msn",
@@ -3401,6 +3461,7 @@ def run_batch_with_options(
     include_parallax: bool = True,
     include_glow: bool = False,
     include_environment_mask: bool = False,
+    include_rmaos: bool = False,
     include_complex: bool = False,
     render_profile: str = "auto",
     progress_callback: Callable[[int, int, Path], None] | None = None,
@@ -3426,11 +3487,13 @@ def run_batch_with_options(
                     parallax_name=parallax_name,
                     glow_name=glow_name,
                     environment_mask_name=environment_mask_name,
+                    rmaos_name=rmaos_name,
                     complex_name=complex_name,
                     normal_strength=normal_strength,
                     parallax_strength=parallax_strength,
                     glow_threshold=glow_threshold,
                     environment_mask_strength=environment_mask_strength,
+                    rmaos_strength=rmaos_strength,
                     complex_strength=complex_strength,
                     specular_strength=specular_strength,
                     complex_format=complex_format,
@@ -3443,6 +3506,7 @@ def run_batch_with_options(
                     include_parallax=include_parallax,
                     include_glow=include_glow,
                     include_environment_mask=include_environment_mask,
+                    include_rmaos=include_rmaos,
                     include_complex=include_complex,
                     render_profile=render_profile,
                 )
@@ -3462,11 +3526,13 @@ def run_batch_with_options(
             parallax_name=parallax_name,
             glow_name=glow_name,
             environment_mask_name=environment_mask_name,
+            rmaos_name=rmaos_name,
             complex_name=complex_name,
             normal_strength=normal_strength,
             parallax_strength=parallax_strength,
             glow_threshold=glow_threshold,
             environment_mask_strength=environment_mask_strength,
+            rmaos_strength=rmaos_strength,
             complex_strength=complex_strength,
             specular_strength=specular_strength,
             complex_format=complex_format,
@@ -3479,6 +3545,7 @@ def run_batch_with_options(
             include_parallax=include_parallax,
             include_glow=include_glow,
             include_environment_mask=include_environment_mask,
+            include_rmaos=include_rmaos,
             include_complex=include_complex,
             render_profile=render_profile,
         )
@@ -3521,8 +3588,9 @@ def parse_args() -> argparse.Namespace:
         "--environment-mask-name",
         type=str,
         default=None,
-        help="Environment mask output file stem (_m by default; _rmaos is used automatically for TruePBR complex workflows).",
+        help="Environment mask output file stem (_m by default).",
     )
+    parser.add_argument("--rmaos-name", type=str, default=None, help="RMAOS output file stem (_rmaos by default).")
     parser.add_argument("--complex-name", type=str, default=None, help="Complex material output file stem.")
     parser.add_argument(
         "--complex-format",
@@ -3564,6 +3632,12 @@ def parse_args() -> argparse.Namespace:
         help="Complex material contrast strength factor (auto if omitted).",
     )
     parser.add_argument(
+        "--rmaos-strength",
+        type=float,
+        default=None,
+        help="RMAOS channel packing strength factor (auto if omitted).",
+    )
+    parser.add_argument(
         "--specular-strength",
         type=float,
         default=None,
@@ -3574,6 +3648,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-parallax", action="store_true", help="Skip parallax output generation.")
     parser.add_argument("--glow-map", action="store_true", help="Generate glow output.")
     parser.add_argument("--environment-mask", action="store_true", help="Generate environment mask output.")
+    parser.add_argument("--rmaos", action="store_true", help="Generate dedicated TruePBR RMAOS output (_rmaos).")
     parser.add_argument(
         "--environment-mask-mode",
         choices=("standard", "complex"),
@@ -3581,8 +3656,8 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Environment mask output mode. "
             "'standard' (default) = greyscale _m.dds for vanilla Skyrim SE (Texture Slot 5, no ENB required). "
-            "'complex' = RGBA channel-packed _rmaos texture for renderer-specific complex workflows "
-            "(ENB and TruePBR use different channel meanings; default naming is _rmaos for TruePBR and _m for ENB-style complex output unless --environment-mask-name overrides it)."
+            "'complex' = RGBA channel-packed _m texture for ENB-style complex workflows. "
+            "Use --rmaos for dedicated TruePBR _rmaos output."
         ),
     )
     parser.add_argument(
@@ -3773,10 +3848,12 @@ if GUI_AVAILABLE:
             self.specular_strength_var = tk.DoubleVar(value=1.15)
             self.glow_threshold_var = tk.DoubleVar(value=190.0)
             self.environment_mask_strength_var = tk.DoubleVar(value=1.2)
+            self.rmaos_strength_var = tk.DoubleVar(value=1.2)
             self.normal_strength_display_var = tk.StringVar()
             self.parallax_strength_display_var = tk.StringVar()
             self.glow_threshold_display_var = tk.StringVar()
             self.environment_mask_strength_display_var = tk.StringVar()
+            self.rmaos_strength_display_var = tk.StringVar()
             self.complex_strength_display_var = tk.StringVar()
             self.specular_strength_display_var = tk.StringVar()
             self.complex_format_var = tk.StringVar(value="msn")
@@ -3796,6 +3873,7 @@ if GUI_AVAILABLE:
             self.auto_parallax_suggestion_var = tk.BooleanVar(value=True)
             self.auto_glow_suggestion_var = tk.BooleanVar(value=True)
             self.auto_environment_mask_suggestion_var = tk.BooleanVar(value=True)
+            self.auto_rmaos_suggestion_var = tk.BooleanVar(value=True)
             self.auto_complex_suggestion_var = tk.BooleanVar(value=True)
             self.auto_specular_suggestion_var = tk.BooleanVar(value=True)
             self.theme_mode_label_var = tk.StringVar(value="☀ Light mode")
@@ -3804,6 +3882,7 @@ if GUI_AVAILABLE:
             self.include_parallax_var = tk.BooleanVar(value=True)
             self.include_glow_var = tk.BooleanVar(value=False)
             self.include_environment_mask_var = tk.BooleanVar(value=False)
+            self.include_rmaos_var = tk.BooleanVar(value=False)
             self.include_complex_var = tk.BooleanVar(value=False)
             self.status_var = tk.StringVar(
                 value=self.manager_context.summary if self.manager_context.manager is not None else "Select a DDS file to begin."
@@ -3944,8 +4023,11 @@ if GUI_AVAILABLE:
             _env_mask_check = ttk.Checkbutton(options_frame, text="Environment mask / _m", variable=self.include_environment_mask_var, command=self._refresh_preview)
             _env_mask_check.grid(row=1, column=1, sticky=tk.W)
             self._add_tooltip(_env_mask_check, "🪞 Generate an environment mask for reflections.\nTells Skyrim which parts of a surface are shiny. Science!")
+            _rmaos_check = ttk.Checkbutton(options_frame, text="RMAOS / _rmaos", variable=self.include_rmaos_var, command=self._refresh_preview)
+            _rmaos_check.grid(row=1, column=2, sticky=tk.W)
+            self._add_tooltip(_rmaos_check, "🧩 Generate a dedicated TruePBR RMAOS map (_rmaos). Separate from vanilla/ENB _m environment masks.")
             _complex_check = ttk.Checkbutton(options_frame, text="Complex/PBR material", variable=self.include_complex_var, command=self._refresh_preview)
-            _complex_check.grid(row=1, column=2, sticky=tk.W)
+            _complex_check.grid(row=1, column=3, sticky=tk.W)
             self._add_tooltip(
                 _complex_check,
                 "🔮 Generate complex/PBR material output.\n"
@@ -3959,7 +4041,7 @@ if GUI_AVAILABLE:
                 variable=self.auto_suggestions_var,
                 command=self._toggle_auto_suggestions,
             )
-            _auto_sugg_check.grid(row=2, column=0, columnspan=3, sticky=tk.W, pady=(6, 2))
+            _auto_sugg_check.grid(row=2, column=0, columnspan=4, sticky=tk.W, pady=(6, 2))
             self._add_tooltip(_auto_sugg_check, "🤖 Let the AI™ (actually just math) pick slider values.\nUncheck if you think YOU know better than the algorithm. Spoiler: maybe you do.")
 
             _render_profile_label = ttk.Label(options_frame, text="Target renderer")
@@ -4094,28 +4176,40 @@ if GUI_AVAILABLE:
             self.auto_environment_mask_check.grid(row=8, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_environment_mask_check, "🤖 Auto-select environment mask strength.\nThe machine will judge your texture's reflective potential.")
 
+            _rmaos_label = ttk.Label(options_frame, text="RMAOS strength")
+            _rmaos_label.grid(row=9, column=0, sticky=tk.W, pady=8)
+            self._add_tooltip(_rmaos_label, "🧩 Controls TruePBR _rmaos channel contrast/intensity packing.")
+            self.rmaos_scale = ttk.Scale(options_frame, from_=0.1, to=6.0, variable=self.rmaos_strength_var, command=lambda _: self._on_slider_changed())
+            self.rmaos_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
+            self._add_tooltip(self.rmaos_scale, "🧩 Higher values push stronger channel separation for _rmaos output.")
+            self.rmaos_strength_display_label = ttk.Label(options_frame, textvariable=self.rmaos_strength_display_var)
+            self.rmaos_strength_display_label.grid(row=9, column=3, sticky=tk.W, padx=8)
+            self.auto_rmaos_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_rmaos_suggestion_var, command=self._on_auto_slider_preference_changed)
+            self.auto_rmaos_check.grid(row=9, column=4, sticky=tk.W)
+            self._add_tooltip(self.auto_rmaos_check, "🤖 Auto-select dedicated RMAOS strength.")
+
             _complex_label = ttk.Label(options_frame, text="Complex strength")
-            _complex_label.grid(row=9, column=0, sticky=tk.W, pady=8)
+            _complex_label.grid(row=10, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_complex_label, "🔮 Controls complex-material contrast.\nHigher = punchier ENB material response. Lower = subtle, civilized vibes.")
             self.complex_scale = ttk.Scale(options_frame, from_=0.1, to=6.0, variable=self.complex_strength_var, command=lambda _: self._on_slider_changed())
-            self.complex_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
+            self.complex_scale.grid(row=10, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.complex_scale, "🔮 Right = louder material definition.\nLeft = quieter output for restrained legends.")
             self.complex_strength_display_label = ttk.Label(options_frame, textvariable=self.complex_strength_display_var)
-            self.complex_strength_display_label.grid(row=9, column=3, sticky=tk.W, padx=8)
+            self.complex_strength_display_label.grid(row=10, column=3, sticky=tk.W, padx=8)
             self.auto_complex_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_complex_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_complex_check.grid(row=9, column=4, sticky=tk.W)
+            self.auto_complex_check.grid(row=10, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_complex_check, "🤖 Auto-set complex strength. Let the algorithm\nscrutinise your texture's material complexity.")
 
             _specular_label = ttk.Label(options_frame, text="Specular strength (_msn alpha)")
-            _specular_label.grid(row=10, column=0, sticky=tk.W, pady=8)
+            _specular_label.grid(row=11, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_specular_label, "✨ Controls specular highlight intensity in _msn alpha.\nHigher = shinier. Lower = dusty realism.")
             self.specular_scale = ttk.Scale(options_frame, from_=0.1, to=6.0, variable=self.specular_strength_var, command=lambda _: self._on_slider_changed())
-            self.specular_scale.grid(row=10, column=1, columnspan=2, sticky=tk.EW)
+            self.specular_scale.grid(row=11, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.specular_scale, "✨ Turn it up for glorious shine, down for ancient weathered stone.\nLive value shown beside slider.")
             self.specular_strength_display_label = ttk.Label(options_frame, textvariable=self.specular_strength_display_var)
-            self.specular_strength_display_label.grid(row=10, column=3, sticky=tk.W, padx=8)
+            self.specular_strength_display_label.grid(row=11, column=3, sticky=tk.W, padx=8)
             self.auto_specular_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_specular_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_specular_check.grid(row=10, column=4, sticky=tk.W)
+            self.auto_specular_check.grid(row=11, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_specular_check, "🤖 Auto-set specular strength. The AI ponders how shiny\nyour texture DESERVES to be.")
 
             # --- Emboss depth + relief depth + parallax mode options ---
@@ -4125,7 +4219,7 @@ if GUI_AVAILABLE:
                 variable=self.emboss_mode_var,
                 command=self._on_emboss_mode_changed,
             )
-            _emboss_check.grid(row=11, column=0, columnspan=4, sticky=tk.W, pady=(8, 2))
+            _emboss_check.grid(row=12, column=0, columnspan=4, sticky=tk.W, pady=(8, 2))
             self._add_tooltip(
                 _emboss_check,
                 "📜 Emboss mode generates normals from edge ridges instead of smooth gradients.\n"
@@ -4139,7 +4233,7 @@ if GUI_AVAILABLE:
                 variable=self.relief_mode_var,
                 command=self._on_relief_mode_changed,
             )
-            _relief_check.grid(row=11, column=4, columnspan=4, sticky=tk.W, pady=(8, 2))
+            _relief_check.grid(row=12, column=4, columnspan=4, sticky=tk.W, pady=(8, 2))
             self._add_tooltip(
                 _relief_check,
                 "🖼 Relief mode uses the image's own luminosity as a height field so that\n"
@@ -4150,7 +4244,7 @@ if GUI_AVAILABLE:
             )
 
             _parallax_mode_label = ttk.Label(options_frame, text="Parallax mode")
-            _parallax_mode_label.grid(row=12, column=0, sticky=tk.W, pady=(2, 8))
+            _parallax_mode_label.grid(row=13, column=0, sticky=tk.W, pady=(2, 8))
             self._add_tooltip(
                 _parallax_mode_label,
                 "🏔 Heightmap style for _p.dds output.\n"
@@ -4164,7 +4258,7 @@ if GUI_AVAILABLE:
                 state="readonly",
                 width=24,
             )
-            _parallax_mode_combo.grid(row=12, column=1, columnspan=2, sticky=tk.W)
+            _parallax_mode_combo.grid(row=13, column=1, columnspan=2, sticky=tk.W)
             _parallax_mode_combo.bind("<<ComboboxSelected>>", self._on_parallax_mode_changed)
             self._add_tooltip(
                 _parallax_mode_combo,
@@ -4175,7 +4269,7 @@ if GUI_AVAILABLE:
                 options_frame,
                 text="standard = vanilla  |  occlusion = ENBSeries POM",
                 foreground="gray",
-            ).grid(row=12, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
+            ).grid(row=13, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
 
             options_frame.columnconfigure(2, weight=1)
             options_frame.columnconfigure(3, weight=1)
@@ -4346,6 +4440,7 @@ if GUI_AVAILABLE:
                 ("parallax", "Parallax"),
                 ("glow", "Glow"),
                 ("environment_mask", "Environment Mask"),
+                ("rmaos", "RMAOS"),
                 ("complex_material", "Complex Material"),
             )
             _output_tooltips = {
@@ -4354,6 +4449,7 @@ if GUI_AVAILABLE:
                 "parallax": "🏔 Height/parallax preview.\nDarker = lower, lighter = higher. Think of it as tiny grayscale topography for your texture.",
                 "glow": "✨ Emissive/glow preview.\nBright pixels glow in darkness; dark pixels mind their own business like respectable citizens.",
                 "environment_mask": "🪞 Reflection mask preview.\nBrighter = shinier, darker = matte. Basically a \"where may I sparkle\" permit.",
+                "rmaos": "🧩 TruePBR RMAOS preview (_rmaos). Dedicated packed map for TruePBR workflows.",
                 "complex_material": "🔮 Complex-material preview.\nFor MSN format this pane is split: LEFT = RGB normal channels, RIGHT = alpha/specular channel.\nFor CM format it shows the packed texture directly. Not a bug — just advanced wizard math.",
             }
             for index, (output_key, output_label) in enumerate(output_specs):
@@ -4531,18 +4627,21 @@ if GUI_AVAILABLE:
             self.include_parallax_var.set(bool(state["include_parallax"]))
             self.include_glow_var.set(bool(state["include_glow"]))
             self.include_environment_mask_var.set(bool(state["include_environment_mask"]))
+            self.include_rmaos_var.set(bool(state["include_rmaos"]))
             self.include_complex_var.set(bool(state["include_complex"]))
             self.auto_suggestions_var.set(bool(state["auto_suggestions"]))
             self.auto_normal_suggestion_var.set(bool(state["auto_normal"]))
             self.auto_parallax_suggestion_var.set(bool(state["auto_parallax"]))
             self.auto_glow_suggestion_var.set(bool(state["auto_glow"]))
             self.auto_environment_mask_suggestion_var.set(bool(state["auto_environment_mask"]))
+            self.auto_rmaos_suggestion_var.set(bool(state["auto_rmaos"]))
             self.auto_complex_suggestion_var.set(bool(state["auto_complex"]))
             self.auto_specular_suggestion_var.set(bool(state["auto_specular"]))
             self.normal_strength_var.set(float(state["normal_strength"]))
             self.parallax_strength_var.set(float(state["parallax_strength"]))
             self.glow_threshold_var.set(float(state["glow_threshold"]))
             self.environment_mask_strength_var.set(float(state["environment_mask_strength"]))
+            self.rmaos_strength_var.set(float(state["rmaos_strength"]))
             self.complex_strength_var.set(float(state["complex_strength"]))
             self.specular_strength_var.set(float(state["specular_strength"]))
             dismissed = state.get("dismissed_warnings", [])
@@ -4569,18 +4668,21 @@ if GUI_AVAILABLE:
                 "include_parallax": self.include_parallax_var.get(),
                 "include_glow": self.include_glow_var.get(),
                 "include_environment_mask": self.include_environment_mask_var.get(),
+                "include_rmaos": self.include_rmaos_var.get(),
                 "include_complex": self.include_complex_var.get(),
                 "auto_suggestions": self.auto_suggestions_var.get(),
                 "auto_normal": self.auto_normal_suggestion_var.get(),
                 "auto_parallax": self.auto_parallax_suggestion_var.get(),
                 "auto_glow": self.auto_glow_suggestion_var.get(),
                 "auto_environment_mask": self.auto_environment_mask_suggestion_var.get(),
+                "auto_rmaos": self.auto_rmaos_suggestion_var.get(),
                 "auto_complex": self.auto_complex_suggestion_var.get(),
                 "auto_specular": self.auto_specular_suggestion_var.get(),
                 "normal_strength": self.normal_strength_var.get(),
                 "parallax_strength": self.parallax_strength_var.get(),
                 "glow_threshold": int(round(self.glow_threshold_var.get())),
                 "environment_mask_strength": self.environment_mask_strength_var.get(),
+                "rmaos_strength": self.rmaos_strength_var.get(),
                 "complex_strength": self.complex_strength_var.get(),
                 "specular_strength": self.specular_strength_var.get(),
                 "dismissed_warnings": sorted(self.dismissed_warnings),
@@ -4796,6 +4898,7 @@ if GUI_AVAILABLE:
                 "parallax": bool(generation_kwargs["include_parallax"]),
                 "glow": bool(generation_kwargs["include_glow"]),
                 "environment_mask": bool(generation_kwargs["include_environment_mask"]),
+                "rmaos": bool(generation_kwargs["include_rmaos"]),
                 "complex_material": bool(generation_kwargs["include_complex"]),
             }
             for input_file in input_files:
@@ -4849,6 +4952,13 @@ if GUI_AVAILABLE:
                             complex_format=str(generation_kwargs["complex_format"]),
                         )
                     )
+                if includes["rmaos"]:
+                    expected_paths.append(
+                        build_rmaos_output_path(
+                            input_path=input_file,
+                            output_dir=generation_kwargs["output_dir"],
+                        )
+                    )
                 for candidate in expected_paths:
                     for possible in (candidate, candidate.with_suffix(".png")):
                         if not possible.exists() or possible in backups:
@@ -4899,6 +5009,7 @@ if GUI_AVAILABLE:
                                 include_parallax=bool(generation_call_kwargs.get("include_parallax", True)),
                                 include_environment_mask=bool(
                                     generation_call_kwargs.get("include_environment_mask", False)
+                                    or generation_call_kwargs.get("include_rmaos", False)
                                 ),
                             )
                             patched = sum(1 for result in nif_patch_results if getattr(result, "success", False))
@@ -5024,6 +5135,9 @@ if GUI_AVAILABLE:
             self.environment_mask_strength_display_var.set(
                 _fmt(f"{float(self.environment_mask_strength_var.get()):.2f} (0.1–6.0)", self.auto_environment_mask_suggestion_var)
             )
+            self.rmaos_strength_display_var.set(
+                _fmt(f"{float(self.rmaos_strength_var.get()):.2f} (0.1–6.0)", self.auto_rmaos_suggestion_var)
+            )
             self.complex_strength_display_var.set(_fmt(f"{float(self.complex_strength_var.get()):.2f} (0.1–6.0)", self.auto_complex_suggestion_var))
             self.specular_strength_display_var.set(_fmt(f"{float(self.specular_strength_var.get()):.2f} (0.1–6.0)", self.auto_specular_suggestion_var))
 
@@ -5046,6 +5160,7 @@ if GUI_AVAILABLE:
             self.auto_parallax_suggestion_var.set(value)
             self.auto_glow_suggestion_var.set(value)
             self.auto_environment_mask_suggestion_var.set(value)
+            self.auto_rmaos_suggestion_var.set(value)
             self.auto_complex_suggestion_var.set(value)
             self.auto_specular_suggestion_var.set(value)
             self._update_slider_auto_states()
@@ -5131,6 +5246,7 @@ if GUI_AVAILABLE:
             self.include_parallax_var.set(bool(resolved["include_parallax"]))
             self.include_glow_var.set(bool(resolved["include_glow"]))
             self.include_environment_mask_var.set(bool(resolved["include_environment_mask"]))
+            self.include_rmaos_var.set(bool(resolved["include_rmaos"]))
             self.include_complex_var.set(bool(resolved["include_complex"]))
             return str(resolved["effective_profile"])
 
@@ -5273,6 +5389,12 @@ if GUI_AVAILABLE:
                     self.environment_mask_strength_display_label,
                     self.auto_environment_mask_check,
                 ),
+                (
+                    self.rmaos_scale,
+                    self.auto_rmaos_suggestion_var,
+                    self.rmaos_strength_display_label,
+                    self.auto_rmaos_check,
+                ),
                 (self.complex_scale, self.auto_complex_suggestion_var, self.complex_strength_display_label, self.auto_complex_check),
                 (self.specular_scale, self.auto_specular_suggestion_var, self.specular_strength_display_label, self.auto_specular_check),
             )
@@ -5305,6 +5427,7 @@ if GUI_AVAILABLE:
                 "parallax_strength": float(self.parallax_strength_var.get()),
                 "glow_threshold": int(round(self.glow_threshold_var.get())),
                 "environment_mask_strength": float(self.environment_mask_strength_var.get()),
+                "rmaos_strength": float(self.rmaos_strength_var.get()),
                 "complex_strength": float(self.complex_strength_var.get()),
                 "specular_strength": float(self.specular_strength_var.get()),
             }
@@ -5313,6 +5436,7 @@ if GUI_AVAILABLE:
                 "parallax_strength": self.auto_parallax_suggestion_var.get(),
                 "glow_threshold": self.auto_glow_suggestion_var.get(),
                 "environment_mask_strength": self.auto_environment_mask_suggestion_var.get(),
+                "rmaos_strength": self.auto_rmaos_suggestion_var.get(),
                 "complex_strength": self.auto_complex_suggestion_var.get(),
                 "specular_strength": self.auto_specular_suggestion_var.get(),
             }
@@ -5321,6 +5445,7 @@ if GUI_AVAILABLE:
             self.parallax_strength_var.set(float(resolved["parallax_strength"]))
             self.glow_threshold_var.set(float(resolved["glow_threshold"]))
             self.environment_mask_strength_var.set(float(resolved["environment_mask_strength"]))
+            self.rmaos_strength_var.set(float(resolved["rmaos_strength"]))
             self.complex_strength_var.set(float(resolved["complex_strength"]))
             self.specular_strength_var.set(float(resolved["specular_strength"]))
             if update_toggles:
@@ -5478,6 +5603,7 @@ if GUI_AVAILABLE:
                     parallax_strength=float(self.parallax_strength_var.get()),
                     glow_threshold=int(round(self.glow_threshold_var.get())),
                     environment_mask_strength=float(self.environment_mask_strength_var.get()),
+                    rmaos_strength=float(self.rmaos_strength_var.get()),
                     complex_strength=float(self.complex_strength_var.get()),
                     specular_strength=float(self.specular_strength_var.get()),
                     complex_format=self.complex_format_var.get(),
@@ -5490,6 +5616,7 @@ if GUI_AVAILABLE:
                     include_parallax=self.include_parallax_var.get(),
                     include_glow=self.include_glow_var.get(),
                     include_environment_mask=self.include_environment_mask_var.get(),
+                    include_rmaos=self.include_rmaos_var.get(),
                     include_complex=self.include_complex_var.get(),
                     render_profile=self.render_profile_var.get(),
                 )
@@ -5624,8 +5751,9 @@ if GUI_AVAILABLE:
                 include_parallax = self.include_parallax_var.get()
                 include_glow = self.include_glow_var.get()
                 include_environment_mask = self.include_environment_mask_var.get()
+                include_rmaos = self.include_rmaos_var.get()
                 include_complex = self.include_complex_var.get()
-                if not any((include_diffuse, include_normal, include_parallax, include_glow, include_environment_mask, include_complex)):
+                if not any((include_diffuse, include_normal, include_parallax, include_glow, include_environment_mask, include_rmaos, include_complex)):
                     messagebox.showwarning("No outputs selected", "Select at least one output type.", parent=self.root)
                     return
 
@@ -5750,6 +5878,9 @@ if GUI_AVAILABLE:
                     "environment_mask_strength": self._resolve_generation_value(
                         self.environment_mask_strength_var.get(), self.auto_environment_mask_suggestion_var
                     ),
+                    "rmaos_strength": self._resolve_generation_value(
+                        self.rmaos_strength_var.get(), self.auto_rmaos_suggestion_var
+                    ),
                     "complex_strength": self._resolve_generation_value(
                         self.complex_strength_var.get(), self.auto_complex_suggestion_var
                     ),
@@ -5769,6 +5900,7 @@ if GUI_AVAILABLE:
                     "include_parallax": include_parallax,
                     "include_glow": include_glow,
                     "include_environment_mask": include_environment_mask,
+                    "include_rmaos": include_rmaos,
                     "include_complex": include_complex,
                 }
                 self.batch_failures = []
@@ -6739,11 +6871,13 @@ def main() -> int:
             parallax_name=args.parallax_name,
             glow_name=args.glow_name,
             environment_mask_name=args.environment_mask_name,
+            rmaos_name=args.rmaos_name,
             complex_name=args.complex_name,
             normal_strength=args.normal_strength,
             parallax_strength=args.parallax_strength,
             glow_threshold=args.glow_threshold,
             environment_mask_strength=args.environment_mask_strength,
+            rmaos_strength=args.rmaos_strength,
             complex_strength=args.complex_strength,
             specular_strength=args.specular_strength,
             complex_format=args.complex_format,
@@ -6756,6 +6890,7 @@ def main() -> int:
             include_parallax=not args.no_parallax,
             include_glow=args.glow_map,
             include_environment_mask=args.environment_mask,
+            include_rmaos=args.rmaos,
             include_complex=args.complex_material,
             render_profile="auto",
             continue_on_error=True,
@@ -6781,11 +6916,13 @@ def main() -> int:
         parallax_name=args.parallax_name,
         glow_name=args.glow_name,
         environment_mask_name=args.environment_mask_name,
+        rmaos_name=args.rmaos_name,
         complex_name=args.complex_name,
         normal_strength=args.normal_strength,
         parallax_strength=args.parallax_strength,
         glow_threshold=args.glow_threshold,
         environment_mask_strength=args.environment_mask_strength,
+        rmaos_strength=args.rmaos_strength,
         complex_strength=args.complex_strength,
         specular_strength=args.specular_strength,
         complex_format=args.complex_format,
@@ -6798,6 +6935,7 @@ def main() -> int:
         include_parallax=not args.no_parallax,
         include_glow=args.glow_map,
         include_environment_mask=args.environment_mask,
+        include_rmaos=args.rmaos,
         include_complex=args.complex_material,
         render_profile="auto",
     )

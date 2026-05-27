@@ -26,6 +26,7 @@ from generate_textures import (
     build_complex_preview_image,
     build_complex_output_path,
     build_environment_mask_output_path,
+    build_rmaos_output_path,
     classify_material_type,
     collect_source_textures,
     compute_wrapped_preview_index,
@@ -606,7 +607,8 @@ class GenerateTexturesTests(unittest.TestCase):
 
         truepbr = resolve_render_profile_output_defaults("truepbr")
         self.assertTrue(bool(truepbr["include_parallax"]))
-        self.assertTrue(bool(truepbr["include_environment_mask"]))
+        self.assertFalse(bool(truepbr["include_environment_mask"]))
+        self.assertTrue(bool(truepbr["include_rmaos"]))
         self.assertFalse(bool(truepbr["include_complex"]))
         self.assertTrue(bool(truepbr["include_normal"]))
 
@@ -1312,7 +1314,7 @@ class GenerateTexturesTests(unittest.TestCase):
 
             self.assertEqual(environment_mask_path.name, "brick_m.dds")
 
-    def test_build_environment_mask_output_path_uses_rmaos_name_for_truepbr_complex_mode(self) -> None:
+    def test_build_environment_mask_output_path_keeps_m_name_for_truepbr_complex_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             input_path = temp_path / "brick.dds"
@@ -1327,7 +1329,21 @@ class GenerateTexturesTests(unittest.TestCase):
                 render_profile="truepbr",
             )
 
-            self.assertEqual(environment_mask_path.name, "brick_rmaos.dds")
+            self.assertEqual(environment_mask_path.name, "brick_m.dds")
+
+    def test_build_rmaos_output_path_uses_rmaos_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.dds"
+            input_path.write_bytes(b"stub")
+
+            rmaos_path = build_rmaos_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+                rmaos_name=None,
+            )
+
+            self.assertEqual(rmaos_path.name, "brick_rmaos.dds")
 
     def test_build_complex_output_path_uses_msn_default_name_and_extension(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2294,7 +2310,7 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(len(env_calls), 1)
             self.assertEqual(env_calls[0].kwargs["preferred_pixel_formats"], ("DXT5",))
 
-    def test_run_with_options_truepbr_complex_env_mask_defaults_to_rmaos_name(self) -> None:
+    def test_run_with_options_truepbr_complex_env_mask_defaults_to_m_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             input_path = temp_path / "brick.png"
@@ -2317,6 +2333,33 @@ class GenerateTexturesTests(unittest.TestCase):
                     env_mask_mode="complex",
                     complex_format="cm",
                     render_profile="truepbr",
+                )
+
+            self.assertEqual(save_mock.call_count, 1)
+            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT5",))
+            self.assertEqual(save_mock.call_args.args[1].name, "brick_m.dds")
+
+    def test_run_with_options_rmaos_writes_rmaos_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ) as save_mock:
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_rmaos=True,
+                    include_complex=False,
                 )
 
             self.assertEqual(save_mock.call_count, 1)
