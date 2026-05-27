@@ -444,6 +444,15 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertIn("slot 1 normal path", joined)
         self.assertIn("_n.dds or _msn.dds", joined)
 
+    def test_reports_wrong_texture_type_in_normal_slot_for_env_mask_suffix(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_NORMAL] = "textures\\arch\\stone_rmaos.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 1 normal path", joined)
+        self.assertIn("_n.dds or _msn.dds", joined)
+
     def test_reports_wrong_texture_type_in_glow_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_n.dds"
@@ -1108,6 +1117,13 @@ class TestGuessHelpers(unittest.TestCase):
         self.assertIsNotNone(guessed)
         self.assertTrue((guessed or "").endswith("_g.dds"))
 
+    def test_guess_glow_path_from_existing_skin_tint_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_GLOW] = "textures\\actors\\dragon\\dragon_sk.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_glow_path_for_nif(nif)
+        self.assertEqual(guessed, "textures\\actors\\dragon\\dragon_g.dds")
+
     def test_guess_glow_returns_none_for_no_diffuse(self) -> None:
         nif = _write_nif(self.tmp)
         self.assertIsNone(guess_glow_path_for_nif(nif))
@@ -1127,6 +1143,13 @@ class TestGuessHelpers(unittest.TestCase):
         guessed = guess_env_mask_path_for_nif(nif)
         self.assertIsNotNone(guessed)
         self.assertTrue((guessed or "").endswith("_m.dds"))
+
+    def test_guess_env_mask_path_from_existing_rmaos_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_rmaos.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_env_mask_path_for_nif(nif)
+        self.assertEqual(guessed, "textures\\arch\\stone_m.dds")
 
     def test_guess_env_mask_returns_none_for_no_paths(self) -> None:
         nif = _write_nif(self.tmp)

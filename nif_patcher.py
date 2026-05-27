@@ -175,6 +175,22 @@ _CUBEMAP_SLOT_WRONG_SUFFIXES: tuple[str, ...] = (
     "_cm.dds",
     "_rmaos.dds",
 )
+_NORMAL_SLOT_DISALLOWED_SUFFIXES: tuple[str, ...] = (
+    "_p.dds",
+    "_g.dds",
+    "_sk.dds",
+    "_m.dds",
+    "_mask.dds",
+    "_envmask.dds",
+    "_em.dds",
+    "_rmaos.dds",
+    "_cm.dds",
+    "_e.dds",
+    "_env.dds",
+    "_envmap.dds",
+    "_cube.dds",
+    "_cubemap.dds",
+)
 
 # BSLightingShaderPropertyShaderType values
 SHADER_TYPE_DEFAULT: int = 0
@@ -1950,7 +1966,7 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                 )
         if normal_path:
             normalized_normal = _normalise_slot_path(normal_path)
-            if normalized_normal.endswith(("_p.dds", "_g.dds", "_m.dds")):
+            if normalized_normal.endswith(_NORMAL_SLOT_DISALLOWED_SUFFIXES):
                 _append_unique(
                     result.issues,
                     f"Block {info.block_index}: slot 1 normal path '{normal_path}' does not look like a normal map path."
@@ -2130,7 +2146,7 @@ def guess_glow_path_for_nif(nif_path: Path) -> str | None:
         if existing:
             p = Path(existing.replace("\\", "/"))
             stem = p.stem
-            for s in ("_g", "_glow", "_emissive", "_emit"):
+            for s in ("_g", "_glow", "_emissive", "_emit", "_sk"):
                 if stem.lower().endswith(s):
                     stem = stem[: -len(s)]
                     break
@@ -2160,7 +2176,7 @@ def guess_env_mask_path_for_nif(nif_path: Path) -> str | None:
         if existing:
             p = Path(existing.replace("\\", "/"))
             stem = p.stem
-            for s in ("_m", "_mask", "_envmask", "_env"):
+            for s in ("_m", "_mask", "_envmask", "_env", "_em", "_rmaos", "_cm"):
                 if stem.lower().endswith(s):
                     stem = stem[: -len(s)]
                     break
