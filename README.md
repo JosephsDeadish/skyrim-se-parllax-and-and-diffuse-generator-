@@ -32,6 +32,7 @@ Alternatively, simply extract `generate_textures.exe` anywhere and run it direct
 When the tool is launched from **MO2** or **Vortex**, it now tries to detect the current mod-manager context:
 - **MO2**: reads the active profile and enabled mods from `modlist.txt`, then exposes detected loaded mod texture folders in the GUI.
 - **Vortex**: looks for the active profile/staging layout and exposes detected managed texture folders in the GUI.
+- Renderer auto-detect now also uses loaded mod names from that MO2/Vortex context to better infer `ENB`, `Community Shaders`, or `TruePBR` defaults when texture path hints are unclear.
 - The GUI shows the detected context under the file picker and adds a **Loaded Mod** button for faster browsing.
 
 ## Usage

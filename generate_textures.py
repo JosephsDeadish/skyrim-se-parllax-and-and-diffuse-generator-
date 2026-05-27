@@ -1038,6 +1038,12 @@ _RENDER_PROFILE_PATH_HINTS: dict[str, tuple[str, ...]] = {
     "truepbr": ("truepbr", "true_pbr", "true-pbr", "pbrnifpatcher", "textures pbr"),
 }
 
+_RENDER_PROFILE_MANAGER_HINT_TOKENS: dict[str, tuple[str, ...]] = {
+    "enb": ("enb", "enbseries"),
+    "community_shaders": ("community shaders", "communityshaders", "complex material", "extended materials"),
+    "truepbr": ("truepbr", "true pbr", "pbrnifpatcher", "pbr nif patcher", "rmaos", "ramos"),
+}
+
 
 def _normalize_render_profile(value: str | None) -> str:
     normalized = (value or "").strip().lower()
@@ -1262,6 +1268,7 @@ def recommend_render_profile(
     detected_suffix: str | None = None,
     material_type: str = "general",
     workflow_profile: str | None = None,
+    manager_context: ModManagerContext | None = None,
 ) -> str:
     """Recommend target rendering profile for map format/mode defaults."""
     normalized_suffix = (detected_suffix or "").strip().lower()
@@ -1282,7 +1289,49 @@ def recommend_render_profile(
         for profile, tokens in _RENDER_PROFILE_PATH_HINTS.items():
             if any(token in combined for token in tokens):
                 return profile
+    manager_profile = detect_render_profile_from_mod_manager_context(manager_context)
+    if manager_profile is not None:
+        return manager_profile
     return "vanilla"
+
+
+def detect_render_profile_from_mod_manager_context(context: ModManagerContext | None) -> str | None:
+    """Infer installed renderer profile hints from detected MO2/Vortex context."""
+    if context is None or context.manager is None:
+        return None
+    candidates: list[str] = []
+    for mod_name in context.loaded_mods:
+        normalized = str(mod_name).strip().lower()
+        if normalized:
+            candidates.append(normalized)
+    for path in (*context.loaded_texture_dirs, *context.loaded_mesh_dirs):
+        parent_name = path.parent.name.strip().lower()
+        if parent_name:
+            candidates.append(parent_name)
+    if not candidates:
+        return None
+    has_truepbr = any(
+        token in candidate
+        for candidate in candidates
+        for token in _RENDER_PROFILE_MANAGER_HINT_TOKENS["truepbr"]
+    )
+    has_cs = any(
+        token in candidate
+        for candidate in candidates
+        for token in _RENDER_PROFILE_MANAGER_HINT_TOKENS["community_shaders"]
+    )
+    has_enb = any(
+        token in candidate
+        for candidate in candidates
+        for token in _RENDER_PROFILE_MANAGER_HINT_TOKENS["enb"]
+    )
+    if has_truepbr:
+        return "truepbr"
+    if has_cs and not has_enb:
+        return "community_shaders"
+    if has_enb and not has_cs:
+        return "enb"
+    return None
 
 
 def resolve_render_profile_options(
@@ -5354,6 +5403,7 @@ if GUI_AVAILABLE:
                 detected_suffix=role_info["suffix"] if role_info is not None else None,
                 material_type=material_type,
                 workflow_profile=workflow_profile,
+                manager_context=self.manager_context,
             )
 
         def _apply_render_profile_modes(

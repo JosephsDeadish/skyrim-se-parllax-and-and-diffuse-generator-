@@ -31,9 +31,11 @@ from generate_textures import (
     classify_material_type,
     collect_source_textures,
     compute_wrapped_preview_index,
+    ModManagerContext,
     describe_render_profile_default_outputs,
     detect_workflow_profile,
     detect_mod_manager_context,
+    detect_render_profile_from_mod_manager_context,
     enforce_skyrim_output_profile,
     find_related_nif_files_for_texture,
     build_glow_output_path,
@@ -563,6 +565,20 @@ class GenerateTexturesTests(unittest.TestCase):
             "vanilla",
         )
 
+    def test_recommend_render_profile_uses_mod_manager_context_hint_when_path_is_neutral(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            loaded_mods=("Community Shaders", "Some Texture Pack"),
+        )
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/architecture/metalplate.dds"),
+                source=_detailed_low_saturation_image(),
+                manager_context=context,
+            ),
+            "community_shaders",
+        )
+
     def test_recommend_render_profile_detects_truepbr_from_rmaos_suffix(self) -> None:
         self.assertEqual(
             recommend_render_profile(
@@ -598,6 +614,20 @@ class GenerateTexturesTests(unittest.TestCase):
             ),
             "truepbr",
         )
+
+    def test_detect_render_profile_from_mod_manager_context_prioritizes_truepbr(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            loaded_mods=("Community Shaders", "PBRNifPatcher", "ENB Light"),
+        )
+        self.assertEqual(detect_render_profile_from_mod_manager_context(context), "truepbr")
+
+    def test_detect_render_profile_from_mod_manager_context_handles_ambiguous_enb_and_cs(self) -> None:
+        context = ModManagerContext(
+            manager="Vortex",
+            loaded_mods=("Community Shaders", "ENB Light"),
+        )
+        self.assertIsNone(detect_render_profile_from_mod_manager_context(context))
 
     def test_resolve_render_profile_options_returns_expected_modes(self) -> None:
         enb = resolve_render_profile_options("enb")
