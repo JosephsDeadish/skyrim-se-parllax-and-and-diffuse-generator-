@@ -1619,6 +1619,8 @@ def _apply_patches(
             requested_slots.append(TEXTURE_SLOT_DIFFUSE)
         if requested_slots:
             max_slot = max(requested_slots)
+            if ts.num_textures < TEXTURE_SLOT_COUNT:
+                max_slot = max(max_slot, TEXTURE_SLOT_COUNT - 1)
             data, header, texture_sets, extended = _extend_texture_set_slots(data, header, ts, max_slot)
             if extended:
                 sets_patched += 1

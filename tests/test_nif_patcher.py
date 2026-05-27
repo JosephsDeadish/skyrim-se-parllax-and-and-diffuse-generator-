@@ -36,6 +36,9 @@ from nif_patcher import (
     scan_nif,
     scan_nif_diagnostics,
     validate_nif_for_parallax,
+    _Buf,
+    _build_block_map,
+    _read_header,
 )
 
 
@@ -95,13 +98,14 @@ def _build_texture_set_block(
     """Build a single BSShaderTextureSet block body."""
     if texture_paths is None:
         texture_paths = [""] * 9
+    slot_count = len(texture_paths)
     layout_pad = b"\x00\x00\x00\x00" if texture_set_layout_shift == 4 else b""
     if texture_set_count_u16:
-        count_bytes = struct.pack("<H", 9)
+        count_bytes = struct.pack("<H", slot_count)
     else:
-        count_bytes = struct.pack("<I", 9)
+        count_bytes = struct.pack("<I", slot_count)
     body = layout_pad + count_bytes
-    for path in texture_paths[:9]:
+    for path in texture_paths:
         body += _sstring_u32(path)
     return body
 
@@ -203,6 +207,17 @@ def _write_nif(tmp_dir: Path, **kwargs: object) -> Path:
     p = tmp_dir / "test.nif"
     p.write_bytes(_build_minimal_nif(**kwargs))
     return p
+
+
+def _texture_set_slot_count(nif_path: Path) -> int:
+    data = nif_path.read_bytes()
+    header = _read_header(_Buf(data))
+    if header is None:
+        return 0
+    _, texture_sets, _ = _build_block_map(data, header)
+    if not texture_sets:
+        return 0
+    return next(iter(texture_sets.values())).num_textures
 
 
 # ---------------------------------------------------------------------------
@@ -615,6 +630,43 @@ class TestPatchTexturePaths(unittest.TestCase):
         self.assertEqual(
             infos[0].texture_paths.get(TEXTURE_SLOT_PARALLAX), "textures\\arch\\stone_p.dds"
         )
+
+    def test_extends_low_slot_texture_set_to_full_skyrim_slot_count(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=["textures\\arch\\stone.dds", "textures\\arch\\stone_n.dds"],
+        )
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                parallax_texture_path="textures\\arch\\stone_p.dds",
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(
+            infos[0].texture_paths.get(TEXTURE_SLOT_PARALLAX), "textures\\arch\\stone_p.dds"
+        )
+        self.assertEqual(_texture_set_slot_count(nif), 9)
+
+    def test_extends_low_slot_u16_texture_set_to_full_skyrim_slot_count(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=["textures\\arch\\stone.dds", ""],
+            texture_set_count_u16=True,
+        )
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                env_mask_texture_path="textures\\arch\\stone_m.dds",
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].texture_paths.get(TEXTURE_SLOT_ENV_MASK), "textures\\arch\\stone_m.dds")
+        self.assertEqual(_texture_set_slot_count(nif), 9)
 
     def test_normalises_forward_slashes_to_backslashes(self) -> None:
         nif = _write_nif(self.tmp)
