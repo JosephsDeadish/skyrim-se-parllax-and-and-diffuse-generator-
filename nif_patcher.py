@@ -146,6 +146,36 @@ TEXTURE_SLOT_WRINKLE: int = 7
 TEXTURE_SLOT_BACKLIGHT: int = 8
 TEXTURE_SLOT_COUNT: int = 9
 
+_DIFFUSE_SLOT_DISALLOWED_SUFFIXES: tuple[str, ...] = (
+    "_n.dds",
+    "_msn.dds",
+    "_p.dds",
+    "_g.dds",
+    "_m.dds",
+    "_cm.dds",
+    "_rmaos.dds",
+    "_e.dds",
+    "_cube.dds",
+    "_env.dds",
+    "_envmap.dds",
+)
+_CUBEMAP_SLOT_EXPECTED_SUFFIXES: tuple[str, ...] = (
+    "_e.dds",
+    "_cube.dds",
+    "_env.dds",
+    "_envmap.dds",
+    "_cubemap.dds",
+)
+_CUBEMAP_SLOT_WRONG_SUFFIXES: tuple[str, ...] = (
+    "_n.dds",
+    "_msn.dds",
+    "_p.dds",
+    "_g.dds",
+    "_m.dds",
+    "_cm.dds",
+    "_rmaos.dds",
+)
+
 # BSLightingShaderPropertyShaderType values
 SHADER_TYPE_DEFAULT: int = 0
 SHADER_TYPE_ENVMAP: int = 1
@@ -1205,6 +1235,10 @@ def _normalise_path(p: str) -> str:
     return collapsed
 
 
+def _normalise_slot_path(path: str) -> str:
+    return path.strip().lower().replace("/", "\\")
+
+
 def _build_block_map(
     data: bytes,
     header: _NifHeader,
@@ -1803,9 +1837,6 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
         if message not in items:
             items.append(message)
 
-    def _normalise_slot_path(path: str) -> str:
-        return path.strip().lower().replace("/", "\\")
-
     if diagnostics:
         result.issues.extend(diagnostics[:6])
     if not infos:
@@ -1856,6 +1887,17 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                     "(not Heightmap/3). Use force_shader_type_3=True to enable "
                     "the parallax_scale field for stronger in-game depth."
                 )
+        if diffuse_path:
+            normalized_diffuse = _normalise_slot_path(diffuse_path)
+            if normalized_diffuse.endswith(_DIFFUSE_SLOT_DISALLOWED_SUFFIXES):
+                _append_unique(
+                    result.issues,
+                    f"Block {info.block_index}: slot 0 diffuse path '{diffuse_path}' looks like a non-diffuse map."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Use slot 0 for diffuse/albedo textures and move _n/_p/_g/_m/_cm/cubemap files to slots 1/3/2/5/4 as appropriate."
+                )
         if parallax_path:
             normalized_parallax = _normalise_slot_path(parallax_path)
             if not normalized_parallax.startswith("textures\\"):
@@ -1875,6 +1917,15 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                 _append_unique(
                     result.suggestions,
                     "Use a dedicated _p.dds height map in texture slot 3 so Skyrim/ENB parallax reads the correct file."
+                )
+            if normalized_parallax.endswith(_CUBEMAP_SLOT_EXPECTED_SUFFIXES):
+                _append_unique(
+                    result.issues,
+                    f"Block {info.block_index}: slot 3 parallax path '{parallax_path}' looks like a cubemap path."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Use slot 3 for _p.dds height maps and move cubemap/environment textures to slot 4."
                 )
             if diffuse_path and normalized_parallax == _normalise_slot_path(diffuse_path):
                 _append_unique(
@@ -1973,6 +2024,23 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                 result.suggestions,
                 f"Block {info.block_index}: SLSF2_Glow_Map is set but slot 2 is empty; add a _g.dds emissive map or disable the flag."
             )
+        cubemap_path = info.texture_paths.get(TEXTURE_SLOT_CUBEMAP, "").strip()
+        if cubemap_path:
+            normalized_cubemap = _normalise_slot_path(cubemap_path)
+            if normalized_cubemap.endswith(_CUBEMAP_SLOT_WRONG_SUFFIXES):
+                _append_unique(
+                    result.issues,
+                    f"Block {info.block_index}: slot 4 cubemap path '{cubemap_path}' looks like a non-cubemap texture."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Use slot 4 for cubemap/environment textures (_e/_env/_cube naming) and keep _n/_p/_g/_m/_cm maps in their standard slots."
+                )
+            elif "cubemap" not in normalized_cubemap and not normalized_cubemap.endswith(_CUBEMAP_SLOT_EXPECTED_SUFFIXES):
+                _append_unique(
+                    result.suggestions,
+                    f"Block {info.block_index}: slot 4 path '{cubemap_path}' does not use common cubemap naming (_e/_env/_cube); verify the file is the intended reflection cubemap."
+                )
 
     result.valid = result.shader_count > 0
     return result

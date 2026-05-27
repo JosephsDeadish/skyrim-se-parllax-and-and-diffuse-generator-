@@ -965,6 +965,9 @@ def get_nif_patch_option_warnings(
     parallax_texture_path: str = "",
     normal_texture_path: str = "",
     env_mask_texture_path: str = "",
+    glow_texture_path: str = "",
+    cubemap_texture_path: str = "",
+    diffuse_texture_path: str = "",
     disable_parallax: bool = False,
     disable_pom: bool = False,
     disable_env_mapping: bool = False,
@@ -998,11 +1001,16 @@ def get_nif_patch_option_warnings(
         warnings.append("Environment mask slot is set to both clear and write a path.")
 
     path_rules = (
+        ("Diffuse slot", diffuse_texture_path, ("_n.dds", "_msn.dds", "_p.dds", "_g.dds", "_m.dds", "_cm.dds"), True),
         ("Parallax slot", parallax_texture_path, ("_p.dds",)),
-        ("Normal slot", normal_texture_path, ("_n.dds", "_msn.dds")),
-        ("Env mask slot", env_mask_texture_path, ("_m.dds",)),
+        ("Normal slot", normal_texture_path, ("_n.dds", "_msn.dds"), False),
+        ("Glow slot", glow_texture_path, ("_g.dds", "_glow.dds", "_emit.dds", "_emissive.dds"), False),
+        ("Cubemap slot", cubemap_texture_path, ("_e.dds", "_cube.dds", "_env.dds", "_envmap.dds"), False),
+        ("Env mask slot", env_mask_texture_path, ("_m.dds", "_mask.dds", "_envmask.dds", "_cm.dds", "_rmaos.dds"), False),
     )
-    for label, raw_path, suffixes in path_rules:
+    for rule in path_rules:
+        label, raw_path, suffixes, *extra = rule
+        is_diffuse_rule = bool(extra[0]) if extra else False
         normalized = raw_path.strip().replace("/", "\\")
         if not normalized:
             continue
@@ -1017,7 +1025,14 @@ def get_nif_patch_option_warnings(
             )
         if not lowered.startswith("textures\\") and "textures\\" not in lowered:
             warnings.append(f"{label} path should start with textures\\ for Skyrim-relative lookups.")
-        if not lowered.endswith(tuple(s.lower() for s in suffixes)):
+        lowered_suffixes = tuple(s.lower() for s in suffixes)
+        if is_diffuse_rule:
+            if lowered.endswith(lowered_suffixes):
+                warnings.append(
+                    f"{label} path looks like a generated map type (_n/_p/_g/_m/_cm); slot 0 should usually be diffuse/albedo."
+                )
+            continue
+        if not lowered.endswith(lowered_suffixes):
             warnings.append(f"{label} path should usually end with {', '.join(suffixes)}.")
 
     return warnings
@@ -5623,9 +5638,10 @@ if GUI_AVAILABLE:
                 guide_label = ttk.Label(
                     opt_frame,
                     text=(
-                        "Option guide: Enable standard parallax for vanilla/community shaders workflows. "
-                        "Enable ENB POM only for ENB setups. Enable environment mapping only when using slot 5 (_m). "
-                        "Force shader type 3 lets the tool write stronger parallax scale values."
+                        "Option guide: Slot 0=diffuse/albedo, 1=normal/_n or _msn, 2=glow/_g, "
+                        "3=parallax/_p, 4=cubemap, 5=environment mask/_m. "
+                        "Enable standard parallax for vanilla/community shaders workflows. Enable ENB POM only for ENB setups. "
+                        "Enable environment mapping only when using slot 5 (_m). Force shader type 3 lets the tool write stronger parallax scale values."
                     ),
                     justify=tk.LEFT,
                     wraplength=860,

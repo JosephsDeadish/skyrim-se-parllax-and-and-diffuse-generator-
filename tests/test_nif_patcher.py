@@ -442,6 +442,24 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertIn("slot 5 environment-mask path", joined)
         self.assertIn("slot 5 for _m.dds", joined)
 
+    def test_reports_non_diffuse_texture_in_diffuse_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_DIFFUSE] = "textures\\arch\\stone_p.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 0 diffuse path", joined)
+        self.assertIn("use slot 0 for diffuse/albedo", joined)
+
+    def test_reports_non_cubemap_texture_in_cubemap_slot(self) -> None:
+        paths = [""] * 9
+        paths[4] = "textures\\arch\\stone_n.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 4 cubemap path", joined)
+        self.assertIn("use slot 4 for cubemap/environment textures", joined)
+
 
 # ---------------------------------------------------------------------------
 # Tests: flag patching

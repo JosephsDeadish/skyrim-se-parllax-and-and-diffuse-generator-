@@ -625,6 +625,19 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(any("_p.dds" in text for text in warnings))
         self.assertTrue(any("_m.dds" in text for text in warnings))
 
+    def test_get_nif_patch_option_warnings_reports_diffuse_slot_misuse(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="vanilla",
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=False,
+            force_shader_type_3=False,
+            diffuse_texture_path="textures\\architecture\\stone\\stone_n.dds",
+            cubemap_texture_path="textures\\architecture\\stone\\stone_n.dds",
+        )
+        self.assertTrue(any("slot 0" in text.lower() or "diffuse slot" in text.lower() for text in warnings))
+        self.assertTrue(any("cubemap slot" in text.lower() for text in warnings))
+
     def test_build_render_profile_recommendation_message_lists_renderer_guidance(self) -> None:
         message = build_render_profile_recommendation_message("community_shaders")
         self.assertIn("Suggested target: Community Shaders", message)
