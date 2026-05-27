@@ -77,7 +77,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "complex_format": "msn",
     "env_mask_mode": "standard",
     "parallax_mode": "standard",
-    "render_profile": "custom",
+    "render_profile": "experimental",
     "emboss_mode": False,
     "relief_mode": False,
     "include_diffuse": True,
@@ -277,11 +277,13 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     else:
         state["parallax_mode"] = str(_GUI_STATE_DEFAULTS["parallax_mode"])
     render_profile = str(raw.get("render_profile", state["render_profile"]) or state["render_profile"]).strip().lower()
-    if render_profile in {"auto", "custom", "vanilla", "community_shaders", "community shaders", "truepbr", "true pbr", "enb"}:
+    if render_profile in {"auto", "experimental", "custom", "vanilla", "community_shaders", "community shaders", "truepbr", "true pbr", "enb"}:
         if render_profile == "community shaders":
             state["render_profile"] = "community_shaders"
         elif render_profile == "true pbr":
             state["render_profile"] = "truepbr"
+        elif render_profile == "custom":
+            state["render_profile"] = "experimental"
         else:
             state["render_profile"] = render_profile
     else:
@@ -839,8 +841,8 @@ def detect_workflow_profile(path: Path) -> str | None:
 
 
 _RENDER_PROFILE_PRESETS: dict[str, dict[str, str]] = {
-    # Blank/custom profile — user-controlled, no forced workflow assumptions.
-    "custom": {
+    # Blank/experimental profile — user-controlled, no forced workflow assumptions.
+    "experimental": {
         "complex_format": "msn",
         "env_mask_mode": "standard",
         "parallax_mode": "standard",
@@ -875,7 +877,7 @@ _RENDER_PROFILE_PRESETS: dict[str, dict[str, str]] = {
 
 _RENDER_PROFILE_LABELS: dict[str, str] = {
     "auto": "Auto-detect",
-    "custom": "Custom [Experimental]",
+    "experimental": "Experimental",
     "vanilla": "Vanilla",
     "community_shaders": "Community Shaders",
     "truepbr": "Community Shaders TruePBR",
@@ -883,8 +885,8 @@ _RENDER_PROFILE_LABELS: dict[str, str] = {
 }
 
 _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
-    "custom": (
-        "Custom profile [Experimental].\n"
+    "experimental": (
+        "Experimental profile.\n"
         "No renderer assumptions are applied; this profile is intentionally blank so you can choose all options manually.\n"
         "Guidance text and channel hints are best-effort and may be inaccurate for your specific shader stack.\n"
         "For TruePBR workflows, use dedicated _rmaos/_ramos output plus its JSON sidecar and validate against your installed shader docs."
@@ -934,7 +936,7 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
 }
 
 _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
-    "custom": {
+    "experimental": {
         "enable_parallax": True,
         "enable_pom": False,
         "enable_env_mapping": False,
@@ -972,7 +974,7 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
 }
 
 _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
-    "custom": {
+    "experimental": {
         "include_diffuse": False,
         "include_normal": False,
         "include_parallax": False,
@@ -1042,9 +1044,11 @@ def _normalize_render_profile(value: str | None) -> str:
         return "community_shaders"
     if normalized in {"true pbr", "truepbr"}:
         return "truepbr"
-    if normalized in {"auto", "custom", "vanilla", "community_shaders", "truepbr", "enb"}:
+    if normalized == "custom":
+        return "experimental"
+    if normalized in {"auto", "experimental", "vanilla", "community_shaders", "truepbr", "enb"}:
         return normalized
-    return "custom"
+    return "experimental"
 
 
 def resolve_env_mask_complex_workflow(
@@ -1063,7 +1067,7 @@ def resolve_env_mask_complex_workflow(
     if normalized_profile == "truepbr":
         return "truepbr"
     if include_complex is False:
-        return "truepbr"
+        return "enb"
     if include_complex is True:
         return "enb" if _normalize_complex_format(complex_format) == "msn" else "truepbr"
     return "enb" if _normalize_complex_format(complex_format) == "msn" else "truepbr"
@@ -1213,7 +1217,7 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
     label = _RENDER_PROFILE_LABELS.get(normalized, normalized.replace("_", " ").title())
     resolved = resolve_render_profile_options("auto", recommended_profile=normalized)
     workflow_hint = {
-        "custom": "manual blank profile (experimental)",
+        "experimental": "manual blank profile",
         "vanilla": "best for stock Skyrim SE / safest defaults",
         "community_shaders": "best for Community Shaders packed-material workflows",
         "truepbr": "best for Community Shaders TruePBR JSON-driven workflows",
@@ -1231,7 +1235,7 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
         "",
         "Renderer quick guide:",
     ]
-    for profile in ("custom", "vanilla", "community_shaders", "truepbr", "enb"):
+    for profile in ("experimental", "vanilla", "community_shaders", "truepbr", "enb"):
         lines.append(
             f"- {_RENDER_PROFILE_LABELS[profile]}: "
             f"{describe_render_profile_default_outputs(profile)} "
@@ -3962,7 +3966,7 @@ if GUI_AVAILABLE:
             self.emboss_mode_manual_override = False
             self.relief_mode_manual_override = False
             self.parallax_mode_var = tk.StringVar(value="standard")
-            self.render_profile_var = tk.StringVar(value="custom")
+            self.render_profile_var = tk.StringVar(value="experimental")
             self.render_profile_suggestion_var = tk.StringVar(
                 value=build_render_profile_brief_message("vanilla")
             )
@@ -4148,7 +4152,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(
                 _render_profile_label,
                 "🎯 Select target renderer preset.\n"
-                "custom = blank manual mode (experimental; nothing auto-enforced).\n"
+                "experimental = blank manual mode (nothing auto-enforced).\n"
                 "vanilla = safest stock Skyrim SE setup.\n"
                 "community_shaders = Community Shaders Extended Materials _cm/_c/_C workflow.\n"
                 "truepbr = Community Shaders TruePBR JSON-driven _rmaos/_ramos workflow.\n"
@@ -4160,7 +4164,7 @@ if GUI_AVAILABLE:
             _render_profile_combo = ttk.Combobox(
                 options_frame,
                 textvariable=self.render_profile_var,
-                values=("custom", "auto", "vanilla", "community_shaders", "truepbr", "enb"),
+                values=("experimental", "auto", "vanilla", "community_shaders", "truepbr", "enb"),
                 state="readonly",
                 width=20,
             )
@@ -4168,7 +4172,7 @@ if GUI_AVAILABLE:
             _render_profile_combo.bind("<<ComboboxSelected>>", self._on_render_profile_changed)
             self._add_tooltip(
                 _render_profile_combo,
-                "🎯 custom = blank manual mode (experimental).\n"
+                "🎯 experimental = blank manual mode.\n"
                 "auto = pick the best renderer preset for the current texture, but only when you change this control.\n"
                 "vanilla = safest defaults; community_shaders = _cm/_c/_C; truepbr = _n + _rmaos/_ramos + JSON path; enb = tool ENB preset _msn + complex env + optional POM.\n"
                 "Render-profile guidance is experimental and may be inaccurate for some stacks.\n"
@@ -4934,7 +4938,7 @@ if GUI_AVAILABLE:
                 self.emboss_mode_manual_override = False
                 self.relief_mode_manual_override = False
                 self._set_preview_source(0, apply_recommendations=True)
-                if self.render_profile_var.get() not in {"auto", "custom"}:
+                if self.render_profile_var.get() not in {"auto", "experimental"}:
                     self._apply_render_profile_modes(self.render_profile_var.get(), apply_preset=False)
                 if not self.use_custom_output_var.get():
                     self.output_var.set(str(self._default_output_dir_for_path(path)))
@@ -5357,7 +5361,8 @@ if GUI_AVAILABLE:
             preview_path = self._current_preview_path()
             recommended_profile = self._recommended_render_profile_for_preview(preview_path)
             message = build_render_profile_brief_message(recommended_profile)
-            if self.render_profile_var.get() == "auto":
+            selected_profile = _normalize_render_profile(self.render_profile_var.get())
+            if selected_profile == "auto":
                 self.render_profile_suggestion_var.set(message)
                 if apply_auto:
                     effective = self._apply_render_profile_modes(
@@ -5371,8 +5376,15 @@ if GUI_AVAILABLE:
                     )
                     if effective == "enb":
                         self.emboss_mode_var.set(False)
+            elif selected_profile == "experimental":
+                self.render_profile_suggestion_var.set(
+                    "Experimental mode: manual controls are active; auto renderer suggestions are disabled."
+                )
             else:
-                self.render_profile_suggestion_var.set(message)
+                selected_label = _RENDER_PROFILE_LABELS.get(selected_profile, selected_profile.replace("_", " ").title())
+                self.render_profile_suggestion_var.set(
+                    f"Target renderer locked to {selected_label}. Auto suggestions are disabled for locked presets."
+                )
             return recommended_profile
 
         def _open_render_profile_help(self) -> None:
@@ -5425,9 +5437,9 @@ if GUI_AVAILABLE:
             selected = _normalize_render_profile(self.render_profile_var.get())
             self.render_profile_var.set(selected)
             recommended_profile = self._update_render_profile_recommendation(apply_auto=False)
-            if selected == "custom":
+            if selected == "experimental":
                 self.status_var.set(
-                    "Target renderer set to Custom [Experimental]. Leaving all toggles/sliders/modes unchanged for manual control. Guidance may be inaccurate."
+                    "Target renderer set to Experimental. Leaving all toggles/sliders/modes unchanged for manual control."
                 )
                 self._request_preview_refresh()
                 return
@@ -6185,7 +6197,7 @@ if GUI_AVAILABLE:
                 renderer_combo = ttk.Combobox(
                     render_row,
                     textvariable=renderer_profile_var,
-                    values=("custom", "auto", "vanilla", "community_shaders", "truepbr", "enb"),
+                    values=("experimental", "auto", "vanilla", "community_shaders", "truepbr", "enb"),
                     state="readonly",
                     width=20,
                 )
