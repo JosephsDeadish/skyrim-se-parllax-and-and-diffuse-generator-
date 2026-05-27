@@ -158,6 +158,7 @@ _DIFFUSE_SLOT_DISALLOWED_SUFFIXES: tuple[str, ...] = (
     "_envmask.dds",
     "_em.dds",
     "_cm.dds",
+    "_c.dds",
     "_rmaos.dds",
     "_e.dds",
     "_cube.dds",
@@ -178,6 +179,7 @@ _CUBEMAP_SLOT_WRONG_SUFFIXES: tuple[str, ...] = (
     "_g.dds",
     "_m.dds",
     "_cm.dds",
+    "_c.dds",
     "_rmaos.dds",
 )
 _NORMAL_SLOT_DISALLOWED_SUFFIXES: tuple[str, ...] = (
@@ -190,6 +192,7 @@ _NORMAL_SLOT_DISALLOWED_SUFFIXES: tuple[str, ...] = (
     "_em.dds",
     "_rmaos.dds",
     "_cm.dds",
+    "_c.dds",
     "_e.dds",
     "_env.dds",
     "_envmap.dds",
@@ -2026,14 +2029,14 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
         env_mask_path = info.texture_paths.get(TEXTURE_SLOT_ENV_MASK, "").strip()
         if env_mask_path:
             normalized_env_mask = _normalise_slot_path(env_mask_path)
-            if not normalized_env_mask.endswith(("_m.dds", "_mask.dds", "_envmask.dds", "_em.dds", "_rmaos.dds", "_cm.dds")):
+            if not normalized_env_mask.endswith(("_m.dds", "_mask.dds", "_envmask.dds", "_em.dds", "_rmaos.dds", "_cm.dds", "_c.dds")):
                 _append_unique(
                     result.issues,
                     f"Block {info.block_index}: slot 5 environment-mask path '{env_mask_path}' does not look like an environment mask."
                 )
                 _append_unique(
                     result.suggestions,
-                    "Use slot 5 for _m.dds (standard env mask) or complex-material mask naming such as _cm/_rmaos."
+                    "Use slot 5 for _m.dds (standard env mask) or complex-material mask naming such as _cm/_c/_rmaos."
                 )
         if env_mask_path and not info.has_env_mapping_flag:
             _append_unique(
@@ -2205,7 +2208,7 @@ def guess_env_mask_path_for_nif(nif_path: Path) -> str | None:
         if existing:
             p = Path(existing.replace("\\", "/"))
             stem = p.stem
-            for s in ("_m", "_mask", "_envmask", "_env", "_em", "_rmaos", "_cm"):
+            for s in ("_m", "_mask", "_envmask", "_env", "_em", "_rmaos", "_cm", "_c"):
                 if stem.lower().endswith(s):
                     stem = stem[: -len(s)]
                     break

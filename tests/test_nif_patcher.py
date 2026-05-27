@@ -486,6 +486,19 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertIn("slot 5 environment-mask path", joined)
         self.assertIn("slot 5 for _m.dds", joined)
 
+    def test_accepts_c_suffix_in_env_mask_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_c.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            shader_type=SHADER_TYPE_ENVMAP,
+        )
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertNotIn("slot 5 environment-mask path", joined)
+
     def test_reports_non_diffuse_texture_in_diffuse_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_DIFFUSE] = "textures\\arch\\stone_p.dds"

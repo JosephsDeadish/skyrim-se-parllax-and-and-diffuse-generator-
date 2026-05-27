@@ -638,6 +638,17 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(any("_p.dds" in text for text in warnings))
         self.assertTrue(any("env mask slot" in text.lower() for text in warnings))
 
+    def test_get_nif_patch_option_warnings_accepts_c_env_mask_suffix(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="community_shaders",
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            force_shader_type_3=True,
+            env_mask_texture_path="textures\\architecture\\stone\\stone_c.dds",
+        )
+        self.assertFalse(any("env mask slot path should usually end" in text.lower() for text in warnings))
+
     def test_get_nif_patch_option_warnings_reports_diffuse_slot_misuse(self) -> None:
         warnings = get_nif_patch_option_warnings(
             selected_profile="vanilla",
@@ -1248,7 +1259,16 @@ class GenerateTexturesTests(unittest.TestCase):
     def test_collect_source_textures_from_directory_skips_generated_suffixes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            for name in ("brick.dds", "stone_wall.dds", "brick_n.dds", "brick_p.dds", "brick_msn.dds", "preview.png"):
+            for name in (
+                "brick.dds",
+                "stone_wall.dds",
+                "brick_n.dds",
+                "brick_p.dds",
+                "brick_msn.dds",
+                "brick_c.dds",
+                "brick_rmaos.dds",
+                "preview.png",
+            ):
                 (temp_path / name).write_bytes(b"stub")
 
             collected = collect_source_textures(temp_path)
@@ -1675,6 +1695,8 @@ class GenerateTexturesTests(unittest.TestCase):
             _sample_image().save(nested / "brick.dds", format="DDS", pixel_format="DXT5")
             _sample_image().save(deeper / "stone.dds", format="DDS", pixel_format="DXT5")
             _sample_image().save(deeper / "stone_n.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_c.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_rmaos.dds", format="DDS", pixel_format="DXT5")
 
             discovered = collect_source_textures(root)
             self.assertEqual(
@@ -1992,6 +2014,16 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(result["role"], "environment_mask")
         self.assertEqual(result["suffix"], "_m")
         self.assertIn("Slot 5", result["notes"])
+
+    def test_identify_skyrim_texture_role_rmaos_environment_mask(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/armor/iron_rmaos.dds"))
+        self.assertEqual(result["role"], "environment_mask")
+        self.assertEqual(result["suffix"], "_rmaos")
+
+    def test_identify_skyrim_texture_role_c_as_complex_material(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/architecture/brick_c.dds"))
+        self.assertEqual(result["role"], "complex_material_cm")
+        self.assertEqual(result["suffix"], "_c")
 
     def test_identify_skyrim_texture_role_diffuse_fallback(self) -> None:
         result = identify_skyrim_texture_role(Path("textures/clutter/candle.dds"))
@@ -2726,6 +2758,16 @@ class ParallaxOcclusionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             (temp_path / "stone_cm.dds").write_bytes(b"fake")
+            warnings = get_output_folder_format_warnings(
+                temp_path, include_complex=True, complex_format="msn"
+            )
+            ids = [w[0] for w in warnings]
+            self.assertIn("output_folder_has_cm_files", ids)
+
+    def test_get_output_folder_format_warnings_c_vs_msn_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            (temp_path / "stone_c.dds").write_bytes(b"fake")
             warnings = get_output_folder_format_warnings(
                 temp_path, include_complex=True, complex_format="msn"
             )

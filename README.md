@@ -84,10 +84,11 @@ Optional arguments:
 - `--glow-name` (default: `<input_stem>_g`, e.g. `stonewall_g.dds`)
 - `--environment-mask-name` (default: `<input_stem>_m`, e.g. `stonewall_m.dds`)
 - `--complex-name` (default from format: `<input_stem>_msn` or `<input_stem>_cm`)
+  - use `<input_stem>_c` here when a shader pack expects `_c.dds` naming
 - `--complex-format` (`msn` or `cm`, default: `msn`)
 - `--environment-mask-mode` (`standard` or `complex`, default: `standard`)
   - `standard` — greyscale `_m.dds` for vanilla Skyrim SE (Texture Slot 5, no ENB required)
-  - `complex` — RGBA channel-packed texture for ENBSeries Complex Parallax Material only
+  - `complex` — RGBA channel-packed texture for ENBSeries Complex Parallax Material only (often saved as `_rmaos.dds`; use `--environment-mask-name` to set that suffix)
 - `--emboss-mode` (normal-map emboss depth mode for flat printed assets)
 - `--parallax-mode` (`standard` or `occlusion`, default: `standard`)
   - `standard` — vanilla-style parallax heightmap with micro-detail
@@ -116,12 +117,13 @@ This app already supports a practical PBR-style packed workflow via `_cm` output
   1. Set **Target renderer** to `community_shaders`
   2. Enable **Complex/PBR material**
   3. Set **Complex/PBR format** to `cm`
-  4. Generate textures (you'll get `_cm` packed output)
+  4. Generate textures (you'll get `_cm` packed output by default, or `_c` if you set a custom complex name)
 - In CLI:
   - `python generate_textures.py /path/to/input.dds --pbr-material`
   - or explicitly: `python generate_textures.py /path/to/input.dds --complex-material --complex-format cm`
 
 `_cm` packs channels for modern shader workflows (AO/roughness/metallic/height-spec proxies).  
+Some packs use `_c.dds` naming for the same packed role — set `--complex-name <stem>_c` (or GUI custom naming) for that variant.
 For ENB complex material workflows, use `_msn` instead (`--complex-format msn`).
 
 Generated outputs default to `.dds` filenames regardless of the input format. Most outputs are written as DXT5 DDS for broad compatibility; standard (`--environment-mask-mode standard`) `_m` masks prefer DXT1 (with automatic DXT5 fallback if needed). `_cm` PBR-style complex maps now prefer BC7 when available, then fall back to DXT5/DXT3 for compatibility. If DDS export is unavailable on the current Pillow build, the tool falls back to PNG output.
@@ -138,7 +140,7 @@ Generated outputs default to `.dds` filenames regardless of the input format. Mo
 - Output generation now enforces per-map Skyrim-safe channel profiles during preview and file export (for example: normal maps always RGB with blue channel floor, standard env masks always greyscale, complex outputs always RGBA).
 - **Environment mask** (`*_m`) has two modes:
   - **Standard** (default) — greyscale `L`-mode texture. Texture Slot 5 in the NIF. Controls per-pixel environment/specular reflection intensity (brighter = more reflection). Requires `SLSF1_Environment_Mapping` shader flag. Works with vanilla Skyrim SE — **no ENBSeries required**. Typically stored as DXT1.
-  - **Complex** (select in GUI or via `--environment-mask-mode complex`) — RGBA channel-packed for ENBSeries Complex Parallax Material workflows: R=env amount, G=glossiness, B=metallic proxy, A=parallax height. **ENBSeries required** with complex material support enabled.
+  - **Complex** (select in GUI or via `--environment-mask-mode complex`) — RGBA channel-packed for ENBSeries Complex Parallax Material workflows: R=env amount, G=glossiness, B=metallic proxy, A=parallax height. **ENBSeries required** with complex material support enabled. Many ENB packs call this `*_rmaos.dds`; use custom environment-mask naming when needed.
 - For large/high-detail sources (2K/4K/8K), generation applies adaptive detail dampening to reduce over-sharpened normals/parallax and complex-material sparkle artifacts. Analysis and auto-recommendation calculations are automatically performed on a downscaled copy so large textures are processed faster without sacrificing output quality.
 - Generation warnings now include extra guardrails for UI/interface texture paths and paper/card-like assets when map combinations are likely to look incorrect in-game.
 - Specular generation uses numpy float32 arithmetic with percentile-based range normalisation so true-black hole artefacts cannot be introduced by integer rounding, regardless of texture size or content.
@@ -155,9 +157,11 @@ The tool recognises standard Skyrim SE texture naming conventions from the file 
 | `_p` | Parallax Heightmap | Greyscale, Slot 3, requires SKSE64 memory patch |
 | `_g` | Glow / Emissive | Slot 2, requires `SLSF1_Own_Emit` flag |
 | `_m` | Environment Mask | Greyscale reflection intensity, Slot 5 |
+| `_rmaos` | Complex Env/Material Mask | Common complex-material naming for channel-packed env/gloss/metal/AO-style masks (Slot 5 workflows) |
 | `_s` | Subsurface Scattering | Slot 6, skin/character textures |
 | `_sk` | Skin Specular | Slot 7, character-specific |
 | `_msn` | Complex Parallax Material | ENBSeries only — **not vanilla Skyrim SE** |
 | `_cm` | Complex Material (packed) | Packed AO/roughness/metallic/height-spec proxies for modern complex-material workflows — **not vanilla Skyrim SE** |
+| `_c` | Complex Material (packed alias) | Alternative naming used by some Community Shaders/complex-material packs; same packed role as `_cm` |
 
-Batch folder mode scans subfolders and automatically skips generated variants (`_n`, `_p`, `_g`, `_m`, `_msn`, `_cm`) so it only processes original source textures.
+Batch folder mode scans subfolders and automatically skips generated variants (`_n`, `_p`, `_g`, `_m`, `_rmaos`, `_msn`, `_cm`, `_c`) so it only processes original source textures.
