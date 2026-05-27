@@ -1196,8 +1196,12 @@ def _normalise_path(p: str) -> str:
             continue
         parts.append(segment)
     collapsed = "\\".join(parts).lstrip("\\")
-    if collapsed.lower().startswith("textures\\"):
-        return "textures\\" + collapsed[len("textures\\"):]
+    lowered_collapsed = collapsed.lower()
+    if lowered_collapsed.startswith("textures\\"):
+        tail = collapsed[len("textures\\"):]
+        while tail.lower().startswith("textures\\"):
+            tail = tail[len("textures\\"):]
+        return f"textures\\{tail}" if tail else "textures"
     return collapsed
 
 
@@ -1799,6 +1803,9 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
         if message not in items:
             items.append(message)
 
+    def _normalise_slot_path(path: str) -> str:
+        return path.strip().lower().replace("/", "\\")
+
     if diagnostics:
         result.issues.extend(diagnostics[:6])
     if not infos:
@@ -1850,7 +1857,7 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                     "the parallax_scale field for stronger in-game depth."
                 )
         if parallax_path:
-            normalized_parallax = parallax_path.lower().replace("/", "\\")
+            normalized_parallax = _normalise_slot_path(parallax_path)
             if not normalized_parallax.startswith("textures\\"):
                 _append_unique(
                     result.issues,
@@ -1869,15 +1876,26 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                     result.suggestions,
                     "Use a dedicated _p.dds height map in texture slot 3 so Skyrim/ENB parallax reads the correct file."
                 )
-            if diffuse_path and normalized_parallax == diffuse_path.lower().replace("/", "\\"):
+            if diffuse_path and normalized_parallax == _normalise_slot_path(diffuse_path):
                 _append_unique(
                     result.issues,
                     f"Block {info.block_index}: parallax slot 3 points at the diffuse texture instead of a _p.dds height map."
                 )
-            if normal_path and normalized_parallax == normal_path.lower().replace("/", "\\"):
+            if normal_path and normalized_parallax == _normalise_slot_path(normal_path):
                 _append_unique(
                     result.issues,
                     f"Block {info.block_index}: parallax slot 3 points at the normal texture instead of a dedicated height map."
+                )
+        if normal_path:
+            normalized_normal = _normalise_slot_path(normal_path)
+            if normalized_normal.endswith(("_p.dds", "_g.dds", "_m.dds")):
+                _append_unique(
+                    result.issues,
+                    f"Block {info.block_index}: slot 1 normal path '{normal_path}' does not look like a normal map path."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Use slot 1 for _n.dds or _msn.dds normal maps; keep _p/_g/_m textures in slots 3/2/5."
                 )
         if not normal_path:
             _append_unique(
@@ -1899,6 +1917,17 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                 "Enable standard parallax alongside POM, or disable POM for this block."
             )
         env_mask_path = info.texture_paths.get(TEXTURE_SLOT_ENV_MASK, "").strip()
+        if env_mask_path:
+            normalized_env_mask = _normalise_slot_path(env_mask_path)
+            if not normalized_env_mask.endswith(("_m.dds", "_mask.dds", "_envmask.dds", "_em.dds", "_rmaos.dds", "_cm.dds")):
+                _append_unique(
+                    result.issues,
+                    f"Block {info.block_index}: slot 5 environment-mask path '{env_mask_path}' does not look like an environment mask."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Use slot 5 for _m.dds (standard env mask) or complex-material mask naming such as _cm/_rmaos."
+                )
         if env_mask_path and not info.has_env_mapping_flag:
             _append_unique(
                 result.issues,
@@ -1919,6 +1948,17 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                 f"Block {info.block_index}: parallax scale is only {info.parallax_scale:.2f}; increase it if the mesh patches successfully but depth is still invisible in game."
             )
         glow_path = info.texture_paths.get(TEXTURE_SLOT_GLOW, "").strip()
+        if glow_path:
+            normalized_glow = _normalise_slot_path(glow_path)
+            if not normalized_glow.endswith(("_g.dds", "_glow.dds", "_emit.dds", "_emissive.dds", "_sk.dds")):
+                _append_unique(
+                    result.issues,
+                    f"Block {info.block_index}: slot 2 glow path '{glow_path}' does not look like an emissive/glow texture."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Use slot 2 for emissive textures (usually _g.dds) and keep normal/parallax/env-mask maps in their own slots."
+                )
         if glow_path and not info.has_glow_map_flag:
             _append_unique(
                 result.issues,

@@ -415,6 +415,33 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertIn("pom flag", joined)
         self.assertIn("base slsf1_parallax", joined)
 
+    def test_reports_wrong_texture_type_in_normal_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_NORMAL] = "textures\\arch\\stone_p.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 1 normal path", joined)
+        self.assertIn("_n.dds or _msn.dds", joined)
+
+    def test_reports_wrong_texture_type_in_glow_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_n.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 2 glow path", joined)
+        self.assertIn("slot 2 for emissive textures", joined)
+
+    def test_reports_wrong_texture_type_in_env_mask_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_g.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 5 environment-mask path", joined)
+        self.assertIn("slot 5 for _m.dds", joined)
+
 
 # ---------------------------------------------------------------------------
 # Tests: flag patching
@@ -546,6 +573,22 @@ class TestPatchTexturePaths(unittest.TestCase):
             NifPatchOptions(
                 enable_parallax=True,
                 parallax_texture_path=r"C:\Modlist\Data\Textures\architecture\stone\stone_p.dds",
+                backup=False,
+            ),
+        )
+        infos = scan_nif(nif)
+        self.assertEqual(
+            infos[0].texture_paths.get(TEXTURE_SLOT_PARALLAX),
+            "textures\\architecture\\stone\\stone_p.dds",
+        )
+
+    def test_normalises_duplicate_textures_root_segments(self) -> None:
+        nif = _write_nif(self.tmp)
+        patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_texture_path=r"textures\\textures\\architecture\\stone\\stone_p.dds",
                 backup=False,
             ),
         )
