@@ -156,8 +156,7 @@ class NifPatchOptions:
     Attributes
     ----------
     enable_parallax:
-        Set ``SLSF1_Parallax`` in Shader_Flags_1 and write
-        *parallax_texture_path* into texture slot 3.
+        Set ``SLSF1_Parallax`` in Shader_Flags_1.
     enable_pom:
         Also set ``SLSF1_Parallax_Occlusion`` for ENB Parallax Occlusion
         Mapping (deeper, screen-space parallax).  Implies *enable_parallax*.
@@ -177,7 +176,8 @@ class NifPatchOptions:
     enable_env_mapping:
         Set ``SLSF1_Environment_Mapping`` in Shader_Flags_1.
     parallax_texture_path:
-        Relative texture path for slot 3 (e.g. ``textures\\arch\\stone_p.dds``).
+        Texture path for slot 3. Absolute ``Data\\Textures`` picks are normalized
+        to Skyrim-relative form (e.g. ``textures\\arch\\stone_p.dds``).
     normal_texture_path:
         Relative path for slot 1.  Set to your ``_msn.dds`` for ENB complex
         material or ``_n.dds`` for a standard normal map.
@@ -843,7 +843,21 @@ def _compute_block_starts(blocks_start: int, block_sizes: list[int]) -> list[int
 # ---------------------------------------------------------------------------
 
 def _normalise_path(p: str) -> str:
-    return p.replace("/", "\\")
+    normalized = p.strip().strip("\"").replace("/", "\\")
+    if not normalized:
+        return ""
+    lowered = normalized.lower()
+    if lowered.startswith(".\\"):
+        normalized = normalized[2:]
+        lowered = normalized.lower()
+    if lowered.startswith("data\\textures\\"):
+        normalized = "textures\\" + normalized[len("data\\textures\\"):]
+        lowered = normalized.lower()
+    marker = "\\textures\\"
+    marker_index = lowered.rfind(marker)
+    if marker_index != -1:
+        normalized = "textures\\" + normalized[marker_index + len(marker):]
+    return normalized.lstrip("\\")
 
 
 def _build_block_map(
@@ -1030,13 +1044,13 @@ def _apply_patches(
             continue
 
         requested_slots: list[int] = []
-        if effective_parallax and opts.parallax_texture_path:
+        if opts.parallax_texture_path:
             requested_slots.append(TEXTURE_SLOT_PARALLAX)
         if opts.normal_texture_path:
             requested_slots.append(TEXTURE_SLOT_NORMAL)
-        if opts.enable_env_mapping and opts.env_mask_texture_path:
+        if opts.env_mask_texture_path:
             requested_slots.append(TEXTURE_SLOT_ENV_MASK)
-        if opts.enable_env_mapping and opts.cubemap_texture_path:
+        if opts.cubemap_texture_path:
             requested_slots.append(TEXTURE_SLOT_CUBEMAP)
         if requested_slots:
             max_slot = max(requested_slots)
@@ -1060,16 +1074,14 @@ def _apply_patches(
             if old != new:
                 slot_changes.append((slot, old, new))
 
-        if effective_parallax:
-            _want(TEXTURE_SLOT_PARALLAX, opts.parallax_texture_path)
+        _want(TEXTURE_SLOT_PARALLAX, opts.parallax_texture_path)
         if opts.clear_parallax_texture_path:
             _want(TEXTURE_SLOT_PARALLAX, None, clear=True)
         _want(TEXTURE_SLOT_NORMAL, opts.normal_texture_path)
         if opts.clear_normal_texture_path:
             _want(TEXTURE_SLOT_NORMAL, None, clear=True)
-        if opts.enable_env_mapping:
-            _want(TEXTURE_SLOT_ENV_MASK, opts.env_mask_texture_path)
-            _want(TEXTURE_SLOT_CUBEMAP, opts.cubemap_texture_path)
+        _want(TEXTURE_SLOT_ENV_MASK, opts.env_mask_texture_path)
+        _want(TEXTURE_SLOT_CUBEMAP, opts.cubemap_texture_path)
         if opts.clear_env_mask_texture_path:
             _want(TEXTURE_SLOT_ENV_MASK, None, clear=True)
         if opts.clear_cubemap_texture_path:

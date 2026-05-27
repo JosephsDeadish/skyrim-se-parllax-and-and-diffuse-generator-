@@ -46,6 +46,7 @@ from generate_textures import (
     generate_preview_outputs,
     generate_specular,
     get_generation_warnings,
+    get_nif_patch_option_warnings,
     get_preview_size_limits,
     identify_skyrim_texture_role,
     prepare_preview_source,
@@ -594,6 +595,35 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(enb["enable_env_mapping"]))
         self.assertTrue(bool(enb["force_shader_type_3"]))
         self.assertTrue(bool(enb["prefer_msn_normal"]))
+
+    def test_get_nif_patch_option_warnings_reports_disabled_feature_path_combos(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="vanilla",
+            enable_parallax=False,
+            enable_pom=False,
+            enable_env_mapping=False,
+            force_shader_type_3=False,
+            parallax_texture_path="textures\\arch\\stone_p.dds",
+            env_mask_texture_path="textures\\arch\\stone_m.dds",
+        )
+        self.assertTrue(any("Parallax slot path set" in text for text in warnings))
+        self.assertTrue(any("Environment mask path set" in text for text in warnings))
+
+    def test_get_nif_patch_option_warnings_reports_absolute_and_non_textures_paths(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="enb",
+            enable_parallax=True,
+            enable_pom=True,
+            enable_env_mapping=True,
+            force_shader_type_3=True,
+            parallax_texture_path=r"C:\Mods\Data\Textures\architecture\stone\stone.dds",
+            normal_texture_path="stone_n.dds",
+            env_mask_texture_path=r"D:\mod\masks\stone_mask.dds",
+        )
+        self.assertTrue(any("absolute" in text.lower() for text in warnings))
+        self.assertTrue(any("start with textures\\" in text.lower() for text in warnings))
+        self.assertTrue(any("_p.dds" in text for text in warnings))
+        self.assertTrue(any("_m.dds" in text for text in warnings))
 
     def test_build_render_profile_recommendation_message_lists_renderer_guidance(self) -> None:
         message = build_render_profile_recommendation_message("community_shaders")

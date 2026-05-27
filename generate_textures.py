@@ -953,6 +953,74 @@ def resolve_nif_patch_defaults_for_render_profile(
     return {"selected_profile": normalized_selected, "effective_profile": effective_profile, **defaults}
 
 
+def get_nif_patch_option_warnings(
+    *,
+    selected_profile: str,
+    enable_parallax: bool,
+    enable_pom: bool,
+    enable_env_mapping: bool,
+    force_shader_type_3: bool,
+    parallax_texture_path: str = "",
+    normal_texture_path: str = "",
+    env_mask_texture_path: str = "",
+    disable_parallax: bool = False,
+    disable_pom: bool = False,
+    disable_env_mapping: bool = False,
+    clear_parallax_texture_path: bool = False,
+    clear_normal_texture_path: bool = False,
+    clear_env_mask_texture_path: bool = False,
+) -> list[str]:
+    warnings: list[str] = []
+    profile = str(selected_profile or "auto")
+    if profile in {"auto", "vanilla"} and enable_pom:
+        warnings.append("ENB POM is usually incorrect for vanilla meshes.")
+    if enable_pom and not force_shader_type_3:
+        warnings.append("POM works best with shader type 3 enabled.")
+    if enable_env_mapping and not env_mask_texture_path.strip():
+        warnings.append("Environment mapping enabled with empty slot 5 path.")
+    if parallax_texture_path.strip() and not (enable_parallax or enable_pom):
+        warnings.append("Parallax slot path set, but parallax/POM flags are disabled.")
+    if env_mask_texture_path.strip() and not enable_env_mapping:
+        warnings.append("Environment mask path set, but environment mapping flag is disabled.")
+    if disable_parallax and enable_parallax:
+        warnings.append("Both enable and disable parallax are checked.")
+    if disable_pom and enable_pom:
+        warnings.append("Both enable and disable POM are checked.")
+    if disable_env_mapping and enable_env_mapping:
+        warnings.append("Both enable and disable environment mapping are checked.")
+    if clear_parallax_texture_path and parallax_texture_path.strip():
+        warnings.append("Parallax slot is set to both clear and write a path.")
+    if clear_normal_texture_path and normal_texture_path.strip():
+        warnings.append("Normal slot is set to both clear and write a path.")
+    if clear_env_mask_texture_path and env_mask_texture_path.strip():
+        warnings.append("Environment mask slot is set to both clear and write a path.")
+
+    path_rules = (
+        ("Parallax slot", parallax_texture_path, ("_p.dds",)),
+        ("Normal slot", normal_texture_path, ("_n.dds", "_msn.dds")),
+        ("Env mask slot", env_mask_texture_path, ("_m.dds",)),
+    )
+    for label, raw_path, suffixes in path_rules:
+        normalized = raw_path.strip().replace("/", "\\")
+        if not normalized:
+            continue
+        lowered = normalized.lower()
+        if re.match(r"^[a-z]:\\", lowered):
+            warnings.append(
+                f"{label} path is absolute; use Skyrim-relative textures\\... paths to avoid broken in-game lookups."
+            )
+        if lowered.startswith("data\\textures\\"):
+            warnings.append(
+                f"{label} path should not include data\\ prefix; use textures\\... instead."
+            )
+        if not lowered.startswith("textures\\") and "textures\\" not in lowered:
+            warnings.append(f"{label} path should start with textures\\ for Skyrim-relative lookups.")
+        if not lowered.endswith(tuple(s.lower() for s in suffixes)):
+            warnings.append(f"{label} path should usually end with {', '.join(suffixes)}.")
+
+    return warnings
+
+
 def resolve_render_profile_output_defaults(
     selected_profile: str,
     *,
@@ -5529,21 +5597,23 @@ if GUI_AVAILABLE:
                     option_warning_var.set("")
 
                 def _update_checkbox_warnings(*_: object) -> None:
-                    warnings: list[str] = []
-                    profile = str(renderer_profile_var.get() or "auto")
-                    if profile in {"auto", "vanilla"} and enable_pom_var.get():
-                        warnings.append("ENB POM is usually incorrect for vanilla meshes.")
-                    if enable_pom_var.get() and not force_type3_var.get():
-                        warnings.append("POM works best with shader type 3 enabled.")
-                    if enable_env_var.get() and not env_mask_tex_var.get().strip():
-                        warnings.append("Environment mapping enabled with empty slot 5 path.")
-                    if disable_parallax_var.get() and enable_parallax_var.get():
-                        warnings.append("Both enable and disable parallax are checked.")
-                    if disable_pom_var.get() and enable_pom_var.get():
-                        warnings.append("Both enable and disable POM are checked.")
-                    if disable_env_var.get() and enable_env_var.get():
-                        warnings.append("Both enable and disable environment mapping are checked.")
-                    option_warning_var.set("⚠ " + " ".join(warnings[:2]) if warnings else "")
+                    warnings = get_nif_patch_option_warnings(
+                        selected_profile=str(renderer_profile_var.get() or "auto"),
+                        enable_parallax=enable_parallax_var.get(),
+                        enable_pom=enable_pom_var.get(),
+                        enable_env_mapping=enable_env_var.get(),
+                        force_shader_type_3=force_type3_var.get(),
+                        parallax_texture_path=parallax_tex_var.get(),
+                        normal_texture_path=normal_tex_var.get(),
+                        env_mask_texture_path=env_mask_tex_var.get(),
+                        disable_parallax=disable_parallax_var.get(),
+                        disable_pom=disable_pom_var.get(),
+                        disable_env_mapping=disable_env_var.get(),
+                        clear_parallax_texture_path=clear_parallax_var.get(),
+                        clear_normal_texture_path=clear_normal_var.get(),
+                        clear_env_mask_texture_path=clear_env_var.get(),
+                    )
+                    option_warning_var.set("⚠ " + " ".join(warnings[:3]) if warnings else "")
 
                 _apply_renderer_defaults()
                 renderer_combo.bind("<<ComboboxSelected>>", _apply_renderer_defaults)
@@ -5615,14 +5685,27 @@ if GUI_AVAILABLE:
 
                 tex_frame = ttk.LabelFrame(
                     win,
-                    text="Texture Paths (leave blank to keep what the NIF already uses)",
+                    text="Texture Paths (Skyrim-relative textures\\... ; blank keeps current NIF slot)",
                     padding=6,
                 )
                 tex_frame.pack(fill="x", padx=10, pady=4)
                 parallax_tex_var = tk.StringVar()
                 normal_tex_var = tk.StringVar()
                 env_mask_tex_var = tk.StringVar()
+                parallax_tex_var.trace_add("write", _update_checkbox_warnings)
+                normal_tex_var.trace_add("write", _update_checkbox_warnings)
                 env_mask_tex_var.trace_add("write", _update_checkbox_warnings)
+
+                def _normalize_nif_texture_input_path(raw_path: str) -> str:
+                    normalized = raw_path.strip().replace("/", "\\")
+                    lowered = normalized.lower()
+                    marker = "\\textures\\"
+                    marker_index = lowered.rfind(marker)
+                    if marker_index != -1:
+                        return "textures\\" + normalized[marker_index + len(marker):]
+                    if lowered.startswith("data\\textures\\"):
+                        return "textures\\" + normalized[len("data\\textures\\"):]
+                    return normalized
 
                 def _browse_texture_path(target_var: tk.StringVar, title: str) -> None:
                     selected = filedialog.askopenfilename(
@@ -5630,7 +5713,7 @@ if GUI_AVAILABLE:
                         filetypes=[("DDS files", "*.dds"), ("All files", "*.*")],
                     )
                     if selected:
-                        target_var.set(selected.replace("/", "\\"))
+                        target_var.set(_normalize_nif_texture_input_path(selected))
 
                 def _tex_row(parent: ttk.Frame, label: str, var: tk.StringVar, browse_title: str, tooltip: str) -> None:
                     row = ttk.Frame(parent)
@@ -5753,6 +5836,10 @@ if GUI_AVAILABLE:
                 self._add_tooltip(
                     auto_fill_button,
                     "🧠 Guesses texture slots from the selected NIF.\nGreat for speed, still worth eyeballing before you hit Patch.",
+                )
+                self._add_tooltip(
+                    tex_frame,
+                    "Use textures\\... paths for slots. Browsing a file auto-converts Data\\Textures picks into Skyrim-relative paths.",
                 )
 
                 btn_frame = ttk.Frame(win)
@@ -5942,7 +6029,22 @@ if GUI_AVAILABLE:
                     if not nifs:
                         _add_result_row("WARN", "—", "No NIF files found at the selected path.")
                         return
-                    warnings_to_confirm = [option_warning_var.get().strip()] if option_warning_var.get().strip() else []
+                    warnings_to_confirm = get_nif_patch_option_warnings(
+                        selected_profile=str(renderer_profile_var.get() or "auto"),
+                        enable_parallax=enable_parallax_var.get(),
+                        enable_pom=enable_pom_var.get(),
+                        enable_env_mapping=enable_env_var.get(),
+                        force_shader_type_3=force_type3_var.get(),
+                        parallax_texture_path=parallax_tex_var.get(),
+                        normal_texture_path=normal_tex_var.get(),
+                        env_mask_texture_path=env_mask_tex_var.get(),
+                        disable_parallax=disable_parallax_var.get(),
+                        disable_pom=disable_pom_var.get(),
+                        disable_env_mapping=disable_env_var.get(),
+                        clear_parallax_texture_path=clear_parallax_var.get(),
+                        clear_normal_texture_path=clear_normal_var.get(),
+                        clear_env_mask_texture_path=clear_env_var.get(),
+                    )
                     if warnings_to_confirm:
                         proceed = messagebox.askyesno(
                             "Confirm patch options",

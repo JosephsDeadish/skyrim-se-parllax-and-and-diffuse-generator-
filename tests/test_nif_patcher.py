@@ -475,6 +475,22 @@ class TestPatchTexturePaths(unittest.TestCase):
             infos[0].texture_paths.get(TEXTURE_SLOT_PARALLAX), "textures\\arch\\stone_p.dds"
         )
 
+    def test_normalises_absolute_data_textures_path_to_skyrim_relative(self) -> None:
+        nif = _write_nif(self.tmp)
+        patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_texture_path=r"C:\Modlist\Data\Textures\architecture\stone\stone_p.dds",
+                backup=False,
+            ),
+        )
+        infos = scan_nif(nif)
+        self.assertEqual(
+            infos[0].texture_paths.get(TEXTURE_SLOT_PARALLAX),
+            "textures\\architecture\\stone\\stone_p.dds",
+        )
+
     def test_writes_normal_texture_path(self) -> None:
         nif = _write_nif(self.tmp)
         patch_nif(
@@ -534,6 +550,34 @@ class TestPatchTexturePaths(unittest.TestCase):
         )
         infos = scan_nif(nif)
         self.assertEqual(infos[0].texture_paths.get(5, ""), "")
+
+    def test_writes_parallax_texture_path_even_without_enabling_parallax_flag(self) -> None:
+        nif = _write_nif(self.tmp)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                parallax_texture_path="textures\\arch\\stone_p.dds",
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].texture_paths.get(TEXTURE_SLOT_PARALLAX), "textures\\arch\\stone_p.dds")
+        self.assertFalse(infos[0].has_parallax_flag)
+
+    def test_writes_env_mask_texture_path_even_without_enabling_env_mapping_flag(self) -> None:
+        nif = _write_nif(self.tmp)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                env_mask_texture_path="textures\\arch\\stone_m.dds",
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].texture_paths.get(5), "textures\\arch\\stone_m.dds")
+        self.assertFalse(infos[0].has_env_mapping_flag)
 
 
 # ---------------------------------------------------------------------------
