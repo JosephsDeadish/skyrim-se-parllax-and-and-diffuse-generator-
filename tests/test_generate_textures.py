@@ -453,10 +453,10 @@ class GenerateTexturesTests(unittest.TestCase):
     def test_generate_complex_material_channel_order_matches_packed_contract(self) -> None:
         source = _vertical_gradient_image()
         complex_material = generate_complex_material(source, strength=1.4)
-        ao, roughness, metallic, height_or_spec = complex_material.split()
-        self.assertNotEqual(ao.tobytes(), roughness.tobytes())
-        self.assertNotEqual(roughness.tobytes(), metallic.tobytes())
-        self.assertNotEqual(height_or_spec.tobytes(), ao.tobytes())
+        env_reflection, glossiness, metallic, height = complex_material.split()
+        self.assertNotEqual(env_reflection.tobytes(), glossiness.tobytes())
+        self.assertNotEqual(glossiness.tobytes(), metallic.tobytes())
+        self.assertNotEqual(height.tobytes(), env_reflection.tobytes())
 
     def test_generate_msn_returns_rgba_same_size(self) -> None:
         msn = generate_msn(_sample_image())
@@ -542,11 +542,21 @@ class GenerateTexturesTests(unittest.TestCase):
             "vanilla",
         )
 
-    def test_recommend_render_profile_uses_image_signals_for_enb(self) -> None:
+    def test_recommend_render_profile_defaults_to_vanilla_without_renderer_hints(self) -> None:
         self.assertEqual(
             recommend_render_profile(
                 Path("textures/architecture/metalplate.dds"),
                 source=_detailed_low_saturation_image(),
+            ),
+            "vanilla",
+        )
+
+    def test_recommend_render_profile_detects_enb_from_rmaos_suffix(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/architecture/stone_rmaos.dds"),
+                detected_role="environment_mask",
+                detected_suffix="_rmaos",
             ),
             "enb",
         )
@@ -2073,20 +2083,23 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("Metallic", result["notes"])
         self.assertIn("Ambient Occlusion", result["notes"])
         self.assertIn("ENBSeries", result["notes"])
+        self.assertIn("TruePBR", result["notes"])
 
     def test_identify_skyrim_texture_role_cm_has_channel_notes(self) -> None:
         result = identify_skyrim_texture_role(Path("textures/architecture/brick_cm.dds"))
         self.assertEqual(result["role"], "complex_material_cm")
         self.assertEqual(result["suffix"], "_cm")
-        self.assertIn("Roughness", result["notes"])
+        self.assertIn("Environment reflection amount", result["notes"])
+        self.assertIn("Glossiness", result["notes"])
         self.assertIn("Metallic", result["notes"])
-        self.assertIn("Ambient Occlusion", result["notes"])
+        self.assertIn("Extended Materials", result["notes"])
 
     def test_identify_skyrim_texture_role_c_has_channel_notes(self) -> None:
         result = identify_skyrim_texture_role(Path("textures/architecture/brick_c.dds"))
         self.assertEqual(result["role"], "complex_material_cm")
         self.assertEqual(result["suffix"], "_c")
-        self.assertIn("Roughness", result["notes"])
+        self.assertIn("Environment reflection amount", result["notes"])
+        self.assertIn("Glossiness", result["notes"])
         self.assertIn("Metallic", result["notes"])
 
     def test_identify_skyrim_texture_role_uppercase_C_is_complex_material(self) -> None:
@@ -2800,6 +2813,66 @@ class ParallaxOcclusionTests(unittest.TestCase):
         )
         ids = [w[0] for w in warnings]
         self.assertIn("cm_with_complex_env_mode", ids)
+
+    def test_cm_without_normal_map_triggers_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=False,
+            include_environment_mask=False,
+            include_complex=True,
+            include_glow=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.2,
+            include_parallax=False,
+            complex_format="cm",
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("cm_without_normal_map", ids)
+
+    def test_msn_with_normal_output_triggers_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=True,
+            include_environment_mask=True,
+            include_complex=True,
+            include_glow=False,
+            env_mask_mode="complex",
+            env_mask_strength=1.2,
+            include_parallax=False,
+            complex_format="msn",
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("msn_with_normal_output", ids)
+
+    def test_complex_env_without_complex_material_triggers_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=True,
+            include_environment_mask=True,
+            include_complex=False,
+            include_glow=False,
+            env_mask_mode="complex",
+            env_mask_strength=1.2,
+            include_parallax=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("complex_env_without_msn", ids)
+
+    def test_cm_with_occlusion_parallax_triggers_workflow_mix_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=True,
+            include_environment_mask=False,
+            include_complex=True,
+            include_glow=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.2,
+            include_parallax=True,
+            complex_format="cm",
+            parallax_mode="occlusion",
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("cm_with_enb_pom", ids)
 
     def test_get_output_folder_format_warnings_msn_vs_cm_conflict(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

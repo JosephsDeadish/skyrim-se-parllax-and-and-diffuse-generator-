@@ -864,16 +864,15 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "Do NOT generate _rmaos, _msn, _cm, or _c — those are ignored by the vanilla renderer."
     ),
     "community_shaders": (
-        "Community Shaders PBR workflow.\n"
+        "Community Shaders Extended Materials workflow (not ENB, not TruePBR JSON).\n"
         "Files: diffuse.dds + _n.dds + _p.dds + _cm.dds (or _c.dds / _C.dds — identical channel layout).\n"
-        "_cm/_c RGBA channel layout: R=Ambient Occlusion (0=occluded, 255=open), "
-        "G=Roughness (0=smooth, 255=rough), B=Metallic (0=dielectric, 255=full metal), "
-        "A=Height/specular proxy.\n"
+        "_cm/_c/_C RGBA channel layout: R=Environment reflection amount, "
+        "G=Glossiness, B=Metallic, A=Height / mode-control alpha.\n"
         "How files should look: _n stays purple/blue, _p stays greyscale, and _cm/_c/_C should NOT look like a normal map — "
-        "it should read as packed grayscale data with AO strongest in red, roughness in green, metallic in blue, and a mid-grey height/spec proxy alpha.\n"
+        "it should read as packed grayscale data with reflective areas bright in red, glossy areas bright in green, metallic areas bright in blue, and a non-white alpha height channel.\n"
         "Add _g.dds only for emissive assets.\n"
-        "Use standard _m.dds only when the shader explicitly expects a separate greyscale env mask.\n"
-        "Do NOT generate _msn or _rmaos — those are ENB-only and are not read by Community Shaders."
+        "Do NOT generate _msn or ENB-style _rmaos for this preset. Community Shaders and ENB are separate renderer paths and should not be mixed.\n"
+        "If you specifically need Community Shaders TruePBR _rmaos, that is a different JSON-driven workflow than this _cm/_c/_C preset."
     ),
     "enb": (
         "ENBSeries Complex Parallax Material — requires ENBSeries + ComplexParallaxMaterial=true in enbseries.ini.\n"
@@ -886,6 +885,7 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "How files should look: _msn should remain a purple/blue normal map with a useful alpha, while _rmaos should look like packed grayscale data — "
         "red roughness, green metallic, blue AO, and a mid-grey alpha proxy. It should not look like a second normal map.\n"
         "Add _g.dds only for emissive assets.\n"
+        "This is not Community Shaders and not 'ENB PBR' — it is ENB complex material. Do not mix it with _cm/_c/_C workflows.\n"
         "Do NOT generate vanilla _n.dds (replaced by _msn) or _cm/_c (Community Shaders format, "
         "not read by ENB complex material)."
     ),
@@ -1139,10 +1139,16 @@ def recommend_render_profile(
     *,
     source: Image.Image | None = None,
     detected_role: str | None = None,
+    detected_suffix: str | None = None,
     material_type: str = "general",
     workflow_profile: str | None = None,
 ) -> str:
     """Recommend target rendering profile for map format/mode defaults."""
+    normalized_suffix = (detected_suffix or "").strip().lower()
+    if normalized_suffix in {"_cm", "_c"}:
+        return "community_shaders"
+    if normalized_suffix in {"_msn", "_rmaos"}:
+        return "enb"
     if detected_role == "complex_material_cm":
         return "community_shaders"
     if detected_role == "complex_material":
@@ -1154,22 +1160,6 @@ def recommend_render_profile(
         for profile, tokens in _RENDER_PROFILE_PATH_HINTS.items():
             if any(token in combined for token in tokens):
                 return profile
-    if source is not None:
-        analysis = analyze_image_content(source)
-        low_saturation = float(analysis["low_saturation_ratio"])
-        highlight_ratio = float(analysis["highlight_ratio"])
-        detail_energy = float(analysis["detail_energy"])
-        dog_fine_energy = float(analysis["dog_fine_energy"])
-        contrast = float(analysis["contrast"])
-        saturation_mean = float(analysis["saturation_mean"])
-        detailed_surface = (detail_energy >= 24.0) or (dog_fine_energy >= 15.0)
-        reflective_surface = (highlight_ratio >= 0.2) and (contrast >= 38.0)
-        if detailed_surface and low_saturation >= 0.72 and reflective_surface:
-            return "enb"
-        if detailed_surface and low_saturation >= 0.68:
-            return "community_shaders"
-        if saturation_mean >= 115.0 and low_saturation <= 0.5:
-            return "vanilla"
     return "vanilla"
 
 
@@ -1864,11 +1854,11 @@ def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Im
     grayscale = ImageOps.grayscale(rgb_source).filter(ImageFilter.GaussianBlur(radius=0.8))
     grayscale_min, grayscale_max = grayscale.getextrema()
     if (grayscale_max - grayscale_min) <= 2:
-        ao = _lift_black_floor(Image.new("L", grayscale.size, color=214), floor=24)
-        roughness = _lift_black_floor(Image.new("L", grayscale.size, color=182), floor=32)
+        env_reflection = _lift_black_floor(Image.new("L", grayscale.size, color=112), floor=16)
+        glossiness = _lift_black_floor(Image.new("L", grayscale.size, color=132), floor=8)
         metallic = _lift_black_floor(Image.new("L", grayscale.size, color=18), floor=4)
-        height_or_spec = _lift_black_floor(Image.new("L", grayscale.size, color=127), floor=24)
-        return Image.merge("RGBA", (ao, roughness, metallic, height_or_spec))
+        height = _lift_black_floor(Image.new("L", grayscale.size, color=127), floor=24)
+        return Image.merge("RGBA", (env_reflection, glossiness, metallic, height))
 
     red, green, blue = rgb_source.split()
     maximum = ImageChops.lighter(ImageChops.lighter(red, green), blue)
@@ -1878,31 +1868,27 @@ def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Im
     specular_drive = max(0.1, min(6.0, 0.7 + (strength * 0.6)))
     specular = generate_specular(rgb_source, strength=specular_drive)
 
-    roughness_contrast = 0.7 + (strength * 0.38)
-    roughness = ImageOps.invert(specular)
-    roughness = ImageEnhance.Contrast(roughness).enhance(roughness_contrast)
-    roughness = _lift_black_floor(ImageOps.autocontrast(roughness, cutoff=0), floor=20)
+    env_reflection = Image.blend(grayscale, specular, alpha=_clamp(0.56 + (strength * 0.06), 0.56, 0.86))
+    env_reflection = ImageEnhance.Contrast(env_reflection).enhance(0.82 + (strength * 0.22))
+    env_reflection = _lift_black_floor(ImageOps.autocontrast(env_reflection, cutoff=0), floor=12)
+
+    glossiness = ImageEnhance.Contrast(specular).enhance(0.86 + (strength * 0.28))
+    glossiness = _lift_black_floor(ImageOps.autocontrast(glossiness, cutoff=0), floor=6)
 
     metallic_contrast = 0.7 + (strength * 0.4)
     metallic = Image.blend(chroma, specular, alpha=_clamp(0.2 + (strength * 0.1), 0.2, 0.85))
     metallic = ImageEnhance.Contrast(metallic).enhance(metallic_contrast)
     metallic = _lift_black_floor(ImageOps.autocontrast(metallic, cutoff=0), floor=3)
 
-    cavity_contrast = 1.1 + (strength * 0.28)
-    local_detail = ImageChops.difference(grayscale, grayscale.filter(ImageFilter.GaussianBlur(radius=2.4)))
-    cavity = ImageOps.invert(ImageEnhance.Contrast(local_detail).enhance(cavity_contrast))
-    ao_alpha = _clamp(0.5 + (strength * 0.14), 0.5, 0.92)
-    ao = Image.blend(grayscale, cavity, alpha=ao_alpha)
-    ao = _lift_black_floor(ImageOps.autocontrast(ao, cutoff=0), floor=24)
-
-    height_specular_alpha = _clamp(0.2 + (strength * 0.12), 0.2, 0.90)
+    height_specular_alpha = _clamp(0.16 + (strength * 0.1), 0.16, 0.82)
     raw_height = generate_parallax(rgb_source, strength=max(0.1, min(6.0, strength)))
-    height_or_spec = Image.blend(raw_height, specular, alpha=height_specular_alpha)
-    blend_alpha = _clamp(0.65 + (strength * 0.1), 0.65, 0.95)
-    height_or_spec = Image.blend(Image.new("L", raw_height.size, color=127), height_or_spec, alpha=blend_alpha)
-    height_or_spec = _lift_black_floor(height_or_spec, floor=8)
+    height = Image.blend(raw_height, specular, alpha=height_specular_alpha)
+    blend_alpha = _clamp(0.64 + (strength * 0.1), 0.64, 0.92)
+    height = Image.blend(Image.new("L", raw_height.size, color=127), height, alpha=blend_alpha)
+    height = _lift_black_floor(height, floor=8)
+    height = height.point(lambda value: int(_clamp(float(value), 8.0, 224.0)))
 
-    return Image.merge("RGBA", (ao, roughness, metallic, height_or_spec))
+    return Image.merge("RGBA", (env_reflection, glossiness, metallic, height))
 
 
 def generate_specular(source: Image.Image, strength: float = 1.15) -> Image.Image:
@@ -2513,14 +2499,15 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
     ),
     "_rmaos": (
         "environment_mask",
-        "Complex Environment Mask — ENBSeries (_rmaos)",
-        "ENBSeries Complex Parallax Material channel-packed mask. Texture Slot 5 in the NIF. "
+        "Complex Environment Mask — ENBSeries / TruePBR-style (_rmaos)",
+        "Primarily used by ENBSeries Complex Parallax Material as the channel-packed Slot 5 mask. "
         "RGBA channel layout: R=Roughness (0=smooth, 255=rough), G=Metallic (0=dielectric, 255=full metal), "
         "B=Ambient Occlusion (0=fully occluded, 255=no occlusion), A=Specular/height proxy. "
         "Requires ENBSeries with ComplexParallaxMaterial=true in enbseries.ini. "
         "Always paired with _msn.dds in Slot 1 (RGB normal + A specular) and optionally _p.dds (Slot 3 parallax). "
-        "Do NOT use with vanilla Skyrim SE or Community Shaders — use greyscale _m for vanilla "
-        "or _cm/_c for Community Shaders PBR workflows.",
+        "Community Shaders TruePBR can also use _rmaos naming in a separate JSON-driven workflow, "
+        "but that is not the same as Community Shaders Extended Materials _cm/_c/_C packing. "
+        "Do NOT use _rmaos for vanilla Skyrim SE or for Community Shaders _cm/_c workflows.",
     ),
     "_s": (
         "subsurface",
@@ -2544,28 +2531,30 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
     ),
     "_cm": (
         "complex_material_cm",
-        "Complex Material Packed — Community Shaders (_cm)",
-        "NOT a vanilla Skyrim SE texture. Channel-packed complex material output for Community Shaders PBR workflows. "
+        "Complex Material Packed — Community Shaders Extended Materials (_cm)",
+        "NOT a vanilla Skyrim SE texture. Channel-packed complex material output for Community Shaders Extended Materials. "
         "Texture Slot 5 in the NIF. "
-        "RGBA channel layout: R=Ambient Occlusion proxy (0=fully occluded, 255=no occlusion), "
-        "G=Roughness proxy (0=smooth, 255=rough), "
+        "RGBA channel layout: R=Environment reflection amount, "
+        "G=Glossiness (0=matte, 255=glossy), "
         "B=Metallic proxy (0=dielectric, 255=full metal), "
-        "A=Height/specular proxy. "
-        "Requires Community Shaders with PBR material support. "
+        "A=Height / mode-control alpha. "
+        "Requires Community Shaders Extended Materials. "
         "Typically paired with a standard _n.dds (normal map, Slot 1) and optional _p.dds (parallax, Slot 3). "
-        "_c.dds is a naming alias with the identical channel layout — use _cm for new mods unless the pack explicitly uses _c.",
+        "_c.dds is a naming alias with the identical channel layout — use _cm for new mods unless the pack explicitly uses _c. "
+        "Do not mix this format with ENB _msn/_rmaos workflows.",
     ),
     "_c": (
         "complex_material_cm",
-        "Complex Material Packed — Community Shaders (_c / _C naming alias)",
-        "Alternative naming for the Community Shaders packed PBR material (_cm). "
-        "Identical RGBA channel layout to _cm: R=Ambient Occlusion proxy (0=fully occluded, 255=no occlusion), "
-        "G=Roughness proxy (0=smooth, 255=rough), "
+        "Complex Material Packed — Community Shaders Extended Materials (_c / _C naming alias)",
+        "Alternative naming for the Community Shaders Extended Materials packed map (_cm). "
+        "Identical RGBA channel layout to _cm: R=Environment reflection amount, "
+        "G=Glossiness (0=matte, 255=glossy), "
         "B=Metallic proxy (0=dielectric, 255=full metal), "
-        "A=Height/specular proxy. "
-        "Texture Slot 5 in the NIF. Requires Community Shaders with PBR material support. "
+        "A=Height / mode-control alpha. "
+        "Texture Slot 5 in the NIF. Requires Community Shaders Extended Materials. "
         "_C.dds (uppercase C) is treated identically on Windows (case-insensitive filesystem) and by this tool. "
-        "Prefer _cm.dds for new mods unless the target shader pack specifically expects _c naming.",
+        "Prefer _cm.dds for new mods unless the target shader pack specifically expects _c naming. "
+        "Do not mix this format with ENB _msn/_rmaos workflows.",
     ),
 }
 
@@ -2679,6 +2668,7 @@ def get_generation_warnings(
     *,
     source_role: str | None = None,
     source_hint: str | None = None,
+    source_suffix: str | None = None,
     include_diffuse: bool = False,
     include_normal: bool = False,
     include_glow: bool,
@@ -2688,6 +2678,7 @@ def get_generation_warnings(
     include_parallax: bool,
     include_complex: bool,
     complex_format: str = "msn",
+    parallax_mode: str = "standard",
     emboss_mode: bool = False,
     relief_mode: bool = False,
 ) -> list[tuple[str, str]]:
@@ -2699,6 +2690,8 @@ def get_generation_warnings(
     """
     warnings: list[tuple[str, str]] = []
     normalized_complex_format = complex_format.strip().lower()
+    normalized_parallax_mode = parallax_mode.strip().lower()
+    normalized_source_suffix = (source_suffix or "").strip().lower()
     is_enb_complex_combo = include_complex and normalized_complex_format == "msn" and env_mask_mode == "complex"
 
     organic_types = {"plants", "cloth", "skin"}
@@ -2743,8 +2736,8 @@ def get_generation_warnings(
         warnings.append((
             "complex_material_organic",
             f"Complex material enabled for a '{material_type}' texture.\n\n"
-            "Complex material is designed for hard surfaces with distinct PBR channels "
-            "(AO, roughness, metallic). Organic surfaces like skin and cloth rarely benefit "
+            "Complex material is designed for hard surfaces with distinct packed material channels. "
+            "Organic surfaces like skin and cloth rarely benefit "
             "and the result may look incorrect without careful ENB configuration.\n\n"
             "Tip: Complex material works best on stone, metal, and glass.",
         ))
@@ -2825,6 +2818,14 @@ def get_generation_warnings(
             "Regenerating complex material from packed complex inputs often damages channel meaning.\n\n"
             "Tip: Start from diffuse/albedo source when creating new complex materials.",
         ))
+    if normalized_source_suffix == "_rmaos":
+        warnings.append((
+            "rmaos_source_requires_renderer_check",
+            "Input uses the '_rmaos' suffix.\n\n"
+            "_rmaos is usually ENB complex-material data, but some Community Shaders TruePBR setups also use it via JSON configs. "
+            "This is NOT the same thing as Community Shaders _cm/_c Extended Materials.\n\n"
+            "Tip: Treat '_rmaos + _msn' as ENB, or verify that you intentionally have a separate TruePBR JSON workflow.",
+        ))
     hint_text = (source_hint or "").lower()
     if "ui/interface texture" in hint_text and (include_parallax or include_environment_mask or include_complex):
         warnings.append((
@@ -2858,7 +2859,7 @@ def get_generation_warnings(
             "env_mask_with_complex_material",
             "Both 'Environment mask' and 'Complex material' outputs are enabled.\n\n"
             "This combination is often redundant outside ENB complex-material workflows and can produce double-specular artefacts.\n\n"
-            "Tip: For ENB complex workflows use _msn + _rmaos (complex env mode); for Community Shaders use _cm/_c with standard env mode "
+            "Tip: For ENB complex workflows use _msn + _rmaos (complex env mode); for Community Shaders use _cm/_c/_C with standard env mode "
             "only when your shader setup explicitly expects a separate env mask.",
         ))
 
@@ -2866,8 +2867,8 @@ def get_generation_warnings(
         warnings.append((
             "cm_with_complex_env_mode",
             "Complex material format is set to '_cm' while environment mask mode is set to 'complex'.\n\n"
-            "_cm/_c is the Community Shaders-style packed map, while complex env mode is aimed at ENB complex-material workflows.\n\n"
-            "Tip: Switch env mask mode to 'standard' for _cm/_c, or switch complex format to '_msn' for ENB-style complex workflows.",
+            "_cm/_c/_C is the Community Shaders Extended Materials packed map, while complex env mode is aimed at ENB complex-material workflows.\n\n"
+            "Tip: Switch env mask mode to 'standard' for _cm/_c/_C, or switch complex format to '_msn' for ENB-style complex workflows. Community Shaders and ENB should not be mixed.",
         ))
 
     if include_complex and normalized_complex_format == "msn" and env_mask_mode == "standard":
@@ -2876,6 +2877,38 @@ def get_generation_warnings(
             "Complex material format is set to '_msn' but environment mask mode is 'standard'.\n\n"
             "_msn is typically used in ENB complex-material setups, which usually pair with complex env mode.\n\n"
             "Tip: If targeting ENB complex workflows, switch env mask mode to 'complex'.",
+        ))
+
+    if include_complex and normalized_complex_format == "cm" and not include_normal:
+        warnings.append((
+            "cm_without_normal_map",
+            "Community Shaders '_cm/_c/_C' output is enabled but normal-map output is disabled.\n\n"
+            "Community Shaders Extended Materials expects a standard '_n.dds' alongside the packed Slot 5 map.\n\n"
+            "Tip: Enable normal-map generation when using '_cm/_c/_C'.",
+        ))
+
+    if include_complex and normalized_complex_format == "msn" and include_normal:
+        warnings.append((
+            "msn_with_normal_output",
+            "Both '_msn' complex material and regular normal-map output are enabled.\n\n"
+            "ENB complex-material workflows normally use '_msn' instead of '_n.dds', not alongside it.\n\n"
+            "Tip: Disable regular normal-map output when targeting ENB complex materials unless you intentionally need both variants in separate installs.",
+        ))
+
+    if include_environment_mask and env_mask_mode == "complex" and not include_complex:
+        warnings.append((
+            "complex_env_without_msn",
+            "Complex environment-mask mode is enabled but complex-material output is disabled.\n\n"
+            "ENB '_rmaos.dds' is normally paired with '_msn.dds'. Without '_msn', the result is usually an incomplete ENB setup.\n\n"
+            "Tip: Enable complex-material output for ENB '_msn + _rmaos', or switch env mask mode back to 'standard'.",
+        ))
+
+    if include_parallax and normalized_parallax_mode == "occlusion" and normalized_complex_format == "cm":
+        warnings.append((
+            "cm_with_enb_pom",
+            "Parallax mode is set to 'occlusion (ENB/POM)' while complex format is '_cm/_c/_C'.\n\n"
+            "ENB POM and Community Shaders Extended Materials are different workflows. This setup mixes ENB-only parallax with Community Shaders packed materials.\n\n"
+            "Tip: Use standard parallax mode for '_cm/_c/_C', or switch the complex format to '_msn' for an ENB workflow.",
         ))
 
     return warnings
@@ -3359,8 +3392,8 @@ def parse_args() -> argparse.Namespace:
         choices=("msn", "cm"),
         default="msn",
         help=(
-            "Complex material format/suffix: msn -> _msn (normal+spec alpha), "
-            "cm -> packed AO/rough/metal/height-spec (_cm by default, or _c/_C via --complex-name)."
+            "Complex material format/suffix: msn -> _msn (ENB normal+spec alpha), "
+            "cm -> Community Shaders Extended Materials packed env/gloss/metal/height (_cm by default, or _c/_C via --complex-name)."
         ),
     )
     parser.add_argument(
@@ -3418,15 +3451,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--complex-material",
         action="store_true",
-        help="Generate complex material output (ENB _msn or Community Shaders/PBR-style packed output: _cm default, _c/_C optional via --complex-name).",
+        help="Generate complex material output (ENB _msn or Community Shaders Extended Materials packed output: _cm default, _c/_C optional via --complex-name).",
     )
     parser.add_argument(
         "--pbr-material",
         action="store_true",
         help=(
-            "Enable PBR-style output shortcut. "
+            "Enable Community Shaders packed-material shortcut. "
             "Automatically enables complex material generation and switches --complex-format to 'cm' "
-            "(packed AO/roughness/metallic/height-spec workflow; _cm default, _c/_C optional via --complex-name)."
+            "(packed env/gloss/metal/height workflow; _cm default, _c/_C optional via --complex-name). "
+            "This is not ENB and should not be mixed with ENB workflows."
         ),
     )
     parser.add_argument(
@@ -3766,8 +3800,9 @@ if GUI_AVAILABLE:
             self._add_tooltip(
                 _complex_check,
                 "🔮 Generate complex/PBR material output.\n"
-                "For Community Shaders PBR-style workflows use format 'cm' (or custom name ending with _c/_C).\n"
-                "For ENB complex material workflows use format 'msn'.",
+                "For Community Shaders Extended Materials use format 'cm' (or custom name ending with _c/_C).\n"
+                "For ENB complex material workflows use format 'msn'.\n"
+                "Do not mix Community Shaders and ENB outputs in the same install.",
             )
             _auto_sugg_check = ttk.Checkbutton(
                 options_frame,
@@ -3784,8 +3819,9 @@ if GUI_AVAILABLE:
                 _render_profile_label,
                 "🎯 Select target renderer preset.\n"
                 "vanilla = safest stock Skyrim SE setup.\n"
-                "community_shaders = packed _cm/_c workflow.\n"
+                "community_shaders = Community Shaders Extended Materials _cm/_c/_C workflow.\n"
                 "enb = _msn + complex _rmaos env mask + POM.\n"
+                "Community Shaders and ENB are separate workflows and should not be combined.\n"
                 "Changing this is the only thing that should auto-switch the mode combos.",
             )
             _render_profile_combo = ttk.Combobox(
@@ -3800,7 +3836,8 @@ if GUI_AVAILABLE:
             self._add_tooltip(
                 _render_profile_combo,
                 "🎯 auto = pick the best renderer preset for the current texture, but only when you change this control.\n"
-                "vanilla = safest defaults; community_shaders = _cm/_c + standard env/parallax; enb = _msn + complex _rmaos env + POM.",
+                "vanilla = safest defaults; community_shaders = _cm/_c/_C + standard parallax; enb = _msn + _rmaos + ENB POM.\n"
+                "Community Shaders and ENB are separate workflows and should not be mixed.",
             )
             ttk.Label(
                 options_frame,
@@ -3815,7 +3852,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(
                 _complex_fmt_label,
                 "🏷 Output format for complex/PBR maps.\n"
-                "'cm' = PBR-style packed map for Community Shaders (AO/roughness/metallic/height-spec proxies; _cm default, _c/_C via custom name).\n"
+                "'cm' = Community Shaders Extended Materials packed map (env reflection / glossiness / metallic / height; _cm default, _c/_C via custom name).\n"
                 "'msn' = ENB complex material (normal RGB + specular alpha).",
             )
             complex_format = ttk.Combobox(
@@ -3830,9 +3867,10 @@ if GUI_AVAILABLE:
             self._add_tooltip(
                 complex_format,
                 "🏷 Choose map type:\n"
-                "'cm' for Community Shaders PBR-style setups (_cm default, _c/_C optional via custom naming).\n"
+                "'cm' for Community Shaders Extended Materials setups (_cm default, _c/_C optional via custom naming).\n"
                 "'msn' for ENB complex material setups.\n"
-                "Quick start PBR: set Target renderer=community_shaders, enable Complex/PBR material, keep format=cm.",
+                "Quick start for Community Shaders: set Target renderer=community_shaders, enable Complex/PBR material, keep format=cm.\n"
+                "Do not use 'cm' together with ENB _rmaos/_msn outputs.",
             )
 
             _env_mode_row = ttk.Frame(options_frame)
@@ -4891,6 +4929,7 @@ if GUI_AVAILABLE:
                 preview_path,
                 source=self.source_image,
                 detected_role=role_info["role"] if role_info is not None else None,
+                detected_suffix=role_info["suffix"] if role_info is not None else None,
                 material_type=material_type,
                 workflow_profile=workflow_profile,
             )
@@ -4987,7 +5026,7 @@ if GUI_AVAILABLE:
             if "occlusion" in self.parallax_mode_var.get():
                 self.status_var.set("Parallax mode: occlusion — ENB-only smooth POM heightmap for meshes/materials set up for ENB parallax.")
             else:
-                self.status_var.set("Parallax mode: standard — best default for vanilla Skyrim SE and most Community Shaders workflows.")
+                self.status_var.set("Parallax mode: standard — best default for vanilla Skyrim SE and Community Shaders Extended Materials workflows.")
             self._request_preview_refresh()
 
         def _on_complex_format_changed(self, _event: object | None = None) -> None:
@@ -4998,7 +5037,7 @@ if GUI_AVAILABLE:
             if selected == "msn":
                 self.status_var.set("Complex naming: msn (_msn) — ENB-style normal RGB + specular alpha workflow.")
             else:
-                self.status_var.set("Complex naming: cm (_cm default; _c/_C optional with custom name) — Community Shaders packed complex-material workflow.")
+                self.status_var.set("Complex naming: cm (_cm default; _c/_C optional with custom name) — Community Shaders Extended Materials env/gloss/metal/height workflow.")
             self._request_preview_refresh()
 
         def _on_env_mask_mode_changed(self, _event: object | None = None) -> None:
@@ -5007,7 +5046,7 @@ if GUI_AVAILABLE:
                 selected = "standard"
                 self.env_mask_mode_var.set(selected)
             if selected == "complex":
-                self.status_var.set("Environment mask mode: complex — ENB-only RGBA reflection/gloss/metal/height workflow.")
+                self.status_var.set("Environment mask mode: complex — ENB-only RGBA roughness/metallic/AO/spec-height workflow.")
             else:
                 self.status_var.set("Environment mask mode: standard — vanilla Skyrim SE grayscale reflection mask.")
             self._request_preview_refresh()
@@ -5273,6 +5312,7 @@ if GUI_AVAILABLE:
             material_type: str,
             source_role: str | None,
             source_hint: str | None,
+            source_suffix: str | None,
             include_diffuse: bool,
             include_normal: bool,
             include_glow: bool,
@@ -5281,6 +5321,7 @@ if GUI_AVAILABLE:
             env_mask_strength: float,
             include_parallax: bool,
             include_complex: bool,
+            parallax_mode: str,
             emboss_mode: bool = False,
             relief_mode: bool = False,
         ) -> bool:
@@ -5289,6 +5330,7 @@ if GUI_AVAILABLE:
                 material_type,
                 source_role=source_role,
                 source_hint=source_hint,
+                source_suffix=source_suffix,
                 include_diffuse=include_diffuse,
                 include_normal=include_normal,
                 include_glow=include_glow,
@@ -5298,6 +5340,7 @@ if GUI_AVAILABLE:
                 include_parallax=include_parallax,
                 include_complex=include_complex,
                 complex_format=self.complex_format_var.get(),
+                parallax_mode=self.parallax_mode_var.get(),
                 emboss_mode=emboss_mode,
                 relief_mode=relief_mode,
             )
@@ -5402,10 +5445,12 @@ if GUI_AVAILABLE:
                 _role_info = identify_skyrim_texture_role(_context_source)
                 _source_role = _role_info["role"] if _role_info is not None else None
                 _source_hint = _role_info["hint"] if _role_info is not None else None
+                _source_suffix = _role_info["suffix"] if _role_info is not None else None
                 if not self._check_and_show_generation_warnings(
                     _material_type,
                     source_role=_source_role,
                     source_hint=_source_hint,
+                    source_suffix=_source_suffix,
                     include_diffuse=include_diffuse,
                     include_normal=include_normal,
                     include_glow=include_glow,
@@ -5414,6 +5459,7 @@ if GUI_AVAILABLE:
                     env_mask_strength=float(self.environment_mask_strength_var.get()),
                     include_parallax=include_parallax,
                     include_complex=include_complex,
+                    parallax_mode=self.parallax_mode_var.get(),
                     emboss_mode=self.emboss_mode_var.get(),
                     relief_mode=self.relief_mode_var.get(),
                 ):
