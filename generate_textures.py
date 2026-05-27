@@ -5461,8 +5461,8 @@ if GUI_AVAILABLE:
 
             win = tk.Toplevel(self.root)
             win.title(f"NIF Editor — Skyrim Texture Generator v{APP_VERSION}")
-            win.geometry("1040x820")
-            win.minsize(920, 680)
+            win.geometry("1200x900")
+            win.minsize(960, 720)
             win.resizable(True, True)
             win.grab_set()
             try:
@@ -6278,6 +6278,7 @@ if GUI_AVAILABLE:
                 self._add_tooltip(copy_selected_button, "📎 Copies only the selected row — ideal for Discord bragging or bug reports.")
                 self._add_tooltip(copy_all_button, "📦 Copies every row in one go for logs/changelists.")
                 self._add_tooltip(close_button, "🚪 Closes this window. Your NIFs will not feel abandoned.")
+                win.update_idletasks()
             except Exception as exc:
                 try:
                     win.destroy()

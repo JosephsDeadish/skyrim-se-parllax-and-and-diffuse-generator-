@@ -67,11 +67,16 @@ jobs:
           Compress-Archive -Path generate_textures.py, nif_patcher.py, README.md, requirements.txt, assets, tests -DestinationPath skyrim-texture-generator-source.zip
         shell: pwsh
 
-      - name: Upload artifact
+      - name: Upload application artifact
         uses: actions/upload-artifact@v4
         with:
           name: skyrim-texture-generator
-          path: |
-            skyrim-texture-generator.zip
-            skyrim-texture-generator-source.zip
+          path: skyrim-texture-generator.zip
+          if-no-files-found: error
+
+      - name: Upload source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: skyrim-texture-generator-source
+          path: skyrim-texture-generator-source.zip
           if-no-files-found: error
