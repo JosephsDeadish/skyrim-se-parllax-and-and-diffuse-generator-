@@ -338,6 +338,8 @@ class ModManagerContext:
     staging_root: Path | None = None
     output_dir: Path | None = None
     loaded_mods: tuple[str, ...] = ()
+    enabled_plugins: tuple[str, ...] = ()
+    load_order: tuple[str, ...] = ()
     loaded_texture_dirs: tuple[Path, ...] = ()
     loaded_mesh_dirs: tuple[Path, ...] = ()
 
@@ -352,6 +354,10 @@ class ModManagerContext:
             details.append(f"{len(self.loaded_texture_dirs)} loaded mod texture folder(s)")
         elif self.loaded_mods:
             details.append(f"{len(self.loaded_mods)} loaded mod(s)")
+        if self.enabled_plugins:
+            details.append(f"{len(self.enabled_plugins)} plugin(s)")
+        if self.load_order:
+            details.append(f"{len(self.load_order)} load-order entry/entries")
         if self.loaded_mesh_dirs:
             details.append(f"{len(self.loaded_mesh_dirs)} mesh folder(s)")
         return " — ".join(details)
@@ -404,6 +410,38 @@ def _parse_enabled_modlist(modlist_path: Path) -> tuple[str, ...]:
         if mod_name:
             enabled_mods.append(mod_name)
     return tuple(enabled_mods)
+
+
+def _parse_enabled_plugins(plugins_path: Path) -> tuple[str, ...]:
+    plugins: list[str] = []
+    if not plugins_path.exists():
+        return ()
+    for raw_line in plugins_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line[0] in {";", "-"}:
+            continue
+        if line[0] in {"+", "*"}:
+            line = line[1:].strip()
+        if line:
+            plugins.append(line)
+    return tuple(plugins)
+
+
+def _parse_load_order(loadorder_path: Path) -> tuple[str, ...]:
+    entries: list[str] = []
+    if not loadorder_path.exists():
+        return ()
+    for raw_line in loadorder_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line.startswith(";"):
+            continue
+        if line[0] in {"+", "*", "-"}:
+            line = line[1:].strip()
+        if line:
+            entries.append(line)
+    return tuple(entries)
 
 
 def _find_manager_instance_root(start: Path, required_children: tuple[str, ...]) -> Path | None:
@@ -468,10 +506,16 @@ def _detect_mo2_context(
             resolved_profile = profile_dirs[0].name
 
     loaded_mods: tuple[str, ...] = ()
+    enabled_plugins: tuple[str, ...] = ()
+    load_order: tuple[str, ...] = ()
     loaded_texture_dirs: tuple[Path, ...] = ()
     if instance_root is not None and resolved_profile:
         modlist_path = instance_root / "profiles" / resolved_profile / "modlist.txt"
+        plugins_path = instance_root / "profiles" / resolved_profile / "plugins.txt"
+        loadorder_path = instance_root / "profiles" / resolved_profile / "loadorder.txt"
         loaded_mods = _parse_enabled_modlist(modlist_path)
+        enabled_plugins = _parse_enabled_plugins(plugins_path)
+        load_order = _parse_load_order(loadorder_path)
         loaded_texture_dirs = _unique_existing_paths(
             [instance_root / "mods" / mod_name / "textures" for mod_name in loaded_mods]
         )
@@ -488,6 +532,8 @@ def _detect_mo2_context(
         instance_root=instance_root,
         output_dir=output_dir,
         loaded_mods=loaded_mods,
+        enabled_plugins=enabled_plugins,
+        load_order=load_order,
         loaded_texture_dirs=loaded_texture_dirs,
         loaded_mesh_dirs=loaded_mesh_dirs,
     )
@@ -524,6 +570,8 @@ def _detect_vortex_context(
     profile_dir = profile_dirs[0] if profile_dirs else None
     profile_name = env.get("VORTEX_PROFILE") or (profile_dir.name if profile_dir is not None else None)
     loaded_mods = _parse_enabled_modlist(profile_dir / "modlist.txt") if profile_dir is not None else ()
+    enabled_plugins = _parse_enabled_plugins(profile_dir / "plugins.txt") if profile_dir is not None else ()
+    load_order = _parse_load_order(profile_dir / "loadorder.txt") if profile_dir is not None else ()
     if staging_root is not None and loaded_mods:
         texture_dirs = _unique_existing_paths([staging_root / mod_name / "textures" for mod_name in loaded_mods])
         mesh_dirs = _unique_existing_paths([staging_root / mod_name / "meshes" for mod_name in loaded_mods])
@@ -545,6 +593,8 @@ def _detect_vortex_context(
         staging_root=staging_root,
         output_dir=executable_path.parent / "generated_textures",
         loaded_mods=loaded_mods,
+        enabled_plugins=enabled_plugins,
+        load_order=load_order,
         loaded_texture_dirs=texture_dirs,
         loaded_mesh_dirs=mesh_dirs,
     )
@@ -1397,6 +1447,14 @@ def detect_render_profile_from_mod_manager_context(context: ModManagerContext | 
     candidates: list[str] = []
     for mod_name in context.loaded_mods:
         normalized = str(mod_name).strip().lower()
+        if normalized:
+            candidates.append(normalized)
+    for plugin_name in context.enabled_plugins:
+        normalized = str(plugin_name).strip().lower()
+        if normalized:
+            candidates.append(normalized)
+    for load_order_name in context.load_order:
+        normalized = str(load_order_name).strip().lower()
         if normalized:
             candidates.append(normalized)
     for path in (*context.loaded_texture_dirs, *context.loaded_mesh_dirs):

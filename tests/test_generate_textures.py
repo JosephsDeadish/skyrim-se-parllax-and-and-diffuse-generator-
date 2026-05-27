@@ -636,6 +636,14 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         self.assertIsNone(detect_render_profile_from_mod_manager_context(context))
 
+    def test_detect_render_profile_from_mod_manager_context_uses_plugin_and_load_order_hints(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            enabled_plugins=("CommunityShaders.esp",),
+            load_order=("PBRNifPatcher.esp",),
+        )
+        self.assertEqual(detect_render_profile_from_mod_manager_context(context), "truepbr")
+
     def test_detect_render_profile_from_mod_manager_context_detects_enb_from_runtime_markers(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -1548,6 +1556,8 @@ class GenerateTexturesTests(unittest.TestCase):
             tool_dir.mkdir(parents=True)
             profile_dir.mkdir(parents=True)
             (profile_dir / "modlist.txt").write_text("+Texture Pack\n-Disabled Mod\n", encoding="utf-8")
+            (profile_dir / "plugins.txt").write_text("*Skyrim.esm\n*CommunityShaders.esp\n", encoding="utf-8")
+            (profile_dir / "loadorder.txt").write_text("Skyrim.esm\nCommunityShaders.esp\n", encoding="utf-8")
 
             context = detect_mod_manager_context(
                 {"MO_PROFILE": "Default"},
@@ -1557,9 +1567,13 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(context.manager, "Mod Organizer 2")
             self.assertEqual(context.profile_name, "Default")
             self.assertEqual(context.loaded_mods, ("Texture Pack",))
+            self.assertEqual(context.enabled_plugins, ("Skyrim.esm", "CommunityShaders.esp"))
+            self.assertEqual(context.load_order, ("Skyrim.esm", "CommunityShaders.esp"))
             self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
             self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
             self.assertEqual(context.output_dir, (instance_root / "overwrite"))
+            self.assertIn("plugin(s)", context.summary)
+            self.assertIn("load-order", context.summary)
 
     def test_detect_mod_manager_context_reads_vortex_profile_and_staging_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1568,6 +1582,8 @@ class GenerateTexturesTests(unittest.TestCase):
             profile_dir = appdata_dir / "Vortex" / "skyrimse" / "profiles" / "Main"
             profile_dir.mkdir(parents=True)
             (profile_dir / "modlist.txt").write_text("+Texture Pack\n", encoding="utf-8")
+            (profile_dir / "plugins.txt").write_text("*Skyrim.esm\n*PBRNifPatcher.esp\n", encoding="utf-8")
+            (profile_dir / "loadorder.txt").write_text("Skyrim.esm\nPBRNifPatcher.esp\n", encoding="utf-8")
 
             staging_root = temp_path / "Vortex Mods" / "skyrimse"
             textures_dir = staging_root / "Texture Pack" / "textures"
@@ -1588,6 +1604,8 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(context.manager, "Vortex")
             self.assertEqual(context.profile_name, "Main")
             self.assertEqual(context.loaded_mods, ("Texture Pack",))
+            self.assertEqual(context.enabled_plugins, ("Skyrim.esm", "PBRNifPatcher.esp"))
+            self.assertEqual(context.load_order, ("Skyrim.esm", "PBRNifPatcher.esp"))
             self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
             self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
             self.assertEqual(context.staging_root, staging_root.resolve())

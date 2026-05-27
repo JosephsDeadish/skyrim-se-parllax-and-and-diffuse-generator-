@@ -30,8 +30,8 @@ The release ZIP (`skyrim-texture-generator.zip`) includes a FoMod installer so t
 Alternatively, simply extract `generate_textures.exe` anywhere and run it directly — no installation is required.
 
 When the tool is launched from **MO2** or **Vortex**, it now tries to detect the current mod-manager context:
-- **MO2**: reads the active profile and enabled mods from `modlist.txt`, then exposes detected loaded mod texture folders in the GUI.
-- **Vortex**: looks for the active profile/staging layout and exposes detected managed texture folders in the GUI.
+- **MO2**: reads the active profile, enabled mods from `modlist.txt`, enabled plugins from `plugins.txt`, and load order from `loadorder.txt`, then exposes detected loaded mod texture folders in the GUI.
+- **Vortex**: looks for the active profile/staging layout, reads `modlist.txt` plus `plugins.txt`/`loadorder.txt` when present, and exposes detected managed texture folders in the GUI.
 - Renderer auto-detect now uses loaded mod names plus concrete runtime markers from that MO2/Vortex context (for example `d3d11.dll`/`enbseries.ini`, `SKSE/Plugins/CommunityShaders.dll`, and `SKSE/Plugins/PBRNifPatcher.dll`) to better infer `ENB`, `Community Shaders`, or `TruePBR` defaults when texture path hints are unclear.
 - The GUI shows the detected context under the file picker and adds a **Loaded Mod** button for faster browsing.
 
