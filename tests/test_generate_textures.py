@@ -669,6 +669,8 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("Vanilla:", message)
         self.assertIn("ENB:", message)
         self.assertIn("Auto-check:", message)
+        self.assertIn("_C.dds", message)
+        self.assertIn("How files should look:", message)
 
     def test_describe_render_profile_default_outputs_mentions_auto_checked_outputs(self) -> None:
         summary = describe_render_profile_default_outputs("enb")
@@ -944,8 +946,8 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_generate_environment_mask_glossiness_stays_above_complex_parallax_floor(self) -> None:
         environment_mask = generate_environment_mask(_large_high_detail_image(), strength=2.2, mode="complex")
-        _, glossiness, _, _ = environment_mask.split()
-        minimum, _ = glossiness.getextrema()
+        _, metallic, _, _ = environment_mask.split()
+        minimum, _ = metallic.getextrema()
         self.assertGreater(minimum, 4)
 
     def test_generate_environment_mask_complex_mode_returns_rgba_same_size(self) -> None:
@@ -955,17 +957,24 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_generate_environment_mask_complex_mode_flat_surface_avoids_black_holes(self) -> None:
         environment_mask = generate_environment_mask(_flat_dark_image(), strength=2.2, mode="complex")
-        env_amount, glossiness, metallic, height_alpha = environment_mask.split()
-        env_min, env_max = env_amount.getextrema()
-        gloss_min, _ = glossiness.getextrema()
+        roughness, metallic, ao, specular_height = environment_mask.split()
+        rough_min, rough_max = roughness.getextrema()
         metallic_min, _ = metallic.getextrema()
-        height_min, height_max = height_alpha.getextrema()
-        self.assertGreaterEqual(env_min, 10)
-        self.assertLessEqual(env_max - env_min, 80)
-        self.assertGreaterEqual(gloss_min, 5)
+        ao_min, _ = ao.getextrema()
+        alpha_min, alpha_max = specular_height.getextrema()
+        self.assertGreaterEqual(rough_min, 24)
+        self.assertLessEqual(rough_max - rough_min, 80)
         self.assertGreaterEqual(metallic_min, 6)
-        self.assertGreaterEqual(height_min, 95)
-        self.assertLessEqual(height_max, 160)
+        self.assertGreaterEqual(ao_min, 24)
+        self.assertGreaterEqual(alpha_min, 24)
+        self.assertLessEqual(alpha_max, 224)
+
+    def test_generate_environment_mask_complex_mode_channel_order_matches_rmaos_contract(self) -> None:
+        environment_mask = generate_environment_mask(_flat_dark_image(), strength=2.2, mode="complex")
+        roughness, metallic, ao, specular_height = environment_mask.split()
+        self.assertGreater(ImageStat.Stat(roughness).mean[0], ImageStat.Stat(metallic).mean[0])
+        self.assertGreater(ImageStat.Stat(ao).mean[0], ImageStat.Stat(roughness).mean[0])
+        self.assertGreater(ImageStat.Stat(specular_height).mean[0], ImageStat.Stat(metallic).mean[0])
 
     def test_prepare_preview_source_downscales_large_images(self) -> None:
         source = Image.new("RGB", (4096, 2048), color=(64, 96, 128))
@@ -1195,7 +1204,7 @@ class GenerateTexturesTests(unittest.TestCase):
 
             self.assertEqual(glow_path.name, "brick_g.dds")
 
-    def test_build_environment_mask_output_path_uses_default_name_and_extension(self) -> None:
+    def test_build_environment_mask_output_path_uses_standard_default_name_and_extension(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             input_path = temp_path / "brick.dds"
@@ -1205,9 +1214,25 @@ class GenerateTexturesTests(unittest.TestCase):
                 input_path=input_path,
                 output_dir=temp_path / "out",
                 environment_mask_name=None,
+                env_mask_mode="standard",
             )
 
             self.assertEqual(environment_mask_path.name, "brick_m.dds")
+
+    def test_build_environment_mask_output_path_uses_rmaos_name_for_complex_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.dds"
+            input_path.write_bytes(b"stub")
+
+            environment_mask_path = build_environment_mask_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+                environment_mask_name=None,
+                env_mask_mode="complex",
+            )
+
+            self.assertEqual(environment_mask_path.name, "brick_rmaos.dds")
 
     def test_build_complex_output_path_uses_msn_default_name_and_extension(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2153,6 +2178,7 @@ class GenerateTexturesTests(unittest.TestCase):
 
             self.assertEqual(save_mock.call_count, 1)
             self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT5",))
+            self.assertEqual(save_mock.call_args.args[1].name, "brick_rmaos.dds")
 
 
 class EmbossNormalTests(unittest.TestCase):

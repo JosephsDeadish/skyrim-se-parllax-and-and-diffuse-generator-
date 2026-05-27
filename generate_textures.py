@@ -860,14 +860,17 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "Add _p.dds (greyscale height) only for meshes patched for parallax (requires SKSE64 memory patch).\n"
         "Add _m.dds (greyscale, Slot 5) for reflective metals/armour — brighter = more environment reflection.\n"
         "Add _g.dds only for emissive/glowing assets.\n"
+        "How files should look: _n stays purple/blue, _p is greyscale, _m is greyscale with brighter pixels on shinier areas.\n"
         "Do NOT generate _rmaos, _msn, _cm, or _c — those are ignored by the vanilla renderer."
     ),
     "community_shaders": (
         "Community Shaders PBR workflow.\n"
-        "Files: diffuse.dds + _n.dds + _p.dds + _cm.dds (or _c.dds — identical channel layout).\n"
+        "Files: diffuse.dds + _n.dds + _p.dds + _cm.dds (or _c.dds / _C.dds — identical channel layout).\n"
         "_cm/_c RGBA channel layout: R=Ambient Occlusion (0=occluded, 255=open), "
         "G=Roughness (0=smooth, 255=rough), B=Metallic (0=dielectric, 255=full metal), "
         "A=Height/specular proxy.\n"
+        "How files should look: _n stays purple/blue, _p stays greyscale, and _cm/_c/_C should NOT look like a normal map — "
+        "it should read as packed grayscale data with AO strongest in red, roughness in green, metallic in blue, and a mid-grey height/spec proxy alpha.\n"
         "Add _g.dds only for emissive assets.\n"
         "Use standard _m.dds only when the shader explicitly expects a separate greyscale env mask.\n"
         "Do NOT generate _msn or _rmaos — those are ENB-only and are not read by Community Shaders."
@@ -880,6 +883,8 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "_rmaos RGBA channel layout (Slot 5): R=Roughness (0=smooth, 255=rough), "
         "G=Metallic (0=dielectric, 255=full metal), B=Ambient Occlusion (0=occluded, 255=open), "
         "A=Specular/height proxy.\n"
+        "How files should look: _msn should remain a purple/blue normal map with a useful alpha, while _rmaos should look like packed grayscale data — "
+        "red roughness, green metallic, blue AO, and a mid-grey alpha proxy. It should not look like a second normal map.\n"
         "Add _g.dds only for emissive assets.\n"
         "Do NOT generate vanilla _n.dds (replaced by _msn) or _cm/_c (Community Shaders format, "
         "not read by ENB complex material)."
@@ -1785,8 +1790,8 @@ def generate_environment_mask(source: Image.Image, strength: float = 1.2, mode: 
         Contrast/intensity strength factor (higher = stronger reflection/glossiness).
     mode:
         ``"complex"`` — RGBA texture for ENBSeries Complex Parallax Material.
-        Channel layout: R=env reflection amount, G=glossiness, B=metallic proxy,
-        A=parallax height.  Requires ENBSeries with complex material support.
+        Channel layout: R=Roughness, G=Metallic, B=Ambient Occlusion,
+        A=Specular/height proxy. Requires ENBSeries with complex material support.
 
         ``"standard"`` (default) — Greyscale (L mode) texture for the vanilla Skyrim SE
         ``_m.dds`` texture slot (Slot 5 in the NIF).  Controls environment/specular
@@ -1798,30 +1803,41 @@ def generate_environment_mask(source: Image.Image, strength: float = 1.2, mode: 
 
     rgb_source = source.convert("RGB")
     grayscale = ImageOps.grayscale(rgb_source).filter(ImageFilter.GaussianBlur(radius=0.8))
+    grayscale_min, grayscale_max = grayscale.getextrema()
+    if (grayscale_max - grayscale_min) <= 2:
+        roughness = _lift_black_floor(Image.new("L", grayscale.size, color=182), floor=24)
+        metallic = _lift_black_floor(Image.new("L", grayscale.size, color=18), floor=6)
+        ao = _lift_black_floor(Image.new("L", grayscale.size, color=214), floor=24)
+        specular_height = _lift_black_floor(Image.new("L", grayscale.size, color=127), floor=24)
+        return Image.merge("RGBA", (roughness, metallic, ao, specular_height))
+
     red, green, blue = rgb_source.split()
     maximum = ImageChops.lighter(ImageChops.lighter(red, green), blue)
     minimum = ImageChops.darker(ImageChops.darker(red, green), blue)
     chroma = ImageChops.subtract(maximum, minimum)
 
-    env_amount = ImageEnhance.Contrast(grayscale).enhance(0.9 + (strength * 0.35))
-    env_amount = _lift_black_floor(ImageOps.autocontrast(env_amount, cutoff=1), floor=10)
+    specular = generate_specular(rgb_source, strength=max(0.1, min(6.0, strength + 0.15)))
 
-    glossiness = generate_specular(rgb_source, strength=max(0.1, min(6.0, strength + 0.15)))
-    glossiness = ImageEnhance.Contrast(glossiness).enhance(0.9 + (strength * 0.25))
-    glossiness = _lift_black_floor(glossiness, floor=5)
+    roughness = ImageOps.invert(specular)
+    roughness = ImageEnhance.Contrast(roughness).enhance(0.85 + (strength * 0.32))
+    roughness = _lift_black_floor(ImageOps.autocontrast(roughness, cutoff=0), floor=12)
 
-    metallic_proxy = ImageOps.invert(chroma).filter(ImageFilter.GaussianBlur(radius=0.9))
-    metallic = Image.blend(grayscale, metallic_proxy, alpha=0.7)
-    metallic = ImageEnhance.Contrast(metallic).enhance(0.85 + (strength * 0.3))
-    metallic = _lift_black_floor(ImageOps.autocontrast(metallic, cutoff=1), floor=6)
+    metallic = Image.blend(chroma, specular, alpha=_clamp(0.22 + (strength * 0.1), 0.22, 0.85))
+    metallic = ImageEnhance.Contrast(metallic).enhance(0.75 + (strength * 0.34))
+    metallic = _lift_black_floor(ImageOps.autocontrast(metallic, cutoff=0), floor=6)
+
+    local_detail = ImageChops.difference(grayscale, grayscale.filter(ImageFilter.GaussianBlur(radius=2.4)))
+    cavity = ImageOps.invert(ImageEnhance.Contrast(local_detail).enhance(1.05 + (strength * 0.24)))
+    ao = Image.blend(grayscale, cavity, alpha=_clamp(0.52 + (strength * 0.12), 0.52, 0.92))
+    ao = _lift_black_floor(ImageOps.autocontrast(ao, cutoff=0), floor=24)
 
     raw_height = generate_parallax(rgb_source, strength=max(0.85, min(2.0, strength)))
-    midpoint = Image.new("L", raw_height.size, color=127)
-    height_alpha = Image.blend(midpoint, raw_height, alpha=0.75)
-    height_alpha = _lift_black_floor(height_alpha, floor=95)
-    height_alpha = height_alpha.point(lambda value: int(_clamp(float(value), 95.0, 160.0)))
+    specular_height = Image.blend(raw_height, specular, alpha=_clamp(0.28 + (strength * 0.1), 0.28, 0.82))
+    specular_height = Image.blend(Image.new("L", raw_height.size, color=127), specular_height, alpha=0.74)
+    specular_height = _lift_black_floor(specular_height, floor=24)
+    specular_height = specular_height.point(lambda value: int(_clamp(float(value), 24.0, 224.0)))
 
-    return Image.merge("RGBA", (env_amount, glossiness, metallic, height_alpha))
+    return Image.merge("RGBA", (roughness, metallic, ao, specular_height))
 
 
 def _generate_standard_env_mask(source: Image.Image, strength: float = 1.2) -> Image.Image:
@@ -2149,11 +2165,13 @@ def build_environment_mask_output_path(
     input_path: Path,
     output_dir: Path | None,
     environment_mask_name: str | None = None,
+    env_mask_mode: str = "standard",
 ) -> Path:
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
-    mask_stem = environment_mask_name or f"{input_path.stem}_m"
+    default_suffix = "_rmaos" if env_mask_mode == "complex" else "_m"
+    mask_stem = environment_mask_name or f"{input_path.stem}{default_suffix}"
     return base_output_dir / f"{mask_stem}{ext}"
 
 
@@ -2939,7 +2957,7 @@ def collect_source_textures(input_path: Path) -> list[Path]:
     if not source_files:
         raise ValueError(
             f"No source DDS textures found in {input_path}. "
-            "Folder mode scans subfolders, processes original DDS files, and skips generated *_n, *_p, *_g, *_m, *_rmaos, *_msn, *_cm, and *_c variants."
+            "Folder mode scans subfolders, processes original DDS files, and skips generated *_n, *_p, *_g, *_m, *_rmaos, *_msn, *_cm, *_c, and *_C variants."
         )
     return source_files
 
@@ -3146,6 +3164,7 @@ def run_with_options(
                 input_path=input_file,
                 output_dir=output_dir,
                 environment_mask_name=environment_mask_name,
+                env_mask_mode=env_mask_mode,
             )
             env_formats = ("DXT1", "DXT5") if env_mask_mode == "standard" else ("DXT5",)
             outputs["environment_mask"] = _save_with_dds_fallback(
@@ -3328,7 +3347,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--normal-name", type=str, default=None, help="Normal output file stem.")
     parser.add_argument("--parallax-name", type=str, default=None, help="Parallax output file stem.")
     parser.add_argument("--glow-name", type=str, default=None, help="Glow output file stem.")
-    parser.add_argument("--environment-mask-name", type=str, default=None, help="Environment mask output file stem.")
+    parser.add_argument(
+        "--environment-mask-name",
+        type=str,
+        default=None,
+        help="Environment mask output file stem (_m by default, or _rmaos when --environment-mask-mode=complex).",
+    )
     parser.add_argument("--complex-name", type=str, default=None, help="Complex material output file stem.")
     parser.add_argument(
         "--complex-format",
@@ -3336,7 +3360,7 @@ def parse_args() -> argparse.Namespace:
         default="msn",
         help=(
             "Complex material format/suffix: msn -> _msn (normal+spec alpha), "
-            "cm -> packed AO/rough/metal/height-spec (_cm by default, or _c via --complex-name)."
+            "cm -> packed AO/rough/metal/height-spec (_cm by default, or _c/_C via --complex-name)."
         ),
     )
     parser.add_argument(
@@ -3388,13 +3412,13 @@ def parse_args() -> argparse.Namespace:
             "Environment mask output mode. "
             "'standard' (default) = greyscale _m.dds for vanilla Skyrim SE (Texture Slot 5, no ENB required). "
             "'complex' = RGBA channel-packed texture for ENBSeries Complex Parallax Material "
-            "(often authored/saved with _rmaos naming)."
+            "(defaults to _rmaos.dds naming unless --environment-mask-name overrides it)."
         ),
     )
     parser.add_argument(
         "--complex-material",
         action="store_true",
-        help="Generate complex material output (ENB _msn or Community Shaders/PBR-style packed output: _cm default, _c optional via --complex-name).",
+        help="Generate complex material output (ENB _msn or Community Shaders/PBR-style packed output: _cm default, _c/_C optional via --complex-name).",
     )
     parser.add_argument(
         "--pbr-material",
@@ -3402,7 +3426,7 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Enable PBR-style output shortcut. "
             "Automatically enables complex material generation and switches --complex-format to 'cm' "
-            "(packed AO/roughness/metallic/height-spec workflow)."
+            "(packed AO/roughness/metallic/height-spec workflow; _cm default, _c/_C optional via --complex-name)."
         ),
     )
     parser.add_argument(
@@ -3742,7 +3766,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(
                 _complex_check,
                 "🔮 Generate complex/PBR material output.\n"
-                "For Community Shaders PBR-style workflows use format 'cm' (or custom name ending with _c).\n"
+                "For Community Shaders PBR-style workflows use format 'cm' (or custom name ending with _c/_C).\n"
                 "For ENB complex material workflows use format 'msn'.",
             )
             _auto_sugg_check = ttk.Checkbutton(
@@ -3791,7 +3815,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(
                 _complex_fmt_label,
                 "🏷 Output format for complex/PBR maps.\n"
-                "'cm' = PBR-style packed map for Community Shaders (AO/roughness/metallic/height-spec proxies; _cm default, _c via custom name).\n"
+                "'cm' = PBR-style packed map for Community Shaders (AO/roughness/metallic/height-spec proxies; _cm default, _c/_C via custom name).\n"
                 "'msn' = ENB complex material (normal RGB + specular alpha).",
             )
             complex_format = ttk.Combobox(
@@ -3806,7 +3830,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(
                 complex_format,
                 "🏷 Choose map type:\n"
-                "'cm' for Community Shaders PBR-style setups (_cm default, _c optional via custom naming).\n"
+                "'cm' for Community Shaders PBR-style setups (_cm default, _c/_C optional via custom naming).\n"
                 "'msn' for ENB complex material setups.\n"
                 "Quick start PBR: set Target renderer=community_shaders, enable Complex/PBR material, keep format=cm.",
             )
@@ -4974,7 +4998,7 @@ if GUI_AVAILABLE:
             if selected == "msn":
                 self.status_var.set("Complex naming: msn (_msn) — ENB-style normal RGB + specular alpha workflow.")
             else:
-                self.status_var.set("Complex naming: cm (_cm default; _c optional with custom name) — Community Shaders packed complex-material workflow.")
+                self.status_var.set("Complex naming: cm (_cm default; _c/_C optional with custom name) — Community Shaders packed complex-material workflow.")
             self._request_preview_refresh()
 
         def _on_env_mask_mode_changed(self, _event: object | None = None) -> None:

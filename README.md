@@ -82,13 +82,13 @@ Optional arguments:
 - `--normal-name` (default: `<input_stem>_n`, e.g. `stonewall_n.dds`)
 - `--parallax-name` (default: `<input_stem>_p`, e.g. `stonewall_p.dds`)
 - `--glow-name` (default: `<input_stem>_g`, e.g. `stonewall_g.dds`)
-- `--environment-mask-name` (default: `<input_stem>_m`, e.g. `stonewall_m.dds`)
+- `--environment-mask-name` (default: `<input_stem>_m`, or `<input_stem>_rmaos` when `--environment-mask-mode complex`)
 - `--complex-name` (default from format: `<input_stem>_msn` or `<input_stem>_cm`)
   - use `<input_stem>_c` here when a shader pack expects `_c.dds` naming
 - `--complex-format` (`msn` or `cm`, default: `msn`)
 - `--environment-mask-mode` (`standard` or `complex`, default: `standard`)
   - `standard` — greyscale `_m.dds` for vanilla Skyrim SE (Texture Slot 5, no ENB required)
-  - `complex` — RGBA channel-packed texture for ENBSeries Complex Parallax Material only (often saved as `_rmaos.dds`; use `--environment-mask-name` to set that suffix)
+  - `complex` — RGBA channel-packed texture for ENBSeries Complex Parallax Material only (defaults to `_rmaos.dds`; use `--environment-mask-name` to override)
 - `--emboss-mode` (normal-map emboss depth mode for flat printed assets)
 - `--parallax-mode` (`standard` or `occlusion`, default: `standard`)
   - `standard` — vanilla-style parallax heightmap with micro-detail
@@ -122,8 +122,8 @@ This app already supports a practical PBR-style packed workflow via `_cm` output
   - `python generate_textures.py /path/to/input.dds --pbr-material`
   - or explicitly: `python generate_textures.py /path/to/input.dds --complex-material --complex-format cm`
 
-`_cm` packs channels for Community Shaders PBR: R=AO, G=Roughness, B=Metallic, A=Height/specular proxy.  
-Some packs use `_c.dds` (or `_C.dds` on Windows) for the same role — set `--complex-name <stem>_c` (or GUI custom naming) for that variant.
+``_cm` packs channels for Community Shaders PBR: R=AO, G=Roughness, B=Metallic, A=Height/specular proxy.  
+Some packs use `_c.dds` (or `_C.dds` on Windows) for the same role — set `--complex-name <stem>_c` or `--complex-name <stem>_C` (or GUI custom naming) for that variant.
 
 ### ENB complex material quick start
 
@@ -134,8 +134,7 @@ Requires ENBSeries with `ComplexParallaxMaterial=true` in `enbseries.ini`.
   2. Enable **Complex/PBR material**, set format to `msn`
   3. Enable **Environment mask**, set mode to `complex`
   4. Enable **Parallax** (occlusion mode recommended)
-  5. Generate textures — you'll get `_msn.dds` (Slot 1 normal+spec) and `_m.dds` (Slot 5 RGBA env mask)
-  6. Rename the `_m.dds` output to `_rmaos.dds` if your ENB preset expects that naming
+  5. Generate textures — you'll get `_msn.dds` (Slot 1 normal+spec) and `_rmaos.dds` (Slot 5 RGBA env mask) by default
 - In CLI:
   - `python generate_textures.py /path/to/input.dds --complex-material --complex-format msn --environment-mask --environment-mask-mode complex --parallax-mode occlusion`
 
@@ -154,9 +153,9 @@ Generated outputs default to `.dds` filenames regardless of the input format. Mo
 - `--parallax-mode occlusion` generates a smoother `*_p` heightmap optimized for ENBSeries Parallax Occlusion Mapping (POM) while keeping the same filename/slot usage.
 - `--emboss-mode` generates normal maps from edge-ridge detail so flat printed surfaces (cards/books/scrolls) gain embossed/debossed depth cues.
 - Output generation now enforces per-map Skyrim-safe channel profiles during preview and file export (for example: normal maps always RGB with blue channel floor, standard env masks always greyscale, complex outputs always RGBA).
-- **Environment mask** (`*_m`) has two modes:
+- **Environment mask** (`*_m` / `*_rmaos`) has two modes:
   - **Standard** (default) — greyscale `L`-mode texture. Texture Slot 5 in the NIF. Controls per-pixel environment/specular reflection intensity (brighter = more reflection). Requires `SLSF1_Environment_Mapping` shader flag. Works with vanilla Skyrim SE — **no ENBSeries required**. Typically stored as DXT1.
-  - **Complex** (select in GUI or via `--environment-mask-mode complex`) — RGBA channel-packed for ENBSeries Complex Parallax Material workflows: R=Roughness (0=smooth, 255=rough), G=Metallic (0=dielectric, 255=full metal), B=Ambient Occlusion (0=fully occluded, 255=no occlusion), A=Specular/height proxy. **ENBSeries required** with `ComplexParallaxMaterial=true` in `enbseries.ini`. Always paired with `_msn.dds` (Slot 1) and optionally `_p.dds` (parallax). Many ENB packs call this `*_rmaos.dds`; use custom environment-mask naming when needed.
+  - **Complex** (select in GUI or via `--environment-mask-mode complex`) — RGBA channel-packed for ENBSeries Complex Parallax Material workflows: R=Roughness (0=smooth, 255=rough), G=Metallic (0=dielectric, 255=full metal), B=Ambient Occlusion (0=fully occluded, 255=no occlusion), A=Specular/height proxy. **ENBSeries required** with `ComplexParallaxMaterial=true` in `enbseries.ini`. Always paired with `_msn.dds` (Slot 1) and optionally `_p.dds` (parallax). The generator now defaults this mode to `*_rmaos.dds`, though custom environment-mask naming still works.
 - For large/high-detail sources (2K/4K/8K), generation applies adaptive detail dampening to reduce over-sharpened normals/parallax and complex-material sparkle artifacts. Analysis and auto-recommendation calculations are automatically performed on a downscaled copy so large textures are processed faster without sacrificing output quality.
 - Generation warnings now include extra guardrails for UI/interface texture paths and paper/card-like assets when map combinations are likely to look incorrect in-game.
 - Specular generation uses numpy float32 arithmetic with percentile-based range normalisation so true-black hole artefacts cannot be introduced by integer rounding, regardless of texture size or content.
