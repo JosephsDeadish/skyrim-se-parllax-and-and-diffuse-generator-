@@ -8,11 +8,11 @@ Texture generator that supports both GUI and command-line usage. It can generate
 - a grayscale parallax texture
 - an ENBSeries POM-optimized parallax heightmap mode (**Parallax Occlusion**)
 - a glow map
-- an environment mask — **standard greyscale** (vanilla Skyrim SE, no ENB needed) or **complex RGBA** (ENBSeries only)
+- an environment mask — **standard greyscale** (vanilla Skyrim SE, no ENB needed) or **complex RGBA** (ENBSeries Complex Parallax Material only; often saved as `_rmaos.dds`)
 - a complex material output:
-  - `_msn`: normal RGB with specular in alpha
-  - `_cm`: packed complex material texture (AO/roughness/metallic/height-spec proxies)
-  - `_cm` is the tool's PBR-style output path for Community Shaders workflows
+  - `_msn`: normal RGB with specular in alpha (ENBSeries complex material, Slot 1)
+  - `_cm` / `_c`: packed PBR material (Community Shaders) — RGBA: R=AO, G=Roughness, B=Metallic, A=Height proxy
+  - `_cm` / `_c` is the tool's PBR-style output path for Community Shaders workflows; `_c` and `_C.dds` are treated as aliases
 
 ## Requirements
 
@@ -62,7 +62,7 @@ This opens a desktop interface where you can:
 - batch-process folder inputs in the background so the UI stays responsive on larger files or larger sets
 - load oversized preview sources with automatic downscaling to keep the GUI responsive when opening very large textures
 - switch preview source images in folder mode, with automatic preview switching to the current file while batch processing
-- use the NIF Editor’s resizable results log to review full untruncated scan/patch details while processing whole mesh folders
+- use the NIF Editor's resizable results log to review full untruncated scan/patch details while processing whole mesh folders — **NIF editing is an experimental feature; always keep backups of your NIF files**
 - when a folder is selected, only process original `.dds` source textures and skip generated `_n`, `_p`, `_g`, `_m`, `_msn`, and `_cm` variants
 - continue processing remaining files in folder mode even if one file is corrupt/unreadable
 - toggle **dark mode** for low-light modding sessions
@@ -122,9 +122,25 @@ This app already supports a practical PBR-style packed workflow via `_cm` output
   - `python generate_textures.py /path/to/input.dds --pbr-material`
   - or explicitly: `python generate_textures.py /path/to/input.dds --complex-material --complex-format cm`
 
-`_cm` packs channels for modern shader workflows (AO/roughness/metallic/height-spec proxies).  
-Some packs use `_c.dds` naming for the same packed role — set `--complex-name <stem>_c` (or GUI custom naming) for that variant.
-For ENB complex material workflows, use `_msn` instead (`--complex-format msn`).
+`_cm` packs channels for Community Shaders PBR: R=AO, G=Roughness, B=Metallic, A=Height/specular proxy.  
+Some packs use `_c.dds` (or `_C.dds` on Windows) for the same role — set `--complex-name <stem>_c` (or GUI custom naming) for that variant.
+
+### ENB complex material quick start
+
+Requires ENBSeries with `ComplexParallaxMaterial=true` in `enbseries.ini`.
+
+- In GUI:
+  1. Set **Target renderer** to `enb`
+  2. Enable **Complex/PBR material**, set format to `msn`
+  3. Enable **Environment mask**, set mode to `complex`
+  4. Enable **Parallax** (occlusion mode recommended)
+  5. Generate textures — you'll get `_msn.dds` (Slot 1 normal+spec) and `_m.dds` (Slot 5 RGBA env mask)
+  6. Rename the `_m.dds` output to `_rmaos.dds` if your ENB preset expects that naming
+- In CLI:
+  - `python generate_textures.py /path/to/input.dds --complex-material --complex-format msn --environment-mask --environment-mask-mode complex --parallax-mode occlusion`
+
+`_msn` channel layout (Slot 1): R=Normal X, G=Normal Y, B=Normal Z, A=Specular intensity.  
+`_rmaos` channel layout (Slot 5): R=Roughness, G=Metallic, B=AO, A=Specular/height proxy.
 
 Generated outputs default to `.dds` filenames regardless of the input format. Most outputs are written as DXT5 DDS for broad compatibility; standard (`--environment-mask-mode standard`) `_m` masks prefer DXT1 (with automatic DXT5 fallback if needed). `_cm` PBR-style complex maps now prefer BC7 when available, then fall back to DXT5/DXT3 for compatibility. If DDS export is unavailable on the current Pillow build, the tool falls back to PNG output.
 
@@ -140,11 +156,11 @@ Generated outputs default to `.dds` filenames regardless of the input format. Mo
 - Output generation now enforces per-map Skyrim-safe channel profiles during preview and file export (for example: normal maps always RGB with blue channel floor, standard env masks always greyscale, complex outputs always RGBA).
 - **Environment mask** (`*_m`) has two modes:
   - **Standard** (default) — greyscale `L`-mode texture. Texture Slot 5 in the NIF. Controls per-pixel environment/specular reflection intensity (brighter = more reflection). Requires `SLSF1_Environment_Mapping` shader flag. Works with vanilla Skyrim SE — **no ENBSeries required**. Typically stored as DXT1.
-  - **Complex** (select in GUI or via `--environment-mask-mode complex`) — RGBA channel-packed for ENBSeries Complex Parallax Material workflows: R=env amount, G=glossiness, B=metallic proxy, A=parallax height. **ENBSeries required** with complex material support enabled. Many ENB packs call this `*_rmaos.dds`; use custom environment-mask naming when needed.
+  - **Complex** (select in GUI or via `--environment-mask-mode complex`) — RGBA channel-packed for ENBSeries Complex Parallax Material workflows: R=Roughness (0=smooth, 255=rough), G=Metallic (0=dielectric, 255=full metal), B=Ambient Occlusion (0=fully occluded, 255=no occlusion), A=Specular/height proxy. **ENBSeries required** with `ComplexParallaxMaterial=true` in `enbseries.ini`. Always paired with `_msn.dds` (Slot 1) and optionally `_p.dds` (parallax). Many ENB packs call this `*_rmaos.dds`; use custom environment-mask naming when needed.
 - For large/high-detail sources (2K/4K/8K), generation applies adaptive detail dampening to reduce over-sharpened normals/parallax and complex-material sparkle artifacts. Analysis and auto-recommendation calculations are automatically performed on a downscaled copy so large textures are processed faster without sacrificing output quality.
 - Generation warnings now include extra guardrails for UI/interface texture paths and paper/card-like assets when map combinations are likely to look incorrect in-game.
 - Specular generation uses numpy float32 arithmetic with percentile-based range normalisation so true-black hole artefacts cannot be introduced by integer rounding, regardless of texture size or content.
-- `_msn` output stores normal RGB with specular in alpha; `_cm` stores packed complex-material channels (R=ambient occlusion proxy, G=roughness proxy, B=metallic proxy, A=height/specular proxy).
+- `_msn` output stores normal RGB with specular in alpha (ENBSeries Slot 1); `_cm`/`_c` stores packed Community Shaders PBR channels (R=ambient occlusion proxy, G=roughness proxy, B=metallic proxy, A=height/specular proxy); `_rmaos` stores ENBSeries complex env mask (R=roughness, G=metallic, B=AO, A=specular/height proxy).
 
 ## File name recognition
 
@@ -156,12 +172,26 @@ The tool recognises standard Skyrim SE texture naming conventions from the file 
 | `_n` | Normal Map | DirectX tangent-space, Slot 1 |
 | `_p` | Parallax Heightmap | Greyscale, Slot 3, requires SKSE64 memory patch |
 | `_g` | Glow / Emissive | Slot 2, requires `SLSF1_Own_Emit` flag |
-| `_m` | Environment Mask | Greyscale reflection intensity, Slot 5 |
-| `_rmaos` | Complex Env/Material Mask | Common complex-material naming for channel-packed env/gloss/metal/AO-style masks (Slot 5 workflows) |
+| `_m` | Environment Mask | Greyscale reflection intensity, Slot 5 — vanilla Skyrim SE only |
+| `_rmaos` | Complex Env Mask (ENBSeries) | RGBA Slot 5 — **ENBSeries only** with `ComplexParallaxMaterial=true`. Channels: R=Roughness, G=Metallic, B=AO, A=Specular/height proxy. Always paired with `_msn`. Do **not** use with vanilla or Community Shaders. |
 | `_s` | Subsurface Scattering | Slot 6, skin/character textures |
 | `_sk` | Skin Specular | Slot 7, character-specific |
-| `_msn` | Complex Parallax Material | ENBSeries only — **not vanilla Skyrim SE** |
-| `_cm` | Complex Material (packed) | Packed AO/roughness/metallic/height-spec proxies for modern complex-material workflows — **not vanilla Skyrim SE** |
-| `_c` | Complex Material (packed alias) | Alternative naming used by some Community Shaders/complex-material packs; same packed role as `_cm` |
+| `_msn` | Complex Parallax Material (ENBSeries) | RGBA Slot 1 — replaces `_n` when ENBSeries complex material is active. Channels: R=Normal X, G=Normal Y, B=Normal Z, A=Specular intensity. **ENBSeries only — not vanilla Skyrim SE.** |
+| `_cm` | Complex Material packed (Community Shaders) | RGBA Slot 5 — **Community Shaders PBR** workflow. Channels: R=AO, G=Roughness, B=Metallic, A=Height proxy. **Not vanilla Skyrim SE.** |
+| `_c` / `_C` | Complex Material packed alias | Identical channel layout and role as `_cm`. `_C.dds` (uppercase) is treated the same on Windows and by this tool. Prefer `_cm` for new mods unless the pack uses `_c` naming. |
 
-Batch folder mode scans subfolders and automatically skips generated variants (`_n`, `_p`, `_g`, `_m`, `_rmaos`, `_msn`, `_cm`, `_c`) so it only processes original source textures.
+Batch folder mode scans subfolders and automatically skips generated variants (`_n`, `_p`, `_g`, `_m`, `_rmaos`, `_msn`, `_cm`, `_c`, `_C`) so it only processes original source textures.
+
+## Renderer quick-reference
+
+| Renderer | Required files | Notes |
+|----------|---------------|-------|
+| **Vanilla Skyrim SE** | diffuse + `_n` | Add `_m` (greyscale) for reflective materials; add `_p` for parallax meshes |
+| **Community Shaders** | diffuse + `_n` + `_p` + `_cm` (or `_c`) | `_cm`/`_c`: R=AO, G=Roughness, B=Metallic, A=Height proxy |
+| **ENBSeries complex** | diffuse + `_msn` + `_p` + `_rmaos` | `_msn`: R=Nx, G=Ny, B=Nz, A=Spec; `_rmaos`: R=Rough, G=Metal, B=AO, A=Spec/Height |
+
+### NIF Editor — Experimental Feature
+
+The **NIF Editor** (accessible from the toolbar button) lets you patch BSLightingShaderProperty flags and texture slots in Skyrim SE mesh files.
+**This is an experimental feature.** Always keep backups of your NIF files before patching.
+The **Auto-patch NIFs after generation** checkbox (off by default) triggers NIF patching automatically after each generation run.

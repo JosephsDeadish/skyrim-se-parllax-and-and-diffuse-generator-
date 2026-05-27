@@ -2039,6 +2039,37 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(result["role"], "complex_material")
         self.assertIn("ENBSeries", result["notes"])
 
+    def test_identify_skyrim_texture_role_rmaos_has_channel_notes(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/armor/iron_rmaos.dds"))
+        self.assertEqual(result["role"], "environment_mask")
+        self.assertEqual(result["suffix"], "_rmaos")
+        # Notes must describe the RGBA channel layout for the ENB complex mask
+        self.assertIn("Roughness", result["notes"])
+        self.assertIn("Metallic", result["notes"])
+        self.assertIn("Ambient Occlusion", result["notes"])
+        self.assertIn("ENBSeries", result["notes"])
+
+    def test_identify_skyrim_texture_role_cm_has_channel_notes(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/architecture/brick_cm.dds"))
+        self.assertEqual(result["role"], "complex_material_cm")
+        self.assertEqual(result["suffix"], "_cm")
+        self.assertIn("Roughness", result["notes"])
+        self.assertIn("Metallic", result["notes"])
+        self.assertIn("Ambient Occlusion", result["notes"])
+
+    def test_identify_skyrim_texture_role_c_has_channel_notes(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/architecture/brick_c.dds"))
+        self.assertEqual(result["role"], "complex_material_cm")
+        self.assertEqual(result["suffix"], "_c")
+        self.assertIn("Roughness", result["notes"])
+        self.assertIn("Metallic", result["notes"])
+
+    def test_identify_skyrim_texture_role_uppercase_C_is_complex_material(self) -> None:
+        # _C.dds (uppercase) must be treated identically to _c.dds — stem is lowercased before lookup
+        result = identify_skyrim_texture_role(Path("textures/architecture/brick_C.dds"))
+        self.assertEqual(result["role"], "complex_material_cm")
+        self.assertEqual(result["suffix"], "_c")
+
     def test_identify_skyrim_texture_role_infers_from_filename_tokens(self) -> None:
         result = identify_skyrim_texture_role(Path("textures/architecture/wall_normalmap.dds"))
         self.assertEqual(result["role"], "normal")
@@ -2774,6 +2805,16 @@ class ParallaxOcclusionTests(unittest.TestCase):
             ids = [w[0] for w in warnings]
             self.assertIn("output_folder_has_cm_files", ids)
 
+    def test_get_output_folder_format_warnings_uppercase_C_vs_msn_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            (temp_path / "stone_C.dds").write_bytes(b"fake")
+            warnings = get_output_folder_format_warnings(
+                temp_path, include_complex=True, complex_format="msn"
+            )
+            ids = [w[0] for w in warnings]
+            self.assertIn("output_folder_has_cm_files", ids)
+
     def test_get_output_folder_format_warnings_matching_format_no_warning(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -2810,6 +2851,18 @@ class ParallaxOcclusionTests(unittest.TestCase):
         from generate_textures import _normalize_gui_state
         state = _normalize_gui_state({})
         self.assertEqual(state["dismissed_warnings"], [])
+
+    def test_auto_patch_nifs_default_is_false(self) -> None:
+        from generate_textures import _GUI_STATE_DEFAULTS
+        self.assertFalse(
+            _GUI_STATE_DEFAULTS["auto_patch_nifs"],
+            "auto_patch_nifs must default to False so NIF auto-patching is opt-in",
+        )
+
+    def test_normalize_gui_state_auto_patch_nifs_defaults_false_when_missing(self) -> None:
+        from generate_textures import _normalize_gui_state
+        state = _normalize_gui_state({})
+        self.assertFalse(state["auto_patch_nifs"])
 
 
 if __name__ == "__main__":
