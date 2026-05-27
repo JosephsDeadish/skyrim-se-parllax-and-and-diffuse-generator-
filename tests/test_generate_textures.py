@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -2403,10 +2404,44 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertIn("rmaos_json", outputs)
             self.assertTrue(outputs["rmaos_json"].exists())
             self.assertEqual(outputs["rmaos_json"].parent.name, "PBRNifPatcher")
-            payload = outputs["rmaos_json"].read_text(encoding="utf-8")
-            self.assertIn('"format": "truepbr_rmaos"', payload)
-            self.assertIn('"rmaos": "../brick_rmaos.dds"', payload)
-            self.assertIn('"R": "roughness"', payload)
+            payload = json.loads(outputs["rmaos_json"].read_text(encoding="utf-8"))
+            self.assertIsInstance(payload, list)
+            self.assertEqual(len(payload), 1)
+            self.assertEqual(payload[0]["texture"], "brick")
+            self.assertFalse(bool(payload[0]["parallax"]))
+            self.assertAlmostEqual(float(payload[0]["specular_level"]), 0.04)
+
+    def test_run_with_options_rmaos_writes_sidecar_next_to_textures_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "mod" / "textures" / "trees" / "treepineforestbarkcomp.dds"
+            output_dir = temp_path / "generated"
+            input_path.parent.mkdir(parents=True, exist_ok=True)
+            _sample_image().save(input_path)
+
+            outputs = run_with_options(
+                input_file=input_path,
+                output_dir=output_dir,
+                include_diffuse=False,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_rmaos=True,
+                include_complex=False,
+            )
+
+            expected_sidecar = (
+                output_dir
+                / "PBRNifPatcher"
+                / "trees"
+                / "treepineforestbarkcomp_rmaos.json"
+            )
+            self.assertEqual(outputs["rmaos_json"], expected_sidecar)
+            self.assertTrue(expected_sidecar.exists())
+            payload = json.loads(expected_sidecar.read_text(encoding="utf-8"))
+            self.assertEqual(payload[0]["texture"], "trees/treepineforestbarkcomp")
+            self.assertFalse(bool(payload[0]["parallax"]))
 
 
 class EmbossNormalTests(unittest.TestCase):

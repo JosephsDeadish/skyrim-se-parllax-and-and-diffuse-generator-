@@ -140,10 +140,10 @@ This app now has a dedicated **TruePBR** renderer profile path for Community Sha
   1. Set **Target renderer** to `truepbr`
   2. Keep **Normal / _n** enabled
   3. Enable **RMAOS / _rmaos**
-  4. Generate textures; the tool writes `_rmaos` (or `_ramos`) plus a JSON sidecar to guide channel mapping
+  4. Generate textures; the tool writes `_rmaos` (or `_ramos`) plus a PBRNifPatcher JSON sidecar (placed in a `PBRNifPatcher/` folder next to `textures/` when a textures root is detected)
   5. Validate the generated JSON/channels against your installed TruePBR schema
 
-TruePBR is JSON-driven and can vary by setup; treat `_rmaos`/`_ramos` channel semantics as config-dependent and verify against the specific TruePBR schema you use.
+The generated sidecar uses pgen/PBRNifPatcher-style texture entries (for example: `texture`, `parallax`, `specular_level`, `roughness_scale`, `smooth_angle`, `displacement_scale`, `emissive_scale`, `vertex_color_lum_mult`) and is intended as a practical starting point you can tune per asset pack.
 
 ### ENB complex material quick start
 
