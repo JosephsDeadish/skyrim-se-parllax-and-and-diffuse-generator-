@@ -1,58 +1,107 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  FoMod installer for Skyrim SE Parallax and Diffuse Texture Generator.
+  FoMod installer for Skyrim SE Parallax and Diffuse Texture Generator v0.6.
   Compatible with Mod Organizer 2 (v2.4+) and Vortex.
 
   After installation, register generate_textures.exe as an external tool:
-    MO2:  Tools → Executables → Add → point to generate_textures.exe in the mod staging folder.
+    MO2:    Tools → Executables → Add → point to generate_textures.exe in the mod's Data folder.
+            When launched through MO2 the app automatically detects your active profile,
+            reads modlist.txt, and pre-populates both texture and mesh folder paths.
     Vortex: Dashboard → Add Tool → browse to generate_textures.exe.
-  When launched from MO2/Vortex, the app now tries to detect the current mod-manager context
-  and loaded mod texture folders to make browsing source textures easier.
+
+  NIF Editor (v0.6):
+    Open the NIF Editor window from the main toolbar ("NIF Editor…" button).
+    It lets you scan and patch BSLightingShaderProperty blocks in any NIF so that
+    mods which shipped without parallax, ENB complex material, or environment-mapping
+    support gain those features.  Detected MO2/Vortex mesh folders are pre-filled
+    automatically.
 -->
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="http://qconsulting.ca/fo3/ModConfig5.0.xsd">
     <moduleName>Skyrim SE Parallax and Diffuse Texture Generator</moduleName>
 
     <requiredInstallFiles>
-        <!-- The main executable is always installed. -->
+        <!-- Main executable — always installed. -->
         <file source="generate_textures.exe" destination="generate_textures.exe" priority="0"/>
+        <!-- NIF patcher module — required by generate_textures.exe for the NIF Editor feature. -->
+        <file source="nif_patcher.py" destination="nif_patcher.py" priority="0"/>
     </requiredInstallFiles>
 
     <installSteps order="Explicit">
+
+        <!-- ─── Step 1: renderer profile ─────────────────────────────────── -->
+        <installStep name="Default Renderer Profile">
+            <optionalFileGroups order="Explicit">
+                <group name="Which renderer are you using?" type="SelectExactlyOne">
+                    <plugins order="Explicit">
+
+                        <plugin name="Auto-detect (recommended)">
+                            <description>The app detects your renderer at launch and recommends appropriate settings (complex format, environment mask mode). Parallax mode stays on Standard so sign and artwork textures keep their pop-out depth effect regardless of renderer.</description>
+                            <image path=""/>
+                            <files/>
+                            <typeDescriptor><type name="Recommended"/></typeDescriptor>
+                        </plugin>
+
+                        <plugin name="Vanilla Skyrim SE / SKSE">
+                            <description>Standard parallax via height-map offset (slot 3). No ENBSeries required. Works with any load order.</description>
+                            <image path=""/>
+                            <files/>
+                            <typeDescriptor><type name="Optional"/></typeDescriptor>
+                        </plugin>
+
+                        <plugin name="ENBSeries">
+                            <description>Enables ENB Parallax Occlusion Mapping (POM), complex material (_msn.dds slot 1), and complex environment masks. Requires ENBSeries v0.315+ installed and configured for Skyrim SE.</description>
+                            <image path=""/>
+                            <files/>
+                            <typeDescriptor><type name="Optional"/></typeDescriptor>
+                        </plugin>
+
+                        <plugin name="Community Shaders">
+                            <description>Parallax + Complex Parallax Material support via Community Shaders. Uses standard height-map (slot 3) and CM environment masks.</description>
+                            <image path=""/>
+                            <files/>
+                            <typeDescriptor><type name="Optional"/></typeDescriptor>
+                        </plugin>
+
+                    </plugins>
+                </group>
+            </optionalFileGroups>
+        </installStep>
+
+        <!-- ─── Step 2: optional components ──────────────────────────────── -->
         <installStep name="Optional Components">
             <optionalFileGroups order="Explicit">
+
                 <group name="Documentation (recommended)" type="SelectAny">
                     <plugins order="Explicit">
                         <plugin name="Include README and usage notes">
-                            <description>Installs the README so the MO2/Vortex setup notes and Skyrim SE output-format guidance are available inside the installed tool folder.</description>
+                            <description>Installs the README so MO2/Vortex setup notes, renderer guidance, NIF Editor instructions, and output-format explanations are available inside the installed tool folder.</description>
                             <image path=""/>
                             <files>
                                 <file source="README.md" destination="README.md" priority="0"/>
                             </files>
-                            <typeDescriptor>
-                                <type name="Recommended"/>
-                            </typeDescriptor>
+                            <typeDescriptor><type name="Recommended"/></typeDescriptor>
                         </plugin>
                     </plugins>
                 </group>
 
-                <group name="Source Script (optional)" type="SelectAny">
+                <group name="Python source files (advanced users)" type="SelectAny">
                     <plugins order="Explicit">
                         <plugin name="Include Python source files">
-                            <description>Install the Python source script and requirements file. Useful for advanced users who want to run or modify the tool directly with Python 3.11+ instead of the pre-built executable. Requires: pip install -r requirements.txt.</description>
+                            <description>Installs generate_textures.py, nif_patcher.py, and requirements.txt. Useful for running the tool directly with Python 3.11+ or modifying it. Run: pip install -r requirements.txt, then python generate_textures.py</description>
                             <image path=""/>
                             <files>
                                 <file source="generate_textures.py" destination="generate_textures.py" priority="0"/>
+                                <file source="nif_patcher.py" destination="nif_patcher.py" priority="0"/>
                                 <file source="requirements.txt" destination="requirements.txt" priority="0"/>
                             </files>
-                            <typeDescriptor>
-                                <type name="Optional"/>
-                            </typeDescriptor>
+                            <typeDescriptor><type name="Optional"/></typeDescriptor>
                         </plugin>
                     </plugins>
                 </group>
 
             </optionalFileGroups>
         </installStep>
+
     </installSteps>
 </config>
