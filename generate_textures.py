@@ -1008,6 +1008,7 @@ def resolve_env_mask_complex_workflow(
     env_mask_mode: str,
     complex_format: str = "msn",
     render_profile: str = "auto",
+    include_complex: bool | None = None,
 ) -> str:
     """Resolve how complex env-mask channels should be packed."""
     if _normalize_env_mask_mode(env_mask_mode) != "complex":
@@ -1017,6 +1018,10 @@ def resolve_env_mask_complex_workflow(
         return "enb"
     if normalized_profile == "truepbr":
         return "truepbr"
+    if include_complex is False:
+        return "truepbr"
+    if include_complex is True:
+        return "enb" if _normalize_complex_format(complex_format) == "msn" else "truepbr"
     return "enb" if _normalize_complex_format(complex_format) == "msn" else "truepbr"
 
 
@@ -2127,6 +2132,7 @@ def generate_preview_outputs(
             env_mask_mode=env_mask_mode,
             complex_format=complex_format,
             render_profile=render_profile,
+            include_complex=include_complex,
         )
         outputs["environment_mask"] = enforce_skyrim_output_profile(
             "environment_mask",
@@ -2263,6 +2269,7 @@ def build_environment_mask_output_path(
     env_mask_mode: str = "standard",
     complex_format: str = "msn",
     render_profile: str = "auto",
+    include_complex: bool | None = None,
 ) -> Path:
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
@@ -2271,6 +2278,7 @@ def build_environment_mask_output_path(
         env_mask_mode=env_mask_mode,
         complex_format=complex_format,
         render_profile=render_profile,
+        include_complex=include_complex,
     )
     default_suffix = "_rmaos" if complex_workflow == "truepbr" else "_m"
     mask_stem = environment_mask_name or f"{input_path.stem}{default_suffix}"
@@ -3304,6 +3312,7 @@ def run_with_options(
                 env_mask_mode=env_mask_mode,
                 complex_format=complex_format,
                 render_profile=render_profile,
+                include_complex=include_complex,
             )
             environment_mask = enforce_skyrim_output_profile(
                 "environment_mask",
@@ -3322,6 +3331,7 @@ def run_with_options(
                 env_mask_mode=env_mask_mode,
                 complex_format=complex_format,
                 render_profile=render_profile,
+                include_complex=include_complex,
             )
             env_formats = ("DXT1", "DXT5") if env_mask_mode == "standard" else ("DXT5",)
             outputs["environment_mask"] = _save_with_dds_fallback(
@@ -4828,6 +4838,7 @@ if GUI_AVAILABLE:
                             env_mask_mode=str(generation_kwargs.get("env_mask_mode", "standard")),
                             complex_format=str(generation_kwargs.get("complex_format", "msn")),
                             render_profile=str(generation_kwargs.get("render_profile", "auto")),
+                            include_complex=bool(generation_kwargs.get("include_complex", False)),
                         )
                     )
                 if includes["complex_material"]:

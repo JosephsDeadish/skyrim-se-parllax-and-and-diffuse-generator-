@@ -1042,6 +1042,15 @@ class GenerateTexturesTests(unittest.TestCase):
             resolve_env_mask_complex_workflow(env_mask_mode="complex", complex_format="cm", render_profile="auto"),
             "truepbr",
         )
+        self.assertEqual(
+            resolve_env_mask_complex_workflow(
+                env_mask_mode="complex",
+                complex_format="msn",
+                render_profile="auto",
+                include_complex=False,
+            ),
+            "truepbr",
+        )
 
     def test_prepare_preview_source_downscales_large_images(self) -> None:
         source = Image.new("RGB", (4096, 2048), color=(64, 96, 128))
@@ -2274,13 +2283,16 @@ class GenerateTexturesTests(unittest.TestCase):
                     include_parallax=False,
                     include_glow=False,
                     include_environment_mask=True,
-                    include_complex=False,
+                    include_complex=True,
                     env_mask_mode="complex",
+                    complex_format="msn",
+                    render_profile="enb",
                 )
 
-            self.assertEqual(save_mock.call_count, 1)
-            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT5",))
-            self.assertEqual(save_mock.call_args.args[1].name, "brick_m.dds")
+            self.assertEqual(save_mock.call_count, 2)
+            env_calls = [call for call in save_mock.call_args_list if call.args[1].name.endswith("_m.dds")]
+            self.assertEqual(len(env_calls), 1)
+            self.assertEqual(env_calls[0].kwargs["preferred_pixel_formats"], ("DXT5",))
 
     def test_run_with_options_truepbr_complex_env_mask_defaults_to_rmaos_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
