@@ -10,16 +10,25 @@ from nif_patcher import (
     SLSF1_ENVIRONMENT_MAPPING,
     SLSF1_PARALLAX,
     SLSF1_PARALLAX_OCCLUSION,
+    SLSF2_GLOW_MAP,
     SHADER_TYPE_DEFAULT,
     SHADER_TYPE_ENVMAP,
+    SHADER_TYPE_GLOW,
     SHADER_TYPE_HEIGHTMAP,
+    SHADER_TYPE_MULTILAYER,
+    SHADER_TYPE_NAMES,
     TEXTURE_SLOT_DIFFUSE,
+    TEXTURE_SLOT_ENV_MASK,
+    TEXTURE_SLOT_GLOW,
     TEXTURE_SLOT_NORMAL,
     TEXTURE_SLOT_PARALLAX,
     NifPatchOptions,
     find_nif_files,
+    guess_env_mask_path_for_nif,
+    guess_glow_path_for_nif,
     guess_normal_path_for_nif,
     guess_parallax_path_for_nif,
+    batch_patch_nif,
     patch_nif,
     scan_nif,
     validate_nif_for_parallax,
@@ -41,6 +50,55 @@ def _sstring_u32(text: str) -> bytes:
     return struct.pack("<I", len(enc)) + enc
 
 
+def _build_shader_block(
+    *,
+    shader_type: int = SHADER_TYPE_DEFAULT,
+    flags1: int = 0,
+    flags2: int = 0,
+    parallax_scale: float | None = None,
+    texture_set_ref: int = 0,
+    shader_layout_shift: int = 0,
+) -> bytes:
+    """Build a single BSLightingShaderProperty block body."""
+    # NiObjectNET: name_ref(0) + num_extra(0) + controller(-1)
+    nio = struct.pack("<IIi", 0, 0, -1)
+    layout_pad = b"\x00\x00\x00\x00" if shader_layout_shift == 4 else b""
+    flags = struct.pack("<II", flags1, flags2)
+    stype = struct.pack("<I", shader_type)
+    uv = struct.pack("<ffff", 0.0, 0.0, 1.0, 1.0)
+    tsref = struct.pack("<i", texture_set_ref)
+    emit = struct.pack("<ffff", 0.0, 0.0, 0.0, 1.0)
+    misc = struct.pack("<Ifff", 3, 1.0, 0.0, 80.0)
+    spec = struct.pack("<ffff", 1.0, 1.0, 1.0, 1.0)
+    light = struct.pack("<ff", 0.3, 2.0)
+
+    body = nio + layout_pad + flags + stype + uv + tsref + emit + misc + spec + light
+    if shader_type == SHADER_TYPE_HEIGHTMAP:
+        scale = parallax_scale if parallax_scale is not None else 1.0
+        body += struct.pack("<ff", 4.0, scale)
+    return body
+
+
+def _build_texture_set_block(
+    *,
+    texture_paths: list[str] | None = None,
+    texture_set_layout_shift: int = 0,
+    texture_set_count_u16: bool = False,
+) -> bytes:
+    """Build a single BSShaderTextureSet block body."""
+    if texture_paths is None:
+        texture_paths = [""] * 9
+    layout_pad = b"\x00\x00\x00\x00" if texture_set_layout_shift == 4 else b""
+    if texture_set_count_u16:
+        count_bytes = struct.pack("<H", 9)
+    else:
+        count_bytes = struct.pack("<I", 9)
+    body = layout_pad + count_bytes
+    for path in texture_paths[:9]:
+        body += _sstring_u32(path)
+    return body
+
+
 def _build_minimal_nif(
     *,
     shader_type: int = SHADER_TYPE_DEFAULT,
@@ -54,12 +112,18 @@ def _build_minimal_nif(
     shader_layout_shift: int = 0,
     texture_set_layout_shift: int = 0,
     texture_set_count_u16: bool = False,
+    extra_shader_blocks: list[dict] | None = None,
 ) -> bytes:
     """Build a minimal but structurally valid Skyrim SE NIF in memory.
 
-    Contains exactly two blocks:
+    Contains at least two blocks:
       0 – BSShaderTextureSet   (9 texture slots)
       1 – BSLightingShaderProperty  (references block 0)
+
+    When *extra_shader_blocks* is provided, each dict entry is passed as
+    kwargs to :func:`_build_shader_block` and an additional BSShaderTextureSet
+    (with all-empty slots) is added for each extra shader.  Block indices are
+    assigned sequentially: TS0, SP0, TS1, SP1, ...
 
     When *texture_set_count_u16* is True the count field is written as a
     u16 (Skyrim LE / mixed-export format) instead of u32 (SE native).
@@ -67,71 +131,62 @@ def _build_minimal_nif(
     if texture_paths is None:
         texture_paths = [""] * 9
 
-    # --- BSShaderTextureSet block ---
-    ts_layout_pad = b"\x00\x00\x00\x00" if texture_set_layout_shift == 4 else b""
-    if texture_set_count_u16:
-        ts_count_bytes = struct.pack("<H", 9)
-    else:
-        ts_count_bytes = struct.pack("<I", 9)
-    ts_body = ts_layout_pad + ts_count_bytes
-    for path in texture_paths[:9]:
-        ts_body += _sstring_u32(path)
+    # --- Primary blocks -------------------------------------------------
+    ts0_body = _build_texture_set_block(
+        texture_paths=texture_paths,
+        texture_set_layout_shift=texture_set_layout_shift,
+        texture_set_count_u16=texture_set_count_u16,
+    )
+    sp0_body = _build_shader_block(
+        shader_type=shader_type,
+        flags1=flags1,
+        flags2=flags2,
+        parallax_scale=parallax_scale,
+        texture_set_ref=0,
+        shader_layout_shift=shader_layout_shift,
+    )
 
-    # --- BSLightingShaderProperty block ---
-    # NiObjectNET: name_ref(0) + num_extra(0) + controller(-1)
-    nio = struct.pack("<IIi", 0, 0, -1)
-    # Some real-world NIFs include an extra u32 between NiObjectNET and
-    # BSShaderProperty fields; shader_layout_shift=4 simulates that variant.
-    layout_pad = b"\x00\x00\x00\x00" if shader_layout_shift == 4 else b""
-    # BSShaderProperty flags
-    flags = struct.pack("<II", flags1, flags2)
-    # shader_type
-    stype = struct.pack("<I", shader_type)
-    # uv_offset(2f) + uv_scale(2f)
-    uv = struct.pack("<ffff", 0.0, 0.0, 1.0, 1.0)
-    # texture_set_ref → block 0
-    tsref = struct.pack("<i", 0)
-    # emissive_color(3f) + emissive_mul(f)
-    emit = struct.pack("<ffff", 0.0, 0.0, 0.0, 1.0)
-    # clamp_mode(u32) + alpha(f) + refraction(f) + glossiness(f)
-    misc = struct.pack("<Ifff", 3, 1.0, 0.0, 80.0)
-    # spec_color(3f) + spec_strength(f)
-    spec = struct.pack("<ffff", 1.0, 1.0, 1.0, 1.0)
-    # light_eff1(f) + light_eff2(f)
-    light = struct.pack("<ff", 0.3, 2.0)
+    # --- Extra shader blocks --------------------------------------------
+    extra_bodies: list[tuple[bytes, bytes]] = []
+    for extra in (extra_shader_blocks or []):
+        ts_idx = 2 + len(extra_bodies) * 2
+        ts_body = _build_texture_set_block()
+        sp_body = _build_shader_block(texture_set_ref=ts_idx, **extra)
+        extra_bodies.append((ts_body, sp_body))
 
-    sp_body = nio + layout_pad + flags + stype + uv + tsref + emit + misc + spec + light
-    # type-3 parallax-specific fields
-    if shader_type == SHADER_TYPE_HEIGHTMAP:
-        scale = parallax_scale if parallax_scale is not None else 1.0
-        sp_body += struct.pack("<ff", 4.0, scale)
+    # --- Assemble block list --------------------------------------------
+    # order: TS0, SP0, TS1, SP1, ...
+    block_type_names = ["BSShaderTextureSet", shader_block_type]
+    all_blocks: list[tuple[int, bytes]] = [
+        (0, ts0_body),   # type_idx 0 = BSShaderTextureSet
+        (1, sp0_body),   # type_idx 1 = shader_block_type
+    ]
+    for ts_body, sp_body in extra_bodies:
+        all_blocks.append((0, ts_body))
+        all_blocks.append((1, sp_body))
+
+    num_blks = len(all_blocks)
+    type_indices_bytes = b"".join(struct.pack("<H", ti) for ti, _ in all_blocks)
+    block_sizes_bytes = b"".join(struct.pack("<I", len(body)) for _, body in all_blocks)
 
     # --- Header ---
     header_str = b"Gamebryo File Format, Version 20.2.0.7" + header_line_ending
     version = struct.pack("<I", 0x14020007)
     endian = struct.pack("B", 1)
     user_ver = struct.pack("<I", 12)
-    num_blocks = struct.pack("<I", 2)
+    num_blocks_bytes = struct.pack("<I", num_blks)
     user_ver2 = struct.pack("<I", user_ver2)
-    # 3 export strings (all empty)
     export = _sstring_u8("") + _sstring_u8("") + _sstring_u8("")
-    # block types
-    block_types_list = ["BSShaderTextureSet", shader_block_type]
-    num_block_types = struct.pack("<H", 2)
-    btypes = b"".join(_sstring_u32(t) for t in block_types_list)
-    # type indices
-    type_indices = struct.pack("<HH", 0, 1)  # block 0 = type 0, block 1 = type 1
-    # block sizes
-    block_sizes = struct.pack("<II", len(ts_body), len(sp_body))
-    # string table (empty)
+    num_block_types = struct.pack("<H", len(block_type_names))
+    btypes = b"".join(_sstring_u32(t) for t in block_type_names)
     string_table = struct.pack("<II", 0, 0)
 
     header = (
-        header_str + version + endian + user_ver + num_blocks
+        header_str + version + endian + user_ver + num_blocks_bytes
         + user_ver2 + export + num_block_types + btypes
-        + type_indices + block_sizes + string_table
+        + type_indices_bytes + block_sizes_bytes + string_table
     )
-    return header + ts_body + sp_body
+    return header + b"".join(body for _, body in all_blocks)
 
 
 def _write_nif(tmp_dir: Path, **kwargs: object) -> Path:
@@ -762,6 +817,333 @@ class TestHelpers(unittest.TestCase):
         self.assertIn("a.nif", names)
         self.assertIn("b.nif", names)
         self.assertNotIn("skip.txt", names)
+
+
+# ---------------------------------------------------------------------------
+# Tests: glow / diffuse texture slot patching
+# ---------------------------------------------------------------------------
+
+class TestGlowAndDiffusePatching(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_writes_glow_texture_path(self) -> None:
+        nif = _write_nif(self.tmp)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                glow_texture_path="textures\\arch\\stone_g.dds",
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(
+            infos[0].texture_paths.get(TEXTURE_SLOT_GLOW),
+            "textures\\arch\\stone_g.dds",
+        )
+
+    def test_enable_glow_map_flag(self) -> None:
+        nif = _write_nif(self.tmp)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(enable_glow_map=True, backup=False),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertTrue(infos[0].has_glow_map_flag)
+
+    def test_disable_glow_map_flag(self) -> None:
+        nif = _write_nif(self.tmp, flags2=SLSF2_GLOW_MAP)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(disable_glow_map=True, backup=False),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertFalse(infos[0].has_glow_map_flag)
+
+    def test_writes_diffuse_texture_path(self) -> None:
+        nif = _write_nif(self.tmp)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                diffuse_texture_path="textures\\arch\\stone_new.dds",
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(
+            infos[0].texture_paths.get(TEXTURE_SLOT_DIFFUSE),
+            "textures\\arch\\stone_new.dds",
+        )
+
+    def test_clear_glow_texture_path(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_g.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths, flags2=SLSF2_GLOW_MAP)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(clear_glow_texture_path=True, backup=False),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].texture_paths.get(TEXTURE_SLOT_GLOW, ""), "")
+
+    def test_clear_diffuse_texture_path(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(clear_diffuse_texture_path=True, backup=False),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].texture_paths.get(TEXTURE_SLOT_DIFFUSE, ""), "")
+
+    def test_glow_and_parallax_patched_together(self) -> None:
+        nif = _write_nif(self.tmp)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_texture_path="textures\\arch\\stone_p.dds",
+                enable_glow_map=True,
+                glow_texture_path="textures\\arch\\stone_g.dds",
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertTrue(infos[0].has_parallax_flag)
+        self.assertTrue(infos[0].has_glow_map_flag)
+        self.assertEqual(infos[0].texture_paths.get(TEXTURE_SLOT_PARALLAX), "textures\\arch\\stone_p.dds")
+        self.assertEqual(infos[0].texture_paths.get(TEXTURE_SLOT_GLOW), "textures\\arch\\stone_g.dds")
+
+
+# ---------------------------------------------------------------------------
+# Tests: NifShaderInfo.shader_type_name and has_glow_map_flag
+# ---------------------------------------------------------------------------
+
+class TestNifShaderInfoProperties(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_shader_type_name_default(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT)
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].shader_type_name, SHADER_TYPE_NAMES[SHADER_TYPE_DEFAULT])
+
+    def test_shader_type_name_heightmap(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_HEIGHTMAP, parallax_scale=1.0)
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].shader_type_name, SHADER_TYPE_NAMES[SHADER_TYPE_HEIGHTMAP])
+        self.assertIn("Parallax", infos[0].shader_type_name)
+
+    def test_shader_type_name_unknown(self) -> None:
+        from nif_patcher import NifShaderInfo
+        info = NifShaderInfo(
+            block_index=0, shader_type=99, flags1=0, flags2=0,
+            parallax_scale=None, texture_paths={}
+        )
+        self.assertIn("99", info.shader_type_name)
+
+    def test_has_glow_map_flag_false_by_default(self) -> None:
+        nif = _write_nif(self.tmp)
+        infos = scan_nif(nif)
+        self.assertFalse(infos[0].has_glow_map_flag)
+
+    def test_has_glow_map_flag_true_when_set(self) -> None:
+        nif = _write_nif(self.tmp, flags2=SLSF2_GLOW_MAP)
+        infos = scan_nif(nif)
+        self.assertTrue(infos[0].has_glow_map_flag)
+
+    def test_shader_type_names_covers_all_known_types(self) -> None:
+        for st in (SHADER_TYPE_DEFAULT, SHADER_TYPE_ENVMAP, SHADER_TYPE_GLOW,
+                   SHADER_TYPE_HEIGHTMAP, SHADER_TYPE_MULTILAYER):
+            self.assertIn(st, SHADER_TYPE_NAMES)
+
+
+# ---------------------------------------------------------------------------
+# Tests: guess_env_mask_path_for_nif and guess_glow_path_for_nif
+# ---------------------------------------------------------------------------
+
+class TestGuessHelpers(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_guess_glow_path_from_diffuse(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_glow_path_for_nif(nif)
+        self.assertIsNotNone(guessed)
+        self.assertTrue((guessed or "").endswith("_g.dds"))
+        self.assertIn("stone", guessed or "")
+
+    def test_guess_glow_path_from_existing_glow_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_glow.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_glow_path_for_nif(nif)
+        self.assertIsNotNone(guessed)
+        self.assertTrue((guessed or "").endswith("_g.dds"))
+
+    def test_guess_glow_returns_none_for_no_diffuse(self) -> None:
+        nif = _write_nif(self.tmp)
+        self.assertIsNone(guess_glow_path_for_nif(nif))
+
+    def test_guess_env_mask_path_from_diffuse(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_env_mask_path_for_nif(nif)
+        self.assertIsNotNone(guessed)
+        self.assertTrue((guessed or "").endswith("_m.dds"))
+        self.assertIn("stone", guessed or "")
+
+    def test_guess_env_mask_path_from_existing_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_mask.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_env_mask_path_for_nif(nif)
+        self.assertIsNotNone(guessed)
+        self.assertTrue((guessed or "").endswith("_m.dds"))
+
+    def test_guess_env_mask_returns_none_for_no_paths(self) -> None:
+        nif = _write_nif(self.tmp)
+        self.assertIsNone(guess_env_mask_path_for_nif(nif))
+
+
+# ---------------------------------------------------------------------------
+# Tests: batch_patch_nif
+# ---------------------------------------------------------------------------
+
+class TestBatchPatchNif(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_batch_patches_multiple_files(self) -> None:
+        nif_a = self.tmp / "a.nif"
+        nif_b = self.tmp / "b.nif"
+        nif_a.write_bytes(_build_minimal_nif())
+        nif_b.write_bytes(_build_minimal_nif())
+        results = batch_patch_nif(
+            [nif_a, nif_b],
+            NifPatchOptions(enable_parallax=True, backup=False),
+        )
+        self.assertEqual(len(results), 2)
+        for r in results:
+            self.assertTrue(r.success, r.errors)
+        for nif in (nif_a, nif_b):
+            infos = scan_nif(nif)
+            self.assertTrue(infos[0].has_parallax_flag)
+
+    def test_batch_returns_empty_list_for_empty_input(self) -> None:
+        results = batch_patch_nif([], NifPatchOptions(enable_parallax=True, backup=False))
+        self.assertEqual(results, [])
+
+    def test_batch_captures_errors_without_raising(self) -> None:
+        missing = self.tmp / "nonexistent.nif"
+        results = batch_patch_nif(
+            [missing],
+            NifPatchOptions(enable_parallax=True, backup=False),
+        )
+        self.assertEqual(len(results), 1)
+        self.assertFalse(results[0].success)
+        self.assertTrue(len(results[0].errors) > 0)
+
+    def test_batch_results_preserve_order(self) -> None:
+        nifs = []
+        for i in range(3):
+            p = self.tmp / f"nif_{i}.nif"
+            p.write_bytes(_build_minimal_nif())
+            nifs.append(p)
+        results = batch_patch_nif(nifs, NifPatchOptions(enable_parallax=True, backup=False))
+        for i, r in enumerate(results):
+            self.assertEqual(r.nif_path, nifs[i])
+
+
+# ---------------------------------------------------------------------------
+# Tests: multiple shader blocks (extra_shader_blocks builder feature)
+# ---------------------------------------------------------------------------
+
+class TestMultipleShaderBlocks(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_builder_creates_multiple_shader_blocks(self) -> None:
+        nif_data = _build_minimal_nif(
+            extra_shader_blocks=[
+                {"shader_type": SHADER_TYPE_DEFAULT, "flags1": 0},
+                {"shader_type": SHADER_TYPE_HEIGHTMAP, "parallax_scale": 2.0, "flags1": SLSF1_PARALLAX},
+            ]
+        )
+        p = self.tmp / "multi.nif"
+        p.write_bytes(nif_data)
+        infos = scan_nif(p)
+        self.assertEqual(len(infos), 3)
+
+    def test_patch_affects_all_shader_blocks(self) -> None:
+        nif_data = _build_minimal_nif(
+            extra_shader_blocks=[{"shader_type": SHADER_TYPE_DEFAULT, "flags1": 0}]
+        )
+        p = self.tmp / "multi.nif"
+        p.write_bytes(nif_data)
+        result = patch_nif(p, NifPatchOptions(enable_parallax=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(p)
+        self.assertEqual(len(infos), 2)
+        for info in infos:
+            self.assertTrue(info.has_parallax_flag)
+
+
+# ---------------------------------------------------------------------------
+# Tests: validate glow map consistency
+# ---------------------------------------------------------------------------
+
+class TestValidateGlowMap(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_reports_glow_slot_without_glow_flag(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_g.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths, flags2=0)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 2", joined)
+        self.assertIn("glow_map", joined)
+
+    def test_reports_glow_flag_without_glow_slot(self) -> None:
+        nif = _write_nif(self.tmp, flags2=SLSF2_GLOW_MAP)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("glow_map", joined)
+        self.assertIn("slot 2", joined)
 
 
 if __name__ == "__main__":

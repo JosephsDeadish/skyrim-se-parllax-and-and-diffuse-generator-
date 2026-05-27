@@ -1,4 +1,4 @@
-"""Skyrim SE NIF file patcher (v0.6).
+"""Skyrim SE NIF file patcher (v0.7).
 
 Reads Skyrim SE NIF files (format 20.2.0.7, user_version=12,
 user_version_2=83/100) and patches ``BSLightingShaderProperty`` shader flags and
@@ -69,18 +69,70 @@ _HEADER_PREFIXES: tuple[bytes, ...] = (
 # Shader Flags 1 (BSLightingShaderProperty)
 SLSF1_SPECULAR: int = 0x00000001
 SLSF1_SKINNED: int = 0x00000002
+SLSF1_LOW_DETAIL: int = 0x00000004
+SLSF1_VERTEX_ALPHA: int = 0x00000008
+SLSF1_UNKNOWN_1: int = 0x00000010
+SLSF1_SINGLE_PASS: int = 0x00000020
+SLSF1_EMPTY: int = 0x00000040
 SLSF1_ENVIRONMENT_MAPPING: int = 0x00000080
 SLSF1_RECEIVE_SHADOWS: int = 0x00000100
 SLSF1_CAST_SHADOWS: int = 0x00000200
+SLSF1_FACEGEN_DETAIL: int = 0x00000400
 SLSF1_PARALLAX: int = 0x00000800
 SLSF1_MODEL_SPACE_NORMALS: int = 0x00001000
+SLSF1_NON_PROJECTIVE_SHADOWS: int = 0x00002000
+SLSF1_LANDSCAPE: int = 0x00004000
+SLSF1_REFRACTION: int = 0x00008000
+SLSF1_FIRE_REFRACTION: int = 0x00010000
+SLSF1_EYE_ENVIRONMENT_MAPPING: int = 0x00020000
+SLSF1_HAIR_SOFT_LIGHTING: int = 0x00040000
+SLSF1_SCREENDOOR_ALPHA_FADE: int = 0x00080000
+SLSF1_LOCALMAP_HIDE_SECRET: int = 0x00100000
+SLSF1_FACEGEN_RGB_TINT: int = 0x00200000
+SLSF1_OWN_EMIT: int = 0x00400000
+SLSF1_PROJECTED_UV: int = 0x00800000
+SLSF1_MULTIPLE_TEXTURES: int = 0x01000000
+SLSF1_REMAPPABLE_TEXTURES: int = 0x02000000
+SLSF1_DECAL: int = 0x04000000
+SLSF1_DYNAMIC_DECAL: int = 0x08000000
 SLSF1_PARALLAX_OCCLUSION: int = 0x10000000
+SLSF1_EXTERNAL_EMITTANCE: int = 0x20000000
+SLSF1_SOFT_EFFECT: int = 0x40000000
 SLSF1_ZBUFFER_TEST: int = 0x80000000
 
 # Shader Flags 2
 SLSF2_ZBUFFER_WRITE: int = 0x00000001
+SLSF2_LOD_LANDSCAPE: int = 0x00000002
+SLSF2_LOD_OBJECTS: int = 0x00000004
+SLSF2_NO_FADE: int = 0x00000008
+SLSF2_DOUBLE_SIDED: int = 0x00000010
+SLSF2_VERTEX_COLORS: int = 0x00000020
 SLSF2_GLOW_MAP: int = 0x00000040
+SLSF2_ASSUME_SHADOWMASK: int = 0x00000080
+SLSF2_PACKED_TANGENT: int = 0x00000100
+SLSF2_MULTI_INDEX_SNOW: int = 0x00000200
+SLSF2_VERTEX_LIGHTING: int = 0x00000400
+SLSF2_UNIFORM_SCALE: int = 0x00000800
+SLSF2_FIT_SLOPE: int = 0x00001000
+SLSF2_BILLBOARD: int = 0x00002000
+SLSF2_NO_LOD_LAND_BLEND: int = 0x00004000
+SLSF2_ENVMAP_LIGHT_FADE: int = 0x00008000
+SLSF2_WIREFRAME: int = 0x00010000
+SLSF2_WEAPON_BLOOD: int = 0x00020000
+SLSF2_HIDE_ON_LOCAL_MAP: int = 0x00040000
+SLSF2_PREMULT_ALPHA: int = 0x00080000
+SLSF2_CLOUD_LOD: int = 0x00100000
+SLSF2_ANISOTROPIC_LIGHTING: int = 0x00200000
+SLSF2_NO_TRANSPARENCY_MULTISAMPLING: int = 0x00400000
+SLSF2_UNUSED01: int = 0x00800000
+SLSF2_MULTI_LAYER_PARALLAX: int = 0x01000000
 SLSF2_SOFT_LIGHTING: int = 0x02000000
+SLSF2_RIM_LIGHTING: int = 0x04000000
+SLSF2_BACK_LIGHTING: int = 0x08000000
+SLSF2_UNUSED02: int = 0x10000000
+SLSF2_TREE_ANIM: int = 0x20000000
+SLSF2_EFFECT_LIGHTING: int = 0x40000000
+SLSF2_HD_LOD_OBJECTS: int = 0x80000000
 
 # Texture slot indices inside BSShaderTextureSet
 TEXTURE_SLOT_DIFFUSE: int = 0
@@ -114,6 +166,19 @@ _KNOWN_SHADER_TYPES: set[int] = {
     SHADER_TYPE_HAIR_TINT,
     SHADER_TYPE_PARALLAX_OCC,
     SHADER_TYPE_MULTILAYER,
+}
+
+# Human-readable names for BSLightingShaderPropertyShaderType values
+SHADER_TYPE_NAMES: dict[int, str] = {
+    SHADER_TYPE_DEFAULT: "Default",
+    SHADER_TYPE_ENVMAP: "Environment Map",
+    SHADER_TYPE_GLOW: "Glow/Emit",
+    SHADER_TYPE_HEIGHTMAP: "Heightmap (Parallax)",
+    SHADER_TYPE_FACE_TINT: "Face Tint",
+    SHADER_TYPE_SKIN_TINT: "Skin Tint",
+    SHADER_TYPE_HAIR_TINT: "Hair Tint",
+    SHADER_TYPE_PARALLAX_OCC: "Parallax Occlusion",
+    SHADER_TYPE_MULTILAYER: "Multi-Layer Parallax",
 }
 
 # Default parallax field values when upgrading a block to type 3
@@ -175,12 +240,21 @@ class NifPatchOptions:
         sizes are updated accordingly.
     enable_env_mapping:
         Set ``SLSF1_Environment_Mapping`` in Shader_Flags_1.
+    enable_glow_map:
+        Set ``SLSF2_Glow_Map`` in Shader_Flags_2.  Set this together with
+        *glow_texture_path* to activate an emissive/glow map in-game.
     parallax_texture_path:
         Texture path for slot 3. Absolute ``Data\\Textures`` picks are normalized
         to Skyrim-relative form (e.g. ``textures\\arch\\stone_p.dds``).
     normal_texture_path:
         Relative path for slot 1.  Set to your ``_msn.dds`` for ENB complex
         material or ``_n.dds`` for a standard normal map.
+    glow_texture_path:
+        Relative path for slot 2 (glow/emissive map, ``_g.dds``).  Pair with
+        *enable_glow_map* to activate the emissive effect on the mesh.
+    diffuse_texture_path:
+        Relative path for slot 0 (diffuse/albedo, ``_d.dds`` or similar).
+        Useful for re-pointing a NIF's diffuse slot after a texture rename.
     env_mask_texture_path:
         Relative path for slot 5 (environment mask / ``_m.dds``).
     cubemap_texture_path:
@@ -195,10 +269,16 @@ class NifPatchOptions:
         Clear only ``SLSF1_Parallax_Occlusion``.
     disable_env_mapping:
         Clear ``SLSF1_Environment_Mapping``.
+    disable_glow_map:
+        Clear ``SLSF2_Glow_Map`` in Shader_Flags_2.
     clear_parallax_texture_path:
         Empty texture slot 3 (parallax map).
     clear_normal_texture_path:
         Empty texture slot 1 (normal/MSN map).
+    clear_glow_texture_path:
+        Empty texture slot 2 (glow/emissive map).
+    clear_diffuse_texture_path:
+        Empty texture slot 0 (diffuse/albedo map).
     clear_env_mask_texture_path:
         Empty texture slot 5 (environment mask).
     clear_cubemap_texture_path:
@@ -210,8 +290,11 @@ class NifPatchOptions:
     parallax_scale: float | None = None
     force_shader_type_3: bool = False
     enable_env_mapping: bool = False
+    enable_glow_map: bool = False
     parallax_texture_path: str | None = None
     normal_texture_path: str | None = None
+    glow_texture_path: str | None = None
+    diffuse_texture_path: str | None = None
     env_mask_texture_path: str | None = None
     cubemap_texture_path: str | None = None
     backup: bool = True
@@ -219,8 +302,11 @@ class NifPatchOptions:
     disable_parallax: bool = False
     disable_pom: bool = False
     disable_env_mapping: bool = False
+    disable_glow_map: bool = False
     clear_parallax_texture_path: bool = False
     clear_normal_texture_path: bool = False
+    clear_glow_texture_path: bool = False
+    clear_diffuse_texture_path: bool = False
     clear_env_mask_texture_path: bool = False
     clear_cubemap_texture_path: bool = False
 
@@ -250,6 +336,15 @@ class NifShaderInfo:
     @property
     def has_env_mapping_flag(self) -> bool:
         return bool(self.flags1 & SLSF1_ENVIRONMENT_MAPPING)
+
+    @property
+    def has_glow_map_flag(self) -> bool:
+        return bool(self.flags2 & SLSF2_GLOW_MAP)
+
+    @property
+    def shader_type_name(self) -> str:
+        """Human-readable name of the shader type (e.g. ``'Heightmap (Parallax)'``)."""
+        return SHADER_TYPE_NAMES.get(self.shader_type, f"Unknown ({self.shader_type})")
 
 
 @dataclass
@@ -979,6 +1074,8 @@ def _apply_patches(
             new_flags1 |= SLSF1_PARALLAX_OCCLUSION
         if opts.enable_env_mapping:
             new_flags1 |= SLSF1_ENVIRONMENT_MAPPING
+        if opts.enable_glow_map:
+            new_flags2 |= SLSF2_GLOW_MAP
         if opts.disable_parallax:
             new_flags1 &= ~SLSF1_PARALLAX
             new_flags1 &= ~SLSF1_PARALLAX_OCCLUSION
@@ -986,6 +1083,8 @@ def _apply_patches(
             new_flags1 &= ~SLSF1_PARALLAX_OCCLUSION
         if opts.disable_env_mapping:
             new_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
+        if opts.disable_glow_map:
+            new_flags2 &= ~SLSF2_GLOW_MAP
 
         flags_changed = (new_flags1 != sp.flags1) or (new_flags2 != sp.flags2)
         if flags_changed:
@@ -1052,6 +1151,10 @@ def _apply_patches(
             requested_slots.append(TEXTURE_SLOT_ENV_MASK)
         if opts.cubemap_texture_path:
             requested_slots.append(TEXTURE_SLOT_CUBEMAP)
+        if opts.glow_texture_path:
+            requested_slots.append(TEXTURE_SLOT_GLOW)
+        if opts.diffuse_texture_path:
+            requested_slots.append(TEXTURE_SLOT_DIFFUSE)
         if requested_slots:
             max_slot = max(requested_slots)
             data, header, texture_sets, extended = _extend_texture_set_slots(data, header, ts, max_slot)
@@ -1080,6 +1183,12 @@ def _apply_patches(
         _want(TEXTURE_SLOT_NORMAL, opts.normal_texture_path)
         if opts.clear_normal_texture_path:
             _want(TEXTURE_SLOT_NORMAL, None, clear=True)
+        _want(TEXTURE_SLOT_GLOW, opts.glow_texture_path)
+        if opts.clear_glow_texture_path:
+            _want(TEXTURE_SLOT_GLOW, None, clear=True)
+        _want(TEXTURE_SLOT_DIFFUSE, opts.diffuse_texture_path)
+        if opts.clear_diffuse_texture_path:
+            _want(TEXTURE_SLOT_DIFFUSE, None, clear=True)
         _want(TEXTURE_SLOT_ENV_MASK, opts.env_mask_texture_path)
         _want(TEXTURE_SLOT_CUBEMAP, opts.cubemap_texture_path)
         if opts.clear_env_mask_texture_path:
@@ -1139,15 +1248,21 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         (
             effective_parallax,
             opts.enable_env_mapping,
+            opts.enable_glow_map,
             opts.normal_texture_path is not None,
             opts.parallax_texture_path is not None,
+            opts.glow_texture_path is not None,
+            opts.diffuse_texture_path is not None,
             opts.env_mask_texture_path is not None,
             opts.cubemap_texture_path is not None,
             opts.disable_parallax,
             opts.disable_pom,
             opts.disable_env_mapping,
+            opts.disable_glow_map,
             opts.clear_parallax_texture_path,
             opts.clear_normal_texture_path,
+            opts.clear_glow_texture_path,
+            opts.clear_diffuse_texture_path,
             opts.clear_env_mask_texture_path,
             opts.clear_cubemap_texture_path,
         )
@@ -1422,6 +1537,21 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                 result.suggestions,
                 f"Block {info.block_index}: parallax scale is only {info.parallax_scale:.2f}; increase it if the mesh patches successfully but depth is still invisible in game."
             )
+        glow_path = info.texture_paths.get(TEXTURE_SLOT_GLOW, "").strip()
+        if glow_path and not info.has_glow_map_flag:
+            _append_unique(
+                result.issues,
+                f"Block {info.block_index}: texture slot 2 is filled ('{glow_path}') but SLSF2_Glow_Map is not set — the emissive map will not be visible."
+            )
+            _append_unique(
+                result.suggestions,
+                "Enable the glow map flag with enable_glow_map=True or clear slot 2 if this mesh should not glow."
+            )
+        if info.has_glow_map_flag and not glow_path:
+            _append_unique(
+                result.suggestions,
+                f"Block {info.block_index}: SLSF2_Glow_Map is set but slot 2 is empty; add a _g.dds emissive map or disable the flag."
+            )
 
     result.valid = result.shader_count > 0
     return result
@@ -1488,6 +1618,86 @@ def guess_normal_path_for_nif(nif_path: Path, *, msn: bool = False) -> str | Non
     return None
 
 
+def guess_glow_path_for_nif(nif_path: Path) -> str | None:
+    """Guess the glow/emissive-map path from a NIF's diffuse or glow slot.
+
+    Returns a Windows-style relative ``_g.dds`` path, or ``None`` if no
+    suitable texture path is found in the NIF.
+    """
+    infos = scan_nif(nif_path)
+    for info in infos:
+        existing = info.texture_paths.get(TEXTURE_SLOT_GLOW, "").strip()
+        if existing:
+            p = Path(existing.replace("\\", "/"))
+            stem = p.stem
+            for s in ("_g", "_glow", "_emissive", "_emit"):
+                if stem.lower().endswith(s):
+                    stem = stem[: -len(s)]
+                    break
+            return str(p.parent / (stem + "_g.dds")).replace("/", "\\")
+        diffuse = info.texture_paths.get(TEXTURE_SLOT_DIFFUSE, "").strip()
+        if not diffuse:
+            continue
+        p = Path(diffuse.replace("\\", "/"))
+        stem = p.stem
+        for s in ("_d", "_diff", "_diffuse", "_albedo"):
+            if stem.lower().endswith(s):
+                stem = stem[: -len(s)]
+                break
+        return str(p.parent / (stem + "_g.dds")).replace("/", "\\")
+    return None
+
+
+def guess_env_mask_path_for_nif(nif_path: Path) -> str | None:
+    """Guess the environment-mask path from a NIF's diffuse or env-mask slot.
+
+    Returns a Windows-style relative ``_m.dds`` path, or ``None`` if no
+    suitable texture path is found in the NIF.
+    """
+    infos = scan_nif(nif_path)
+    for info in infos:
+        existing = info.texture_paths.get(TEXTURE_SLOT_ENV_MASK, "").strip()
+        if existing:
+            p = Path(existing.replace("\\", "/"))
+            stem = p.stem
+            for s in ("_m", "_mask", "_envmask", "_env"):
+                if stem.lower().endswith(s):
+                    stem = stem[: -len(s)]
+                    break
+            return str(p.parent / (stem + "_m.dds")).replace("/", "\\")
+        diffuse = info.texture_paths.get(TEXTURE_SLOT_DIFFUSE, "").strip()
+        if not diffuse:
+            continue
+        p = Path(diffuse.replace("\\", "/"))
+        stem = p.stem
+        for s in ("_d", "_diff", "_diffuse", "_albedo"):
+            if stem.lower().endswith(s):
+                stem = stem[: -len(s)]
+                break
+        return str(p.parent / (stem + "_m.dds")).replace("/", "\\")
+    return None
+
+
+def batch_patch_nif(
+    nif_paths: list[Path],
+    opts: NifPatchOptions,
+) -> list[NifPatchResult]:
+    """Patch multiple NIF files with the same options.
+
+    Returns one :class:`NifPatchResult` per input path in the same order.
+    Never raises — individual errors are captured in each result's
+    ``errors`` list and ``success`` flag.
+
+    Parameters
+    ----------
+    nif_paths:
+        NIF files to patch.
+    opts:
+        Patch options applied uniformly to every file.
+    """
+    return [patch_nif(p, opts) for p in nif_paths]
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -1513,20 +1723,34 @@ def _main() -> None:  # pragma: no cover
                         help="Upgrade shader type 0→3 to enable parallax scale.")
     parser.add_argument("--normal", metavar="PATH",
                         help="Normal / MSN texture path (slot 1).")
+    parser.add_argument("--diffuse", metavar="PATH",
+                        help="Diffuse / albedo texture path (slot 0).")
+    parser.add_argument("--glow", metavar="PATH",
+                        help="Glow / emissive texture path (slot 2).")
+    parser.add_argument("--cubemap", metavar="PATH",
+                        help="Cubemap texture path (slot 4).")
     parser.add_argument("--env-mask", metavar="PATH",
                         help="Environment mask texture path (slot 5).")
     parser.add_argument("--env-mapping", action="store_true",
                         help="Set SLSF1_Environment_Mapping flag.")
+    parser.add_argument("--enable-glow-map", action="store_true",
+                        help="Set SLSF2_Glow_Map flag.")
     parser.add_argument("--disable-parallax", action="store_true",
                         help="Clear SLSF1_Parallax and SLSF1_Parallax_Occlusion flags.")
     parser.add_argument("--disable-pom", action="store_true",
                         help="Clear SLSF1_Parallax_Occlusion flag only.")
     parser.add_argument("--disable-env-mapping", action="store_true",
                         help="Clear SLSF1_Environment_Mapping flag.")
+    parser.add_argument("--disable-glow-map", action="store_true",
+                        help="Clear SLSF2_Glow_Map flag.")
     parser.add_argument("--clear-parallax", action="store_true",
                         help="Clear slot 3 parallax texture path.")
     parser.add_argument("--clear-normal", action="store_true",
                         help="Clear slot 1 normal/MSN texture path.")
+    parser.add_argument("--clear-glow", action="store_true",
+                        help="Clear slot 2 glow/emissive texture path.")
+    parser.add_argument("--clear-diffuse", action="store_true",
+                        help="Clear slot 0 diffuse/albedo texture path.")
     parser.add_argument("--clear-env-mask", action="store_true",
                         help="Clear slot 5 environment mask texture path.")
     parser.add_argument("--no-backup", action="store_true",
@@ -1568,16 +1792,23 @@ def _main() -> None:  # pragma: no cover
         parallax_scale=args.parallax_scale,
         force_shader_type_3=args.force_type3,
         enable_env_mapping=args.env_mapping,
+        enable_glow_map=args.enable_glow_map,
         parallax_texture_path=args.parallax,
         normal_texture_path=args.normal,
+        glow_texture_path=args.glow,
+        diffuse_texture_path=args.diffuse,
         env_mask_texture_path=args.env_mask,
+        cubemap_texture_path=args.cubemap,
         backup=not args.no_backup,
         dry_run=args.dry_run,
         disable_parallax=args.disable_parallax,
         disable_pom=args.disable_pom,
         disable_env_mapping=args.disable_env_mapping,
+        disable_glow_map=args.disable_glow_map,
         clear_parallax_texture_path=args.clear_parallax,
         clear_normal_texture_path=args.clear_normal,
+        clear_glow_texture_path=args.clear_glow,
+        clear_diffuse_texture_path=args.clear_diffuse,
         clear_env_mask_texture_path=args.clear_env_mask,
     )
 

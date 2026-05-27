@@ -40,6 +40,8 @@ try:
     from nif_patcher import (
         NifPatchOptions,
         find_nif_files,
+        guess_env_mask_path_for_nif,
+        guess_glow_path_for_nif,
         guess_normal_path_for_nif,
         guess_parallax_path_for_nif,
         patch_nif,
@@ -2293,6 +2295,7 @@ def build_nif_patch_options_for_generated_outputs(
     parallax_scale: float | None,
     include_parallax: bool | None = None,
     include_environment_mask: bool | None = None,
+    include_glow: bool | None = None,
 ) -> NifPatchOptions:
     normalized_complex_format = _normalize_complex_format(complex_format)
     normalized_env_mask_mode = _normalize_env_mask_mode(env_mask_mode)
@@ -2303,18 +2306,22 @@ def build_nif_patch_options_for_generated_outputs(
     normal_output = outputs.get("normal")
     parallax_output = outputs.get("parallax")
     env_mask_output = outputs.get("environment_mask")
+    glow_output = outputs.get("glow")
     normal_path = complex_output if complex_output is not None and normalized_complex_format == "msn" else normal_output
     parallax_disabled_by_options = include_parallax is False
     env_mask_disabled_by_options = include_environment_mask is False
+    glow_disabled_by_options = include_glow is False
     enable_env_mapping = env_mask_output is not None
     if normalized_env_mask_mode == "complex" and env_mask_output is None and not env_mask_disabled_by_options:
         enable_env_mapping = complex_output is not None and normalized_complex_format == "msn"
+    enable_glow_map = glow_output is not None and not glow_disabled_by_options
     return NifPatchOptions(
         enable_parallax=parallax_output is not None,
         enable_pom=parallax_output is not None and normalized_parallax_mode == "occlusion",
         parallax_scale=parallax_scale if parallax_output is not None else None,
         force_shader_type_3=parallax_output is not None,
         enable_env_mapping=enable_env_mapping,
+        enable_glow_map=enable_glow_map,
         parallax_texture_path=(
             _resolve_generated_dds_resource_path(parallax_output, source_texture=source_texture)
             if parallax_output is not None else None
@@ -2327,10 +2334,16 @@ def build_nif_patch_options_for_generated_outputs(
             _resolve_generated_dds_resource_path(env_mask_output, source_texture=source_texture)
             if env_mask_output is not None else None
         ),
+        glow_texture_path=(
+            _resolve_generated_dds_resource_path(glow_output, source_texture=source_texture)
+            if glow_output is not None and not glow_disabled_by_options else None
+        ),
         disable_parallax=parallax_disabled_by_options,
         clear_parallax_texture_path=parallax_disabled_by_options,
         disable_env_mapping=env_mask_disabled_by_options,
         clear_env_mask_texture_path=env_mask_disabled_by_options,
+        disable_glow_map=glow_disabled_by_options,
+        clear_glow_texture_path=glow_disabled_by_options,
         backup=True,
         dry_run=False,
     )
@@ -2348,6 +2361,7 @@ def auto_patch_related_nifs_for_texture(
     parallax_scale: float | None,
     include_parallax: bool | None = None,
     include_environment_mask: bool | None = None,
+    include_glow: bool | None = None,
 ) -> tuple[object, ...]:
     related_nifs = find_related_nif_files_for_texture(
         source_texture,
@@ -2365,6 +2379,7 @@ def auto_patch_related_nifs_for_texture(
         parallax_scale=parallax_scale,
         include_parallax=include_parallax,
         include_environment_mask=include_environment_mask,
+        include_glow=include_glow,
     )
     results: list[object] = []
     for nif_path in related_nifs:
