@@ -12,6 +12,8 @@ from generate_textures import (
     _create_panda_icon_image,
     _map_parallax_strength_to_nif_scale,
     _compute_tooltip_position,
+    _format_nif_result_row_details,
+    _normalize_nif_result_details,
     _run_cli,
     _normalize_gui_state,
     _save_with_dds_fallback,
@@ -684,6 +686,17 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIsNone(parse_preview_jump_input("0", 5))
         self.assertIsNone(parse_preview_jump_input("6", 5))
         self.assertIsNone(parse_preview_jump_input("abc", 5))
+
+    def test_normalize_nif_result_details_falls_back_for_blank_input(self) -> None:
+        self.assertEqual(_normalize_nif_result_details(" \n "), "(no details)")
+
+    def test_format_nif_result_row_details_keeps_full_text_without_truncation(self) -> None:
+        original = "Line one\n" + ("Very long detail chunk " * 20) + "\nLine three"
+        formatted = _format_nif_result_row_details(original)
+        self.assertIn("Line one ↩ ", formatted)
+        self.assertIn("Line three", formatted)
+        self.assertNotIn("...", formatted)
+        self.assertGreater(len(formatted), 190)
 
     def test_compute_wrapped_preview_index_wraps_at_boundaries(self) -> None:
         self.assertEqual(compute_wrapped_preview_index(-1, 3), 2)

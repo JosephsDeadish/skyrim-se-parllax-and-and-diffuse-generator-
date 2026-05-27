@@ -154,6 +154,15 @@ def parse_preview_jump_input(value: str, total: int) -> int | None:
     return requested - 1
 
 
+def _normalize_nif_result_details(details: str) -> str:
+    normalized = details.strip()
+    return normalized or "(no details)"
+
+
+def _format_nif_result_row_details(details: str) -> str:
+    return _normalize_nif_result_details(details).replace("\n", " ↩ ")
+
+
 def restore_nif_backups(nif_paths: list[Path]) -> list[tuple[str, str, str]]:
     """Restore ``.nif`` files from sibling ``.nif.bak`` backups."""
     results: list[tuple[str, str, str]] = []
@@ -5961,10 +5970,16 @@ if GUI_AVAILABLE:
 
                 res_frame = ttk.LabelFrame(
                     win,
-                    text="Results Log (scrollable; right-click rows to copy)",
+                    text="Results Log (resizable; right-click rows to copy)",
                     padding=6,
                 )
                 res_frame.pack(fill="both", expand=True, padx=10, pady=(0, 8))
+                results_pane = ttk.Panedwindow(res_frame, orient="vertical")
+                results_pane.pack(fill="both", expand=True)
+                results_list_frame = ttk.Frame(results_pane)
+                results_details_frame = ttk.LabelFrame(results_pane, text="Selected row details", padding=6)
+                results_pane.add(results_list_frame, weight=4)
+                results_pane.add(results_details_frame, weight=3)
                 style = ttk.Style(win)
                 tree_style_name = "NifEditor.Treeview"
                 tree_select_bg = "#5a7fd6" if dark else "#c8dafc"
@@ -5982,7 +5997,7 @@ if GUI_AVAILABLE:
                     foreground=[("selected", fg)],
                 )
                 results_tree = ttk.Treeview(
-                    res_frame,
+                    results_list_frame,
                     columns=("status", "file", "details"),
                     show="headings",
                     selectmode="browse",
@@ -5994,33 +6009,61 @@ if GUI_AVAILABLE:
                 results_tree.column("status", width=90, minwidth=80, anchor="center")
                 results_tree.column("file", width=260, minwidth=200, anchor="w")
                 results_tree.column("details", width=820, minwidth=320, anchor="w")
-                results_scroll = ttk.Scrollbar(res_frame, command=results_tree.yview)
-                results_scroll_x = ttk.Scrollbar(res_frame, command=results_tree.xview, orient="horizontal")
+                results_scroll = ttk.Scrollbar(results_list_frame, command=results_tree.yview)
+                results_scroll_x = ttk.Scrollbar(results_list_frame, command=results_tree.xview, orient="horizontal")
                 results_tree.configure(yscrollcommand=results_scroll.set, xscrollcommand=results_scroll_x.set)
                 results_scroll.pack(side="right", fill="y")
                 results_scroll_x.pack(side="bottom", fill="x")
                 results_tree.pack(fill="both", expand=True, side="left")
+                result_details_text = tk.Text(
+                    results_details_frame,
+                    wrap="word",
+                    height=8,
+                    background=entry_bg,
+                    foreground=fg,
+                    insertbackground=fg,
+                    relief="flat",
+                    borderwidth=0,
+                )
+                result_details_scroll = ttk.Scrollbar(results_details_frame, command=result_details_text.yview)
+                result_details_text.configure(yscrollcommand=result_details_scroll.set)
+                result_details_scroll.pack(side="right", fill="y")
+                result_details_text.pack(fill="both", expand=True, side="left")
                 self._add_tooltip(
                     results_tree,
-                    "Results log for scan/patch/restore actions. Scroll to inspect all rows.",
+                    "Results log for scan/patch/restore actions. Resize the window or drag the splitter to inspect everything.",
+                )
+                self._add_tooltip(
+                    result_details_text,
+                    "Full untruncated details for the selected row.",
                 )
 
                 full_row_details: dict[str, str] = {}
 
+                def _set_result_details_text(text: str) -> None:
+                    result_details_text.configure(state="normal")
+                    result_details_text.delete("1.0", "end")
+                    result_details_text.insert("1.0", text)
+                    result_details_text.configure(state="disabled")
+
+                _set_result_details_text("Select a row to inspect full multi-line details without truncation.")
+
                 def _add_result_row(status: str, file_name: str, details: str) -> None:
-                    normalized_details = details.strip() or "(no details)"
-                    row_preview = normalized_details.replace("\n", " ↩ ")
-                    if len(row_preview) > 190:
-                        row_preview = row_preview[:187] + "..."
+                    normalized_details = _normalize_nif_result_details(details)
+                    row_preview = _format_nif_result_row_details(normalized_details)
                     item_id = results_tree.insert("", "end", values=(status, file_name, row_preview))
                     full_row_details[str(item_id)] = normalized_details
-                    status_var.set(f"{status}: {file_name} — {details}")
+                    results_tree.selection_set(item_id)
+                    results_tree.focus(item_id)
+                    _set_result_details_text(f"[{status}] {file_name}\n\n{normalized_details}")
+                    status_var.set(f"{status}: {file_name} — {normalized_details}")
                     results_tree.yview_moveto(1.0)
 
                 def _clear_log() -> None:
                     for item in results_tree.get_children():
                         results_tree.delete(item)
                     full_row_details.clear()
+                    _set_result_details_text("Select a row to inspect full multi-line details without truncation.")
                     status_var.set("Results cleared.")
                     progress_var.set(0.0)
 
@@ -6032,6 +6075,7 @@ if GUI_AVAILABLE:
                     if not row_values:
                         return
                     full_details = full_row_details.get(str(selected[0]), str(row_values[2]))
+                    _set_result_details_text(f"[{row_values[0]}] {row_values[1]}\n\n{full_details}")
                     status_var.set(f"[{row_values[0]}] {row_values[1]} — {full_details}")
 
                 def _copy_selected_result() -> None:
@@ -6097,10 +6141,10 @@ if GUI_AVAILABLE:
                         _add_result_row("WARN", "—", "No NIF files found.")
                         return
                     status_var.set(f"Scanning {len(nifs)} NIF file(s)…")
-                    progress_bar.configure(maximum=max(1, min(len(nifs), 50)))
+                    progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
                     win.update_idletasks()
-                    for index, nif in enumerate(nifs[:50], start=1):
+                    for index, nif in enumerate(nifs, start=1):
                         try:
                             validation = validate_nif_for_parallax(nif)
                             combined_detail_lines = list(validation.issues[:4])
@@ -6128,9 +6172,7 @@ if GUI_AVAILABLE:
                             _add_result_row("FAIL", nif.name, f"Scan failed: {exc}")
                         progress_var.set(float(index))
                         win.update_idletasks()
-                    if len(nifs) > 50:
-                        _add_result_row("SKIP", "—", f"{len(nifs) - 50} more files not shown (first 50 displayed).")
-                    status_var.set(f"Scan complete: {min(len(nifs), 50)} shown of {len(nifs)} file(s).")
+                    status_var.set(f"Scan complete: {len(nifs)} file(s) reviewed.")
 
                 def _run_patch() -> None:
                     nifs = _resolve_nifs()
