@@ -1834,6 +1834,29 @@ class GenerateTexturesTests(unittest.TestCase):
 
         self.assertEqual(saved_path, target.with_suffix(".png"))
 
+    def test_save_with_dds_fallback_normalizes_and_deduplicates_preferred_formats(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / "stone.dds"
+            attempted_formats: list[str] = []
+
+            def fake_save(_self, fp, format=None, **kwargs):
+                if format == "DDS":
+                    pixel_format = str(kwargs.get("pixel_format"))
+                    attempted_formats.append(pixel_format)
+                    if pixel_format == "DXT1":
+                        raise OSError("dxt1 unavailable")
+                Path(fp).write_bytes(f"{format}".encode("utf-8"))
+
+            with mock.patch.object(Image.Image, "save", autospec=True, side_effect=fake_save):
+                saved_path = _save_with_dds_fallback(
+                    _sample_image(),
+                    target,
+                    preferred_pixel_formats=(" dxt1 ", "DXT1", "dXt5"),
+                )
+
+        self.assertEqual(saved_path, target)
+        self.assertEqual(attempted_formats, ["DXT1", "DXT5"])
+
 
     def test_generate_specular_no_black_holes_on_detailed_image(self) -> None:
         specular = generate_specular(_large_high_detail_image(), strength=2.0)

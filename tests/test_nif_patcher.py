@@ -546,6 +546,22 @@ class TestPatchTexturePaths(unittest.TestCase):
             "textures\\architecture\\stone\\stone_p.dds",
         )
 
+    def test_normalises_dot_segments_and_duplicate_separators(self) -> None:
+        nif = _write_nif(self.tmp)
+        patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_texture_path=r".\\textures\\architecture\\.\\stone\\..\\stone\\\\stone_p.dds",
+                backup=False,
+            ),
+        )
+        infos = scan_nif(nif)
+        self.assertEqual(
+            infos[0].texture_paths.get(TEXTURE_SLOT_PARALLAX),
+            "textures\\architecture\\stone\\stone_p.dds",
+        )
+
     def test_writes_normal_texture_path(self) -> None:
         nif = _write_nif(self.tmp)
         patch_nif(

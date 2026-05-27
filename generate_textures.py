@@ -2867,6 +2867,17 @@ def _to_dds_compatible_image(image: Image.Image, *, pixel_format: str) -> Image.
     return image.convert("RGB")
 
 
+def _normalise_preferred_dds_formats(preferred_pixel_formats: tuple[str, ...]) -> tuple[str, ...]:
+    normalized: list[str] = []
+    for pixel_format in preferred_pixel_formats:
+        candidate = str(pixel_format).strip().upper()
+        if candidate and candidate not in normalized:
+            normalized.append(candidate)
+    if not normalized:
+        return ("DXT5",)
+    return tuple(normalized)
+
+
 def _save_with_dds_fallback(
     image: Image.Image,
     output_path: Path,
@@ -2883,15 +2894,23 @@ def _save_with_dds_fallback(
             if temp_path.exists():
                 temp_path.unlink(missing_ok=True)
 
+    normalized_formats = _normalise_preferred_dds_formats(preferred_pixel_formats)
     dds_target = output_path.with_suffix(DDS_EXTENSION)
-    for pixel_format in preferred_pixel_formats:
+    dds_errors: list[str] = []
+    for pixel_format in normalized_formats:
         try:
             dds_image = _to_dds_compatible_image(image, pixel_format=pixel_format)
             _atomic_save(dds_target, dds_image, format="DDS", pixel_format=pixel_format)
             return dds_target
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            dds_errors.append(f"{pixel_format}: {exc}")
             continue
     fallback = output_path.with_suffix(".png")
+    if dds_errors:
+        print(
+            f"[DDS fallback] Could not save {dds_target.name} as DDS ({'; '.join(dds_errors)}). Saved PNG fallback: {fallback.name}",
+            file=sys.stderr,
+        )
     _atomic_save(fallback, image, format="PNG")
     return fallback
 

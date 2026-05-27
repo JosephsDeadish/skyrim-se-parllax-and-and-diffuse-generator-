@@ -948,11 +948,34 @@ def _normalise_path(p: str) -> str:
     if lowered.startswith("data\\textures\\"):
         normalized = "textures\\" + normalized[len("data\\textures\\"):]
         lowered = normalized.lower()
-    marker = "\\textures\\"
-    marker_index = lowered.rfind(marker)
-    if marker_index != -1:
-        normalized = "textures\\" + normalized[marker_index + len(marker):]
-    return normalized.lstrip("\\")
+    if lowered.startswith("textures\\"):
+        marker_index = 0
+    else:
+        marker = "\\textures\\"
+        marker_index = lowered.rfind(marker)
+        if marker_index != -1:
+            normalized = "textures\\" + normalized[marker_index + len(marker):]
+            lowered = normalized.lower()
+            marker_index = 0
+    if marker_index == -1:
+        marker_index = lowered.find("textures\\")
+        if marker_index > 0:
+            normalized = normalized[marker_index:]
+            lowered = normalized.lower()
+    parts: list[str] = []
+    for part in normalized.split("\\"):
+        segment = part.strip()
+        if not segment or segment == ".":
+            continue
+        if segment == "..":
+            if len(parts) > 1 and parts[-1] != "..":
+                parts.pop()
+            continue
+        parts.append(segment)
+    collapsed = "\\".join(parts).lstrip("\\")
+    if collapsed.lower().startswith("textures\\"):
+        return "textures\\" + collapsed[len("textures\\"):]
+    return collapsed
 
 
 def _build_block_map(
