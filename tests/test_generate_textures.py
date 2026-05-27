@@ -2398,8 +2398,10 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertIn("rmaos", outputs)
             self.assertIn("rmaos_json", outputs)
             self.assertTrue(outputs["rmaos_json"].exists())
+            self.assertEqual(outputs["rmaos_json"].parent.name, "PBRNifPatcher")
             payload = outputs["rmaos_json"].read_text(encoding="utf-8")
             self.assertIn('"format": "truepbr_rmaos"', payload)
+            self.assertIn('"rmaos": "../brick_rmaos.dds"', payload)
             self.assertIn('"R": "roughness"', payload)
 
 
