@@ -1078,6 +1078,23 @@ def _normalize_render_profile(value: str | None) -> str:
     return "custom"
 
 
+def _path_exists_casefold(root: Path, parts: tuple[str, ...]) -> bool:
+    current = root
+    for part in parts:
+        direct = current / part
+        if direct.exists():
+            current = direct
+            continue
+        try:
+            matched = next((child for child in current.iterdir() if child.name.lower() == part.lower()), None)
+        except Exception:
+            return False
+        if matched is None:
+            return False
+        current = matched
+    return True
+
+
 def resolve_env_mask_complex_workflow(
     *,
     env_mask_mode: str,
@@ -1348,24 +1365,15 @@ def detect_render_profile_from_mod_manager_context(context: ModManagerContext | 
     marker_roots.extend(path.parent for path in (*context.loaded_texture_dirs, *context.loaded_mesh_dirs))
     for root in _unique_existing_paths(marker_roots):
         for parts in _RENDER_PROFILE_ENB_MARKERS:
-            marker = root
-            for part in parts:
-                marker = marker / part
-            if marker.exists():
+            if _path_exists_casefold(root, parts):
                 has_enb = True
                 break
         for parts in _RENDER_PROFILE_CS_MARKERS:
-            marker = root
-            for part in parts:
-                marker = marker / part
-            if marker.exists():
+            if _path_exists_casefold(root, parts):
                 has_cs = True
                 break
         for parts in _RENDER_PROFILE_TRUEPBR_MARKERS:
-            marker = root
-            for part in parts:
-                marker = marker / part
-            if marker.exists():
+            if _path_exists_casefold(root, parts):
                 has_truepbr = True
                 break
     if has_truepbr:
