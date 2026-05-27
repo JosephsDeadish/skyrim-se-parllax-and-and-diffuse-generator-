@@ -499,6 +499,20 @@ class TestValidateNifForParallax(unittest.TestCase):
         joined = "\n".join(v.issues + v.suggestions).lower()
         self.assertNotIn("slot 5 environment-mask path", joined)
 
+    def test_truepbr_rmaos_path_warns_when_not_in_textures_pbr(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\architecture\\stone_rmaos.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            shader_type=SHADER_TYPE_ENVMAP,
+        )
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("textures\\pbr\\", joined)
+        self.assertIn("pbrnifpatcher json", joined)
+
     def test_reports_non_diffuse_texture_in_diffuse_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_DIFFUSE] = "textures\\arch\\stone_p.dds"

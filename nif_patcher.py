@@ -2038,6 +2038,16 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                     result.suggestions,
                     "Use slot 5 for _m.dds (standard env mask) or complex-material mask naming such as _cm/_c/_rmaos."
                 )
+            if normalized_env_mask.endswith("_rmaos.dds") and not normalized_env_mask.startswith("textures\\pbr\\"):
+                _append_unique(
+                    result.suggestions,
+                    "TruePBR _rmaos workflows are usually placed under textures\\pbr\\... and paired with a matching PBRNifPatcher JSON entry."
+                )
+            if normalized_env_mask.endswith(("_cm.dds", "_c.dds")):
+                _append_unique(
+                    result.suggestions,
+                    "Slot 5 _cm/_c usually indicates Community Shaders Extended Materials; avoid mixing those files with ENB _msn workflows."
+                )
         if env_mask_path and not info.has_env_mapping_flag:
             _append_unique(
                 result.issues,

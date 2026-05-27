@@ -591,6 +591,14 @@ class GenerateTexturesTests(unittest.TestCase):
             "truepbr",
         )
 
+    def test_recommend_render_profile_detects_truepbr_from_textures_pbr_path_hint(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(
+                Path("mods/MyPack/textures/pbr/architecture/stone.dds"),
+            ),
+            "truepbr",
+        )
+
     def test_resolve_render_profile_options_returns_expected_modes(self) -> None:
         enb = resolve_render_profile_options("enb")
         self.assertEqual(enb["complex_format"], "msn")
@@ -2417,6 +2425,11 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(len(payload), 1)
             self.assertEqual(payload[0]["texture"], "brick")
             self.assertFalse(bool(payload[0]["parallax"]))
+            self.assertFalse(bool(payload[0]["emissive"]))
+            self.assertFalse(bool(payload[0]["subsurface"]))
+            self.assertFalse(bool(payload[0]["subsurface_foliage"]))
+            self.assertEqual(payload[0]["subsurface_color"], [1.0, 1.0, 1.0])
+            self.assertAlmostEqual(float(payload[0]["subsurface_opacity"]), 1.0)
             self.assertAlmostEqual(float(payload[0]["specular_level"]), 0.04)
 
     def test_run_with_options_rmaos_writes_sidecar_next_to_textures_root(self) -> None:

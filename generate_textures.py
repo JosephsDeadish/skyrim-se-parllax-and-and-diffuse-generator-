@@ -913,10 +913,11 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     ),
     "truepbr": (
         "Community Shaders TruePBR workflow (JSON-driven material path).\n"
-        "Typical files: diffuse.dds + _n.dds + _rmaos.dds (or _ramos.dds alias) + matching JSON sidecar in PBRNifPatcher/ (and optional _p.dds depending on your mesh/material setup).\n"
+        "Typical files: textures/pbr/<name>.dds + textures/pbr/<name>_n.dds + textures/pbr/<name>_rmaos.dds (or _ramos.dds alias) + matching JSON sidecar in PBRNifPatcher/ (and optional _p.dds depending on your mesh/material setup).\n"
         "_rmaos/_ramos RGBA layout for this preset: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (config-driven).\n"
         "How files should look: _n stays purple/blue, _rmaos/_ramos should look like packed grayscale channels (not like a normal map).\n"
-        "JSON sidecar should reference the generated _rmaos/_ramos texture path and document channel mapping for your TruePBR setup.\n"
+        "JSON sidecar should reference the generated base texture prefix (for example via 'texture'/'match_diffuse') and document channel mapping for your TruePBR setup.\n"
+        "PGPatcher best-practice: keep PBR textures under textures/pbr and place your patcher JSON files under a top-level PBRNifPatcher/ folder.\n"
         "Do NOT treat this as Community Shaders Extended Materials _cm/_c/_C, and do NOT mix it with ENB _msn workflows."
     ),
     "enb": (
@@ -1034,7 +1035,7 @@ _RENDER_PROFILE_OUTPUT_LABELS: dict[str, str] = {
 _RENDER_PROFILE_PATH_HINTS: dict[str, tuple[str, ...]] = {
     "enb": ("enb", "enbseries"),
     "community_shaders": ("communityshaders", "community_shaders", "community-shaders", "cs"),
-    "truepbr": ("truepbr", "true_pbr", "true-pbr", "pbrnifpatcher"),
+    "truepbr": ("truepbr", "true_pbr", "true-pbr", "pbrnifpatcher", "textures pbr"),
 }
 
 
@@ -2398,7 +2399,12 @@ def write_rmaos_json_sidecar(texture_path: Path, *, parallax_enabled: bool = Tru
     payload = [
         {
             "texture": texture_identifier,
+            "emissive": False,
             "parallax": bool(parallax_enabled),
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
             "specular_level": 0.04,
             "roughness_scale": 1.0,
             "smooth_angle": 75,
@@ -6380,7 +6386,7 @@ if GUI_AVAILABLE:
                 )
                 self._add_tooltip(
                     renderer_combo,
-                    "🎯 Renderer preset helper.\nAuto applies patch options for Vanilla, Community Shaders, or ENB.",
+                    "🎯 Renderer preset helper.\nAuto applies patch options for Vanilla, Community Shaders, TruePBR, or ENB.",
                 )
                 self._add_tooltip(enable_parallax_check, "🪨 Enables Skyrim parallax shader flag and slot-3 _p usage.")
                 self._add_tooltip(enable_pom_check, "🌊 ENB-only parallax occlusion mode. Leave off for vanilla workflows.")
@@ -6490,7 +6496,7 @@ if GUI_AVAILABLE:
                     "Env mask / _m.dds:",
                     env_mask_tex_var,
                     "Select environment mask texture",
-                    "🪞 Slot 5 environment mask path. Usually _m.dds (standard) or _rmaos.dds (complex workflows).",
+                    "🪞 Slot 5 environment mask path. Usually _m.dds (standard), _cm/_c.dds (CS complex), or _rmaos.dds (TruePBR; usually under textures\\pbr\\...).",
                 )
 
                 def _auto_fill_paths() -> None:
