@@ -53,19 +53,27 @@ def _build_minimal_nif(
     header_line_ending: bytes = b"\n",
     shader_layout_shift: int = 0,
     texture_set_layout_shift: int = 0,
+    texture_set_count_u16: bool = False,
 ) -> bytes:
     """Build a minimal but structurally valid Skyrim SE NIF in memory.
 
     Contains exactly two blocks:
       0 – BSShaderTextureSet   (9 texture slots)
       1 – BSLightingShaderProperty  (references block 0)
+
+    When *texture_set_count_u16* is True the count field is written as a
+    u16 (Skyrim LE / mixed-export format) instead of u32 (SE native).
     """
     if texture_paths is None:
         texture_paths = [""] * 9
 
     # --- BSShaderTextureSet block ---
     ts_layout_pad = b"\x00\x00\x00\x00" if texture_set_layout_shift == 4 else b""
-    ts_body = ts_layout_pad + struct.pack("<I", 9)
+    if texture_set_count_u16:
+        ts_count_bytes = struct.pack("<H", 9)
+    else:
+        ts_count_bytes = struct.pack("<I", 9)
+    ts_body = ts_layout_pad + ts_count_bytes
     for path in texture_paths[:9]:
         ts_body += _sstring_u32(path)
 
@@ -195,6 +203,55 @@ class TestScanNif(unittest.TestCase):
         nif = _write_nif(self.tmp, texture_paths=paths)
         infos = scan_nif(nif)
         self.assertEqual(infos[0].texture_paths.get(TEXTURE_SLOT_DIFFUSE), "textures\\arch\\stone.dds")
+
+    def test_scan_parses_u16_count_texture_set_with_empty_paths(self) -> None:
+        """LE-format BSShaderTextureSet with u16 count and all-empty paths."""
+        nif = _write_nif(self.tmp, texture_set_count_u16=True)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+
+    def test_scan_parses_u16_count_texture_set_with_nonempty_paths(self) -> None:
+        """LE-format BSShaderTextureSet with u16 count and actual texture paths.
+
+        Previously the u32 read of the count would incorporate path bytes,
+        producing a count > 64 and causing ``failed to parse BSShaderTextureSet``.
+        """
+        paths = ["textures\\dungeons\\barrels\\barrel01_d.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, texture_paths=paths, texture_set_count_u16=True)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(
+            infos[0].texture_paths.get(TEXTURE_SLOT_DIFFUSE),
+            "textures\\dungeons\\barrels\\barrel01_d.dds",
+        )
+
+    def test_scan_u16_count_no_parse_error_in_diagnostics(self) -> None:
+        """Scanning a u16-count NIF must not produce BSShaderTextureSet parse errors."""
+        from nif_patcher import scan_nif_diagnostics
+        paths = ["textures\\things\\coin01_d.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, texture_paths=paths, texture_set_count_u16=True)
+        _infos, diagnostics = scan_nif_diagnostics(nif)
+        ts_parse_errors = [d for d in diagnostics if "failed to parse BSShaderTextureSet" in d]
+        self.assertEqual(ts_parse_errors, [], msg=f"Unexpected parse errors: {ts_parse_errors}")
+
+    def test_patch_nif_with_u16_count_texture_set(self) -> None:
+        """patch_nif must work correctly on a NIF whose texture set uses a u16 count."""
+        paths = ["textures\\dungeons\\barrels\\barrel01_d.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, texture_paths=paths, texture_set_count_u16=True)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_texture_path="textures\\dungeons\\barrels\\barrel01_p.dds",
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(
+            infos[0].texture_paths.get(TEXTURE_SLOT_PARALLAX),
+            "textures\\dungeons\\barrels\\barrel01_p.dds",
+        )
 
     def test_scan_bad_file_returns_empty(self) -> None:
         bad = self.tmp / "bad.nif"

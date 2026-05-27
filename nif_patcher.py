@@ -361,11 +361,19 @@ class _Buf:
         start = self._require(4, offset=offset, context="u32 read")
         return struct.unpack_from("<I", self._b, start)[0]
 
+    def read_u16_at(self, offset: int) -> int:
+        start = self._require(2, offset=offset, context="u16 read")
+        return struct.unpack_from("<H", self._b, start)[0]
+
     # --- in-place writes (never resize) ------------------------------------
 
     def write_u32_at(self, offset: int, value: int) -> None:
         self._require(4, offset=offset, context="u32 write")
         struct.pack_into("<I", self._b, offset, value)
+
+    def write_u16_at(self, offset: int, value: int) -> None:
+        self._require(2, offset=offset, context="u16 write")
+        struct.pack_into("<H", self._b, offset, value)
 
     def write_float_at(self, offset: int, value: float) -> None:
         self._require(4, offset=offset, context="float write")
@@ -588,6 +596,7 @@ class _TextureSetBlock:
     block_index: int
     block_start: int
     count_offset: int
+    count_size: int           # 4 for u32, 2 for u16
     num_textures: int
     slot_offsets: list[int]    # byte offset of each slot's uint32 length prefix
     slot_paths: list[str]
@@ -730,20 +739,32 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
 
 def _parse_texture_set(buf: _Buf, block_index: int,
                        block_start: int, block_size: int) -> _TextureSetBlock | None:
-    """Parse a BSShaderTextureSet block."""
+    """Parse a BSShaderTextureSet block.
+
+    Tries multiple count-field formats to handle both Skyrim SE (u32 count)
+    and Skyrim LE / mixed-export NIFs (u16 count).  In each case the texture
+    path strings are u32-prefixed SizedString values.
+    """
     block_end = block_start + block_size
     if block_size < 4 or block_end > len(buf._b):
         return None
 
-    def _parse_with_shift(shift: int) -> _TextureSetBlock | None:
+    def _parse_with_format(shift: int, count_size: int) -> _TextureSetBlock | None:
+        """Try to parse with *shift* bytes of leading padding and a count
+        field of *count_size* bytes (2 = u16, 4 = u32)."""
         if shift not in (0, 4):
             return None
-        if block_start + shift + 4 > block_end:
+        if count_size not in (2, 4):
             return None
-        buf.seek(block_start + shift)
-        num_textures = buf.read_u32()
-        if num_textures > 64:
+        if block_start + shift + count_size > block_end:
             return None
+        if count_size == 2:
+            num_textures = buf.read_u16_at(block_start + shift)
+        else:
+            num_textures = buf.read_u32_at(block_start + shift)
+        if num_textures == 0 or num_textures > 64:
+            return None
+        buf.seek(block_start + shift + count_size)
         slot_offsets: list[int] = []
         slot_paths: list[str] = []
         for _ in range(num_textures):
@@ -751,6 +772,8 @@ def _parse_texture_set(buf: _Buf, block_index: int,
             if buf.pos + 4 > block_end:
                 return None
             n = buf.read_u32()
+            if n > 512:
+                return None
             if buf.pos + n > block_end:
                 return None
             raw = bytes(buf._b[buf.pos: buf.pos + n])
@@ -762,12 +785,18 @@ def _parse_texture_set(buf: _Buf, block_index: int,
             block_index=block_index,
             block_start=block_start,
             count_offset=block_start + shift,
+            count_size=count_size,
             num_textures=num_textures,
             slot_offsets=slot_offsets,
             slot_paths=slot_paths,
         )
 
-    candidates = [c for c in (_parse_with_shift(0), _parse_with_shift(4)) if c is not None]
+    # Collect all candidates: (shift × count_size) combinations
+    # Prefer SE format (u32) over LE (u16); prefer no shift over shift=4.
+    all_formats = [(0, 4), (4, 4), (0, 2), (4, 2)]
+    candidates = [c for c in (
+        _parse_with_format(sh, cs) for sh, cs in all_formats
+    ) if c is not None]
     if not candidates:
         return None
 
@@ -775,11 +804,20 @@ def _parse_texture_set(buf: _Buf, block_index: int,
         score = 0
         if ts.num_textures > 0:
             score += 3
-        if ts.num_textures >= TEXTURE_SLOT_COUNT:
+        if ts.num_textures in (6, 9):  # standard Skyrim slot counts
+            score += 3
+        elif ts.num_textures >= TEXTURE_SLOT_COUNT:
             score += 2
-        if any(path for path in ts.slot_paths):
+        non_empty = [p for p in ts.slot_paths if p]
+        if non_empty:
             score += 2
-        if ts.count_offset == block_start:
+        # Reward paths that look like Skyrim-relative texture paths
+        if any(p.lower().startswith("textures\\") or p.lower().startswith("textures/")
+               for p in non_empty):
+            score += 3
+        if ts.count_offset == block_start:   # no shift preferred
+            score += 1
+        if ts.count_size == 4:               # u32 count (SE native) preferred
             score += 1
         return score
 
@@ -970,7 +1008,11 @@ def _apply_patches(
         block_end = texture_set.block_start + current_header.block_sizes[texture_set.block_index]
         buf_local = _Buf(current_data)
         buf_local.insert_bytes_at(block_end, b"\x00\x00\x00\x00" * needed)
-        buf_local.write_u32_at(texture_set.count_offset, texture_set.num_textures + needed)
+        new_count = texture_set.num_textures + needed
+        if texture_set.count_size == 2:
+            buf_local.write_u16_at(texture_set.count_offset, new_count)
+        else:
+            buf_local.write_u32_at(texture_set.count_offset, new_count)
         ts_bsize_off = current_header.block_sizes_offset + texture_set.block_index * 4
         old_ts_size = buf_local.read_u32_at(ts_bsize_off)
         buf_local.write_u32_at(ts_bsize_off, old_ts_size + (needed * 4))
