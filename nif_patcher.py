@@ -1233,19 +1233,33 @@ def _normalise_path(p: str) -> str:
     if lowered.startswith("data\\textures\\"):
         normalized = "textures\\" + normalized[len("data\\textures\\"):]
         lowered = normalized.lower()
+    elif lowered.startswith("data\\texture\\"):
+        normalized = "textures\\" + normalized[len("data\\texture\\"):]
+        lowered = normalized.lower()
     if lowered.startswith("textures\\"):
         marker_index = 0
+    elif lowered.startswith("texture\\"):
+        normalized = "textures\\" + normalized[len("texture\\"):]
+        lowered = normalized.lower()
+        marker_index = 0
     else:
-        marker = "\\textures\\"
-        marker_index = lowered.rfind(marker)
+        marker_plural = "\\textures\\"
+        marker_singular = "\\texture\\"
+        marker_index = max(lowered.rfind(marker_plural), lowered.rfind(marker_singular))
         if marker_index != -1:
-            normalized = "textures\\" + normalized[marker_index + len(marker):]
+            marker_len = len(marker_plural) if lowered.startswith(marker_plural, marker_index) else len(marker_singular)
+            normalized = "textures\\" + normalized[marker_index + marker_len:]
             lowered = normalized.lower()
             marker_index = 0
     if marker_index == -1:
         marker_index = lowered.find("textures\\")
+        if marker_index == -1:
+            marker_index = lowered.find("texture\\")
+            marker_len = len("texture\\")
+        else:
+            marker_len = len("textures\\")
         if marker_index > 0:
-            normalized = normalized[marker_index:]
+            normalized = "textures\\" + normalized[marker_index + marker_len:]
             lowered = normalized.lower()
     parts: list[str] = []
     for part in normalized.split("\\"):
@@ -1259,10 +1273,18 @@ def _normalise_path(p: str) -> str:
         parts.append(segment)
     collapsed = "\\".join(parts).lstrip("\\")
     lowered_collapsed = collapsed.lower()
+    if lowered_collapsed.startswith("texture\\"):
+        collapsed = "textures\\" + collapsed[len("texture\\"):]
+        lowered_collapsed = collapsed.lower()
+    elif lowered_collapsed == "texture":
+        collapsed = "textures"
+        lowered_collapsed = "textures"
     if lowered_collapsed.startswith("textures\\"):
         tail = collapsed[len("textures\\"):]
         while tail.lower().startswith("textures\\"):
             tail = tail[len("textures\\"):]
+        while tail.lower().startswith("texture\\"):
+            tail = tail[len("texture\\"):]
         return f"textures\\{tail}" if tail else "textures"
     return collapsed
 

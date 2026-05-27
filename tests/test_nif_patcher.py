@@ -679,6 +679,38 @@ class TestPatchTexturePaths(unittest.TestCase):
             "textures\\architecture\\stone\\stone_p.dds",
         )
 
+    def test_normalises_singular_texture_root(self) -> None:
+        nif = _write_nif(self.tmp)
+        patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_texture_path=r"Texture\architecture\stone\stone_p.dds",
+                backup=False,
+            ),
+        )
+        infos = scan_nif(nif)
+        self.assertEqual(
+            infos[0].texture_paths.get(TEXTURE_SLOT_PARALLAX),
+            "textures\\architecture\\stone\\stone_p.dds",
+        )
+
+    def test_normalises_absolute_data_singular_texture_root(self) -> None:
+        nif = _write_nif(self.tmp)
+        patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_texture_path=r"C:\Modlist\Data\Texture\architecture\stone\stone_p.dds",
+                backup=False,
+            ),
+        )
+        infos = scan_nif(nif)
+        self.assertEqual(
+            infos[0].texture_paths.get(TEXTURE_SLOT_PARALLAX),
+            "textures\\architecture\\stone\\stone_p.dds",
+        )
+
     def test_writes_normal_texture_path(self) -> None:
         nif = _write_nif(self.tmp)
         patch_nif(
