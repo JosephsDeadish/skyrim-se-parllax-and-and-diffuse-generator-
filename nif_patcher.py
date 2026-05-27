@@ -644,6 +644,19 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
     _max_str_len = buf.read_u32()
     strings = [buf.read_sstring_u32() for _ in range(num_strings)]
 
+    # Per the NIF 20.2.0.7 format specification, a num_groups u32 field
+    # follows the string table when user_version_2 < 130.  Skyrim SE uses
+    # user_version_2 = 83 or 100 (both < 130), so this field is always
+    # present in real game meshes.  It is always 0 for Skyrim SE NIFs, but
+    # must be consumed here so that blocks_start is positioned correctly.
+    # Omitting this read shifts every block offset 4 bytes early, which
+    # causes _upgrade_block_to_type3 to insert type-3 fields at the wrong
+    # position and corrupts the block — producing exactly the kind of
+    # EXCEPTION_ACCESS_VIOLATION crash seen in game.
+    num_groups = buf.read_u32()
+    for _ in range(num_groups):
+        buf.read_u32()  # group_sizes — always empty for Skyrim SE
+
     return _NifHeader(
         version=version,
         user_version=user_version,

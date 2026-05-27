@@ -1348,6 +1348,7 @@ class GenerateTexturesTests(unittest.TestCase):
             env_mask_mode="complex",
             parallax_mode="occlusion",
             parallax_scale=4.0,
+            render_profile="community_shaders",
         )
 
         self.assertTrue(options.enable_parallax)
@@ -1358,6 +1359,70 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(options.parallax_texture_path, "textures\\sign01_p.dds")
         self.assertEqual(options.env_mask_texture_path, "textures\\sign01_m.dds")
         self.assertEqual(options.parallax_scale, 4.0)
+
+    def test_build_nif_patch_options_render_profile_vanilla_no_type3_upgrade(self) -> None:
+        outputs = {"parallax": Path("/tmp/textures/brick_p.dds")}
+        for profile in ("vanilla", "auto"):
+            with self.subTest(profile=profile):
+                options = build_nif_patch_options_for_generated_outputs(
+                    None,
+                    outputs,
+                    complex_format="msn",
+                    env_mask_mode="standard",
+                    parallax_mode="standard",
+                    parallax_scale=2.0,
+                    render_profile=profile,
+                )
+                self.assertFalse(
+                    options.force_shader_type_3,
+                    msg=f"render_profile={profile!r} should not force shader type-3 upgrade",
+                )
+                self.assertTrue(options.enable_parallax)
+
+    def test_build_nif_patch_options_render_profile_community_shaders_enables_type3(self) -> None:
+        outputs = {"parallax": Path("/tmp/textures/brick_p.dds")}
+        options = build_nif_patch_options_for_generated_outputs(
+            None,
+            outputs,
+            complex_format="msn",
+            env_mask_mode="standard",
+            parallax_mode="standard",
+            parallax_scale=2.0,
+            render_profile="community_shaders",
+        )
+        self.assertTrue(options.force_shader_type_3)
+        self.assertTrue(options.enable_parallax)
+
+    def test_build_nif_patch_options_render_profile_enb_enables_type3(self) -> None:
+        outputs = {"parallax": Path("/tmp/textures/brick_p.dds")}
+        options = build_nif_patch_options_for_generated_outputs(
+            None,
+            outputs,
+            complex_format="msn",
+            env_mask_mode="standard",
+            parallax_mode="standard",
+            parallax_scale=2.0,
+            render_profile="enb",
+        )
+        self.assertTrue(options.force_shader_type_3)
+        self.assertTrue(options.enable_parallax)
+
+    def test_build_nif_patch_options_no_parallax_never_forces_type3(self) -> None:
+        for profile in ("vanilla", "community_shaders", "enb", "auto"):
+            with self.subTest(profile=profile):
+                options = build_nif_patch_options_for_generated_outputs(
+                    None,
+                    {},
+                    complex_format="msn",
+                    env_mask_mode="standard",
+                    parallax_mode="standard",
+                    parallax_scale=None,
+                    render_profile=profile,
+                )
+                self.assertFalse(
+                    options.force_shader_type_3,
+                    msg=f"No parallax output — force_shader_type_3 must be False for {profile!r}",
+                )
 
     def test_build_nif_patch_options_for_generated_outputs_falls_back_to_source_texture_resource_dir(self) -> None:
         source_texture = Path("/tmp/mod/textures/architecture/stone/brick.dds")

@@ -2293,6 +2293,7 @@ def build_nif_patch_options_for_generated_outputs(
     env_mask_mode: str,
     parallax_mode: str,
     parallax_scale: float | None,
+    render_profile: str = "auto",
     include_parallax: bool | None = None,
     include_environment_mask: bool | None = None,
     include_glow: bool | None = None,
@@ -2315,11 +2316,26 @@ def build_nif_patch_options_for_generated_outputs(
     if normalized_env_mask_mode == "complex" and env_mask_output is None and not env_mask_disabled_by_options:
         enable_env_mapping = complex_output is not None and normalized_complex_format == "msn"
     enable_glow_map = glow_output is not None and not glow_disabled_by_options
+    # Consult the render-profile NIF-patch defaults to decide whether
+    # upgrading shader blocks to type-3 (HEIGHTMAP / parallax-scale) is
+    # appropriate.  Vanilla Skyrim SE supports parallax via the flag +
+    # texture slot 3 alone (no type-3 block upgrade required), while
+    # Community Shaders and ENB workflows benefit from the explicit scale
+    # field that type-3 provides.  Unconditionally upgrading to type-3
+    # regardless of the selected renderer was the primary cause of the
+    # EXCEPTION_ACCESS_VIOLATION crashes: the upgrade can corrupt the
+    # block layout when the NIF header num_groups field was not yet
+    # consumed correctly, so limiting upgrades to renderer profiles that
+    # genuinely need them reduces the blast radius.
+    profile_nif_defaults = resolve_nif_patch_defaults_for_render_profile(render_profile)
+    force_shader_type_3 = (
+        bool(profile_nif_defaults.get("force_shader_type_3", False)) and parallax_output is not None
+    )
     return NifPatchOptions(
         enable_parallax=parallax_output is not None,
         enable_pom=parallax_output is not None and normalized_parallax_mode == "occlusion",
         parallax_scale=parallax_scale if parallax_output is not None else None,
-        force_shader_type_3=parallax_output is not None,
+        force_shader_type_3=force_shader_type_3,
         enable_env_mapping=enable_env_mapping,
         enable_glow_map=enable_glow_map,
         parallax_texture_path=(
@@ -2359,6 +2375,7 @@ def auto_patch_related_nifs_for_texture(
     env_mask_mode: str,
     parallax_mode: str,
     parallax_scale: float | None,
+    render_profile: str = "auto",
     include_parallax: bool | None = None,
     include_environment_mask: bool | None = None,
     include_glow: bool | None = None,
@@ -2377,6 +2394,7 @@ def auto_patch_related_nifs_for_texture(
         env_mask_mode=env_mask_mode,
         parallax_mode=parallax_mode,
         parallax_scale=parallax_scale,
+        render_profile=render_profile,
         include_parallax=include_parallax,
         include_environment_mask=include_environment_mask,
         include_glow=include_glow,
@@ -4566,6 +4584,7 @@ if GUI_AVAILABLE:
                                 complex_format=str(generation_call_kwargs.get("complex_format", "msn")),
                                 env_mask_mode=str(generation_call_kwargs.get("env_mask_mode", "standard")),
                                 parallax_mode=str(generation_call_kwargs.get("parallax_mode", "standard")),
+                                render_profile=str(generation_call_kwargs.get("render_profile", "auto")),
                                 parallax_scale=_map_parallax_strength_to_nif_scale(
                                     float(generation_call_kwargs.get("parallax_strength", 1.35) or 1.35)
                                 ),

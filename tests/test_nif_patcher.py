@@ -177,11 +177,16 @@ def _build_minimal_nif(
     num_block_types = struct.pack("<H", len(block_type_names))
     btypes = b"".join(_sstring_u32(t) for t in block_type_names)
     string_table = struct.pack("<II", 0, 0)
+    # num_groups field: present in NIF 20.2.0.7 when user_version_2 < 130.
+    # Skyrim SE (user_version_2=83 or 100) always has this field set to 0.
+    # Without it the block-data offset is 4 bytes early, causing corrupted
+    # patches and in-game crashes.
+    num_groups = struct.pack("<I", 0)
 
     header = (
         header_str + version + endian + user_ver + num_blocks_bytes
         + user_ver2 + export + num_block_types + btypes
-        + type_indices_bytes + block_sizes_bytes + string_table
+        + type_indices_bytes + block_sizes_bytes + string_table + num_groups
     )
     return header + b"".join(body for _, body in all_blocks)
 
@@ -300,6 +305,16 @@ class TestScanNif(unittest.TestCase):
 
     def test_scan_missing_file_returns_empty(self) -> None:
         self.assertEqual(scan_nif(self.tmp / "missing.nif"), [])
+
+    def test_scan_parses_nif_with_num_groups_zero(self) -> None:
+        """num_groups=0 is always present in real Skyrim SE NIFs (user_version_2 < 130).
+        The test NIF builder includes this field; verify that a NIF built with it
+        is parsed correctly and the block offsets are not shifted."""
+        nif = _write_nif(self.tmp, texture_paths=["textures\\test_d.dds"] + [""] * 8)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertIn(0, infos[0].texture_paths)
+        self.assertEqual(infos[0].texture_paths[0], "textures\\test_d.dds")
 
 
 # ---------------------------------------------------------------------------
