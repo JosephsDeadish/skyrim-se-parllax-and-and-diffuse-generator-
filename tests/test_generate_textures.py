@@ -1378,6 +1378,27 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(options.parallax_texture_path, "textures\\architecture\\stone\\brick_p.dds")
         self.assertEqual(options.normal_texture_path, "textures\\architecture\\stone\\brick_n.dds")
 
+    def test_build_nif_patch_options_for_generated_outputs_coerces_non_dds_slots_to_dds(self) -> None:
+        source_texture = Path("/tmp/mod/textures/architecture/stone/brick.dds")
+        outputs = {
+            "parallax": Path("/tmp/generated/brick_p.png"),
+            "normal": Path("/tmp/generated/brick_n.png"),
+            "environment_mask": Path("/tmp/generated/brick_m.png"),
+        }
+
+        options = build_nif_patch_options_for_generated_outputs(
+            source_texture,
+            outputs,
+            complex_format="msn",
+            env_mask_mode="standard",
+            parallax_mode="standard",
+            parallax_scale=2.0,
+        )
+
+        self.assertEqual(options.parallax_texture_path, "textures\\architecture\\stone\\brick_p.dds")
+        self.assertEqual(options.normal_texture_path, "textures\\architecture\\stone\\brick_n.dds")
+        self.assertEqual(options.env_mask_texture_path, "textures\\architecture\\stone\\brick_m.dds")
+
     def test_build_nif_patch_options_respects_disabled_parallax_output_setting(self) -> None:
         options = build_nif_patch_options_for_generated_outputs(
             None,

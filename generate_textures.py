@@ -2196,6 +2196,21 @@ def _resolve_generated_skyrim_resource_path(generated_path: Path, *, source_text
     return direct_resource_path
 
 
+def _coerce_generated_resource_path_to_dds(resource_path: str) -> str:
+    normalized = resource_path.replace("/", "\\").strip()
+    if not normalized:
+        return normalized
+    stem, suffix = os.path.splitext(normalized)
+    if suffix.lower() != DDS_EXTENSION:
+        return f"{stem}{DDS_EXTENSION}"
+    return normalized
+
+
+def _resolve_generated_dds_resource_path(generated_path: Path, *, source_texture: Path | None = None) -> str:
+    resource_path = _resolve_generated_skyrim_resource_path(generated_path, source_texture=source_texture)
+    return _coerce_generated_resource_path_to_dds(resource_path)
+
+
 def _candidate_nif_search_roots(
     source_texture: Path,
     *,
@@ -2301,15 +2316,15 @@ def build_nif_patch_options_for_generated_outputs(
         force_shader_type_3=parallax_output is not None,
         enable_env_mapping=enable_env_mapping,
         parallax_texture_path=(
-            _resolve_generated_skyrim_resource_path(parallax_output, source_texture=source_texture)
+            _resolve_generated_dds_resource_path(parallax_output, source_texture=source_texture)
             if parallax_output is not None else None
         ),
         normal_texture_path=(
-            _resolve_generated_skyrim_resource_path(normal_path, source_texture=source_texture)
+            _resolve_generated_dds_resource_path(normal_path, source_texture=source_texture)
             if normal_path is not None else None
         ),
         env_mask_texture_path=(
-            _resolve_generated_skyrim_resource_path(env_mask_output, source_texture=source_texture)
+            _resolve_generated_dds_resource_path(env_mask_output, source_texture=source_texture)
             if env_mask_output is not None else None
         ),
         disable_parallax=parallax_disabled_by_options,
@@ -5726,10 +5741,10 @@ if GUI_AVAILABLE:
                     marker = "\\textures\\"
                     marker_index = lowered.rfind(marker)
                     if marker_index != -1:
-                        return "textures\\" + normalized[marker_index + len(marker):]
-                    if lowered.startswith("data\\textures\\"):
-                        return "textures\\" + normalized[len("data\\textures\\"):]
-                    return normalized
+                        normalized = "textures\\" + normalized[marker_index + len(marker):]
+                    elif lowered.startswith("data\\textures\\"):
+                        normalized = "textures\\" + normalized[len("data\\textures\\"):]
+                    return _coerce_generated_resource_path_to_dds(normalized)
 
                 def _browse_texture_path(target_var: tk.StringVar, title: str) -> None:
                     selected = filedialog.askopenfilename(
