@@ -784,6 +784,23 @@ class TestForceShaderType3(unittest.TestCase):
         self.assertEqual(len(infos), 1)
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
 
+    def test_upgrade_keeps_shifted_shader_layout_parseable(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT, shader_layout_shift=4)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_scale=4.0,
+                force_shader_type_3=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+        self.assertAlmostEqual(infos[0].parallax_scale or 0.0, 4.0, places=2)
+
 
 # ---------------------------------------------------------------------------
 # Tests: helpers

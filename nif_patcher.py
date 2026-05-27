@@ -677,6 +677,8 @@ class _ShaderPropBlock:
     flags2: int
     shader_type: int
     texture_set_ref: int       # block index of linked BSShaderTextureSet
+    layout_shift: int
+    common_end_offset: int
 
     # Only valid when shader_type == SHADER_TYPE_HEIGHTMAP (3):
     parallax_max_passes_offset: int | None
@@ -825,6 +827,8 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         flags2=flags2,
         shader_type=shader_type,
         texture_set_ref=texture_set_ref,
+        layout_shift=layout_shift,
+        common_end_offset=common_end,
         parallax_max_passes_offset=pmx_offset,
         parallax_scale_offset=psc_offset,
         parallax_max_passes=pmx_val,
@@ -1041,7 +1045,7 @@ def _upgrade_block_to_type3(
     buf.write_u32_at(sp.shader_type_offset, SHADER_TYPE_HEIGHTMAP)
 
     # 2. Insert the two type-3 floats right after the common fields
-    insert_offset = sp.block_start + _COMMON_FIELDS_SIZE + sp.num_extra * 4
+    insert_offset = sp.common_end_offset
     new_fields = struct.pack("<ff", _DEFAULT_PARALLAX_MAX_PASSES, parallax_scale)
     buf.insert_bytes_at(insert_offset, new_fields)
 
