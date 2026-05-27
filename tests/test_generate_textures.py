@@ -15,6 +15,7 @@ from generate_textures import (
     _compute_tooltip_position,
     _format_nif_result_row_details,
     _normalize_nif_result_details,
+    _preferred_dds_formats_for_output,
     _run_cli,
     _normalize_gui_state,
     _save_with_dds_fallback,
@@ -2374,6 +2375,66 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(save_mock.call_count, 1)
             self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT1", "DXT5"))
 
+    def test_run_with_options_normal_prefers_bc5_then_legacy_fallbacks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ) as save_mock:
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=False,
+                    include_normal=True,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                )
+
+            self.assertEqual(save_mock.call_count, 1)
+            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("BC5", "DXT5", "DXT3"))
+
+    def test_run_with_options_parallax_prefers_dxt1_then_dxt5(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ) as save_mock:
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=True,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                )
+
+            self.assertEqual(save_mock.call_count, 1)
+            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT1", "DXT5"))
+
+    def test_preferred_dds_formats_for_opaque_diffuse_uses_bc7_then_dxt1(self) -> None:
+        formats = _preferred_dds_formats_for_output("diffuse", Image.new("RGB", (4, 4), color=(10, 20, 30)))
+        self.assertEqual(formats, ("BC7", "DXT1", "DXT5"))
+
+    def test_preferred_dds_formats_for_alpha_diffuse_avoids_dxt1(self) -> None:
+        image = Image.new("RGBA", (4, 4), color=(10, 20, 30, 255))
+        image.putpixel((0, 0), (10, 20, 30, 80))
+        formats = _preferred_dds_formats_for_output("diffuse", image)
+        self.assertEqual(formats, ("BC7", "DXT5", "DXT3"))
+
     def test_run_with_options_complex_env_mask_uses_dxt5_and_defaults_to_m_for_enb_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -2402,7 +2463,7 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(save_mock.call_count, 2)
             env_calls = [call for call in save_mock.call_args_list if call.args[1].name.endswith("_m.dds")]
             self.assertEqual(len(env_calls), 1)
-            self.assertEqual(env_calls[0].kwargs["preferred_pixel_formats"], ("DXT5",))
+            self.assertEqual(env_calls[0].kwargs["preferred_pixel_formats"], ("BC7", "DXT5", "DXT3"))
 
     def test_run_with_options_truepbr_complex_env_mask_defaults_to_m_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2430,7 +2491,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 )
 
             self.assertEqual(save_mock.call_count, 1)
-            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT5",))
+            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("BC7", "DXT5", "DXT3"))
             self.assertEqual(save_mock.call_args.args[1].name, "brick_m.dds")
 
     def test_run_with_options_rmaos_writes_rmaos_name(self) -> None:
@@ -2457,7 +2518,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 )
 
             self.assertEqual(save_mock.call_count, 1)
-            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT5",))
+            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("BC7", "DXT5", "DXT3"))
             self.assertEqual(save_mock.call_args.args[1].name, "brick_rmaos.dds")
 
     def test_run_with_options_rmaos_writes_json_sidecar(self) -> None:

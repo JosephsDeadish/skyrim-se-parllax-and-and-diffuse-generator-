@@ -3413,6 +3413,46 @@ def _normalise_preferred_dds_formats(preferred_pixel_formats: tuple[str, ...]) -
     return tuple(normalized)
 
 
+def _image_has_visible_alpha(image: Image.Image) -> bool:
+    if image.mode not in {"RGBA", "LA", "PA"}:
+        return False
+    alpha = image.getchannel("A")
+    alpha_min, alpha_max = alpha.getextrema()
+    return alpha_min < alpha_max or alpha_max < 255
+
+
+def _preferred_dds_formats_for_output(
+    output_kind: str,
+    image: Image.Image,
+    *,
+    complex_format: str = "msn",
+    env_mask_mode: str = "standard",
+) -> tuple[str, ...]:
+    normalized_kind = str(output_kind or "").strip().lower()
+    normalized_complex_format = _normalize_complex_format(complex_format)
+    normalized_env_mask_mode = _normalize_env_mask_mode(env_mask_mode)
+
+    if normalized_kind == "diffuse":
+        if _image_has_visible_alpha(image):
+            return ("BC7", "DXT5", "DXT3")
+        return ("BC7", "DXT1", "DXT5")
+    if normalized_kind == "normal":
+        return ("BC5", "DXT5", "DXT3")
+    if normalized_kind == "parallax":
+        return ("DXT1", "DXT5")
+    if normalized_kind == "glow":
+        return ("DXT5", "DXT3") if _image_has_visible_alpha(image) else ("DXT1", "DXT5")
+    if normalized_kind == "environment_mask":
+        if normalized_env_mask_mode == "standard":
+            return ("DXT1", "DXT5")
+        return ("BC7", "DXT5", "DXT3")
+    if normalized_kind == "rmaos":
+        return ("BC7", "DXT5", "DXT3")
+    if normalized_kind == "complex_material":
+        return ("BC7", "DXT5", "DXT3") if normalized_complex_format == "cm" else ("DXT5", "DXT3")
+    return ("DXT5",)
+
+
 def _save_with_dds_fallback(
     image: Image.Image,
     output_path: Path,
@@ -3540,7 +3580,11 @@ def run_with_options(
                 diffuse_name=diffuse_name,
                 parallax_name=parallax_name,
             )
-            outputs["diffuse"] = _save_with_dds_fallback(diffuse, diffuse_path)
+            outputs["diffuse"] = _save_with_dds_fallback(
+                diffuse,
+                diffuse_path,
+                preferred_pixel_formats=_preferred_dds_formats_for_output("diffuse", diffuse),
+            )
 
         if include_normal:
             normal = enforce_skyrim_output_profile(
@@ -3551,7 +3595,11 @@ def run_with_options(
                 output_dir=output_dir,
                 normal_name=normal_name,
             )
-            outputs["normal"] = _save_with_dds_fallback(normal, normal_path)
+            outputs["normal"] = _save_with_dds_fallback(
+                normal,
+                normal_path,
+                preferred_pixel_formats=_preferred_dds_formats_for_output("normal", normal),
+            )
 
         if include_parallax:
             if parallax_mode == "occlusion":
@@ -3568,7 +3616,11 @@ def run_with_options(
                 diffuse_name=diffuse_name,
                 parallax_name=parallax_name,
             )
-            outputs["parallax"] = _save_with_dds_fallback(parallax, parallax_path)
+            outputs["parallax"] = _save_with_dds_fallback(
+                parallax,
+                parallax_path,
+                preferred_pixel_formats=_preferred_dds_formats_for_output("parallax", parallax),
+            )
 
         if include_glow:
             glow = enforce_skyrim_output_profile("glow", generate_glow(source, threshold=resolved_glow_threshold))
@@ -3577,7 +3629,11 @@ def run_with_options(
                 output_dir=output_dir,
                 glow_name=glow_name,
             )
-            outputs["glow"] = _save_with_dds_fallback(glow, glow_path)
+            outputs["glow"] = _save_with_dds_fallback(
+                glow,
+                glow_path,
+                preferred_pixel_formats=_preferred_dds_formats_for_output("glow", glow),
+            )
 
         if include_environment_mask:
             environment_mask = enforce_skyrim_output_profile(
@@ -3599,11 +3655,14 @@ def run_with_options(
                 render_profile=render_profile,
                 include_complex=include_complex,
             )
-            env_formats = ("DXT1", "DXT5") if env_mask_mode == "standard" else ("DXT5",)
             outputs["environment_mask"] = _save_with_dds_fallback(
                 environment_mask,
                 environment_mask_path,
-                preferred_pixel_formats=env_formats,
+                preferred_pixel_formats=_preferred_dds_formats_for_output(
+                    "environment_mask",
+                    environment_mask,
+                    env_mask_mode=env_mask_mode,
+                ),
             )
 
         if include_rmaos:
@@ -3625,7 +3684,7 @@ def run_with_options(
             outputs["rmaos"] = _save_with_dds_fallback(
                 rmaos_map,
                 rmaos_path,
-                preferred_pixel_formats=("DXT5",),
+                preferred_pixel_formats=_preferred_dds_formats_for_output("rmaos", rmaos_map),
             )
             outputs["rmaos_json"] = write_rmaos_json_sidecar(outputs["rmaos"], parallax_enabled=include_parallax)
 
@@ -3654,11 +3713,14 @@ def run_with_options(
                 complex_name=complex_name,
                 complex_format=complex_format,
             )
-            complex_formats = ("BC7", "DXT5", "DXT3") if complex_format == "cm" else ("DXT5", "DXT3")
             outputs["complex_material"] = _save_with_dds_fallback(
                 complex_material,
                 complex_path,
-                preferred_pixel_formats=complex_formats,
+                preferred_pixel_formats=_preferred_dds_formats_for_output(
+                    "complex_material",
+                    complex_material,
+                    complex_format=complex_format,
+                ),
             )
 
     gc.collect()

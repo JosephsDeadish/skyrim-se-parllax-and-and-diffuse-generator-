@@ -162,7 +162,7 @@ Requires ENBSeries with `ComplexParallaxMaterial=true` in `enbseries.ini`.
 `_msn` channel layout (Slot 1): R=Normal X, G=Normal Y, B=Normal Z, A=Specular intensity.  
 `_m` channel layout in this app's ENB preset (Slot 5): R=Reflection/specular brightness, G=Glossiness, B=Metalness (cubemap tint), A=Parallax height.
 
-Generated outputs default to `.dds` filenames regardless of the input format. Most outputs are written as DXT5 DDS for broad compatibility; standard (`--environment-mask-mode standard`) `_m` masks prefer DXT1 (with automatic DXT5 fallback if needed). `_cm` Community Shaders Extended Materials maps now prefer BC7 when available, then fall back to DXT5/DXT3 for compatibility. If DDS export is unavailable on the current Pillow build, the tool falls back to PNG output.
+Generated outputs default to `.dds` filenames regardless of the input format. Export now prefers map-specific compression in line with modern Skyrim workflows: diffuse maps prefer BC7 (with DXT1 fallback for opaque diffuse), normal maps prefer BC5, grayscale parallax/standard `_m` masks prefer DXT1, and packed material maps (`_cm`, `_rmaos`, complex `_m`) prefer BC7 with legacy DXT fallbacks for compatibility. If DDS export is unavailable on the current Pillow build, the tool falls back to PNG output.
 
 - click **❤ Support on Patreon** in the toolbar to open the creator's Patreon page
 
