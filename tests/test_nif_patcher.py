@@ -480,6 +480,24 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertIn("slot 0 diffuse path", joined)
         self.assertIn("use slot 0 for diffuse/albedo", joined)
 
+    def test_reports_env_mask_suffix_in_diffuse_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_DIFFUSE] = "textures\\arch\\stone_em.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 0 diffuse path", joined)
+        self.assertIn("use slot 0 for diffuse/albedo", joined)
+
+    def test_reports_skin_tint_suffix_in_diffuse_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_DIFFUSE] = "textures\\actors\\dragon\\dragon_sk.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 0 diffuse path", joined)
+        self.assertIn("use slot 0 for diffuse/albedo", joined)
+
     def test_reports_non_cubemap_texture_in_cubemap_slot(self) -> None:
         paths = [""] * 9
         paths[4] = "textures\\arch\\stone_n.dds"
