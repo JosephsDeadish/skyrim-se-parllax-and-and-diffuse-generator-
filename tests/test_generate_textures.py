@@ -609,6 +609,17 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(any("Parallax slot path set" in text for text in warnings))
         self.assertTrue(any("Environment mask path set" in text for text in warnings))
 
+    def test_get_nif_patch_option_warnings_skips_empty_env_mask_warning_for_enb(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="enb",
+            enable_parallax=True,
+            enable_pom=True,
+            enable_env_mapping=True,
+            force_shader_type_3=True,
+            env_mask_texture_path="",
+        )
+        self.assertFalse(any("empty slot 5 path" in text.lower() for text in warnings))
+
     def test_get_nif_patch_option_warnings_reports_absolute_and_non_textures_paths(self) -> None:
         warnings = get_nif_patch_option_warnings(
             selected_profile="enb",

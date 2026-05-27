@@ -851,16 +851,27 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
       ------- 100 B common -------
       [type-3 only] parallax_max_passes 4 B + parallax_scale 4 B
     """
+    block_end = block_start + block_size
+    if block_size < 16 or block_end > len(buf._b):
+        return None
+    if block_start + 12 > block_end:
+        return None
+
     buf.seek(block_start)
     _name_ref = buf.read_u32()
     num_extra = buf.read_u32()
+    max_extra_refs = max((block_size - 12) // 4, 0)
+    if num_extra > max_extra_refs:
+        return None
+    if block_start + 12 + num_extra * 4 > block_end:
+        return None
     for _ in range(num_extra):
         buf.read_u32()
+    if buf.pos + 4 > block_end:
+        return None
     _controller = buf.read_i32()
 
     extra_shift = num_extra * 4
-
-    block_end = block_start + block_size
 
     def _decode_shader_type(raw_value: int) -> int:
         if raw_value in _KNOWN_SHADER_TYPES:
@@ -1255,7 +1266,7 @@ def _build_block_map(
         bsize = header.block_sizes[bi]
         buf = _Buf(data)
 
-        if "BSLightingShaderProperty" in btype:
+        if btype == "BSLightingShaderProperty":
             try:
                 sp = _parse_shader_prop(buf, bi, bstart, bsize, header.num_blocks)
                 if sp is not None:
@@ -1264,7 +1275,7 @@ def _build_block_map(
                     errors.append(f"Block {bi}: failed to parse BSLightingShaderProperty.")
             except (ValueError, struct.error, IndexError) as exc:
                 errors.append(f"Block {bi}: shader parse error: {exc}")
-        elif "BSShaderTextureSet" in btype:
+        elif btype == "BSShaderTextureSet":
             try:
                 ts = _parse_texture_set(buf, bi, bstart, bsize)
                 if ts is not None:

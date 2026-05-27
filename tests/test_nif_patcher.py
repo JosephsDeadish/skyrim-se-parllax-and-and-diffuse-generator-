@@ -34,6 +34,7 @@ from nif_patcher import (
     batch_patch_nif,
     patch_nif,
     scan_nif,
+    scan_nif_diagnostics,
     validate_nif_for_parallax,
 )
 
@@ -279,12 +280,31 @@ class TestScanNif(unittest.TestCase):
 
     def test_scan_u16_count_no_parse_error_in_diagnostics(self) -> None:
         """Scanning a u16-count NIF must not produce BSShaderTextureSet parse errors."""
-        from nif_patcher import scan_nif_diagnostics
         paths = ["textures\\things\\coin01_d.dds"] + [""] * 8
         nif = _write_nif(self.tmp, texture_paths=paths, texture_set_count_u16=True)
         _infos, diagnostics = scan_nif_diagnostics(nif)
         ts_parse_errors = [d for d in diagnostics if "failed to parse BSShaderTextureSet" in d]
         self.assertEqual(ts_parse_errors, [], msg=f"Unexpected parse errors: {ts_parse_errors}")
+
+    def test_scan_ignores_shader_controller_block_name(self) -> None:
+        """Only exact BSLightingShaderProperty blocks should be parsed as shader blocks."""
+        nif = _write_nif(self.tmp, shader_block_type="BSLightingShaderPropertyFloatController")
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(infos, [])
+        self.assertFalse(any("shader parse error" in d.lower() for d in diagnostics))
+
+    def test_scan_does_not_raise_out_of_range_for_invalid_num_extra(self) -> None:
+        nif = _write_nif(self.tmp)
+        raw = bytearray(nif.read_bytes())
+        shader_header = struct.pack("<IIi", 0, 0, -1)
+        shader_start = raw.find(shader_header)
+        self.assertNotEqual(shader_start, -1)
+        struct.pack_into("<I", raw, shader_start + 4, 0xFFFFFFFF)
+        nif.write_bytes(raw)
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(infos, [])
+        self.assertFalse(any("u32 read out of range" in d.lower() for d in diagnostics))
+        self.assertTrue(any("failed to parse bslightingshaderproperty" in d.lower() for d in diagnostics))
 
     def test_patch_nif_with_u16_count_texture_set(self) -> None:
         """patch_nif must work correctly on a NIF whose texture set uses a u16 count."""

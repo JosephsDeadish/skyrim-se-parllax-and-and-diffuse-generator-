@@ -977,11 +977,12 @@ def get_nif_patch_option_warnings(
 ) -> list[str]:
     warnings: list[str] = []
     profile = str(selected_profile or "auto")
+    normalized_profile = _normalize_render_profile(profile)
     if profile in {"auto", "vanilla"} and enable_pom:
         warnings.append("ENB POM is usually incorrect for vanilla meshes.")
     if enable_pom and not force_shader_type_3:
         warnings.append("POM works best with shader type 3 enabled.")
-    if enable_env_mapping and not env_mask_texture_path.strip():
+    if enable_env_mapping and not env_mask_texture_path.strip() and normalized_profile not in {"enb", "auto"}:
         warnings.append("Environment mapping enabled with empty slot 5 path.")
     if parallax_texture_path.strip() and not (enable_parallax or enable_pom):
         warnings.append("Parallax slot path set, but parallax/POM flags are disabled.")
