@@ -677,6 +677,29 @@ class GenerateTexturesTests(unittest.TestCase):
             )
             self.assertEqual(detect_render_profile_from_mod_manager_context(context), "truepbr")
 
+    def test_detect_render_profile_from_mod_manager_context_detects_enb_from_game_root_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game_root = Path(temp_dir) / "SkyrimSE"
+            game_root.mkdir(parents=True)
+            (game_root / "d3d11.dll").write_bytes(b"")
+            context = ModManagerContext(
+                manager="MO2",
+                game_root=game_root,
+            )
+            self.assertEqual(detect_render_profile_from_mod_manager_context(context), "enb")
+
+    def test_detect_render_profile_from_mod_manager_context_detects_cs_from_game_data_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game_root = Path(temp_dir) / "SkyrimSE"
+            plugin_dir = game_root / "Data" / "SKSE" / "Plugins"
+            plugin_dir.mkdir(parents=True)
+            (plugin_dir / "CommunityShaders.dll").write_bytes(b"")
+            context = ModManagerContext(
+                manager="Vortex",
+                game_root=game_root,
+            )
+            self.assertEqual(detect_render_profile_from_mod_manager_context(context), "community_shaders")
+
     def test_resolve_render_profile_options_returns_expected_modes(self) -> None:
         enb = resolve_render_profile_options("enb")
         self.assertEqual(enb["complex_format"], "msn")
@@ -1610,6 +1633,41 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
             self.assertEqual(context.staging_root, staging_root.resolve())
             self.assertEqual(context.output_dir, (tool_dir / "generated_textures").resolve())
+
+    def test_detect_mod_manager_context_includes_mo2_overwrite_dirs_and_game_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            instance_root = temp_path / "MO2"
+            textures_dir = instance_root / "mods" / "Texture Pack" / "textures"
+            meshes_dir = instance_root / "mods" / "Texture Pack" / "meshes"
+            overwrite_textures_dir = instance_root / "overwrite" / "textures"
+            overwrite_meshes_dir = instance_root / "overwrite" / "meshes"
+            tool_dir = instance_root / "mods" / "Skyrim Texture Generator"
+            profile_dir = instance_root / "profiles" / "Default"
+            game_root = temp_path / "SkyrimSE"
+            textures_dir.mkdir(parents=True)
+            meshes_dir.mkdir(parents=True)
+            overwrite_textures_dir.mkdir(parents=True)
+            overwrite_meshes_dir.mkdir(parents=True)
+            tool_dir.mkdir(parents=True)
+            profile_dir.mkdir(parents=True)
+            game_root.mkdir(parents=True)
+            (profile_dir / "modlist.txt").write_text("+Texture Pack\n", encoding="utf-8")
+
+            context = detect_mod_manager_context(
+                {"MO_PROFILE": "Default", "MO2_GAME_PATH": str(game_root)},
+                executable_path=tool_dir / "generate_textures.exe",
+            )
+
+            self.assertEqual(context.game_root, game_root)
+            self.assertEqual(
+                context.loaded_texture_dirs,
+                (overwrite_textures_dir.resolve(), textures_dir.resolve()),
+            )
+            self.assertEqual(
+                context.loaded_mesh_dirs,
+                (overwrite_meshes_dir.resolve(), meshes_dir.resolve()),
+            )
 
     def test_find_related_nif_files_for_texture_matches_family_stem(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

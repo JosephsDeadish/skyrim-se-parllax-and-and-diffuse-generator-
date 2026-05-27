@@ -334,6 +334,7 @@ class ModManagerContext:
     manager: str | None = None
     profile_name: str | None = None
     game_id: str | None = None
+    game_root: Path | None = None
     instance_root: Path | None = None
     staging_root: Path | None = None
     output_dir: Path | None = None
@@ -360,6 +361,8 @@ class ModManagerContext:
             details.append(f"{len(self.load_order)} load-order entry/entries")
         if self.loaded_mesh_dirs:
             details.append(f"{len(self.loaded_mesh_dirs)} mesh folder(s)")
+        if self.game_root is not None:
+            details.append(f"game root {self.game_root}")
         return " — ".join(details)
 
 
@@ -451,6 +454,23 @@ def _find_manager_instance_root(start: Path, required_children: tuple[str, ...])
     return None
 
 
+def _resolve_game_root_from_env(env: Mapping[str, str]) -> Path | None:
+    for key in (
+        "MO2_GAME_PATH",
+        "MO_GAME_PATH",
+        "MO2_GAME_DIRECTORY",
+        "VORTEX_GAME_PATH",
+        "GAME_PATH",
+        "SKYRIMSE_PATH",
+        "SKYRIM_GAME_PATH",
+    ):
+        raw = str(env.get(key, "")).strip()
+        if not raw:
+            continue
+        return Path(raw).expanduser()
+    return None
+
+
 def _candidate_vortex_profile_dirs(env: Mapping[str, str], game_id: str | None) -> tuple[Path, ...]:
     candidates: list[Path] = []
     profile_dir = env.get("VORTEX_PROFILE_DIR")
@@ -494,6 +514,7 @@ def _detect_mo2_context(
     *,
     executable_path: Path,
 ) -> ModManagerContext:
+    game_root = _resolve_game_root_from_env(env)
     profile_name = env.get("MO_PROFILE") or env.get("MO2_PROFILE")
     instance_root = _find_manager_instance_root(executable_path.parent, ("mods", "profiles"))
     if instance_root is None and not profile_name:
@@ -508,7 +529,7 @@ def _detect_mo2_context(
     loaded_mods: tuple[str, ...] = ()
     enabled_plugins: tuple[str, ...] = ()
     load_order: tuple[str, ...] = ()
-    loaded_texture_dirs: tuple[Path, ...] = ()
+    loaded_texture_candidates: list[Path] = []
     if instance_root is not None and resolved_profile:
         modlist_path = instance_root / "profiles" / resolved_profile / "modlist.txt"
         plugins_path = instance_root / "profiles" / resolved_profile / "plugins.txt"
@@ -516,19 +537,20 @@ def _detect_mo2_context(
         loaded_mods = _parse_enabled_modlist(modlist_path)
         enabled_plugins = _parse_enabled_plugins(plugins_path)
         load_order = _parse_load_order(loadorder_path)
-        loaded_texture_dirs = _unique_existing_paths(
-            [instance_root / "mods" / mod_name / "textures" for mod_name in loaded_mods]
-        )
-    loaded_mesh_dirs = _unique_existing_paths(
-        [instance_root / "mods" / mod_name / "meshes" for mod_name in loaded_mods]
-        if instance_root is not None else []
-    )
+        loaded_texture_candidates.extend(instance_root / "mods" / mod_name / "textures" for mod_name in loaded_mods)
+    loaded_mesh_candidates = [instance_root / "mods" / mod_name / "meshes" for mod_name in loaded_mods] if instance_root is not None else []
+    if instance_root is not None:
+        loaded_texture_candidates.insert(0, instance_root / "overwrite" / "textures")
+        loaded_mesh_candidates.insert(0, instance_root / "overwrite" / "meshes")
+    loaded_texture_dirs = _unique_existing_paths(loaded_texture_candidates)
+    loaded_mesh_dirs = _unique_existing_paths(loaded_mesh_candidates)
 
     output_dir = instance_root / "overwrite" if instance_root is not None else None
     return ModManagerContext(
         manager="Mod Organizer 2",
         profile_name=resolved_profile,
         game_id="skyrimse",
+        game_root=game_root,
         instance_root=instance_root,
         output_dir=output_dir,
         loaded_mods=loaded_mods,
@@ -556,6 +578,7 @@ def _detect_vortex_context(
     executable_path: Path,
 ) -> ModManagerContext:
     env_signals = any(key.startswith("VORTEX") for key in env)
+    game_root = _resolve_game_root_from_env(env)
     game_id = env.get("VORTEX_GAME_ID") or env.get("GAME_ID") or "skyrimse"
     profile_dirs = _candidate_vortex_profile_dirs(env, game_id)
     staging_root = None
@@ -590,6 +613,7 @@ def _detect_vortex_context(
         manager="Vortex",
         profile_name=profile_name,
         game_id=game_id,
+        game_root=game_root,
         staging_root=staging_root,
         output_dir=executable_path.parent / "generated_textures",
         loaded_mods=loaded_mods,
@@ -1477,7 +1501,9 @@ def detect_render_profile_from_mod_manager_context(context: ModManagerContext | 
         for token in _RENDER_PROFILE_MANAGER_HINT_TOKENS["enb"]
     )
     marker_roots: list[Path] = []
-    marker_roots.extend(path for path in (context.instance_root, context.staging_root) if path is not None)
+    marker_roots.extend(path for path in (context.game_root, context.instance_root, context.staging_root, context.output_dir) if path is not None)
+    if context.game_root is not None:
+        marker_roots.append(context.game_root / "Data")
     marker_roots.extend(path.parent for path in (*context.loaded_texture_dirs, *context.loaded_mesh_dirs))
     for root in _unique_existing_paths(marker_roots):
         for parts in _RENDER_PROFILE_ENB_MARKERS:
