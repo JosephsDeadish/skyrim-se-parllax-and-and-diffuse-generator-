@@ -328,7 +328,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(normalized["complex_format"]), "msn")
         self.assertEqual(str(normalized["env_mask_mode"]), "standard")
         self.assertEqual(str(normalized["parallax_mode"]), "occlusion (ENB/POM)")
-        self.assertEqual(str(normalized["render_profile"]), "experimental")
+        self.assertEqual(str(normalized["render_profile"]), "custom")
         self.assertAlmostEqual(float(normalized["normal_strength"]), 8.0)
         self.assertAlmostEqual(float(normalized["parallax_strength"]), 0.1)
         self.assertEqual(int(normalized["glow_threshold"]), 255)
@@ -340,9 +340,9 @@ class GenerateTexturesTests(unittest.TestCase):
         normalized = _normalize_gui_state({"render_profile": "true pbr"})
         self.assertEqual(str(normalized["render_profile"]), "truepbr")
 
-    def test_normalize_gui_state_maps_custom_alias_to_experimental(self) -> None:
-        normalized = _normalize_gui_state({"render_profile": "custom"})
-        self.assertEqual(str(normalized["render_profile"]), "experimental")
+    def test_normalize_gui_state_maps_experimental_alias_to_custom(self) -> None:
+        normalized = _normalize_gui_state({"render_profile": "experimental"})
+        self.assertEqual(str(normalized["render_profile"]), "custom")
 
     def test_generate_diffuse_returns_rgb_same_size(self) -> None:
         diffuse = generate_diffuse(_sample_image())
