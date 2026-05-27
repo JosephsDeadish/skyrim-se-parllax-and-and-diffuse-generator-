@@ -329,7 +329,7 @@ class NifPatchOptions:
     clear_env_mask_texture_path: bool = False
     clear_cubemap_texture_path: bool = False
 
-    # ----- PGPatcher-compatible safety skip conditions -----
+    # ----- Safety skip conditions -----
     skip_incompatible_shader_types: bool = True
     """Skip shader blocks whose type is not Default(0), Parallax(3), or
     EnvMap(1).  Prevents accidental corruption of face-tint, skin-tint, hair,
@@ -337,8 +337,8 @@ class NifPatchOptions:
 
     skip_decal: bool = True
     """Skip shader blocks that carry ``SLSF1_Decal`` or ``SLSF1_Dynamic_Decal``
-    flags when enabling parallax.  PGPatcher excludes decal shaders because
-    parallax + decal causes visual glitches in Skyrim SE."""
+    flags when enabling parallax.  Parallax + decal causes visual glitches
+    in Skyrim SE."""
 
     skip_lighting_effects: bool = True
     """Skip shader blocks with ``SLSF2_Soft_Lighting``, ``SLSF2_Rim_Lighting``,
@@ -347,7 +347,7 @@ class NifPatchOptions:
 
     skip_anisotropic: bool = True
     """Skip shader blocks with ``SLSF2_Anisotropic_Lighting`` when enabling
-    parallax (PGPatcher excludes anisotropic-lit shapes)."""
+    parallax.  Anisotropic-lit shapes produce incorrect results with parallax."""
 
     skip_if_havok: bool = True
     """Skip all parallax patching in NIFs that contain a
@@ -364,28 +364,27 @@ class NifPatchOptions:
     (alpha-blended or alpha-tested).  These shapes produce rendering glitches
     with parallax enabled."""
 
-    # ----- ENB mesh-lighting fix (pre-patcher equivalent) -----
+    # ----- Mesh lighting fix -----
     fix_mesh_lighting: bool = False
     """When True, clamp the shader's ``lighting effect 1`` (soft lighting)
-    field to 0.6 if its current value exceeds that threshold.  Implements the
-    technique from Catnyss's article used by PGPatcher's *Fix Mesh Lighting*
-    pre-patcher to cure glowing ENB meshes.  Not needed for Community Shaders
-    which fixes this at the engine level."""
+    field to 0.6 if its current value exceeds that threshold.  This corrects
+    the over-bright glowing mesh problem seen with ENB.  Community Shaders
+    fixes this at the engine level and does not require this option."""
 
     # ----- Additional shader field patches for complex material -----
     env_map_scale: float | None = None
     """Set the environment-map scale field on ``SHADER_TYPE_ENVMAP`` (1)
-    blocks.  PGPatcher hard-sets this to ``1.0`` for all complex-material
-    shapes.  Has no effect on other shader types."""
+    blocks.  Recommended value is ``1.0`` for complex-material shapes.
+    Has no effect on other shader types."""
 
     spec_strength: float | None = None
-    """Set the specular-strength field.  PGPatcher sets this to ``1.0`` for
+    """Set the specular-strength field.  Recommended value is ``1.0`` for
     complex material.  Typical range is 0.0–1.0."""
 
     spec_color: tuple[float, float, float] | None = None
-    """Set the specular colour ``(R, G, B)`` each in 0.0–1.0.  PGPatcher sets
-    this to white ``(1.0, 1.0, 1.0)`` for complex-material textures that
-    contain metalness data (non-black blue channel)."""
+    """Set the specular colour ``(R, G, B)`` each in 0.0–1.0.  Use
+    ``(1.0, 1.0, 1.0)`` (white) for complex-material textures that contain
+    metalness data (non-black blue channel)."""
 
 
 
@@ -780,7 +779,7 @@ class _ShaderPropBlock:
     parallax_max_passes: float | None
     parallax_scale: float | None
 
-    # Additional always-present fields parsed for PGPatcher-compatible patching
+    # Additional always-present fields used by shader patching
     spec_color_offset: int           # offset of 3-float spec_color (R,G,B)
     spec_strength_offset: int
     light_eff1_offset: int
@@ -1041,7 +1040,7 @@ def _compute_block_starts(blocks_start: int, block_sizes: list[int]) -> list[int
 
 
 # ---------------------------------------------------------------------------
-# Shape-block parsing  (PGPatcher skip-condition support)
+# Shape-block parsing  (skip-condition support)
 # ---------------------------------------------------------------------------
 
 #: Block type names that indicate a BSTriShape-family node capable of carrying
@@ -1347,7 +1346,8 @@ def _apply_patches(
     if need_shape_map:
         shader_to_shape, has_havok = _build_shape_map(data, header)
 
-    # PGPatcher: if NIF has Havok data, skip parallax patching entirely
+    # NIFs with Havok-animated skeletons must not receive parallax — doing so
+    # causes an EXCEPTION_ACCESS_VIOLATION crash at runtime.
     if has_havok and opts.skip_if_havok and effective_parallax:
         # Clear effective_parallax so Phase 2 won't enable parallax flags,
         # but still allow disable/env/glow operations.
@@ -1357,7 +1357,7 @@ def _apply_patches(
         new_flags1 = sp.flags1
         new_flags2 = sp.flags2
 
-        # ---- PGPatcher skip conditions when enabling parallax ----
+        # ---- Determine whether parallax is safe to enable on this block ----
         enabling_parallax = effective_parallax and not opts.disable_parallax
         if enabling_parallax:
             # Skip incompatible shader types (not Default/Parallax/EnvMap)
@@ -1366,12 +1366,12 @@ def _apply_patches(
             ):
                 enabling_parallax = False
 
-            # Skip decal shaders
+            # Skip decal shaders — parallax+decal produces visual glitches
             if enabling_parallax and opts.skip_decal:
                 if (new_flags1 & SLSF1_DECAL) or (new_flags1 & SLSF1_DYNAMIC_DECAL):
                     enabling_parallax = False
 
-            # Skip shaders with incompatible lighting modes
+            # Skip shaders with lighting modes incompatible with parallax
             if enabling_parallax and opts.skip_lighting_effects:
                 if (
                     (new_flags2 & SLSF2_SOFT_LIGHTING)
@@ -1385,13 +1385,13 @@ def _apply_patches(
                 if new_flags2 & SLSF2_ANISOTROPIC_LIGHTING:
                     enabling_parallax = False
 
-            # Skip skinned shapes
+            # Skip skinned shapes (NiSkinInstance / BSDismemberSkinInstance)
             if enabling_parallax and opts.skip_if_skinned:
                 shape = shader_to_shape.get(sp.block_index)
                 if shape is not None and shape.skin_instance_ref >= 0:
                     enabling_parallax = False
 
-            # Skip shapes with NiAlphaProperty
+            # Skip alpha-property shapes (NiAlphaProperty)
             if enabling_parallax and opts.skip_if_alpha:
                 shape = shader_to_shape.get(sp.block_index)
                 if shape is not None and shape.alpha_property_ref >= 0:
@@ -1400,17 +1400,17 @@ def _apply_patches(
         # ---- Apply flag changes ----
         if enabling_parallax:
             new_flags1 |= SLSF1_PARALLAX
-            # PGPatcher: clear flags that conflict with vanilla parallax
+            # Clear flags that conflict with vanilla parallax
             new_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
             new_flags2 &= ~SLSF2_MULTI_LAYER_PARALLAX
             new_flags2 &= ~SLSF2_UNUSED01        # PBR flag — conflicts with parallax
-            # PGPatcher: ensure VERTEX_COLORS is set for parallax meshes
+            # Vertex colours must be set for parallax meshes to render correctly
             new_flags2 |= SLSF2_VERTEX_COLORS
         if opts.enable_pom:
             new_flags1 |= SLSF1_PARALLAX_OCCLUSION
         if opts.enable_env_mapping:
             new_flags1 |= SLSF1_ENVIRONMENT_MAPPING
-            # PGPatcher: clear parallax flags when enabling env mapping (complex material)
+            # Clear parallax flags — env mapping and parallax are mutually exclusive
             new_flags1 &= ~SLSF1_PARALLAX
             new_flags1 &= ~SLSF1_PARALLAX_OCCLUSION
             new_flags2 &= ~SLSF2_MULTI_LAYER_PARALLAX
@@ -1636,6 +1636,10 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
             opts.clear_diffuse_texture_path,
             opts.clear_env_mask_texture_path,
             opts.clear_cubemap_texture_path,
+            opts.fix_mesh_lighting,
+            opts.spec_strength is not None,
+            opts.spec_color is not None,
+            opts.env_map_scale is not None,
         )
     )
     if not has_any_toggle:
@@ -2138,7 +2142,65 @@ def _main() -> None:  # pragma: no cover
                         help="Preview changes without writing.")
     parser.add_argument("--validate", action="store_true",
                         help="Just validate and report, do not patch.")
+
+    # ---- Safety skip options ----
+    parser.add_argument("--no-skip-incompatible", action="store_true",
+                        help="Disable shader-type compatibility check (default: skip "
+                             "non-Default/Parallax/EnvMap shader types).")
+    parser.add_argument("--no-skip-decal", action="store_true",
+                        help="Disable decal-flag skip (default: skip decal shaders "
+                             "when enabling parallax).")
+    parser.add_argument("--no-skip-lighting-effects", action="store_true",
+                        help="Disable lighting-effects skip (default: skip soft/rim/"
+                             "back-lit shaders when enabling parallax).")
+    parser.add_argument("--no-skip-anisotropic", action="store_true",
+                        help="Disable anisotropic-lighting skip when enabling parallax.")
+    parser.add_argument("--no-skip-havok", action="store_true",
+                        help="Disable Havok-NIF skip (default: skip parallax patching "
+                             "for NIFs with BSBehaviorGraphExtraData blocks).")
+    parser.add_argument("--no-skip-skinned", action="store_true",
+                        help="Disable skinned-mesh skip (default: skip shapes with "
+                             "NiSkinInstance / BSDismemberSkinInstance).")
+    parser.add_argument("--no-skip-alpha", action="store_true",
+                        help="Disable alpha-property skip (default: skip shapes with "
+                             "NiAlphaProperty).")
+
+    # ---- Mesh lighting fix ----
+    parser.add_argument("--fix-mesh-lighting", action="store_true",
+                        help="Clamp lighting-effect-1 (soft lighting) to 0.6 on any "
+                             "shader block where it exceeds that value. Fixes the "
+                             "glowing-mesh problem under ENB.")
+
+    # ---- Complex material shader field patches ----
+    parser.add_argument("--env-map-scale", type=float, default=None,
+                        metavar="SCALE",
+                        help="Set the environment-map scale field (SHADER_TYPE_ENVMAP "
+                             "blocks only). Recommended: 1.0 for complex material.")
+    parser.add_argument("--spec-strength", type=float, default=None,
+                        metavar="STRENGTH",
+                        help="Set the specular-strength field. Recommended: 1.0 for "
+                             "complex material.")
+    parser.add_argument("--spec-color", type=str, default=None,
+                        metavar="R,G,B",
+                        help="Set the specular colour as three 0.0–1.0 floats "
+                             "separated by commas, e.g. '1.0,1.0,1.0'.")
+
     args = parser.parse_args()
+
+    # Parse --spec-color
+    parsed_spec_color: tuple[float, float, float] | None = None
+    if args.spec_color:
+        try:
+            parts = [float(v.strip()) for v in args.spec_color.split(",")]
+            if len(parts) != 3:
+                raise ValueError
+            parsed_spec_color = (parts[0], parts[1], parts[2])
+        except ValueError:
+            print(
+                f"Error: --spec-color must be three comma-separated floats, e.g. '1.0,1.0,1.0'",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     nif_files: list[Path] = []
     for p in args.nif:
@@ -2190,6 +2252,17 @@ def _main() -> None:  # pragma: no cover
         clear_diffuse_texture_path=args.clear_diffuse,
         clear_env_mask_texture_path=args.clear_env_mask,
         clear_cubemap_texture_path=args.clear_cubemap,
+        skip_incompatible_shader_types=not args.no_skip_incompatible,
+        skip_decal=not args.no_skip_decal,
+        skip_lighting_effects=not args.no_skip_lighting_effects,
+        skip_anisotropic=not args.no_skip_anisotropic,
+        skip_if_havok=not args.no_skip_havok,
+        skip_if_skinned=not args.no_skip_skinned,
+        skip_if_alpha=not args.no_skip_alpha,
+        fix_mesh_lighting=args.fix_mesh_lighting,
+        env_map_scale=args.env_map_scale,
+        spec_strength=args.spec_strength,
+        spec_color=parsed_spec_color,
     )
 
     ok = 0

@@ -1,6 +1,7 @@
 """Tests for nif_patcher.py."""
 from __future__ import annotations
 
+import shutil
 import struct
 import tempfile
 import unittest
@@ -58,6 +59,7 @@ def _build_shader_block(
     flags1: int = 0,
     flags2: int = 0,
     parallax_scale: float | None = None,
+    env_map_scale: float | None = None,
     texture_set_ref: int = 0,
 ) -> bytes:
     """Build a single BSLightingShaderProperty block body."""
@@ -76,6 +78,10 @@ def _build_shader_block(
     if shader_type == SHADER_TYPE_HEIGHTMAP:
         scale = parallax_scale if parallax_scale is not None else 1.0
         body += struct.pack("<ff", 4.0, scale)
+    elif shader_type == SHADER_TYPE_ENVMAP:
+        # Env map scale is the first type-specific field after the common section
+        scale = env_map_scale if env_map_scale is not None else 1.0
+        body += struct.pack("<f", scale)
     return body
 
 
@@ -445,8 +451,8 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertTrue(infos[0].has_env_mapping_flag)
 
     def test_patch_is_idempotent(self) -> None:
-        # A fully PGPatcher-compatible parallax NIF must have both SLSF1_PARALLAX
-        # and SLSF2_VERTEX_COLORS set.  Patching such a NIF again must be a no-op.
+        # A fully patched parallax NIF must have both SLSF1_PARALLAX and
+        # SLSF2_VERTEX_COLORS set.  Patching such a NIF again must be a no-op.
         nif = _write_nif(self.tmp, flags1=SLSF1_PARALLAX, flags2=SLSF2_VERTEX_COLORS)
         result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
         self.assertTrue(result.success)
@@ -1348,6 +1354,382 @@ class TestBackupOverwriteProtection(unittest.TestCase):
         """NifPatchResult must expose a 'warnings' list."""
         result = NifPatchResult(nif_path=Path("x.nif"), success=True)
         self.assertIsInstance(result.warnings, list)
+
+
+# ---------------------------------------------------------------------------
+# Tests for flag management and safety skip conditions
+# ---------------------------------------------------------------------------
+
+# Import additional constants needed for skip-condition tests
+from nif_patcher import (
+    SLSF1_DECAL,
+    SLSF1_DYNAMIC_DECAL,
+    SLSF2_SOFT_LIGHTING,
+    SLSF2_RIM_LIGHTING,
+    SLSF2_BACK_LIGHTING,
+    SLSF2_ANISOTROPIC_LIGHTING,
+    SLSF2_MULTI_LAYER_PARALLAX,
+    SLSF2_UNUSED01,
+    SHADER_TYPE_MULTILAYER,
+    _ShapeBlock,
+    _SHAPE_FIXED_PRE_REFS,
+)
+
+
+def _build_shape_block_body(
+    *,
+    shader_ref: int = 1,
+    skin_ref: int = -1,
+    alpha_ref: int = -1,
+) -> bytes:
+    """Build a minimal BSTriShape block body for skip-condition tests.
+
+    Layout matches _parse_shape_block expectations:
+      NiObjectNET : name_ref(4) + num_extra(4) + controller(4) = 12 bytes
+      NiAVObject  : flags(2) + transform(52) + collision_ref(4) = 58 bytes
+      BoundingSphere: 16 bytes
+      → skin_instance_ref   (i32)
+      → shader_property_ref (i32)
+      → alpha_property_ref  (i32)
+    Total header prefix = 86 bytes + refs (12 bytes) = 98 bytes.
+    """
+    niobjectnet = struct.pack("<IIi", 0, 0, -1)         # name, num_extra, controller
+    niavobj = struct.pack("<H", 0)                       # flags u16
+    niavobj += struct.pack("<" + "f" * 13, *([0.0] * 13))  # transform (52 bytes)
+    niavobj += struct.pack("<i", -1)                     # collision_ref
+    bsphere = struct.pack("<ffff", 0.0, 0.0, 0.0, 1.0)  # BoundingSphere (16 bytes)
+    refs = struct.pack("<iii", skin_ref, shader_ref, alpha_ref)
+    return niobjectnet + niavobj + bsphere + refs
+
+
+def _build_nif_with_shapes(
+    *,
+    shader_flags1: int = 0,
+    shader_flags2: int = 0,
+    skin_ref: int = -1,
+    alpha_ref: int = -1,
+    shader_type: int = SHADER_TYPE_DEFAULT,
+    add_havok: bool = False,
+) -> bytes:
+    """Build a minimal NIF that includes a BSTriShape pointing at a shader.
+
+    Block layout:
+      0 – BSShaderTextureSet
+      1 – BSLightingShaderProperty  (shader_property_ref from BSTriShape)
+      2 – BSTriShape                (shader_ref=1, skin_ref, alpha_ref)
+      [3 – BSBehaviorGraphExtraData (if add_havok=True)]
+    """
+    ts_body = _build_texture_set_block()
+    sp_body = _build_shader_block(
+        shader_type=shader_type,
+        flags1=shader_flags1,
+        flags2=shader_flags2,
+        texture_set_ref=0,
+    )
+    num_blocks = 4 if add_havok else 3
+    shape_body = _build_shape_block_body(shader_ref=1, skin_ref=skin_ref, alpha_ref=alpha_ref)
+
+    block_type_names = [
+        "BSShaderTextureSet",
+        "BSLightingShaderProperty",
+        "BSTriShape",
+    ]
+    all_blocks: list[tuple[int, bytes]] = [
+        (0, ts_body),
+        (1, sp_body),
+        (2, shape_body),
+    ]
+    if add_havok:
+        # Minimal BSBehaviorGraphExtraData body — content doesn't matter for detection
+        havok_body = struct.pack("<IIiI", 0, 0, -1, 0)  # name, num_extra, ctrl, filename_ref
+        block_type_names.append("BSBehaviorGraphExtraData")
+        all_blocks.append((3, havok_body))
+
+    type_indices_bytes = b"".join(struct.pack("<H", ti) for ti, _ in all_blocks)
+    block_sizes_bytes = b"".join(struct.pack("<I", len(body)) for _, body in all_blocks)
+
+    header_str = b"Gamebryo File Format, Version 20.2.0.7\n"
+    version    = struct.pack("<I", 0x14020007)
+    endian     = struct.pack("B", 1)
+    user_ver   = struct.pack("<I", 12)
+    num_blocks_bytes = struct.pack("<I", len(all_blocks))
+    user_ver2  = struct.pack("<I", 83)
+    export     = _sstring_u8("") + _sstring_u8("") + _sstring_u8("")
+    num_btype  = struct.pack("<H", len(block_type_names))
+    btypes     = b"".join(_sstring_u32(t) for t in block_type_names)
+    string_table = struct.pack("<II", 0, 0)
+    num_groups = struct.pack("<I", 0)
+
+    header = (
+        header_str + version + endian + user_ver + num_blocks_bytes
+        + user_ver2 + export + num_btype + btypes
+        + type_indices_bytes + block_sizes_bytes + string_table + num_groups
+    )
+    return header + b"".join(body for _, body in all_blocks)
+
+
+class TestFlagManagement(unittest.TestCase):
+    """Verify that enabling parallax or env mapping correctly manages flags."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_enabling_parallax_sets_vertex_colors(self) -> None:
+        """SLSF2_VERTEX_COLORS must be set alongside SLSF1_PARALLAX."""
+        nif = _write_nif(self.tmp)
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertTrue(info.flags2 & SLSF2_VERTEX_COLORS, "SLSF2_VERTEX_COLORS not set")
+
+    def test_enabling_parallax_clears_env_mapping_flag(self) -> None:
+        """SLSF1_ENVIRONMENT_MAPPING must be cleared when enabling parallax."""
+        nif = _write_nif(self.tmp, flags1=SLSF1_ENVIRONMENT_MAPPING)
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.flags1 & SLSF1_ENVIRONMENT_MAPPING,
+                         "SLSF1_ENVIRONMENT_MAPPING should be cleared by parallax")
+
+    def test_enabling_parallax_clears_multi_layer_flag(self) -> None:
+        """SLSF2_MULTI_LAYER_PARALLAX must be cleared when enabling parallax."""
+        nif = _write_nif(self.tmp, flags2=SLSF2_MULTI_LAYER_PARALLAX)
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.flags2 & SLSF2_MULTI_LAYER_PARALLAX,
+                         "SLSF2_MULTI_LAYER_PARALLAX should be cleared by parallax")
+
+    def test_enabling_parallax_clears_pbr_flag(self) -> None:
+        """SLSF2_UNUSED01 (PBR flag) must be cleared when enabling parallax."""
+        nif = _write_nif(self.tmp, flags2=SLSF2_UNUSED01)
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.flags2 & SLSF2_UNUSED01,
+                         "SLSF2_UNUSED01 (PBR) should be cleared by parallax")
+
+    def test_enabling_env_mapping_clears_parallax_flag(self) -> None:
+        """SLSF1_PARALLAX must be cleared when enabling env mapping."""
+        nif = _write_nif(self.tmp, flags1=SLSF1_PARALLAX)
+        patch_nif(nif, NifPatchOptions(enable_env_mapping=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.flags1 & SLSF1_PARALLAX,
+                         "SLSF1_PARALLAX should be cleared by env mapping")
+
+    def test_enabling_env_mapping_clears_pom_flag(self) -> None:
+        """SLSF1_PARALLAX_OCCLUSION must be cleared when enabling env mapping."""
+        nif = _write_nif(self.tmp, flags1=SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION)
+        patch_nif(nif, NifPatchOptions(enable_env_mapping=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.flags1 & SLSF1_PARALLAX_OCCLUSION,
+                         "SLSF1_PARALLAX_OCCLUSION should be cleared by env mapping")
+
+    def test_enabling_env_mapping_clears_multi_layer_flag(self) -> None:
+        """SLSF2_MULTI_LAYER_PARALLAX must be cleared when enabling env mapping."""
+        nif = _write_nif(self.tmp, flags2=SLSF2_MULTI_LAYER_PARALLAX)
+        patch_nif(nif, NifPatchOptions(enable_env_mapping=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.flags2 & SLSF2_MULTI_LAYER_PARALLAX,
+                         "SLSF2_MULTI_LAYER_PARALLAX should be cleared by env mapping")
+
+
+class TestSkipConditions(unittest.TestCase):
+    """Verify that unsafe shapes are skipped when enabling parallax."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write(self, **kwargs: object) -> Path:
+        p = self.tmp / "test.nif"
+        p.write_bytes(_build_nif_with_shapes(**kwargs))  # type: ignore[arg-type]
+        return p
+
+    def test_skip_decal_flag(self) -> None:
+        """Shaders with SLSF1_DECAL must not receive parallax."""
+        nif = self._write(shader_flags1=SLSF1_DECAL)
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.has_parallax_flag, "Decal shader must not get parallax")
+
+    def test_skip_dynamic_decal_flag(self) -> None:
+        """Shaders with SLSF1_DYNAMIC_DECAL must not receive parallax."""
+        nif = self._write(shader_flags1=SLSF1_DYNAMIC_DECAL)
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.has_parallax_flag, "Dynamic-decal shader must not get parallax")
+
+    def test_skip_soft_lighting(self) -> None:
+        """Shaders with SLSF2_SOFT_LIGHTING must not receive parallax."""
+        nif = self._write(shader_flags2=SLSF2_SOFT_LIGHTING)
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.has_parallax_flag, "Soft-lit shader must not get parallax")
+
+    def test_skip_rim_lighting(self) -> None:
+        """Shaders with SLSF2_RIM_LIGHTING must not receive parallax."""
+        nif = self._write(shader_flags2=SLSF2_RIM_LIGHTING)
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.has_parallax_flag, "Rim-lit shader must not get parallax")
+
+    def test_skip_back_lighting(self) -> None:
+        """Shaders with SLSF2_BACK_LIGHTING must not receive parallax."""
+        nif = self._write(shader_flags2=SLSF2_BACK_LIGHTING)
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.has_parallax_flag, "Back-lit shader must not get parallax")
+
+    def test_skip_anisotropic_lighting(self) -> None:
+        """Shaders with SLSF2_ANISOTROPIC_LIGHTING must not receive parallax."""
+        nif = self._write(shader_flags2=SLSF2_ANISOTROPIC_LIGHTING)
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.has_parallax_flag, "Anisotropic-lit shader must not get parallax")
+
+    def test_skip_incompatible_shader_type(self) -> None:
+        """Shaders with types other than Default/Parallax/EnvMap must be skipped."""
+        nif = self._write(shader_type=SHADER_TYPE_MULTILAYER)
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.has_parallax_flag, "Multi-layer shader must not get parallax")
+
+    def test_skip_if_havok(self) -> None:
+        """NIFs with BSBehaviorGraphExtraData must not have parallax enabled."""
+        nif = self._write(add_havok=True)
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.has_parallax_flag, "Havok NIF must not get parallax")
+
+    def test_skip_if_skinned(self) -> None:
+        """Shapes with a skin instance must not receive parallax."""
+        # skin_ref=0 is the BSShaderTextureSet block — just needs to be a valid index
+        nif = self._write(skin_ref=0)
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.has_parallax_flag, "Skinned shape must not get parallax")
+
+    def test_skip_if_alpha(self) -> None:
+        """Shapes with NiAlphaProperty must not receive parallax."""
+        # alpha_ref=0 is the BSShaderTextureSet block — just needs to be a valid index
+        nif = self._write(alpha_ref=0)
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.has_parallax_flag, "Alpha-property shape must not get parallax")
+
+    def test_no_skip_when_flags_disabled(self) -> None:
+        """With all skip options disabled, decal shaders still get parallax."""
+        nif = self._write(shader_flags1=SLSF1_DECAL)
+        patch_nif(nif, NifPatchOptions(
+            enable_parallax=True,
+            backup=False,
+            skip_decal=False,
+        ))
+        info = scan_nif(nif)[0]
+        self.assertTrue(info.has_parallax_flag,
+                        "Decal shader should get parallax when skip_decal=False")
+
+    def test_havok_skip_does_not_affect_env_mapping(self) -> None:
+        """Havok skip only blocks parallax; env-mapping patching must still work."""
+        nif = self._write(add_havok=True)
+        patch_nif(nif, NifPatchOptions(enable_env_mapping=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertTrue(info.has_env_mapping_flag,
+                        "Env mapping must not be blocked by Havok skip")
+
+
+class TestShaderFieldPatches(unittest.TestCase):
+    """Verify spec_strength, spec_color, env_map_scale, and fix_mesh_lighting."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    # ------------------------------------------------------------------
+    # Helpers: read raw float from the patched NIF's shader block
+    # ------------------------------------------------------------------
+
+    def _read_sp_float(self, nif: Path, attr: str) -> float:
+        """Read a float from the _ShaderPropBlock field named *attr*
+        (e.g. 'spec_strength_offset').  Uses the already-computed absolute
+        file offset stored in the parsed _ShaderPropBlock."""
+        from nif_patcher import _Buf, _read_header, _build_block_map
+        data = nif.read_bytes()
+        header = _read_header(_Buf(data))
+        assert header is not None
+        props, _, _ = _build_block_map(data, header)
+        assert props
+        sp = props[0]
+        offset = getattr(sp, attr)
+        assert offset is not None, f"_ShaderPropBlock.{attr} is None"
+        return struct.unpack_from("<f", data, offset)[0]
+
+    def test_spec_strength_patch(self) -> None:
+        """spec_strength option must write the correct float to the shader block."""
+        nif = _write_nif(self.tmp)
+        patch_nif(nif, NifPatchOptions(spec_strength=0.75, backup=False))
+        value = self._read_sp_float(nif, "spec_strength_offset")
+        self.assertAlmostEqual(value, 0.75, places=4)
+
+    def test_spec_color_patch(self) -> None:
+        """spec_color option must write all three RGB floats to the shader block."""
+        nif = _write_nif(self.tmp)
+        patch_nif(nif, NifPatchOptions(spec_color=(0.5, 0.25, 0.125), backup=False))
+        from nif_patcher import _Buf, _read_header, _build_block_map
+        data = nif.read_bytes()
+        header = _read_header(_Buf(data))
+        assert header is not None
+        props, _, _ = _build_block_map(data, header)
+        sp = props[0]
+        r = struct.unpack_from("<f", data, sp.spec_color_offset)[0]
+        g = struct.unpack_from("<f", data, sp.spec_color_offset + 4)[0]
+        b = struct.unpack_from("<f", data, sp.spec_color_offset + 8)[0]
+        self.assertAlmostEqual(r, 0.5, places=4)
+        self.assertAlmostEqual(g, 0.25, places=4)
+        self.assertAlmostEqual(b, 0.125, places=4)
+
+    def test_fix_mesh_lighting_clamps_high_value(self) -> None:
+        """fix_mesh_lighting must clamp light_eff1 > 0.6 down to 0.6."""
+        from nif_patcher import _Buf, _read_header, _build_block_map
+        # Build NIF, then manually overwrite light_eff1 to 2.0 (too high)
+        nif = _write_nif(self.tmp)
+        data = bytearray(nif.read_bytes())
+        header = _read_header(_Buf(bytes(data)))
+        assert header is not None
+        props, _, _ = _build_block_map(bytes(data), header)
+        sp = props[0]
+        struct.pack_into("<f", data, sp.light_eff1_offset, 2.0)
+        nif.write_bytes(bytes(data))
+
+        patch_nif(nif, NifPatchOptions(fix_mesh_lighting=True, backup=False))
+        value = self._read_sp_float(nif, "light_eff1_offset")
+        self.assertAlmostEqual(value, 0.6, places=4)
+
+    def test_fix_mesh_lighting_leaves_low_value_unchanged(self) -> None:
+        """fix_mesh_lighting must not modify light_eff1 when it is already ≤ 0.6."""
+        # Default shader has light_eff1=0.3 which is below 0.6
+        nif = _write_nif(self.tmp)
+        patch_nif(nif, NifPatchOptions(fix_mesh_lighting=True, backup=False))
+        value = self._read_sp_float(nif, "light_eff1_offset")
+        self.assertAlmostEqual(value, 0.3, places=4)
+
+    def test_env_map_scale_patched_on_envmap_shader(self) -> None:
+        """env_map_scale must be written when shader type is ENVMAP (1)."""
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP)
+        patch_nif(nif, NifPatchOptions(env_map_scale=1.0, backup=False))
+        from nif_patcher import _Buf, _read_header, _build_block_map
+        data = nif.read_bytes()
+        header = _read_header(_Buf(data))
+        assert header is not None
+        props, _, _ = _build_block_map(data, header)
+        sp = props[0]
+        self.assertIsNotNone(sp.env_map_scale_offset)
+        value = struct.unpack_from("<f", data, sp.env_map_scale_offset)[0]
+        self.assertAlmostEqual(value, 1.0, places=4)
 
 
 if __name__ == "__main__":
