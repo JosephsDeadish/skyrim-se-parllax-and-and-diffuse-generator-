@@ -11,6 +11,7 @@ from nif_patcher import (
     SLSF1_PARALLAX,
     SLSF1_PARALLAX_OCCLUSION,
     SLSF2_GLOW_MAP,
+    SLSF2_VERTEX_COLORS,
     SHADER_TYPE_DEFAULT,
     SHADER_TYPE_ENVMAP,
     SHADER_TYPE_GLOW,
@@ -444,7 +445,9 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertTrue(infos[0].has_env_mapping_flag)
 
     def test_patch_is_idempotent(self) -> None:
-        nif = _write_nif(self.tmp, flags1=SLSF1_PARALLAX)
+        # A fully PGPatcher-compatible parallax NIF must have both SLSF1_PARALLAX
+        # and SLSF2_VERTEX_COLORS set.  Patching such a NIF again must be a no-op.
+        nif = _write_nif(self.tmp, flags1=SLSF1_PARALLAX, flags2=SLSF2_VERTEX_COLORS)
         result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
         self.assertTrue(result.success)
         self.assertTrue(result.already_up_to_date)

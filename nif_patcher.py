@@ -208,6 +208,25 @@ _OFFSET_FLAGS1: int = 12        # block_start + 12 + 4*num_extra
 _OFFSET_FLAGS2: int = 16
 _OFFSET_SHADER_TYPE: int = 20
 _OFFSET_TEXTURE_SET: int = 40   # after shader_type + uv_offset + uv_scale
+_OFFSET_GLOSSINESS: int = 72    # clamp_mode(4)+alpha(4)+refraction(4)+glossiness(4)
+_OFFSET_SPEC_COLOR: int = 76    # 3 × float32 = 12 bytes (R,G,B)
+_OFFSET_SPEC_STRENGTH: int = 88 # immediately after spec_color
+_OFFSET_LIGHT_EFF1: int = 92    # lighting effect 1 (soft lighting)
+_OFFSET_LIGHT_EFF2: int = 96    # lighting effect 2
+
+# For SHADER_TYPE_ENVMAP (1) blocks, env_map_scale is the first type-specific
+# float immediately after the 100-byte common section.
+_ENVMAP_SCALE_OFFSET_FROM_COMMON: int = 0
+
+# BSTriShape / NiTriShape shape-block layout for Skyrim SE (NIF 20.2.0.7,
+# user_version_2 = 83 / 100). After the NiObjectNET prefix:
+#
+#   NiAVObject  : flags(2) + transform(52) + collision_ref(4)  = 58 bytes
+#   BoundingSphere: center(12) + radius(4)                      = 16 bytes
+#   → skin_instance_ref (4 B), shader_property_ref (4 B), alpha_property_ref (4 B)
+#
+# Total from block_start to skin_instance_ref with zero extra-data = 12+58+16 = 86.
+_SHAPE_FIXED_PRE_REFS: int = 86
 
 
 # ---------------------------------------------------------------------------
@@ -309,6 +328,67 @@ class NifPatchOptions:
     clear_diffuse_texture_path: bool = False
     clear_env_mask_texture_path: bool = False
     clear_cubemap_texture_path: bool = False
+
+    # ----- PGPatcher-compatible safety skip conditions -----
+    skip_incompatible_shader_types: bool = True
+    """Skip shader blocks whose type is not Default(0), Parallax(3), or
+    EnvMap(1).  Prevents accidental corruption of face-tint, skin-tint, hair,
+    and multi-layer parallax shaders."""
+
+    skip_decal: bool = True
+    """Skip shader blocks that carry ``SLSF1_Decal`` or ``SLSF1_Dynamic_Decal``
+    flags when enabling parallax.  PGPatcher excludes decal shaders because
+    parallax + decal causes visual glitches in Skyrim SE."""
+
+    skip_lighting_effects: bool = True
+    """Skip shader blocks with ``SLSF2_Soft_Lighting``, ``SLSF2_Rim_Lighting``,
+    or ``SLSF2_Back_Lighting`` flags when enabling parallax.  These mesh-lighting
+    modes are incompatible with the parallax shader."""
+
+    skip_anisotropic: bool = True
+    """Skip shader blocks with ``SLSF2_Anisotropic_Lighting`` when enabling
+    parallax (PGPatcher excludes anisotropic-lit shapes)."""
+
+    skip_if_havok: bool = True
+    """Skip all parallax patching in NIFs that contain a
+    ``BSBehaviorGraphExtraData`` block (attached Havok skeleton).  Parallax
+    on Havok-animated meshes causes ``EXCEPTION_ACCESS_VIOLATION`` crashes."""
+
+    skip_if_skinned: bool = True
+    """Skip shader blocks whose parent shape has a skin instance
+    (``NiSkinInstance`` / ``BSDismemberSkinInstance``).  Skinned meshes such
+    as armour and clothing crash with parallax enabled."""
+
+    skip_if_alpha: bool = True
+    """Skip shader blocks whose parent shape has an ``NiAlphaProperty``
+    (alpha-blended or alpha-tested).  These shapes produce rendering glitches
+    with parallax enabled."""
+
+    # ----- ENB mesh-lighting fix (pre-patcher equivalent) -----
+    fix_mesh_lighting: bool = False
+    """When True, clamp the shader's ``lighting effect 1`` (soft lighting)
+    field to 0.6 if its current value exceeds that threshold.  Implements the
+    technique from Catnyss's article used by PGPatcher's *Fix Mesh Lighting*
+    pre-patcher to cure glowing ENB meshes.  Not needed for Community Shaders
+    which fixes this at the engine level."""
+
+    # ----- Additional shader field patches for complex material -----
+    env_map_scale: float | None = None
+    """Set the environment-map scale field on ``SHADER_TYPE_ENVMAP`` (1)
+    blocks.  PGPatcher hard-sets this to ``1.0`` for all complex-material
+    shapes.  Has no effect on other shader types."""
+
+    spec_strength: float | None = None
+    """Set the specular-strength field.  PGPatcher sets this to ``1.0`` for
+    complex material.  Typical range is 0.0–1.0."""
+
+    spec_color: tuple[float, float, float] | None = None
+    """Set the specular colour ``(R, G, B)`` each in 0.0–1.0.  PGPatcher sets
+    this to white ``(1.0, 1.0, 1.0)`` for complex-material textures that
+    contain metalness data (non-black blue channel)."""
+
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -700,6 +780,18 @@ class _ShaderPropBlock:
     parallax_max_passes: float | None
     parallax_scale: float | None
 
+    # Additional always-present fields parsed for PGPatcher-compatible patching
+    spec_color_offset: int           # offset of 3-float spec_color (R,G,B)
+    spec_strength_offset: int
+    light_eff1_offset: int
+    spec_color: tuple[float, float, float]
+    spec_strength: float
+    light_eff1: float
+
+    # Only valid when shader_type == SHADER_TYPE_ENVMAP (1):
+    env_map_scale_offset: int | None
+    env_map_scale: float | None
+
 
 @dataclass
 class _TextureSetBlock:
@@ -791,6 +883,33 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         pmx_val = buf.read_float()
         psc_val = buf.read_float()
 
+    # Additional always-present fields (spec_color, spec_strength, light_eff1)
+    spec_color_off = block_start + _OFFSET_SPEC_COLOR + extra_shift + layout_shift
+    spec_strength_off = block_start + _OFFSET_SPEC_STRENGTH + extra_shift + layout_shift
+    light_eff1_off = block_start + _OFFSET_LIGHT_EFF1 + extra_shift + layout_shift
+
+    spec_r, spec_g, spec_b = 1.0, 1.0, 1.0
+    spec_strength_val: float = 1.0
+    light_eff1_val: float = 0.3
+
+    if spec_color_off + 12 <= block_end:
+        spec_r = struct.unpack_from("<f", buf._b, spec_color_off)[0]
+        spec_g = struct.unpack_from("<f", buf._b, spec_color_off + 4)[0]
+        spec_b = struct.unpack_from("<f", buf._b, spec_color_off + 8)[0]
+    if spec_strength_off + 4 <= block_end:
+        spec_strength_val = struct.unpack_from("<f", buf._b, spec_strength_off)[0]
+    if light_eff1_off + 4 <= block_end:
+        light_eff1_val = struct.unpack_from("<f", buf._b, light_eff1_off)[0]
+
+    # Env map scale: only for SHADER_TYPE_ENVMAP (1), first field after common
+    envmap_scale_off: int | None = None
+    envmap_scale_val: float | None = None
+    if shader_type == SHADER_TYPE_ENVMAP:
+        esc_off = common_end + _ENVMAP_SCALE_OFFSET_FROM_COMMON
+        if esc_off + 4 <= block_end:
+            envmap_scale_off = esc_off
+            envmap_scale_val = struct.unpack_from("<f", buf._b, esc_off)[0]
+
     return _ShaderPropBlock(
         block_index=block_index,
         block_start=block_start,
@@ -809,6 +928,14 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         parallax_scale_offset=psc_offset,
         parallax_max_passes=pmx_val,
         parallax_scale=psc_val,
+        spec_color_offset=spec_color_off,
+        spec_strength_offset=spec_strength_off,
+        light_eff1_offset=light_eff1_off,
+        spec_color=(spec_r, spec_g, spec_b),
+        spec_strength=spec_strength_val,
+        light_eff1=light_eff1_val,
+        env_map_scale_offset=envmap_scale_off,
+        env_map_scale=envmap_scale_val,
     )
 
 
@@ -911,6 +1038,123 @@ def _compute_block_starts(blocks_start: int, block_sizes: list[int]) -> list[int
         starts.append(cursor)
         cursor += size
     return starts
+
+
+# ---------------------------------------------------------------------------
+# Shape-block parsing  (PGPatcher skip-condition support)
+# ---------------------------------------------------------------------------
+
+#: Block type names that indicate a BSTriShape-family node capable of carrying
+#: a shader property and a skin instance.
+_SHAPE_BLOCK_TYPES: frozenset[str] = frozenset({
+    "BSTriShape",
+    "NiTriShape",
+    "BSLODTriShape",
+    "BSMeshLODTriShape",
+    "BSDynamicTriShape",
+})
+
+
+@dataclass
+class _ShapeBlock:
+    """Lightweight parsed representation of a BSTriShape-family block."""
+    block_index: int
+    shader_property_ref: int   # block index; -1 if none
+    skin_instance_ref: int     # block index; -1 if none (indicates skinned mesh)
+    alpha_property_ref: int    # block index; -1 if none
+
+
+def _parse_shape_block(
+    data: bytes,
+    block_index: int,
+    block_start: int,
+    block_size: int,
+    num_blocks: int,
+) -> _ShapeBlock | None:
+    """Parse a BSTriShape-family block to extract skin/shader/alpha refs.
+
+    The Skyrim SE binary layout (NIF 20.2.0.7, user_version_2 ∈ {83, 100}):
+
+    NiObjectNET  : name_ref(4) + num_extra(4) + extra_refs(num_extra×4) + controller(4)
+    NiAVObject   : flags(2) + transform(52) + collision_ref(4)
+    BoundingSphere: 16 bytes
+    → skin_instance_ref   (i32)
+    → shader_property_ref (i32)
+    → alpha_property_ref  (i32)
+
+    Without extra-data refs: fixed prefix = 4+4+4 + 2+52+4 + 16 = 86 bytes.
+    """
+    block_end = block_start + block_size
+    buf = _Buf(data)
+    if block_start + _SHAPE_FIXED_PRE_REFS + 4 > block_end:
+        return None
+
+    # Read num_extra from NiObjectNET header (offset 4 from block_start)
+    if block_start + 8 > block_end:
+        return None
+    num_extra = struct.unpack_from("<I", data, block_start + 4)[0]
+    if num_extra > 512:
+        return None
+
+    extra_shift = num_extra * 4
+    refs_start = block_start + _SHAPE_FIXED_PRE_REFS + extra_shift
+    if refs_start + 12 > block_end:
+        return None
+
+    skin_ref = struct.unpack_from("<i", data, refs_start)[0]
+    shader_ref = struct.unpack_from("<i", data, refs_start + 4)[0]
+    alpha_ref = struct.unpack_from("<i", data, refs_start + 8)[0]
+
+    def _valid(ref: int) -> int:
+        """Return ref if it is a valid non-negative block index, else -1."""
+        if 0 <= ref < num_blocks:
+            return ref
+        return -1
+
+    return _ShapeBlock(
+        block_index=block_index,
+        shader_property_ref=_valid(shader_ref),
+        skin_instance_ref=_valid(skin_ref),
+        alpha_property_ref=_valid(alpha_ref),
+    )
+
+
+def _build_shape_map(
+    data: bytes,
+    header: _NifHeader,
+) -> tuple[dict[int, _ShapeBlock], bool]:
+    """Build a mapping of ``shader_property_ref → _ShapeBlock``.
+
+    Also returns *has_havok*: ``True`` if any block is a
+    ``BSBehaviorGraphExtraData`` node (indicating a Havok-animated NIF where
+    parallax would cause CTD).
+
+    Returns ``(shader_to_shape, has_havok)``.
+    """
+    block_starts = _compute_block_starts(header.blocks_start, header.block_sizes)
+    shader_to_shape: dict[int, _ShapeBlock] = {}
+    has_havok = False
+
+    for bi, type_idx in enumerate(header.block_type_indices):
+        btype = header.block_types[type_idx] if type_idx < len(header.block_types) else ""
+
+        if "BSBehaviorGraphExtraData" in btype:
+            has_havok = True
+
+        if any(st in btype for st in _SHAPE_BLOCK_TYPES):
+            bstart = block_starts[bi]
+            bsize = header.block_sizes[bi]
+            shape = _parse_shape_block(data, bi, bstart, bsize, header.num_blocks)
+            if shape is not None and shape.shader_property_ref >= 0:
+                shader_to_shape[shape.shader_property_ref] = shape
+
+    return shader_to_shape, has_havok
+
+
+def _shape_block_type_names(header: _NifHeader) -> set[str]:
+    """Return the set of block type names present in *header*."""
+    return {header.block_types[i] for i in header.block_type_indices
+            if i < len(header.block_types)}
 
 
 # ---------------------------------------------------------------------------
@@ -1090,20 +1334,87 @@ def _apply_patches(
             shader_props, texture_sets, _ = _build_block_map(data, new_header)
             header = new_header
 
-    # --- Phase 2: in-place flag + parallax scale patches --------------------
+    # --- Phase 2: in-place flag + parallax scale + field patches --------------
     buf = _Buf(data)
     props_patched = 0
+
+    # Build shape map and check for Havok when any skip option is enabled
+    shader_to_shape: dict[int, _ShapeBlock] = {}
+    has_havok = False
+    need_shape_map = (
+        opts.skip_if_havok or opts.skip_if_skinned or opts.skip_if_alpha
+    )
+    if need_shape_map:
+        shader_to_shape, has_havok = _build_shape_map(data, header)
+
+    # PGPatcher: if NIF has Havok data, skip parallax patching entirely
+    if has_havok and opts.skip_if_havok and effective_parallax:
+        # Clear effective_parallax so Phase 2 won't enable parallax flags,
+        # but still allow disable/env/glow operations.
+        effective_parallax = False
 
     for sp in shader_props:
         new_flags1 = sp.flags1
         new_flags2 = sp.flags2
 
-        if effective_parallax:
+        # ---- PGPatcher skip conditions when enabling parallax ----
+        enabling_parallax = effective_parallax and not opts.disable_parallax
+        if enabling_parallax:
+            # Skip incompatible shader types (not Default/Parallax/EnvMap)
+            if opts.skip_incompatible_shader_types and sp.shader_type not in (
+                SHADER_TYPE_DEFAULT, SHADER_TYPE_HEIGHTMAP, SHADER_TYPE_ENVMAP
+            ):
+                enabling_parallax = False
+
+            # Skip decal shaders
+            if enabling_parallax and opts.skip_decal:
+                if (new_flags1 & SLSF1_DECAL) or (new_flags1 & SLSF1_DYNAMIC_DECAL):
+                    enabling_parallax = False
+
+            # Skip shaders with incompatible lighting modes
+            if enabling_parallax and opts.skip_lighting_effects:
+                if (
+                    (new_flags2 & SLSF2_SOFT_LIGHTING)
+                    or (new_flags2 & SLSF2_RIM_LIGHTING)
+                    or (new_flags2 & SLSF2_BACK_LIGHTING)
+                ):
+                    enabling_parallax = False
+
+            # Skip anisotropic-lit shaders
+            if enabling_parallax and opts.skip_anisotropic:
+                if new_flags2 & SLSF2_ANISOTROPIC_LIGHTING:
+                    enabling_parallax = False
+
+            # Skip skinned shapes
+            if enabling_parallax and opts.skip_if_skinned:
+                shape = shader_to_shape.get(sp.block_index)
+                if shape is not None and shape.skin_instance_ref >= 0:
+                    enabling_parallax = False
+
+            # Skip shapes with NiAlphaProperty
+            if enabling_parallax and opts.skip_if_alpha:
+                shape = shader_to_shape.get(sp.block_index)
+                if shape is not None and shape.alpha_property_ref >= 0:
+                    enabling_parallax = False
+
+        # ---- Apply flag changes ----
+        if enabling_parallax:
             new_flags1 |= SLSF1_PARALLAX
+            # PGPatcher: clear flags that conflict with vanilla parallax
+            new_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
+            new_flags2 &= ~SLSF2_MULTI_LAYER_PARALLAX
+            new_flags2 &= ~SLSF2_UNUSED01        # PBR flag — conflicts with parallax
+            # PGPatcher: ensure VERTEX_COLORS is set for parallax meshes
+            new_flags2 |= SLSF2_VERTEX_COLORS
         if opts.enable_pom:
             new_flags1 |= SLSF1_PARALLAX_OCCLUSION
         if opts.enable_env_mapping:
             new_flags1 |= SLSF1_ENVIRONMENT_MAPPING
+            # PGPatcher: clear parallax flags when enabling env mapping (complex material)
+            new_flags1 &= ~SLSF1_PARALLAX
+            new_flags1 &= ~SLSF1_PARALLAX_OCCLUSION
+            new_flags2 &= ~SLSF2_MULTI_LAYER_PARALLAX
+            new_flags2 &= ~SLSF2_UNUSED01
         if opts.enable_glow_map:
             new_flags2 |= SLSF2_GLOW_MAP
         if opts.disable_parallax:
@@ -1130,6 +1441,35 @@ def _apply_patches(
                     buf.write_float_at(sp.parallax_scale_offset, float(new_scale))
                     if not flags_changed:
                         props_patched += 1
+
+        # ---- Fix mesh lighting (ENB pre-patcher) ----
+        if opts.fix_mesh_lighting:
+            if sp.light_eff1_offset and sp.light_eff1 > 0.6:
+                buf.write_float_at(sp.light_eff1_offset, 0.6)
+                if not flags_changed:
+                    props_patched += 1
+
+        # ---- Spec color, spec strength, env map scale patches ----
+        if opts.spec_color is not None:
+            r, g, b = opts.spec_color
+            if sp.spec_color_offset and sp.spec_color_offset + 12 <= len(data):
+                buf.write_float_at(sp.spec_color_offset, float(r))
+                buf.write_float_at(sp.spec_color_offset + 4, float(g))
+                buf.write_float_at(sp.spec_color_offset + 8, float(b))
+                if not flags_changed:
+                    props_patched += 1
+
+        if opts.spec_strength is not None:
+            if sp.spec_strength_offset and sp.spec_strength_offset + 4 <= len(data):
+                buf.write_float_at(sp.spec_strength_offset, float(opts.spec_strength))
+                if not flags_changed:
+                    props_patched += 1
+
+        if opts.env_map_scale is not None:
+            if sp.env_map_scale_offset is not None and sp.env_map_scale_offset + 4 <= len(data):
+                buf.write_float_at(sp.env_map_scale_offset, float(opts.env_map_scale))
+                if not flags_changed:
+                    props_patched += 1
 
     data = buf.to_bytes()
 
