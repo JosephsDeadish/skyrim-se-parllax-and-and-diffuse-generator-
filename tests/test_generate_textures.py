@@ -583,6 +583,14 @@ class GenerateTexturesTests(unittest.TestCase):
             "truepbr",
         )
 
+    def test_recommend_render_profile_detects_truepbr_from_pbrnifpatcher_path_hint(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(
+                Path("mods/PBRNifPatcher/textures/architecture/stone.dds"),
+            ),
+            "truepbr",
+        )
+
     def test_resolve_render_profile_options_returns_expected_modes(self) -> None:
         enb = resolve_render_profile_options("enb")
         self.assertEqual(enb["complex_format"], "msn")
@@ -2443,6 +2451,30 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(payload[0]["texture"], "trees/treepineforestbarkcomp")
             self.assertFalse(bool(payload[0]["parallax"]))
 
+    def test_run_with_options_ramos_alias_writes_json_with_family_texture_identifier(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            outputs = run_with_options(
+                input_file=input_path,
+                output_dir=output_dir,
+                include_diffuse=False,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_rmaos=True,
+                include_complex=False,
+                rmaos_name="brick_ramos",
+            )
+
+            self.assertEqual(outputs["rmaos"].name, "brick_ramos.dds")
+            payload = json.loads(outputs["rmaos_json"].read_text(encoding="utf-8"))
+            self.assertEqual(payload[0]["texture"], "brick")
+
 
 class EmbossNormalTests(unittest.TestCase):
     def test_emboss_normal_returns_rgb_same_size(self) -> None:
@@ -3078,6 +3110,38 @@ class ParallaxOcclusionTests(unittest.TestCase):
         )
         ids = [w[0] for w in warnings]
         self.assertIn("cm_without_normal_map", ids)
+
+    def test_rmaos_without_normal_map_triggers_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=False,
+            include_environment_mask=False,
+            include_rmaos=True,
+            include_complex=False,
+            include_glow=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.2,
+            include_parallax=False,
+            complex_format="cm",
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("rmaos_without_normal_map", ids)
+
+    def test_rmaos_with_msn_complex_triggers_workflow_mix_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=True,
+            include_environment_mask=True,
+            include_rmaos=True,
+            include_complex=True,
+            include_glow=False,
+            env_mask_mode="complex",
+            env_mask_strength=1.2,
+            include_parallax=False,
+            complex_format="msn",
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("rmaos_with_msn_mix", ids)
 
     def test_msn_with_normal_output_triggers_warning(self) -> None:
         warnings = get_generation_warnings(

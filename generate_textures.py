@@ -1034,7 +1034,7 @@ _RENDER_PROFILE_OUTPUT_LABELS: dict[str, str] = {
 _RENDER_PROFILE_PATH_HINTS: dict[str, tuple[str, ...]] = {
     "enb": ("enb", "enbseries"),
     "community_shaders": ("communityshaders", "community_shaders", "community-shaders", "cs"),
-    "truepbr": ("truepbr", "true_pbr", "true-pbr"),
+    "truepbr": ("truepbr", "true_pbr", "true-pbr", "pbrnifpatcher"),
 }
 
 
@@ -3149,12 +3149,28 @@ def get_generation_warnings(
             "Tip: Enable normal-map generation when using '_cm/_c/_C'.",
         ))
 
+    if include_rmaos and not include_normal:
+        warnings.append((
+            "rmaos_without_normal_map",
+            "TruePBR RMAOS output is enabled but normal-map output is disabled.\n\n"
+            "Community Shaders TruePBR workflows typically pair '_rmaos/_ramos' with a standard '_n.dds' normal map.\n\n"
+            "Tip: Enable normal-map generation for TruePBR outputs unless your material setup intentionally omits it.",
+        ))
+
     if include_complex and normalized_complex_format == "msn" and include_normal:
         warnings.append((
             "msn_with_normal_output",
             "Both '_msn' complex material and regular normal-map output are enabled.\n\n"
             "ENB complex-material workflows normally use '_msn' instead of '_n.dds', not alongside it.\n\n"
             "Tip: Disable regular normal-map output when targeting ENB complex materials unless you intentionally need both variants in separate installs.",
+        ))
+
+    if include_rmaos and include_complex and normalized_complex_format == "msn":
+        warnings.append((
+            "rmaos_with_msn_mix",
+            "Both TruePBR '_rmaos/_ramos' output and ENB '_msn' complex-material output are enabled.\n\n"
+            "These are different renderer workflows and should not be combined in the same output set.\n\n"
+            "Tip: For ENB use '_msn' workflow outputs; for TruePBR use '_n + _rmaos/_ramos' with the generated JSON sidecar.",
         ))
 
     if include_environment_mask and env_mask_mode == "complex" and not include_complex:
