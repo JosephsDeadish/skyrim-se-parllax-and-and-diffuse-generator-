@@ -890,7 +890,7 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     "truepbr": (
         "Community Shaders TruePBR workflow (JSON-driven material path).\n"
         "Typical files: diffuse.dds + _n.dds + _rmaos.dds (and optional _p.dds depending on your mesh/material setup).\n"
-        "_rmaos is packed data (commonly roughness/metallic/AO in RGB; alpha usage depends on your TruePBR JSON config).\n"
+        "_rmaos RGBA layout for this preset: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (config-driven).\n"
         "How files should look: _n stays purple/blue, _rmaos should look like packed grayscale channels (not like a normal map).\n"
         "Do NOT treat this as Community Shaders Extended Materials _cm/_c/_C, and do NOT mix it with ENB _msn workflows."
     ),
@@ -900,11 +900,10 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "Preset files here: diffuse.dds + _msn.dds + _p.dds + _rmaos.dds.\n"
         "_msn RGBA channel layout (Slot 1, replaces _n): R=Normal X, G=Normal Y, B=Normal Z, "
         "A=Specular intensity.\n"
-        "_rmaos RGBA channel layout (Slot 5): R=Roughness (0=smooth, 255=rough), "
-        "G=Metallic (0=dielectric, 255=full metal), B=Ambient Occlusion (0=occluded, 255=open), "
-        "A=Specular/height proxy.\n"
+        "_rmaos RGBA channel layout (Slot 5): R=Reflection/specular brightness, "
+        "G=Glossiness, B=Metalness (cubemap tint), A=Parallax height.\n"
         "How files should look: _msn should remain a purple/blue normal map with a useful alpha, while _rmaos should look like packed grayscale data — "
-        "red roughness, green metallic, blue AO, and a mid-grey alpha proxy. It should not look like a second normal map.\n"
+        "red = reflectivity, green = gloss, blue = metalness, alpha = height. It should not look like a second normal map.\n"
         "Add _g.dds only for emissive assets.\n"
         "This is not Community Shaders and not 'ENB PBR' — it is ENB complex material. Do not mix it with _cm/_c/_C workflows.\n"
         "Do NOT generate vanilla _n.dds (replaced by _msn) or _cm/_c (Community Shaders format, "
@@ -1003,6 +1002,23 @@ def _normalize_render_profile(value: str | None) -> str:
     if normalized in {"auto", "vanilla", "community_shaders", "truepbr", "enb"}:
         return normalized
     return "auto"
+
+
+def resolve_env_mask_complex_workflow(
+    *,
+    env_mask_mode: str,
+    complex_format: str = "msn",
+    render_profile: str = "auto",
+) -> str:
+    """Resolve how complex env-mask channels should be packed."""
+    if _normalize_env_mask_mode(env_mask_mode) != "complex":
+        return "standard"
+    normalized_profile = _normalize_render_profile(render_profile)
+    if normalized_profile == "enb":
+        return "enb"
+    if normalized_profile == "truepbr":
+        return "truepbr"
+    return "enb" if _normalize_complex_format(complex_format) == "msn" else "truepbr"
 
 
 def describe_render_profile_output_recommendation(profile: str) -> str:
@@ -1172,6 +1188,15 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
             f"{describe_render_profile_output_recommendation(profile)}"
         )
     return "\n".join(lines)
+
+
+def build_render_profile_brief_message(recommended_profile: str) -> str:
+    normalized = _normalize_render_profile(recommended_profile)
+    if normalized == "auto":
+        normalized = "vanilla"
+    label = _RENDER_PROFILE_LABELS.get(normalized, normalized.replace("_", " ").title())
+    defaults = describe_render_profile_default_outputs(normalized)
+    return f"Suggested target: {label}. {defaults} Click Help for full renderer/channel guide."
 
 
 def recommend_render_profile(
@@ -1821,22 +1846,48 @@ def generate_environment_mask(source: Image.Image, strength: float = 1.2, mode: 
     strength:
         Contrast/intensity strength factor (higher = stronger reflection/glossiness).
     mode:
-        ``"complex"`` — RGBA texture for ENBSeries Complex Parallax Material.
-        Channel layout: R=Roughness, G=Metallic, B=Ambient Occlusion,
-        A=Specular/height proxy. Requires ENBSeries with complex material support.
+        ``"complex"`` — RGBA texture using TruePBR-style RMAOS channel packing
+        (R=Roughness, G=Metallic, B=AO, A=Other/height). Use
+        :func:`generate_environment_mask_for_workflow` when you need explicit
+        ENB channel packing.
 
         ``"standard"`` (default) — Greyscale (L mode) texture for the vanilla Skyrim SE
         ``_m.dds`` texture slot (Slot 5 in the NIF).  Controls environment/specular
         reflection intensity only.  Works without any mods or ENBSeries.
         Brighter = more environment reflection.
     """
+    return generate_environment_mask_for_workflow(
+        source,
+        strength=strength,
+        mode=mode,
+        complex_workflow="truepbr",
+    )
+
+
+def generate_environment_mask_for_workflow(
+    source: Image.Image,
+    *,
+    strength: float = 1.2,
+    mode: str = "standard",
+    complex_workflow: str = "truepbr",
+) -> Image.Image:
     if mode == "standard":
         return _generate_standard_env_mask(source, strength)
+
+    normalized_complex_workflow = str(complex_workflow or "truepbr").strip().lower()
+    if normalized_complex_workflow not in {"enb", "truepbr"}:
+        normalized_complex_workflow = "truepbr"
 
     rgb_source = source.convert("RGB")
     grayscale = ImageOps.grayscale(rgb_source).filter(ImageFilter.GaussianBlur(radius=0.8))
     grayscale_min, grayscale_max = grayscale.getextrema()
     if (grayscale_max - grayscale_min) <= 2:
+        if normalized_complex_workflow == "enb":
+            reflection = _lift_black_floor(Image.new("L", grayscale.size, color=112), floor=12)
+            glossiness = _lift_black_floor(Image.new("L", grayscale.size, color=132), floor=8)
+            metalness = _lift_black_floor(Image.new("L", grayscale.size, color=18), floor=4)
+            height = _lift_black_floor(Image.new("L", grayscale.size, color=127), floor=24)
+            return Image.merge("RGBA", (reflection, glossiness, metalness, height))
         roughness = _lift_black_floor(Image.new("L", grayscale.size, color=182), floor=24)
         metallic = _lift_black_floor(Image.new("L", grayscale.size, color=18), floor=6)
         ao = _lift_black_floor(Image.new("L", grayscale.size, color=214), floor=24)
@@ -1850,25 +1901,31 @@ def generate_environment_mask(source: Image.Image, strength: float = 1.2, mode: 
 
     specular = generate_specular(rgb_source, strength=max(0.1, min(6.0, strength + 0.15)))
 
-    roughness = ImageOps.invert(specular)
-    roughness = ImageEnhance.Contrast(roughness).enhance(0.85 + (strength * 0.32))
-    roughness = _lift_black_floor(ImageOps.autocontrast(roughness, cutoff=0), floor=12)
-
     metallic = Image.blend(chroma, specular, alpha=_clamp(0.22 + (strength * 0.1), 0.22, 0.85))
     metallic = ImageEnhance.Contrast(metallic).enhance(0.75 + (strength * 0.34))
     metallic = _lift_black_floor(ImageOps.autocontrast(metallic, cutoff=0), floor=6)
-
-    local_detail = ImageChops.difference(grayscale, grayscale.filter(ImageFilter.GaussianBlur(radius=2.4)))
-    cavity = ImageOps.invert(ImageEnhance.Contrast(local_detail).enhance(1.05 + (strength * 0.24)))
-    ao = Image.blend(grayscale, cavity, alpha=_clamp(0.52 + (strength * 0.12), 0.52, 0.92))
-    ao = _lift_black_floor(ImageOps.autocontrast(ao, cutoff=0), floor=24)
 
     raw_height = generate_parallax(rgb_source, strength=max(0.85, min(2.0, strength)))
     specular_height = Image.blend(raw_height, specular, alpha=_clamp(0.28 + (strength * 0.1), 0.28, 0.82))
     specular_height = Image.blend(Image.new("L", raw_height.size, color=127), specular_height, alpha=0.74)
     specular_height = _lift_black_floor(specular_height, floor=24)
     specular_height = specular_height.point(lambda value: int(_clamp(float(value), 24.0, 224.0)))
+    if normalized_complex_workflow == "enb":
+        reflection = Image.blend(grayscale, specular, alpha=_clamp(0.56 + (strength * 0.06), 0.56, 0.88))
+        reflection = ImageEnhance.Contrast(reflection).enhance(0.84 + (strength * 0.2))
+        reflection = _lift_black_floor(ImageOps.autocontrast(reflection, cutoff=0), floor=12)
+        glossiness = ImageEnhance.Contrast(specular).enhance(0.88 + (strength * 0.28))
+        glossiness = _lift_black_floor(ImageOps.autocontrast(glossiness, cutoff=0), floor=8)
+        metalness = _lift_black_floor(metallic, floor=4)
+        return Image.merge("RGBA", (reflection, glossiness, metalness, specular_height))
 
+    roughness = ImageOps.invert(specular)
+    roughness = ImageEnhance.Contrast(roughness).enhance(0.85 + (strength * 0.32))
+    roughness = _lift_black_floor(ImageOps.autocontrast(roughness, cutoff=0), floor=12)
+    local_detail = ImageChops.difference(grayscale, grayscale.filter(ImageFilter.GaussianBlur(radius=2.4)))
+    cavity = ImageOps.invert(ImageEnhance.Contrast(local_detail).enhance(1.05 + (strength * 0.24)))
+    ao = Image.blend(grayscale, cavity, alpha=_clamp(0.52 + (strength * 0.12), 0.52, 0.92))
+    ao = _lift_black_floor(ImageOps.autocontrast(ao, cutoff=0), floor=24)
     return Image.merge("RGBA", (roughness, metallic, ao, specular_height))
 
 
@@ -2044,6 +2101,7 @@ def generate_preview_outputs(
     include_glow: bool,
     include_environment_mask: bool,
     include_complex: bool,
+    render_profile: str = "auto",
 ) -> dict[str, Image.Image]:
     if parallax_mode not in {"standard", "occlusion"}:
         raise ValueError("parallax_mode must be 'standard' or 'occlusion'.")
@@ -2066,9 +2124,19 @@ def generate_preview_outputs(
     if include_glow:
         outputs["glow"] = enforce_skyrim_output_profile("glow", generate_glow(source, threshold=glow_threshold))
     if include_environment_mask:
+        env_mask_workflow = resolve_env_mask_complex_workflow(
+            env_mask_mode=env_mask_mode,
+            complex_format=complex_format,
+            render_profile=render_profile,
+        )
         outputs["environment_mask"] = enforce_skyrim_output_profile(
             "environment_mask",
-            generate_environment_mask(source, strength=environment_mask_strength, mode=env_mask_mode),
+            generate_environment_mask_for_workflow(
+                source,
+                strength=environment_mask_strength,
+                mode=env_mask_mode,
+                complex_workflow=env_mask_workflow,
+            ),
             env_mask_mode=env_mask_mode,
         )
     if include_complex:
@@ -2542,14 +2610,11 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
     "_rmaos": (
         "environment_mask",
         "Complex Environment Mask — ENBSeries / TruePBR-style (_rmaos)",
-        "Primarily used by ENBSeries Complex Parallax Material as the channel-packed Slot 5 mask. "
-        "RGBA channel layout: R=Roughness (0=smooth, 255=rough), G=Metallic (0=dielectric, 255=full metal), "
-        "B=Ambient Occlusion (0=fully occluded, 255=no occlusion), A=Specular/height proxy. "
-        "Requires ENBSeries with ComplexParallaxMaterial=true in enbseries.ini. "
-        "Always paired with _msn.dds in Slot 1 (RGB normal + A specular) and optionally _p.dds (Slot 3 parallax). "
-        "Community Shaders TruePBR can also use _rmaos naming in a separate JSON-driven workflow, "
-        "but that is not the same as Community Shaders Extended Materials _cm/_c/_C packing. "
-        "Do NOT use _rmaos for vanilla Skyrim SE or for Community Shaders _cm/_c workflows.",
+        "Used by both ENBSeries complex-material and Community Shaders TruePBR naming paths, but the channels are NOT interchangeable. "
+        "ENB complex material reads: R=Reflection/specular brightness, G=Glossiness, B=Metalness (cubemap tint), A=Parallax height. "
+        "TruePBR typically reads: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (JSON-driven). "
+        "This generator resolves packing from the selected renderer/profile so ENB and TruePBR outputs don't cross-wire. "
+        "Do NOT mix _rmaos files across ENB and TruePBR setups without repacking.",
     ),
     "_s": (
         "subsurface",
@@ -3155,6 +3220,7 @@ def run_with_options(
     include_glow: bool = False,
     include_environment_mask: bool = False,
     include_complex: bool = False,
+    render_profile: str = "auto",
 ) -> dict[str, Path]:
     if not any((include_diffuse, include_normal, include_parallax, include_glow, include_environment_mask, include_complex)):
         raise ValueError("Select at least one output.")
@@ -3230,9 +3296,19 @@ def run_with_options(
             outputs["glow"] = _save_with_dds_fallback(glow, glow_path)
 
         if include_environment_mask:
+            env_mask_workflow = resolve_env_mask_complex_workflow(
+                env_mask_mode=env_mask_mode,
+                complex_format=complex_format,
+                render_profile=render_profile,
+            )
             environment_mask = enforce_skyrim_output_profile(
                 "environment_mask",
-                generate_environment_mask(source, strength=resolved_environment_mask_strength, mode=env_mask_mode),
+                generate_environment_mask_for_workflow(
+                    source,
+                    strength=resolved_environment_mask_strength,
+                    mode=env_mask_mode,
+                    complex_workflow=env_mask_workflow,
+                ),
                 env_mask_mode=env_mask_mode,
             )
             environment_mask_path = build_environment_mask_output_path(
@@ -3310,6 +3386,7 @@ def run_batch_with_options(
     include_glow: bool = False,
     include_environment_mask: bool = False,
     include_complex: bool = False,
+    render_profile: str = "auto",
     progress_callback: Callable[[int, int, Path], None] | None = None,
     error_callback: Callable[[int, int, Path, Exception], None] | None = None,
     continue_on_error: bool = False,
@@ -3351,6 +3428,7 @@ def run_batch_with_options(
                     include_glow=include_glow,
                     include_environment_mask=include_environment_mask,
                     include_complex=include_complex,
+                    render_profile=render_profile,
                 )
             except Exception as exc:
                 if error_callback is not None:
@@ -3386,6 +3464,7 @@ def run_batch_with_options(
             include_glow=include_glow,
             include_environment_mask=include_environment_mask,
             include_complex=include_complex,
+            render_profile=render_profile,
         )
 
     completed = 0
@@ -3486,8 +3565,8 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Environment mask output mode. "
             "'standard' (default) = greyscale _m.dds for vanilla Skyrim SE (Texture Slot 5, no ENB required). "
-            "'complex' = RGBA channel-packed texture for ENBSeries Complex Parallax Material "
-            "(defaults to _rmaos.dds naming unless --environment-mask-name overrides it)."
+            "'complex' = RGBA channel-packed _rmaos texture for renderer-specific complex workflows "
+            "(ENB complex material and TruePBR use different channel meanings; defaults to _rmaos.dds unless --environment-mask-name overrides it)."
         ),
     )
     parser.add_argument(
@@ -3693,8 +3772,9 @@ if GUI_AVAILABLE:
             self.parallax_mode_var = tk.StringVar(value="standard")
             self.render_profile_var = tk.StringVar(value="auto")
             self.render_profile_suggestion_var = tk.StringVar(
-                value=build_render_profile_recommendation_message("vanilla")
+                value=build_render_profile_brief_message("vanilla")
             )
+            self.render_profile_help_window: tk.Toplevel | None = None
             self.auto_suggestions_var = tk.BooleanVar(value=True)
             self.auto_normal_suggestion_var = tk.BooleanVar(value=True)
             self.auto_parallax_suggestion_var = tk.BooleanVar(value=True)
@@ -3755,6 +3835,12 @@ if GUI_AVAILABLE:
                 command=lambda: webbrowser.open(PATREON_URL),
             )
             _patreon_button.pack(side=tk.RIGHT, padx=4)
+            _help_button = ttk.Button(
+                top_bar,
+                text="Help",
+                command=self._open_render_profile_help,
+            )
+            _help_button.pack(side=tk.RIGHT, padx=4)
             _theme_top_check = ttk.Checkbutton(
                 top_bar,
                 textvariable=self.theme_mode_label_var,
@@ -3767,6 +3853,11 @@ if GUI_AVAILABLE:
                 _patreon_button,
                 "❤ Fuel the project on Patreon.\n"
                 "Your support buys bug-fixing time, feature upgrades, and enough caffeine to keep the texture goblin alive.",
+            )
+            self._add_tooltip(
+                _help_button,
+                "❓ Open the full renderer/channel guide.\n"
+                "Includes ENB vs Community Shaders channel mappings and workflow do/don't notes.",
             )
 
             file_frame = ttk.LabelFrame(wrapper, text="Files", padding=10)
@@ -3882,13 +3973,15 @@ if GUI_AVAILABLE:
                 "vanilla = safest defaults; community_shaders = _cm/_c/_C; truepbr = _n + _rmaos JSON-driven path; enb = tool ENB preset _msn + complex env + optional POM.\n"
                 "Community Shaders and ENB are separate workflows and should not be mixed.",
             )
-            ttk.Label(
+            self.render_profile_hint_label = ttk.Label(
                 options_frame,
                 textvariable=self.render_profile_suggestion_var,
                 foreground="gray",
                 justify=tk.LEFT,
+                anchor=tk.W,
                 wraplength=520,
-            ).grid(row=3, column=2, columnspan=3, sticky=tk.W, padx=(4, 0))
+            )
+            self.render_profile_hint_label.grid(row=3, column=2, columnspan=3, sticky=tk.EW, padx=(4, 0))
 
             _complex_fmt_label = ttk.Label(options_frame, text="Complex/PBR format")
             _complex_fmt_label.grid(row=4, column=0, sticky=tk.W, pady=8)
@@ -3920,7 +4013,7 @@ if GUI_AVAILABLE:
             _env_mode_row.grid(row=4, column=2, columnspan=2, sticky=tk.W, padx=(20, 4), pady=8)
             _env_mode_label = ttk.Label(_env_mode_row, text="Env mask mode")
             _env_mode_label.pack(side=tk.LEFT)
-            self._add_tooltip(_env_mode_label, "🌍 How to encode the environment mask.\n'standard' = vanilla Skyrim. 'complex' = ENBSeries channel-packed RGBA. Choose wisely.")
+            self._add_tooltip(_env_mode_label, "🌍 How to encode the environment mask.\n'standard' = vanilla Skyrim.\n'complex' = packed RGBA (ENB and TruePBR interpret channels differently).\nUse Target renderer + Help for the correct channel mapping.")
             env_mask_mode_combo = ttk.Combobox(
                 _env_mode_row,
                 textvariable=self.env_mask_mode_var,
@@ -3930,10 +4023,10 @@ if GUI_AVAILABLE:
             )
             env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
             env_mask_mode_combo.bind("<<ComboboxSelected>>", self._on_env_mask_mode_changed)
-            self._add_tooltip(env_mask_mode_combo, "🌍 'standard' = vanilla Skyrim SE reflections.\n'complex' = ENB-only RGBA mask.\nIf you are not targeting ENB, use standard.")
+            self._add_tooltip(env_mask_mode_combo, "🌍 'standard' = vanilla Skyrim SE reflections.\n'complex' = packed RGBA for ENB/TruePBR workflows.\nAlways match this with your selected Target renderer.")
             ttk.Label(
                 options_frame,
-                text="standard = vanilla Skyrim SE  |  complex = ENBSeries RGBA",
+                text="standard = vanilla Skyrim SE  |  complex = packed RGBA (renderer-specific channels)",
                 foreground="gray",
             ).grid(row=4, column=4, sticky=tk.W, padx=(4, 0))
 
@@ -4069,6 +4162,8 @@ if GUI_AVAILABLE:
             ).grid(row=12, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
 
             options_frame.columnconfigure(2, weight=1)
+            options_frame.columnconfigure(3, weight=1)
+            options_frame.columnconfigure(4, weight=1)
             self._update_slider_auto_states()
 
             actions = ttk.Frame(wrapper, padding=(4, 8, 4, 4))
@@ -4101,6 +4196,7 @@ if GUI_AVAILABLE:
             self._bind_responsive_wrap(top_bar, top_bar_message, horizontal_padding=260, min_wrap=220)
             self._bind_responsive_wrap(file_frame, _detected_context_label, horizontal_padding=28, min_wrap=220)
             self._bind_responsive_wrap(actions, _status_label, horizontal_padding=360, min_wrap=200)
+            self._bind_responsive_wrap(options_frame, self.render_profile_hint_label, horizontal_padding=350, min_wrap=220)
 
             preview_frame = ttk.LabelFrame(wrapper, text="Preview (Source vs Generated)", padding=10)
             preview_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
@@ -5021,7 +5117,7 @@ if GUI_AVAILABLE:
         def _update_render_profile_recommendation(self, *, apply_auto: bool) -> str:
             preview_path = self._current_preview_path()
             recommended_profile = self._recommended_render_profile_for_preview(preview_path)
-            message = build_render_profile_recommendation_message(recommended_profile)
+            message = build_render_profile_brief_message(recommended_profile)
             if self.render_profile_var.get() == "auto":
                 self.render_profile_suggestion_var.set(message)
                 if apply_auto:
@@ -5039,6 +5135,52 @@ if GUI_AVAILABLE:
             else:
                 self.render_profile_suggestion_var.set(message)
             return recommended_profile
+
+        def _open_render_profile_help(self) -> None:
+            preview_path = self._current_preview_path()
+            recommended_profile = self._recommended_render_profile_for_preview(preview_path)
+            help_text = build_render_profile_recommendation_message(recommended_profile)
+            if self.render_profile_help_window is not None and self.render_profile_help_window.winfo_exists():
+                self.render_profile_help_window.deiconify()
+                self.render_profile_help_window.lift()
+                self.render_profile_help_window.focus_force()
+                text_widget = getattr(self.render_profile_help_window, "_help_text_widget", None)
+                if text_widget is not None:
+                    text_widget.configure(state=tk.NORMAL)
+                    text_widget.delete("1.0", tk.END)
+                    text_widget.insert("1.0", help_text)
+                    text_widget.configure(state=tk.DISABLED)
+                return
+
+            win = tk.Toplevel(self.root)
+            win.title("Renderer / Channel Help")
+            win.geometry("860x620")
+            win.minsize(620, 420)
+            win.transient(self.root)
+            self.render_profile_help_window = win
+
+            container = ttk.Frame(win, padding=10)
+            container.pack(fill=tk.BOTH, expand=True)
+            ttk.Label(
+                container,
+                text="Renderer/channel guidance (ENB vs Community Shaders)",
+                justify=tk.LEFT,
+                anchor=tk.W,
+            ).pack(fill=tk.X, pady=(0, 8))
+            text = tk.Text(container, wrap=tk.WORD)
+            y_scroll = ttk.Scrollbar(container, orient=tk.VERTICAL, command=text.yview)
+            text.configure(yscrollcommand=y_scroll.set)
+            text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            y_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+            text.insert("1.0", help_text)
+            text.configure(state=tk.DISABLED)
+            win._help_text_widget = text  # type: ignore[attr-defined]
+            def _on_close() -> None:
+                self.render_profile_help_window = None
+                win.destroy()
+
+            ttk.Button(win, text="Close", command=_on_close).pack(anchor=tk.E, padx=10, pady=(0, 10))
+            win.protocol("WM_DELETE_WINDOW", _on_close)
 
         def _on_render_profile_changed(self, _event: object | None = None) -> None:
             selected = _normalize_render_profile(self.render_profile_var.get())
@@ -5089,7 +5231,9 @@ if GUI_AVAILABLE:
                 selected = "standard"
                 self.env_mask_mode_var.set(selected)
             if selected == "complex":
-                self.status_var.set("Environment mask mode: complex — ENB-only RGBA roughness/metallic/AO/spec-height workflow.")
+                self.status_var.set(
+                    "Environment mask mode: complex — RGBA packed output (ENB and TruePBR use different channel meanings; use the renderer preset + Help guide)."
+                )
             else:
                 self.status_var.set("Environment mask mode: standard — vanilla Skyrim SE grayscale reflection mask.")
             self._request_preview_refresh()
@@ -5327,6 +5471,7 @@ if GUI_AVAILABLE:
                     include_glow=self.include_glow_var.get(),
                     include_environment_mask=self.include_environment_mask_var.get(),
                     include_complex=self.include_complex_var.get(),
+                    render_profile=self.render_profile_var.get(),
                 )
 
                 before_max, output_max = get_preview_size_limits(self.preview_size_var.get())
@@ -5598,6 +5743,7 @@ if GUI_AVAILABLE:
                     "parallax_mode": _parallax_mode_key,
                     "auto_patch_nifs": self.auto_patch_nifs_var.get(),
                     "manager_context": self.manager_context,
+                    "render_profile": self.render_profile_var.get(),
                     "include_diffuse": include_diffuse,
                     "include_normal": include_normal,
                     "include_parallax": include_parallax,
@@ -6591,6 +6737,7 @@ def main() -> int:
             include_glow=args.glow_map,
             include_environment_mask=args.environment_mask,
             include_complex=args.complex_material,
+            render_profile="auto",
             continue_on_error=True,
             batch_workers=args.batch_workers,
             error_callback=lambda _index, _total, current, exc: failures.append((current, str(exc))),
@@ -6632,6 +6779,7 @@ def main() -> int:
         include_glow=args.glow_map,
         include_environment_mask=args.environment_mask,
         include_complex=args.complex_material,
+        render_profile="auto",
     )
     for output_type, path in outputs.items():
         print(f"{output_type.replace('_', ' ').title()} texture: {path}")

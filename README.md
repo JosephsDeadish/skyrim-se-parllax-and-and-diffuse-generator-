@@ -154,7 +154,7 @@ Requires ENBSeries with `ComplexParallaxMaterial=true` in `enbseries.ini`.
   - `python generate_textures.py /path/to/input.dds --complex-material --complex-format msn --environment-mask --environment-mask-mode complex --parallax-mode occlusion`
 
 `_msn` channel layout (Slot 1): R=Normal X, G=Normal Y, B=Normal Z, A=Specular intensity.  
-`_rmaos` channel layout in this app's ENB preset (Slot 5): R=Roughness, G=Metallic, B=AO, A=Specular/height proxy.
+`_rmaos` channel layout in this app's ENB preset (Slot 5): R=Reflection/specular brightness, G=Glossiness, B=Metalness (cubemap tint), A=Parallax height.
 
 Generated outputs default to `.dds` filenames regardless of the input format. Most outputs are written as DXT5 DDS for broad compatibility; standard (`--environment-mask-mode standard`) `_m` masks prefer DXT1 (with automatic DXT5 fallback if needed). `_cm` Community Shaders Extended Materials maps now prefer BC7 when available, then fall back to DXT5/DXT3 for compatibility. If DDS export is unavailable on the current Pillow build, the tool falls back to PNG output.
 
@@ -170,11 +170,11 @@ Generated outputs default to `.dds` filenames regardless of the input format. Mo
 - Output generation now enforces per-map Skyrim-safe channel profiles during preview and file export (for example: normal maps always RGB with blue channel floor, standard env masks always greyscale, complex outputs always RGBA).
 - **Environment mask** (`*_m` / `*_rmaos`) has two modes:
   - **Standard** (default) — greyscale `L`-mode texture. Texture Slot 5 in the NIF. Controls per-pixel environment/specular reflection intensity (brighter = more reflection). Requires `SLSF1_Environment_Mapping` shader flag. Works with vanilla Skyrim SE — **no ENBSeries required**. Typically stored as DXT1.
-  - **Complex** (select in GUI or via `--environment-mask-mode complex`) — RGBA channel-packed for ENBSeries Complex Parallax Material workflows: R=Roughness (0=smooth, 255=rough), G=Metallic (0=dielectric, 255=full metal), B=Ambient Occlusion (0=fully occluded, 255=no occlusion), A=Specular/height proxy. **ENBSeries required** with `ComplexParallaxMaterial=true` in `enbseries.ini`. Always paired with `_msn.dds` (Slot 1) and optionally `_p.dds` (parallax). The generator now defaults this mode to `*_rmaos.dds`, though custom environment-mask naming still works.
+  - **Complex** (select in GUI or via `--environment-mask-mode complex`) — RGBA channel-packed for renderer-specific workflows. In this app's ENB preset: R=Reflection/specular brightness, G=Glossiness, B=Metalness (cubemap tint), A=Parallax height. In TruePBR workflows: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (JSON-driven). **ENBSeries required** with `ComplexParallaxMaterial=true` in `enbseries.ini` for ENB usage. The generator defaults complex env-mask naming to `*_rmaos.dds`, though custom naming still works.
 - For large/high-detail sources (2K/4K/8K), generation applies adaptive detail dampening to reduce over-sharpened normals/parallax and complex-material sparkle artifacts. Analysis and auto-recommendation calculations are automatically performed on a downscaled copy so large textures are processed faster without sacrificing output quality.
 - Generation warnings now include extra guardrails for UI/interface texture paths and paper/card-like assets when map combinations are likely to look incorrect in-game.
 - Specular generation uses numpy float32 arithmetic with percentile-based range normalisation so true-black hole artefacts cannot be introduced by integer rounding, regardless of texture size or content.
-- `_msn` output stores normal RGB with specular in alpha (ENBSeries Slot 1); `_cm`/`_c`/`_C` stores packed Community Shaders Extended Materials channels (R=environment reflection amount, G=glossiness, B=metallic, A=height/mode-control alpha); `_rmaos` stores ENBSeries complex env mask (R=roughness, G=metallic, B=AO, A=specular/height proxy).
+- `_msn` output stores normal RGB with specular in alpha (ENBSeries Slot 1); `_cm`/`_c`/`_C` stores packed Community Shaders Extended Materials channels (R=environment reflection amount, G=glossiness, B=metallic, A=height/mode-control alpha); `_rmaos` stores renderer-specific packed data (ENB preset: R=reflection, G=glossiness, B=metalness, A=height; TruePBR preset: R=roughness, G=metallic, B=AO, A=other/height).
 
 ## File name recognition
 
@@ -187,7 +187,7 @@ The tool recognises standard Skyrim SE texture naming conventions from the file 
 | `_p` | Parallax Heightmap | Greyscale, Slot 3, requires SKSE64 memory patch |
 | `_g` | Glow / Emissive | Slot 2, requires `SLSF1_Own_Emit` flag |
 | `_m` | Environment Mask | Greyscale reflection intensity, Slot 5 — vanilla Skyrim SE only |
-| `_rmaos` | Complex Env Mask (TruePBR/ENB-style naming) | RGBA Slot 5 packed data map. In this app's ENB preset it is treated as R=Roughness, G=Metallic, B=AO, A=Specular/height proxy and typically paired with `_msn`. Community Shaders TruePBR can also use `_rmaos` via JSON-driven workflows with setup-dependent channel semantics. |
+| `_rmaos` | Complex Env Mask (TruePBR/ENB-style naming) | RGBA Slot 5 packed data map. In this app's ENB preset it is treated as R=Reflection/specular brightness, G=Glossiness, B=Metalness, A=Parallax height and is typically paired with `_msn`. Community Shaders TruePBR uses `_rmaos` with R=Roughness, G=Metallic, B=AO, A=Other/smoothness/height (JSON-driven). |
 | `_s` | Subsurface Scattering | Slot 6, skin/character textures |
 | `_sk` | Skin Specular | Slot 7, character-specific |
 | `_msn` | Complex Parallax Material (ENBSeries) | RGBA Slot 1 — replaces `_n` when ENBSeries complex material is active. Channels: R=Normal X, G=Normal Y, B=Normal Z, A=Specular intensity. **ENBSeries only — not vanilla Skyrim SE.** |
@@ -203,7 +203,7 @@ Batch folder mode scans subfolders and automatically skips generated variants (`
 | **Vanilla Skyrim SE** | diffuse + `_n` | Add `_m` (greyscale) for reflective materials; add `_p` for parallax meshes |
 | **Community Shaders (Extended Materials)** | diffuse + `_n` + `_p` + `_cm` (or `_c` / `_C`) | `_cm`/`_c`/`_C`: R=Env reflection, G=Glossiness, B=Metallic, A=Height / mode-control alpha |
 | **Community Shaders TruePBR** | diffuse + `_n` + `_rmaos` (+ optional `_p`) | JSON-driven workflow; channel interpretation can vary by TruePBR config |
-| **ENBSeries complex (this app preset)** | diffuse + `_msn` + `_p` + `_rmaos` | `_msn`: R=Nx, G=Ny, B=Nz, A=Spec; `_rmaos`: R=Rough, G=Metal, B=AO, A=Spec/Height |
+| **ENBSeries complex (this app preset)** | diffuse + `_msn` + `_p` + `_rmaos` | `_msn`: R=Nx, G=Ny, B=Nz, A=Spec; `_rmaos`: R=Reflection, G=Glossiness, B=Metalness, A=Height |
 
 Community Shaders Extended Materials and ENB complex material are **mutually exclusive** workflows. Choose one target renderer for a given install/output set instead of trying to combine them.
 

@@ -40,6 +40,7 @@ from generate_textures import (
     generate_complex_material,
     generate_diffuse,
     generate_environment_mask,
+    generate_environment_mask_for_workflow,
     generate_glow,
     generate_msn,
     generate_normal,
@@ -60,6 +61,7 @@ from generate_textures import (
     resolve_render_profile_output_defaults,
     resolve_render_profile_options,
     restore_nif_backups,
+    resolve_env_mask_complex_workflow,
     load_gui_state,
     main,
     parse_args,
@@ -1008,6 +1010,38 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertGreater(ImageStat.Stat(roughness).mean[0], ImageStat.Stat(metallic).mean[0])
         self.assertGreater(ImageStat.Stat(ao).mean[0], ImageStat.Stat(roughness).mean[0])
         self.assertGreater(ImageStat.Stat(specular_height).mean[0], ImageStat.Stat(metallic).mean[0])
+
+    def test_generate_environment_mask_for_workflow_enb_uses_reflection_gloss_metal_height_layout(self) -> None:
+        environment_mask = generate_environment_mask_for_workflow(
+            _flat_dark_image(),
+            strength=2.2,
+            mode="complex",
+            complex_workflow="enb",
+        )
+        reflection, glossiness, metalness, height = environment_mask.split()
+        self.assertGreater(ImageStat.Stat(glossiness).mean[0], ImageStat.Stat(reflection).mean[0])
+        self.assertGreater(ImageStat.Stat(reflection).mean[0], ImageStat.Stat(metalness).mean[0])
+        self.assertGreater(ImageStat.Stat(height).mean[0], ImageStat.Stat(metalness).mean[0])
+
+    def test_resolve_env_mask_complex_workflow_prefers_render_profile(self) -> None:
+        self.assertEqual(
+            resolve_env_mask_complex_workflow(env_mask_mode="complex", complex_format="cm", render_profile="enb"),
+            "enb",
+        )
+        self.assertEqual(
+            resolve_env_mask_complex_workflow(env_mask_mode="complex", complex_format="msn", render_profile="truepbr"),
+            "truepbr",
+        )
+
+    def test_resolve_env_mask_complex_workflow_falls_back_to_complex_format(self) -> None:
+        self.assertEqual(
+            resolve_env_mask_complex_workflow(env_mask_mode="complex", complex_format="msn", render_profile="auto"),
+            "enb",
+        )
+        self.assertEqual(
+            resolve_env_mask_complex_workflow(env_mask_mode="complex", complex_format="cm", render_profile="auto"),
+            "truepbr",
+        )
 
     def test_prepare_preview_source_downscales_large_images(self) -> None:
         source = Image.new("RGB", (4096, 2048), color=(64, 96, 128))
