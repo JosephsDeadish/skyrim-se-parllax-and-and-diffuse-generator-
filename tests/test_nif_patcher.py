@@ -58,12 +58,10 @@ def _build_shader_block(
     flags2: int = 0,
     parallax_scale: float | None = None,
     texture_set_ref: int = 0,
-    shader_layout_shift: int = 0,
 ) -> bytes:
     """Build a single BSLightingShaderProperty block body."""
     # NiObjectNET: name_ref(0) + num_extra(0) + controller(-1)
     nio = struct.pack("<IIi", 0, 0, -1)
-    layout_pad = b"\x00\x00\x00\x00" if shader_layout_shift == 4 else b""
     flags = struct.pack("<II", flags1, flags2)
     stype = struct.pack("<I", shader_type)
     uv = struct.pack("<ffff", 0.0, 0.0, 1.0, 1.0)
@@ -73,7 +71,7 @@ def _build_shader_block(
     spec = struct.pack("<ffff", 1.0, 1.0, 1.0, 1.0)
     light = struct.pack("<ff", 0.3, 2.0)
 
-    body = nio + layout_pad + flags + stype + uv + tsref + emit + misc + spec + light
+    body = nio + flags + stype + uv + tsref + emit + misc + spec + light
     if shader_type == SHADER_TYPE_HEIGHTMAP:
         scale = parallax_scale if parallax_scale is not None else 1.0
         body += struct.pack("<ff", 4.0, scale)
@@ -110,7 +108,6 @@ def _build_minimal_nif(
     shader_block_type: str = "BSLightingShaderProperty",
     user_ver2: int = 83,
     header_line_ending: bytes = b"\n",
-    shader_layout_shift: int = 0,
     texture_set_layout_shift: int = 0,
     texture_set_count_u16: bool = False,
     extra_shader_blocks: list[dict] | None = None,
@@ -144,7 +141,6 @@ def _build_minimal_nif(
         flags2=flags2,
         parallax_scale=parallax_scale,
         texture_set_ref=0,
-        shader_layout_shift=shader_layout_shift,
     )
 
     # --- Extra shader blocks --------------------------------------------
@@ -228,18 +224,6 @@ class TestScanNif(unittest.TestCase):
         infos = scan_nif(nif)
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
         self.assertAlmostEqual(infos[0].parallax_scale or 0.0, 1.5, places=3)
-
-    def test_scan_detects_shifted_shader_layout(self) -> None:
-        nif = _write_nif(
-            self.tmp,
-            shader_type=SHADER_TYPE_HEIGHTMAP,
-            parallax_scale=2.0,
-            shader_layout_shift=4,
-        )
-        infos = scan_nif(nif)
-        self.assertEqual(len(infos), 1)
-        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
-        self.assertAlmostEqual(infos[0].parallax_scale or 0.0, 2.0, places=3)
 
     def test_scan_detects_shifted_texture_set_layout(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8

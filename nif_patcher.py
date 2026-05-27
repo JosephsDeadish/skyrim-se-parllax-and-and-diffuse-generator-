@@ -739,67 +739,29 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
             return low16
         return raw_value
 
-    candidates: list[tuple[int, int, int, int, int, int, int, int, int]] = []
-    for layout_shift in (0, 4):
-        flags1_offset = block_start + _OFFSET_FLAGS1 + extra_shift + layout_shift
-        flags2_offset = block_start + _OFFSET_FLAGS2 + extra_shift + layout_shift
-        shader_type_offset = block_start + _OFFSET_SHADER_TYPE + extra_shift + layout_shift
-        texture_set_ref_offset = block_start + _OFFSET_TEXTURE_SET + extra_shift + layout_shift
-        if (
-            flags1_offset + 4 > block_end
-            or flags2_offset + 4 > block_end
-            or shader_type_offset + 4 > block_end
-            or texture_set_ref_offset + 4 > block_end
-        ):
-            continue
-        flags1 = buf.read_u32_at(flags1_offset)
-        flags2 = buf.read_u32_at(flags2_offset)
-        raw_shader_type = buf.read_u32_at(shader_type_offset)
-        shader_type = _decode_shader_type(raw_shader_type)
-        texture_set_ref = struct.unpack_from("<i", buf._b, texture_set_ref_offset)[0]
-        score = 0
-        if shader_type in _KNOWN_SHADER_TYPES:
-            score += 6
-        elif 0 <= shader_type <= 255:
-            score += 1
-        else:
-            score -= 4
-        if -1 <= texture_set_ref < num_blocks:
-            score += 3
-        else:
-            score -= 3
-        if layout_shift == 0:
-            score += 1
-        candidates.append(
-            (
-                score,
-                layout_shift,
-                flags1_offset,
-                flags2_offset,
-                shader_type_offset,
-                texture_set_ref_offset,
-                flags1,
-                flags2,
-                shader_type,
-            )
-        )
-
-    if not candidates:
+    # Always use layout_shift=0 for Skyrim SE NIFs (user_version_2=83/100).
+    # A speculative layout_shift=4 heuristic was previously attempted but
+    # its scoring was unreliable: on standard NIFs it could mis-select the
+    # shifted layout, causing _upgrade_block_to_type3 to insert type-3 float
+    # fields at the wrong offset and corrupt the adjacent block — which
+    # manifested as an EXCEPTION_ACCESS_VIOLATION in-game when Skyrim read
+    # the garbled BSLightingShaderMaterial.
+    layout_shift = 0
+    flags1_offset = block_start + _OFFSET_FLAGS1 + extra_shift + layout_shift
+    flags2_offset = block_start + _OFFSET_FLAGS2 + extra_shift + layout_shift
+    shader_type_offset = block_start + _OFFSET_SHADER_TYPE + extra_shift + layout_shift
+    texture_set_ref_offset = block_start + _OFFSET_TEXTURE_SET + extra_shift + layout_shift
+    if (
+        flags1_offset + 4 > block_end
+        or flags2_offset + 4 > block_end
+        or shader_type_offset + 4 > block_end
+        or texture_set_ref_offset + 4 > block_end
+    ):
         return None
-
-    candidates.sort(key=lambda item: item[0], reverse=True)
-    (
-        _score,
-        layout_shift,
-        flags1_offset,
-        flags2_offset,
-        shader_type_offset,
-        texture_set_ref_offset,
-        flags1,
-        flags2,
-        shader_type,
-    ) = candidates[0]
-
+    flags1 = buf.read_u32_at(flags1_offset)
+    flags2 = buf.read_u32_at(flags2_offset)
+    raw_shader_type = buf.read_u32_at(shader_type_offset)
+    shader_type = _decode_shader_type(raw_shader_type)
     texture_set_ref = struct.unpack_from("<i", buf._b, texture_set_ref_offset)[0]
 
     # Type-specific parallax fields (only when shader_type == 3)
@@ -1042,6 +1004,20 @@ def _upgrade_block_to_type3(
     """
     buf = _Buf(data)
 
+    # Safety guard: block must be exactly the expected type-0 size before
+    # inserting the type-3 extra fields.  If the stored block size does not
+    # match the layout we parsed, the common_end_offset would be wrong and
+    # the byte-insert would corrupt the adjacent block.
+    bsize_field_offset = header.block_sizes_offset + block_index * 4
+    recorded_size = buf.read_u32_at(bsize_field_offset)
+    expected_type0_size = _COMMON_FIELDS_SIZE + sp.num_extra * 4
+    if recorded_size != expected_type0_size:
+        raise ValueError(
+            f"Block {block_index}: recorded block size {recorded_size} does not match "
+            f"expected type-0 size {expected_type0_size}; refusing to insert type-3 "
+            f"fields to avoid corrupting the NIF."
+        )
+
     # 1. Write new shader_type = 3
     buf.write_u32_at(sp.shader_type_offset, SHADER_TYPE_HEIGHTMAP)
 
@@ -1051,9 +1027,7 @@ def _upgrade_block_to_type3(
     buf.insert_bytes_at(insert_offset, new_fields)
 
     # 3. Update block size in header
-    bsize_field_offset = header.block_sizes_offset + block_index * 4
-    old_size = buf.read_u32_at(bsize_field_offset)
-    buf.write_u32_at(bsize_field_offset, old_size + 8)
+    buf.write_u32_at(bsize_field_offset, recorded_size + 8)
 
     return buf.to_bytes()
 
