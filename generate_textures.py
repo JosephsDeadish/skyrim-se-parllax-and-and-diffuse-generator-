@@ -277,7 +277,7 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     else:
         state["parallax_mode"] = str(_GUI_STATE_DEFAULTS["parallax_mode"])
     render_profile = str(raw.get("render_profile", state["render_profile"]) or state["render_profile"]).strip().lower()
-    if render_profile in {"auto", "custom", "experimental", "vanilla", "community_shaders", "community shaders", "truepbr", "true pbr", "enb"}:
+    if render_profile in {"auto", "custom", "experimental", "vanilla", "performance", "vr", "community_shaders", "community shaders", "truepbr", "true pbr", "enb"}:
         if render_profile == "community shaders":
             state["render_profile"] = "community_shaders"
         elif render_profile == "true pbr":
@@ -853,6 +853,16 @@ _RENDER_PROFILE_PRESETS: dict[str, dict[str, str]] = {
         "env_mask_mode": "standard",
         "parallax_mode": "standard",
     },
+    "performance": {
+        "complex_format": "msn",
+        "env_mask_mode": "standard",
+        "parallax_mode": "standard",
+    },
+    "vr": {
+        "complex_format": "msn",
+        "env_mask_mode": "standard",
+        "parallax_mode": "standard",
+    },
     # Community Shaders generally expects packed _cm assets while keeping vanilla-friendly
     # environment/parallax mode selections.
     "community_shaders": {
@@ -879,6 +889,8 @@ _RENDER_PROFILE_LABELS: dict[str, str] = {
     "auto": "Auto-detect",
     "custom": "Custom",
     "vanilla": "Vanilla",
+    "performance": "Performance (low-end)",
+    "vr": "VR",
     "community_shaders": "Community Shaders",
     "truepbr": "Community Shaders TruePBR",
     "enb": "ENB",
@@ -899,6 +911,18 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "Add _g.dds only for emissive/glowing assets.\n"
         "How files should look: _n stays purple/blue, _p is greyscale, _m is greyscale with brighter pixels on shinier areas.\n"
         "Do NOT generate _rmaos, _msn, _cm, or _c — those are ignored by the vanilla renderer."
+    ),
+    "performance": (
+        "Performance-oriented Skyrim SE profile for lower-end GPUs.\n"
+        "Recommended files: diffuse.dds + _n.dds.\n"
+        "Parallax/complex outputs are disabled by default to reduce shader overhead and shimmer.\n"
+        "Use extra maps only when needed and keep strengths conservative."
+    ),
+    "vr": (
+        "VR-focused profile tuned for comfort and stability.\n"
+        "Recommended files: diffuse.dds + _n.dds with conservative settings.\n"
+        "Parallax is disabled by default to reduce depth shimmer and motion discomfort.\n"
+        "Add extra maps only after in-headset validation."
     ),
     "community_shaders": (
         "Community Shaders Extended Materials workflow (not ENB, not TruePBR JSON).\n"
@@ -951,6 +975,20 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
+    "performance": {
+        "enable_parallax": True,
+        "enable_pom": False,
+        "enable_env_mapping": False,
+        "force_shader_type_3": False,
+        "prefer_msn_normal": False,
+    },
+    "vr": {
+        "enable_parallax": True,
+        "enable_pom": False,
+        "enable_env_mapping": False,
+        "force_shader_type_3": False,
+        "prefer_msn_normal": False,
+    },
     "community_shaders": {
         "enable_parallax": True,
         "enable_pom": False,
@@ -985,6 +1023,24 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_complex": False,
     },
     "vanilla": {
+        "include_diffuse": True,
+        "include_normal": True,
+        "include_parallax": False,
+        "include_glow": False,
+        "include_environment_mask": False,
+        "include_rmaos": False,
+        "include_complex": False,
+    },
+    "performance": {
+        "include_diffuse": True,
+        "include_normal": True,
+        "include_parallax": False,
+        "include_glow": False,
+        "include_environment_mask": False,
+        "include_rmaos": False,
+        "include_complex": False,
+    },
+    "vr": {
         "include_diffuse": True,
         "include_normal": True,
         "include_parallax": False,
@@ -1073,7 +1129,7 @@ def _normalize_render_profile(value: str | None) -> str:
         return "truepbr"
     if normalized == "experimental":
         return "custom"
-    if normalized in {"auto", "custom", "vanilla", "community_shaders", "truepbr", "enb"}:
+    if normalized in {"auto", "custom", "vanilla", "performance", "vr", "community_shaders", "truepbr", "enb"}:
         return normalized
     return "custom"
 
@@ -1263,6 +1319,8 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
     workflow_hint = {
         "custom": "manual blank profile",
         "vanilla": "best for stock Skyrim SE / safest defaults",
+        "performance": "best for lower-end systems and stability-first outputs",
+        "vr": "best for VR comfort-focused conservative outputs",
         "community_shaders": "best for Community Shaders packed-material workflows",
         "truepbr": "best for Community Shaders TruePBR JSON-driven workflows",
         "enb": "best for ENB complex material + POM workflows",
@@ -1279,7 +1337,7 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
         "",
         "Renderer quick guide:",
     ]
-    for profile in ("custom", "vanilla", "community_shaders", "truepbr", "enb"):
+    for profile in ("custom", "vanilla", "performance", "vr", "community_shaders", "truepbr", "enb"):
         lines.append(
             f"- {_RENDER_PROFILE_LABELS[profile]}: "
             f"{describe_render_profile_default_outputs(profile)} "
@@ -4357,6 +4415,8 @@ if GUI_AVAILABLE:
                 "🎯 Select target renderer preset.\n"
                 "custom = blank manual mode (nothing auto-enforced).\n"
                 "vanilla = safest stock Skyrim SE setup.\n"
+                "performance = low-end focused profile (lightweight defaults).\n"
+                "vr = conservative VR-focused profile.\n"
                 "community_shaders = Community Shaders Extended Materials _cm/_c/_C workflow.\n"
                 "truepbr = Community Shaders TruePBR JSON-driven _rmaos/_ramos workflow.\n"
                 "enb = tool ENB preset (_msn + complex env-mask mode + optional POM).\n"
@@ -4367,7 +4427,7 @@ if GUI_AVAILABLE:
             _render_profile_combo = ttk.Combobox(
                 options_frame,
                 textvariable=self.render_profile_var,
-                values=("custom", "auto", "vanilla", "community_shaders", "truepbr", "enb"),
+                values=("custom", "auto", "vanilla", "performance", "vr", "community_shaders", "truepbr", "enb"),
                 state="readonly",
                 width=20,
             )
@@ -4377,7 +4437,8 @@ if GUI_AVAILABLE:
                 _render_profile_combo,
                 "🎯 custom = blank manual mode.\n"
                 "auto = pick the best renderer preset for the current texture, but only when you change this control.\n"
-                "vanilla = safest defaults; community_shaders = _cm/_c/_C; truepbr = _n + _rmaos/_ramos + JSON path; enb = tool ENB preset _msn + complex env + optional POM.\n"
+                "vanilla = safest defaults; performance = lightweight defaults; vr = conservative VR defaults; "
+                "community_shaders = _cm/_c/_C; truepbr = _n + _rmaos/_ramos + JSON path; enb = tool ENB preset _msn + complex env + optional POM.\n"
                 "Render-profile guidance is experimental and may be inaccurate for some stacks.\n"
                 "Community Shaders and ENB are separate workflows and should not be mixed.",
             )
@@ -6402,7 +6463,7 @@ if GUI_AVAILABLE:
                 renderer_combo = ttk.Combobox(
                     render_row,
                     textvariable=renderer_profile_var,
-                    values=("custom", "auto", "vanilla", "community_shaders", "truepbr", "enb"),
+                    values=("custom", "auto", "vanilla", "performance", "vr", "community_shaders", "truepbr", "enb"),
                     state="readonly",
                     width=20,
                 )

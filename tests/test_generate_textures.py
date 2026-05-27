@@ -348,6 +348,12 @@ class GenerateTexturesTests(unittest.TestCase):
         normalized = _normalize_gui_state({"render_profile": "experimental"})
         self.assertEqual(str(normalized["render_profile"]), "custom")
 
+    def test_normalize_gui_state_accepts_performance_and_vr_profiles(self) -> None:
+        performance = _normalize_gui_state({"render_profile": "performance"})
+        vr = _normalize_gui_state({"render_profile": "vr"})
+        self.assertEqual(str(performance["render_profile"]), "performance")
+        self.assertEqual(str(vr["render_profile"]), "vr")
+
     def test_generate_diffuse_returns_rgb_same_size(self) -> None:
         diffuse = generate_diffuse(_sample_image())
         self.assertEqual(diffuse.mode, "RGB")
@@ -669,6 +675,16 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(enb["env_mask_mode"], "complex")
         self.assertEqual(enb["parallax_mode"], "occlusion")
 
+        performance = resolve_render_profile_options("performance")
+        self.assertEqual(performance["complex_format"], "msn")
+        self.assertEqual(performance["env_mask_mode"], "standard")
+        self.assertEqual(performance["parallax_mode"], "standard")
+
+        vr = resolve_render_profile_options("vr")
+        self.assertEqual(vr["complex_format"], "msn")
+        self.assertEqual(vr["env_mask_mode"], "standard")
+        self.assertEqual(vr["parallax_mode"], "standard")
+
         cs = resolve_render_profile_options("community_shaders")
         self.assertEqual(cs["complex_format"], "cm")
         self.assertEqual(cs["env_mask_mode"], "standard")
@@ -694,6 +710,12 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(bool(vanilla["include_parallax"]))
         self.assertFalse(bool(vanilla["include_complex"]))
 
+        performance = resolve_render_profile_output_defaults("performance")
+        self.assertTrue(bool(performance["include_diffuse"]))
+        self.assertTrue(bool(performance["include_normal"]))
+        self.assertFalse(bool(performance["include_parallax"]))
+        self.assertFalse(bool(performance["include_complex"]))
+
         enb = resolve_render_profile_output_defaults("enb")
         self.assertTrue(bool(enb["include_parallax"]))
         self.assertTrue(bool(enb["include_environment_mask"]))
@@ -714,6 +736,13 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(bool(vanilla["enable_env_mapping"]))
         self.assertFalse(bool(vanilla["force_shader_type_3"]))
         self.assertFalse(bool(vanilla["prefer_msn_normal"]))
+
+        vr = resolve_nif_patch_defaults_for_render_profile("vr")
+        self.assertTrue(bool(vr["enable_parallax"]))
+        self.assertFalse(bool(vr["enable_pom"]))
+        self.assertFalse(bool(vr["enable_env_mapping"]))
+        self.assertFalse(bool(vr["force_shader_type_3"]))
+        self.assertFalse(bool(vr["prefer_msn_normal"]))
 
         enb = resolve_nif_patch_defaults_for_render_profile("enb")
         self.assertTrue(bool(enb["enable_parallax"]))
