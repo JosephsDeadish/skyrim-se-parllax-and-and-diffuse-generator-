@@ -1378,6 +1378,37 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(options.parallax_texture_path, "textures\\architecture\\stone\\brick_p.dds")
         self.assertEqual(options.normal_texture_path, "textures\\architecture\\stone\\brick_n.dds")
 
+    def test_build_nif_patch_options_respects_disabled_parallax_output_setting(self) -> None:
+        options = build_nif_patch_options_for_generated_outputs(
+            None,
+            {},
+            complex_format="msn",
+            env_mask_mode="standard",
+            parallax_mode="standard",
+            parallax_scale=2.0,
+            include_parallax=False,
+            include_environment_mask=True,
+        )
+        self.assertTrue(options.disable_parallax)
+        self.assertTrue(options.clear_parallax_texture_path)
+        self.assertFalse(options.enable_parallax)
+        self.assertFalse(options.enable_pom)
+
+    def test_build_nif_patch_options_respects_disabled_env_mask_output_setting(self) -> None:
+        options = build_nif_patch_options_for_generated_outputs(
+            None,
+            {},
+            complex_format="msn",
+            env_mask_mode="standard",
+            parallax_mode="standard",
+            parallax_scale=2.0,
+            include_parallax=True,
+            include_environment_mask=False,
+        )
+        self.assertTrue(options.disable_env_mapping)
+        self.assertTrue(options.clear_env_mask_texture_path)
+        self.assertFalse(options.enable_env_mapping)
+
     def test_auto_patch_related_nifs_for_texture_patches_all_matches(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -1402,10 +1433,15 @@ class GenerateTexturesTests(unittest.TestCase):
                     env_mask_mode="standard",
                     parallax_mode="standard",
                     parallax_scale=2.0,
+                    include_parallax=True,
+                    include_environment_mask=False,
                 )
 
             self.assertEqual(len(results), 1)
             patch_nif_mock.assert_called_once()
+            passed_options = patch_nif_mock.call_args.args[1]
+            self.assertFalse(bool(passed_options.disable_parallax))
+            self.assertTrue(bool(passed_options.disable_env_mapping))
 
     def test_run_with_options_requires_at_least_one_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

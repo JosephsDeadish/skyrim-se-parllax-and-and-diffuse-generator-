@@ -2276,18 +2276,30 @@ def build_nif_patch_options_for_generated_outputs(
     env_mask_mode: str,
     parallax_mode: str,
     parallax_scale: float | None,
+    include_parallax: bool | None = None,
+    include_environment_mask: bool | None = None,
 ) -> NifPatchOptions:
+    normalized_complex_format = _normalize_complex_format(complex_format)
+    normalized_env_mask_mode = _normalize_env_mask_mode(env_mask_mode)
+    normalized_parallax_mode = (
+        "occlusion" if str(parallax_mode or "standard").strip().lower() == "occlusion" else "standard"
+    )
     complex_output = outputs.get("complex_material")
     normal_output = outputs.get("normal")
     parallax_output = outputs.get("parallax")
     env_mask_output = outputs.get("environment_mask")
-    normal_path = complex_output if complex_output is not None and complex_format == "msn" else normal_output
+    normal_path = complex_output if complex_output is not None and normalized_complex_format == "msn" else normal_output
+    parallax_disabled_by_options = include_parallax is False
+    env_mask_disabled_by_options = include_environment_mask is False
+    enable_env_mapping = env_mask_output is not None
+    if normalized_env_mask_mode == "complex" and env_mask_output is None and not env_mask_disabled_by_options:
+        enable_env_mapping = complex_output is not None and normalized_complex_format == "msn"
     return NifPatchOptions(
         enable_parallax=parallax_output is not None,
-        enable_pom=parallax_output is not None and parallax_mode == "occlusion",
+        enable_pom=parallax_output is not None and normalized_parallax_mode == "occlusion",
         parallax_scale=parallax_scale if parallax_output is not None else None,
         force_shader_type_3=parallax_output is not None,
-        enable_env_mapping=(env_mask_output is not None) or (complex_output is not None),
+        enable_env_mapping=enable_env_mapping,
         parallax_texture_path=(
             _resolve_generated_skyrim_resource_path(parallax_output, source_texture=source_texture)
             if parallax_output is not None else None
@@ -2300,6 +2312,10 @@ def build_nif_patch_options_for_generated_outputs(
             _resolve_generated_skyrim_resource_path(env_mask_output, source_texture=source_texture)
             if env_mask_output is not None else None
         ),
+        disable_parallax=parallax_disabled_by_options,
+        clear_parallax_texture_path=parallax_disabled_by_options,
+        disable_env_mapping=env_mask_disabled_by_options,
+        clear_env_mask_texture_path=env_mask_disabled_by_options,
         backup=True,
         dry_run=False,
     )
@@ -2315,6 +2331,8 @@ def auto_patch_related_nifs_for_texture(
     env_mask_mode: str,
     parallax_mode: str,
     parallax_scale: float | None,
+    include_parallax: bool | None = None,
+    include_environment_mask: bool | None = None,
 ) -> tuple[object, ...]:
     related_nifs = find_related_nif_files_for_texture(
         source_texture,
@@ -2330,6 +2348,8 @@ def auto_patch_related_nifs_for_texture(
         env_mask_mode=env_mask_mode,
         parallax_mode=parallax_mode,
         parallax_scale=parallax_scale,
+        include_parallax=include_parallax,
+        include_environment_mask=include_environment_mask,
     )
     results: list[object] = []
     for nif_path in related_nifs:
@@ -4499,6 +4519,10 @@ if GUI_AVAILABLE:
                                 parallax_mode=str(generation_call_kwargs.get("parallax_mode", "standard")),
                                 parallax_scale=_map_parallax_strength_to_nif_scale(
                                     float(generation_call_kwargs.get("parallax_strength", 1.35) or 1.35)
+                                ),
+                                include_parallax=bool(generation_call_kwargs.get("include_parallax", True)),
+                                include_environment_mask=bool(
+                                    generation_call_kwargs.get("include_environment_mask", False)
                                 ),
                             )
                             patched = sum(1 for result in nif_patch_results if getattr(result, "success", False))
