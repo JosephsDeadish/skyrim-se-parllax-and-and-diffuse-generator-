@@ -360,6 +360,7 @@ class NifPatchResult:
     message: str = ""
     backup_path: Path | None = None
     errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -1071,15 +1072,30 @@ def _apply_patches(
 
     # --- Phase 1: block upgrades (type 0 → 3) ------------------------------
     if opts.force_shader_type_3 and effective_parallax and want_scale:
-        # Must reparse after each upgrade because insert shifts later offsets.
-        for sp in shader_props:
-            if sp.shader_type == SHADER_TYPE_DEFAULT:
-                data = _upgrade_block_to_type3(
-                    data, header, sp, opts.parallax_scale or _DEFAULT_PARALLAX_SCALE, sp.block_index
-                )
-                upgraded += 1
+        # Reparse after EACH upgrade because each byte-insert shifts the
+        # offsets of every block that follows it in the file.  Using stale
+        # offsets from a previous parse pass would corrupt the NIF when
+        # there are two or more type-0 shader blocks to upgrade.
+        while True:
+            buf_check = _Buf(data)
+            chk_header = _read_header(buf_check)
+            if chk_header is None:
+                raise RuntimeError("Header corrupted after type-3 upgrade.")
+            fresh_props, _, _ = _build_block_map(data, chk_header)
+            sp_to_upgrade = next(
+                (sp for sp in fresh_props if sp.shader_type == SHADER_TYPE_DEFAULT),
+                None,
+            )
+            if sp_to_upgrade is None:
+                break
+            data = _upgrade_block_to_type3(
+                data, chk_header, sp_to_upgrade,
+                opts.parallax_scale or _DEFAULT_PARALLAX_SCALE,
+                sp_to_upgrade.block_index,
+            )
+            upgraded += 1
         if upgraded:
-            # Reparse with new data so subsequent patches use correct offsets.
+            # Final reparse to give phase 2 fresh offsets.
             buf = _Buf(data)
             new_header = _read_header(buf)
             if new_header is None:
@@ -1274,6 +1290,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
     has_any_toggle = any(
         (
             effective_parallax,
+            opts.parallax_scale is not None and opts.parallax_scale > 0,
             opts.enable_env_mapping,
             opts.enable_glow_map,
             opts.normal_texture_path is not None,
@@ -1365,11 +1382,17 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
 
     if opts.backup:
         backup_path = nif_path.with_suffix(".nif.bak")
-        try:
-            backup_path.write_bytes(original_data)
-            result.backup_path = backup_path
-        except OSError as exc:
-            result.errors.append(f"Backup failed (continuing): {exc}")
+        if backup_path.exists():
+            result.warnings.append(
+                f"Backup skipped — '{backup_path.name}' already exists. "
+                "Delete or rename it first to create a fresh backup."
+            )
+        else:
+            try:
+                backup_path.write_bytes(original_data)
+                result.backup_path = backup_path
+            except OSError as exc:
+                result.errors.append(f"Backup failed (continuing): {exc}")
 
     try:
         nif_path.write_bytes(new_data)
@@ -1780,6 +1803,8 @@ def _main() -> None:  # pragma: no cover
                         help="Clear slot 0 diffuse/albedo texture path.")
     parser.add_argument("--clear-env-mask", action="store_true",
                         help="Clear slot 5 environment mask texture path.")
+    parser.add_argument("--clear-cubemap", action="store_true",
+                        help="Clear slot 4 cubemap texture path.")
     parser.add_argument("--no-backup", action="store_true",
                         help="Skip .nif.bak backup.")
     parser.add_argument("--dry-run", action="store_true",
@@ -1837,6 +1862,7 @@ def _main() -> None:  # pragma: no cover
         clear_glow_texture_path=args.clear_glow,
         clear_diffuse_texture_path=args.clear_diffuse,
         clear_env_mask_texture_path=args.clear_env_mask,
+        clear_cubemap_texture_path=args.clear_cubemap,
     )
 
     ok = 0

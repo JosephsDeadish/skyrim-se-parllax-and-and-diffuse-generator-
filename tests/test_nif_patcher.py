@@ -23,6 +23,7 @@ from nif_patcher import (
     TEXTURE_SLOT_NORMAL,
     TEXTURE_SLOT_PARALLAX,
     NifPatchOptions,
+    NifPatchResult,
     find_nif_files,
     guess_env_mask_path_for_nif,
     guess_glow_path_for_nif,
@@ -1177,6 +1178,190 @@ class TestValidateGlowMap(unittest.TestCase):
         joined = "\n".join(v.issues + v.suggestions).lower()
         self.assertIn("glow_map", joined)
         self.assertIn("slot 2", joined)
+
+
+# ---------------------------------------------------------------------------
+# Tests: multi-block type-0 upgrade correctness
+# ---------------------------------------------------------------------------
+
+class TestMultiBlockType0Upgrade(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_all_type0_blocks_upgraded_to_type3(self) -> None:
+        """All type-0 BSLightingShaderProperty blocks must be upgraded when
+        force_shader_type_3=True, not just the first one."""
+        nif_data = _build_minimal_nif(
+            shader_type=SHADER_TYPE_DEFAULT,
+            extra_shader_blocks=[{"shader_type": SHADER_TYPE_DEFAULT, "flags1": 0}],
+        )
+        p = self.tmp / "multi_upgrade.nif"
+        p.write_bytes(nif_data)
+        result = patch_nif(
+            p,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_scale=2.5,
+                force_shader_type_3=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertEqual(result.blocks_upgraded_to_type3, 2)
+        infos = scan_nif(p)
+        self.assertEqual(len(infos), 2)
+        for info in infos:
+            self.assertEqual(info.shader_type, SHADER_TYPE_HEIGHTMAP,
+                             f"Block {info.block_index} still has shader_type={info.shader_type}")
+            self.assertAlmostEqual(info.parallax_scale or 0.0, 2.5, places=2)
+
+    def test_nif_parseable_after_multi_block_upgrade(self) -> None:
+        """The NIF must remain structurally valid after upgrading multiple blocks."""
+        nif_data = _build_minimal_nif(
+            shader_type=SHADER_TYPE_DEFAULT,
+            extra_shader_blocks=[
+                {"shader_type": SHADER_TYPE_DEFAULT, "flags1": 0},
+                {"shader_type": SHADER_TYPE_DEFAULT, "flags1": 0},
+            ],
+        )
+        p = self.tmp / "triple_upgrade.nif"
+        p.write_bytes(nif_data)
+        result = patch_nif(
+            p,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_scale=1.5,
+                force_shader_type_3=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertEqual(result.blocks_upgraded_to_type3, 3)
+        infos = scan_nif(p)
+        self.assertEqual(len(infos), 3)
+        for info in infos:
+            self.assertEqual(info.shader_type, SHADER_TYPE_HEIGHTMAP)
+
+    def test_mixed_types_only_upgrades_type0(self) -> None:
+        """Only type-0 blocks should be upgraded; existing type-3 blocks stay untouched."""
+        nif_data = _build_minimal_nif(
+            shader_type=SHADER_TYPE_DEFAULT,
+            extra_shader_blocks=[
+                {"shader_type": SHADER_TYPE_HEIGHTMAP, "parallax_scale": 1.0,
+                 "flags1": SLSF1_PARALLAX},
+            ],
+        )
+        p = self.tmp / "mixed_upgrade.nif"
+        p.write_bytes(nif_data)
+        result = patch_nif(
+            p,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_scale=3.0,
+                force_shader_type_3=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertEqual(result.blocks_upgraded_to_type3, 1)
+        infos = scan_nif(p)
+        self.assertEqual(len(infos), 2)
+        for info in infos:
+            self.assertEqual(info.shader_type, SHADER_TYPE_HEIGHTMAP)
+
+
+# ---------------------------------------------------------------------------
+# Tests: parallax_scale-only patch (has_any_toggle fix)
+# ---------------------------------------------------------------------------
+
+class TestParallaxScaleOnly(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_scale_only_updates_existing_type3_block(self) -> None:
+        """Setting parallax_scale alone (no enable_parallax) must update the
+        scale on an already-type-3 block instead of returning 'Nothing to patch'."""
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_HEIGHTMAP, parallax_scale=1.0)
+        result = patch_nif(nif, NifPatchOptions(parallax_scale=4.0, backup=False))
+        self.assertTrue(result.success, result.errors)
+        self.assertFalse(result.already_up_to_date)
+        infos = scan_nif(nif)
+        self.assertAlmostEqual(infos[0].parallax_scale or 0.0, 4.0, places=2)
+
+    def test_scale_only_no_patch_when_already_matching(self) -> None:
+        """No write should occur when the existing scale already matches the requested value."""
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_HEIGHTMAP, parallax_scale=2.5)
+        result = patch_nif(nif, NifPatchOptions(parallax_scale=2.5, backup=False))
+        self.assertTrue(result.success, result.errors)
+        self.assertTrue(result.already_up_to_date)
+
+
+# ---------------------------------------------------------------------------
+# Tests: backup overwrite protection
+# ---------------------------------------------------------------------------
+
+class TestBackupOverwriteProtection(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_backup_created_when_none_exists(self) -> None:
+        """A .nif.bak file is created on the first patch when no backup exists."""
+        nif = _write_nif(self.tmp)
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=True))
+        self.assertTrue(result.success, result.errors)
+        self.assertIsNotNone(result.backup_path)
+        self.assertTrue(result.backup_path.exists())  # type: ignore[union-attr]
+        self.assertEqual(result.warnings, [])
+
+    def test_existing_backup_not_overwritten(self) -> None:
+        """When a .nif.bak already exists the patch succeeds but skips the backup
+        and adds a warning instead of silently overwriting the original backup."""
+        nif = _write_nif(self.tmp)
+        backup_path = nif.with_suffix(".nif.bak")
+        sentinel = b"original backup sentinel"
+        backup_path.write_bytes(sentinel)
+
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=True))
+        self.assertTrue(result.success, result.errors)
+        self.assertIsNone(result.backup_path)
+        self.assertEqual(backup_path.read_bytes(), sentinel,
+                         "Existing backup must not be overwritten")
+        self.assertEqual(len(result.warnings), 1)
+        self.assertIn("already exists", result.warnings[0])
+
+    def test_no_warning_when_backup_disabled(self) -> None:
+        """With backup=False no warning is emitted even if a .nif.bak exists."""
+        nif = _write_nif(self.tmp)
+        backup_path = nif.with_suffix(".nif.bak")
+        backup_path.write_bytes(b"old backup")
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        self.assertEqual(result.warnings, [])
+
+    def test_patch_still_writes_nif_when_backup_skipped(self) -> None:
+        """Skipping the backup must not prevent the NIF itself from being patched."""
+        nif = _write_nif(self.tmp)
+        nif.with_suffix(".nif.bak").write_bytes(b"old backup")
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=True))
+        infos = scan_nif(nif)
+        self.assertTrue(infos[0].has_parallax_flag)
+
+    def test_result_has_warnings_field(self) -> None:
+        """NifPatchResult must expose a 'warnings' list."""
+        result = NifPatchResult(nif_path=Path("x.nif"), success=True)
+        self.assertIsInstance(result.warnings, list)
 
 
 if __name__ == "__main__":
