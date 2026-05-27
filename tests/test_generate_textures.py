@@ -328,11 +328,11 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(normalized["complex_format"]), "msn")
         self.assertEqual(str(normalized["env_mask_mode"]), "standard")
         self.assertEqual(str(normalized["parallax_mode"]), "occlusion (ENB/POM)")
-        self.assertEqual(str(normalized["render_profile"]), "auto")
+        self.assertEqual(str(normalized["render_profile"]), "custom")
         self.assertAlmostEqual(float(normalized["normal_strength"]), 8.0)
         self.assertAlmostEqual(float(normalized["parallax_strength"]), 0.1)
         self.assertEqual(int(normalized["glow_threshold"]), 255)
-        self.assertAlmostEqual(float(normalized["environment_mask_strength"]), 6.0)
+        self.assertAlmostEqual(float(normalized["environment_mask_strength"]), 8.0)
         self.assertAlmostEqual(float(normalized["complex_strength"]), 0.1)
         self.assertAlmostEqual(float(normalized["specular_strength"]), 0.1)
 
@@ -564,6 +564,16 @@ class GenerateTexturesTests(unittest.TestCase):
                 Path("textures/architecture/stone_rmaos.dds"),
                 detected_role="environment_mask",
                 detected_suffix="_rmaos",
+            ),
+            "truepbr",
+        )
+
+    def test_recommend_render_profile_detects_truepbr_from_ramos_suffix(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/architecture/stone_ramos.dds"),
+                detected_role="environment_mask",
+                detected_suffix="_ramos",
             ),
             "truepbr",
         )
@@ -2365,6 +2375,32 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(save_mock.call_count, 1)
             self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT5",))
             self.assertEqual(save_mock.call_args.args[1].name, "brick_rmaos.dds")
+
+    def test_run_with_options_rmaos_writes_json_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            outputs = run_with_options(
+                input_file=input_path,
+                output_dir=output_dir,
+                include_diffuse=False,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_rmaos=True,
+                include_complex=False,
+            )
+
+            self.assertIn("rmaos", outputs)
+            self.assertIn("rmaos_json", outputs)
+            self.assertTrue(outputs["rmaos_json"].exists())
+            payload = outputs["rmaos_json"].read_text(encoding="utf-8")
+            self.assertIn('"format": "truepbr_rmaos"', payload)
+            self.assertIn('"R": "roughness"', payload)
 
 
 class EmbossNormalTests(unittest.TestCase):

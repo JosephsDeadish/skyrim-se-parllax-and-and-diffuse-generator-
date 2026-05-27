@@ -8,7 +8,8 @@ Texture generator that supports both GUI and command-line usage. It can generate
 - a grayscale parallax texture
 - an ENBSeries POM-optimized parallax heightmap mode (**Parallax Occlusion**)
 - a glow map
-- an environment mask — **standard greyscale** (vanilla Skyrim SE, no ENB needed) or **complex RGBA** (renderer-specific packed mode; TruePBR defaults to `_rmaos`, ENB preset defaults to `_m`)
+- an environment mask — **standard greyscale** (vanilla Skyrim SE, no ENB needed) or **complex RGBA** (`_m` for ENB-style packed env masks)
+- a dedicated TruePBR packed map output — `_rmaos` (or `_ramos` alias) with generated JSON sidecar guidance
 - a complex material output:
   - `_msn`: normal RGB with specular in alpha (ENBSeries complex material, Slot 1)
   - `_cm` / `_c`: packed Community Shaders **Extended Materials** map — RGBA: R=Environment reflection amount, G=Glossiness, B=Metallic, A=Height / mode-control alpha
@@ -46,10 +47,11 @@ This opens a desktop interface where you can:
 - pick an output folder
 - see detected MO2/Vortex context and loaded-mod texture folders when launched through a mod manager
 - use a **Use different output folder** toggle to switch between writing beside the input or writing to a custom location
-- choose diffuse/normal/parallax/glow/environment mask/complex material outputs
-- preview the **Before** source image and the currently selected output types (diffuse/normal/parallax/glow/environment mask/complex)
-- tune normal/parallax/glow/environment mask/complex/specular strengths
+- choose diffuse/normal/parallax/glow/environment mask/RMAOS/complex material outputs
+- preview the **Before** source image and the currently selected output types (diffuse/normal/parallax/glow/environment mask/RMAOS/complex)
+- tune normal/parallax/glow/environment mask/RMAOS/complex/specular strengths
 - choose the **Env mask mode**: `standard` (greyscale, vanilla Skyrim SE) or `complex` (RGBA packed, renderer-specific)
+- choose the **Target renderer** profile (**default: `custom`**) — custom is a blank/manual experimental profile
 - toggle **Emboss depth** for edge-ridge normal generation on flat printed assets (books/cards/scrolls/posters)
 - choose **Parallax mode**: `standard` (vanilla / Community Shaders Extended Materials) or `occlusion (ENB/POM)` for smoother ENBSeries POM heightmaps
 - scroll through all controls in smaller windows
@@ -82,13 +84,14 @@ Optional arguments:
 - `--normal-name` (default: `<input_stem>_n`, e.g. `stonewall_n.dds`)
 - `--parallax-name` (default: `<input_stem>_p`, e.g. `stonewall_p.dds`)
 - `--glow-name` (default: `<input_stem>_g`, e.g. `stonewall_g.dds`)
-- `--environment-mask-name` (default: `<input_stem>_m`; in TruePBR complex workflows default becomes `<input_stem>_rmaos`)
+- `--environment-mask-name` (default: `<input_stem>_m`)
+- `--rmaos-name` / `--ramos-name` (default: `<input_stem>_rmaos`)
 - `--complex-name` (default from format: `<input_stem>_msn` or `<input_stem>_cm`)
   - use `<input_stem>_c` here when a shader pack expects `_c.dds` naming
 - `--complex-format` (`msn` or `cm`, default: `msn`)
 - `--environment-mask-mode` (`standard` or `complex`, default: `standard`)
   - `standard` — greyscale `_m.dds` for vanilla Skyrim SE (Texture Slot 5, no ENB required)
-  - `complex` — RGBA channel-packed texture for renderer-specific workflows (TruePBR uses `_rmaos` naming by default, ENB preset uses `_m`; use `--environment-mask-name` to override)
+  - `complex` — RGBA channel-packed `_m` texture for renderer-specific workflows (ENB-style packed env-mask output)
 - `--emboss-mode` (normal-map emboss depth mode for flat printed assets)
 - `--parallax-mode` (`standard` or `occlusion`, default: `standard`)
   - `standard` — vanilla-style parallax heightmap with micro-detail
@@ -104,6 +107,7 @@ Optional arguments:
 - `--no-parallax` (skip parallax output)
 - `--glow-map` (include glow output)
 - `--environment-mask` (include environment mask output)
+- `--rmaos` / `--ramos` (include dedicated TruePBR `_rmaos`/`_ramos` output + JSON sidecar)
 - `--complex-material` (include complex material output)
 - `--pbr-material` (shortcut for the app's Community Shaders Extended Materials packed output: enables complex material, forces `--complex-format cm`, and keeps compatible standard env/parallax modes; not an ENB workflow)
 - `--batch-workers` (parallel workers for folder mode; `0` = automatic)
@@ -128,17 +132,18 @@ Some packs use `_c.dds` (or `_C.dds` on Windows) for the same role — set `--co
 > **Important:** Community Shaders and ENB are separate renderer paths. Do **not** mix `_cm/_c/_C` with ENB `_msn/_m` in the same setup.  
 > Community Shaders **TruePBR** may also use `_rmaos`, but that is a separate JSON-driven workflow and is **not** the same as this `_cm/_c/_C` preset.
 
-### Community Shaders TruePBR quick start (`_rmaos` + JSON)
+### Community Shaders TruePBR quick start (`_rmaos` / `_ramos` + JSON)
 
 This app now has a dedicated **TruePBR** renderer profile path for Community Shaders TruePBR workflows.
 
 - In GUI:
   1. Set **Target renderer** to `truepbr`
   2. Keep **Normal / _n** enabled
-  3. Enable **Environment mask** with complex mode (`_rmaos`)
-  4. Generate textures, then validate channel usage against your TruePBR JSON configuration
+  3. Enable **RMAOS / _rmaos**
+  4. Generate textures; the tool writes `_rmaos` (or `_ramos`) plus a JSON sidecar to guide channel mapping
+  5. Validate the generated JSON/channels against your installed TruePBR schema
 
-TruePBR is JSON-driven and can vary by setup; treat `_rmaos` channel semantics as config-dependent and verify against the specific TruePBR schema you use.
+TruePBR is JSON-driven and can vary by setup; treat `_rmaos`/`_ramos` channel semantics as config-dependent and verify against the specific TruePBR schema you use.
 
 ### ENB complex material quick start
 
@@ -194,7 +199,7 @@ The tool recognises standard Skyrim SE texture naming conventions from the file 
 | `_cm` | Complex Material packed (Community Shaders Extended Materials) | RGBA Slot 5 — **Community Shaders Extended Materials** workflow. Channels: R=Environment reflection amount, G=Glossiness, B=Metallic, A=Height / mode-control alpha. **Not vanilla Skyrim SE.** |
 | `_c` / `_C` | Complex Material packed alias | Identical channel layout and role as `_cm`. `_C.dds` (uppercase) is treated the same on Windows and by this tool. Prefer `_cm` for new mods unless the pack uses `_c` naming. |
 
-Batch folder mode scans subfolders and automatically skips generated variants (`_n`, `_p`, `_g`, `_m`, `_rmaos`, `_msn`, `_cm`, `_c`, `_C`) so it only processes original source textures.
+Batch folder mode scans subfolders and automatically skips generated variants (`_n`, `_p`, `_g`, `_m`, `_rmaos`, `_ramos`, `_msn`, `_cm`, `_c`, `_C`) so it only processes original source textures.
 
 ## Renderer quick-reference
 

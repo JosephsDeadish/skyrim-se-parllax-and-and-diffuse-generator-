@@ -56,7 +56,7 @@ except ImportError:
 DDS_EXTENSION = ".dds"
 APP_VERSION = "0.6"
 SUPPORTED_INPUT_EXTENSIONS = {DDS_EXTENSION, ".png", ".jpg", ".jpeg", ".tga", ".bmp"}
-GENERATED_TEXTURE_SUFFIXES = ("_msn", "_cm", "_c", "_rmaos", "_n", "_p", "_g", "_m")
+GENERATED_TEXTURE_SUFFIXES = ("_msn", "_cm", "_c", "_rmaos", "_ramos", "_n", "_p", "_g", "_m")
 PREVIEW_MAX_DIMENSION = 1024
 PREVIEW_SIZE_PRESETS: dict[str, tuple[int, int]] = {
     "XS": (160, 120),
@@ -77,7 +77,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "complex_format": "msn",
     "env_mask_mode": "standard",
     "parallax_mode": "standard",
-    "render_profile": "auto",
+    "render_profile": "custom",
     "emboss_mode": False,
     "relief_mode": False,
     "include_diffuse": True,
@@ -277,7 +277,7 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     else:
         state["parallax_mode"] = str(_GUI_STATE_DEFAULTS["parallax_mode"])
     render_profile = str(raw.get("render_profile", state["render_profile"]) or state["render_profile"]).strip().lower()
-    if render_profile in {"auto", "vanilla", "community_shaders", "community shaders", "truepbr", "true pbr", "enb"}:
+    if render_profile in {"auto", "custom", "vanilla", "community_shaders", "community shaders", "truepbr", "true pbr", "enb"}:
         if render_profile == "community shaders":
             state["render_profile"] = "community_shaders"
         elif render_profile == "true pbr":
@@ -291,13 +291,13 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     state["glow_threshold"] = _coerce_int(raw.get("glow_threshold"), int(state["glow_threshold"]), 0, 255)
     state["auto_patch_nifs"] = _coerce_bool(raw.get("auto_patch_nifs"), bool(state["auto_patch_nifs"]))
     state["environment_mask_strength"] = _coerce_float(
-        raw.get("environment_mask_strength"), float(state["environment_mask_strength"]), 0.1, 6.0
+        raw.get("environment_mask_strength"), float(state["environment_mask_strength"]), 0.1, 8.0
     )
     state["rmaos_strength"] = _coerce_float(
-        raw.get("rmaos_strength"), float(state["rmaos_strength"]), 0.1, 6.0
+        raw.get("rmaos_strength"), float(state["rmaos_strength"]), 0.1, 8.0
     )
-    state["complex_strength"] = _coerce_float(raw.get("complex_strength"), float(state["complex_strength"]), 0.1, 6.0)
-    state["specular_strength"] = _coerce_float(raw.get("specular_strength"), float(state["specular_strength"]), 0.1, 6.0)
+    state["complex_strength"] = _coerce_float(raw.get("complex_strength"), float(state["complex_strength"]), 0.1, 8.0)
+    state["specular_strength"] = _coerce_float(raw.get("specular_strength"), float(state["specular_strength"]), 0.1, 8.0)
     raw_dismissed = raw.get("dismissed_warnings", [])
     if isinstance(raw_dismissed, list):
         state["dismissed_warnings"] = [str(w) for w in raw_dismissed if isinstance(w, str)]
@@ -839,6 +839,12 @@ def detect_workflow_profile(path: Path) -> str | None:
 
 
 _RENDER_PROFILE_PRESETS: dict[str, dict[str, str]] = {
+    # Blank/custom profile — user-controlled, no forced workflow assumptions.
+    "custom": {
+        "complex_format": "msn",
+        "env_mask_mode": "standard",
+        "parallax_mode": "standard",
+    },
     # Baseline vanilla Skyrim SE-friendly defaults.
     "vanilla": {
         "complex_format": "msn",
@@ -869,6 +875,7 @@ _RENDER_PROFILE_PRESETS: dict[str, dict[str, str]] = {
 
 _RENDER_PROFILE_LABELS: dict[str, str] = {
     "auto": "Auto-detect",
+    "custom": "Custom [Experimental]",
     "vanilla": "Vanilla",
     "community_shaders": "Community Shaders",
     "truepbr": "Community Shaders TruePBR",
@@ -876,6 +883,12 @@ _RENDER_PROFILE_LABELS: dict[str, str] = {
 }
 
 _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
+    "custom": (
+        "Custom profile [Experimental].\n"
+        "No renderer assumptions are applied; this profile is intentionally blank so you can choose all options manually.\n"
+        "Guidance text and channel hints are best-effort and may be inaccurate for your specific shader stack.\n"
+        "For TruePBR workflows, use dedicated _rmaos/_ramos output plus its JSON sidecar and validate against your installed shader docs."
+    ),
     "vanilla": (
         "Vanilla Skyrim SE — no PBR, no ENB required.\n"
         "Files: diffuse.dds + _n.dds (DirectX tangent-space normal).\n"
@@ -898,9 +911,10 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     ),
     "truepbr": (
         "Community Shaders TruePBR workflow (JSON-driven material path).\n"
-        "Typical files: diffuse.dds + _n.dds + _rmaos.dds (and optional _p.dds depending on your mesh/material setup).\n"
-        "_rmaos RGBA layout for this preset: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (config-driven).\n"
-        "How files should look: _n stays purple/blue, _rmaos should look like packed grayscale channels (not like a normal map).\n"
+        "Typical files: diffuse.dds + _n.dds + _rmaos.dds (or _ramos.dds alias) + matching JSON sidecar (and optional _p.dds depending on your mesh/material setup).\n"
+        "_rmaos/_ramos RGBA layout for this preset: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (config-driven).\n"
+        "How files should look: _n stays purple/blue, _rmaos/_ramos should look like packed grayscale channels (not like a normal map).\n"
+        "JSON sidecar should reference the generated _rmaos/_ramos texture and document channel mapping for your TruePBR setup.\n"
         "Do NOT treat this as Community Shaders Extended Materials _cm/_c/_C, and do NOT mix it with ENB _msn workflows."
     ),
     "enb": (
@@ -920,6 +934,13 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
 }
 
 _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
+    "custom": {
+        "enable_parallax": True,
+        "enable_pom": False,
+        "enable_env_mapping": False,
+        "force_shader_type_3": False,
+        "prefer_msn_normal": False,
+    },
     "vanilla": {
         "enable_parallax": True,
         "enable_pom": False,
@@ -951,6 +972,15 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
 }
 
 _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
+    "custom": {
+        "include_diffuse": False,
+        "include_normal": False,
+        "include_parallax": False,
+        "include_glow": False,
+        "include_environment_mask": False,
+        "include_rmaos": False,
+        "include_complex": False,
+    },
     "vanilla": {
         "include_diffuse": True,
         "include_normal": True,
@@ -995,7 +1025,7 @@ _RENDER_PROFILE_OUTPUT_LABELS: dict[str, str] = {
     "include_parallax": "parallax/_p",
     "include_glow": "glow/_g",
     "include_environment_mask": "env mask/_m",
-    "include_rmaos": "rmaos/_rmaos",
+    "include_rmaos": "rmaos/_rmaos/_ramos",
     "include_complex": "complex material",
 }
 
@@ -1012,9 +1042,9 @@ def _normalize_render_profile(value: str | None) -> str:
         return "community_shaders"
     if normalized in {"true pbr", "truepbr"}:
         return "truepbr"
-    if normalized in {"auto", "vanilla", "community_shaders", "truepbr", "enb"}:
+    if normalized in {"auto", "custom", "vanilla", "community_shaders", "truepbr", "enb"}:
         return normalized
-    return "auto"
+    return "custom"
 
 
 def resolve_env_mask_complex_workflow(
@@ -1107,12 +1137,12 @@ def get_nif_patch_option_warnings(
         warnings.append("Environment mask slot is set to both clear and write a path.")
 
     path_rules = (
-        ("Diffuse slot", diffuse_texture_path, ("_n.dds", "_msn.dds", "_p.dds", "_g.dds", "_m.dds", "_cm.dds", "_c.dds", "_rmaos.dds"), True),
+        ("Diffuse slot", diffuse_texture_path, ("_n.dds", "_msn.dds", "_p.dds", "_g.dds", "_m.dds", "_cm.dds", "_c.dds", "_rmaos.dds", "_ramos.dds"), True),
         ("Parallax slot", parallax_texture_path, ("_p.dds",)),
         ("Normal slot", normal_texture_path, ("_n.dds", "_msn.dds"), False),
         ("Glow slot", glow_texture_path, ("_g.dds", "_glow.dds", "_emit.dds", "_emissive.dds"), False),
         ("Cubemap slot", cubemap_texture_path, ("_e.dds", "_cube.dds", "_env.dds", "_envmap.dds"), False),
-        ("Env mask slot", env_mask_texture_path, ("_m.dds", "_mask.dds", "_envmask.dds", "_cm.dds", "_c.dds", "_rmaos.dds"), False),
+        ("Env mask slot", env_mask_texture_path, ("_m.dds", "_mask.dds", "_envmask.dds", "_cm.dds", "_c.dds", "_rmaos.dds", "_ramos.dds"), False),
     )
     for rule in path_rules:
         label, raw_path, suffixes, *extra = rule
@@ -1135,7 +1165,7 @@ def get_nif_patch_option_warnings(
         if is_diffuse_rule:
             if lowered.endswith(lowered_suffixes):
                 warnings.append(
-                    f"{label} path looks like a generated map type (_n/_p/_g/_m/_cm/_c/_rmaos); slot 0 should usually be diffuse/albedo."
+                    f"{label} path looks like a generated map type (_n/_p/_g/_m/_cm/_c/_rmaos/_ramos); slot 0 should usually be diffuse/albedo."
                 )
             continue
         if not lowered.endswith(lowered_suffixes):
@@ -1183,6 +1213,7 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
     label = _RENDER_PROFILE_LABELS.get(normalized, normalized.replace("_", " ").title())
     resolved = resolve_render_profile_options("auto", recommended_profile=normalized)
     workflow_hint = {
+        "custom": "manual blank profile (experimental)",
         "vanilla": "best for stock Skyrim SE / safest defaults",
         "community_shaders": "best for Community Shaders packed-material workflows",
         "truepbr": "best for Community Shaders TruePBR JSON-driven workflows",
@@ -1193,13 +1224,14 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
         f"parallax {resolved['parallax_mode']}"
     )
     lines = [
+        "⚠ Render profile guidance is EXPERIMENTAL and may be inaccurate for some setups.",
         f"Suggested target: {label} ({workflow_hint}) → {tuple_hint}.",
         describe_render_profile_output_recommendation(normalized),
         describe_render_profile_default_outputs(normalized),
         "",
         "Renderer quick guide:",
     ]
-    for profile in ("vanilla", "community_shaders", "truepbr", "enb"):
+    for profile in ("custom", "vanilla", "community_shaders", "truepbr", "enb"):
         lines.append(
             f"- {_RENDER_PROFILE_LABELS[profile]}: "
             f"{describe_render_profile_default_outputs(profile)} "
@@ -1232,7 +1264,7 @@ def recommend_render_profile(
         return "community_shaders"
     if normalized_suffix == "_msn":
         return "enb"
-    if normalized_suffix == "_rmaos":
+    if normalized_suffix in {"_rmaos", "_ramos"}:
         return "truepbr"
     if detected_role == "complex_material_cm":
         return "community_shaders"
@@ -1398,6 +1430,14 @@ def recommend_generation_settings(source: Image.Image, input_path: Path | None =
         0.9,
         2.4,
     )
+    rmaos_strength = _clamp(
+        environment_mask_strength
+        + (detail_energy / 220.0)
+        + (dynamic_range / 1600.0)
+        + (low_saturation_ratio * 0.22),
+        0.9,
+        3.0,
+    )
     complex_strength = _clamp(
         1.05
         + (combined_edge / 200.0)
@@ -1422,6 +1462,7 @@ def recommend_generation_settings(source: Image.Image, input_path: Path | None =
     normal_strength = _clamp(normal_strength * (1.0 - (overdetail_guard * 0.22)), 1.1, 3.8)
     parallax_strength = _clamp(parallax_strength * (1.0 - (overdetail_guard * 0.28)), 0.8, 2.4)
     environment_mask_strength = _clamp(environment_mask_strength * (1.0 - (overdetail_guard * 0.16)), 0.9, 2.4)
+    rmaos_strength = _clamp(rmaos_strength * (1.0 - (overdetail_guard * 0.12)), 0.9, 3.0)
     complex_strength = _clamp(complex_strength * (1.0 - (overdetail_guard * 0.2)), 1.0, 2.6)
     specular_strength = _clamp(specular_strength * (1.0 - (overdetail_guard * 0.24)), 0.9, 2.2)
     glow_threshold = int(
@@ -1442,7 +1483,7 @@ def recommend_generation_settings(source: Image.Image, input_path: Path | None =
         "normal_strength": normal_strength,
         "parallax_strength": parallax_strength,
         "environment_mask_strength": environment_mask_strength,
-        "rmaos_strength": environment_mask_strength,
+        "rmaos_strength": rmaos_strength,
         "complex_strength": complex_strength,
         "specular_strength": specular_strength,
         "glow_threshold": glow_threshold,
@@ -1463,7 +1504,11 @@ def recommend_generation_settings(source: Image.Image, input_path: Path | None =
     material_adjusted = _adjust_recommendations_for_material_type(role_adjusted, material_type)
     workflow_adjusted = _adjust_recommendations_for_workflow_profile(material_adjusted, workflow_profile)
     final = _adjust_recommendations_for_role(workflow_adjusted, detected_role)
-    final["rmaos_strength"] = float(final["environment_mask_strength"])
+    final["rmaos_strength"] = _clamp(
+        float(final.get("rmaos_strength", final["environment_mask_strength"])),
+        0.9,
+        3.0,
+    )
     return final
 
 
@@ -1920,7 +1965,7 @@ def generate_environment_mask_for_workflow(
     minimum = ImageChops.darker(ImageChops.darker(red, green), blue)
     chroma = ImageChops.subtract(maximum, minimum)
 
-    specular = generate_specular(rgb_source, strength=max(0.1, min(6.0, strength + 0.15)))
+    specular = generate_specular(rgb_source, strength=max(0.1, min(8.0, strength + 0.15)))
 
     metallic = Image.blend(chroma, specular, alpha=_clamp(0.22 + (strength * 0.1), 0.22, 0.85))
     metallic = ImageEnhance.Contrast(metallic).enhance(0.75 + (strength * 0.34))
@@ -1961,7 +2006,7 @@ def _generate_standard_env_mask(source: Image.Image, strength: float = 1.2) -> I
     grayscale = ImageOps.grayscale(rgb_source)
     # Derive reflection intensity from specular features of the diffuse texture.
     # Bright/shiny-looking areas in the diffuse are more reflective.
-    specular = generate_specular(rgb_source, strength=max(0.1, min(6.0, strength)))
+    specular = generate_specular(rgb_source, strength=max(0.1, min(8.0, strength)))
     # Blend base luminance with the specular highlight estimate.
     env_mask = Image.blend(grayscale, specular, alpha=0.62)
     env_mask = ImageEnhance.Contrast(env_mask).enhance(0.8 + (strength * 0.28))
@@ -1985,7 +2030,7 @@ def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Im
     minimum = ImageChops.darker(ImageChops.darker(red, green), blue)
     chroma = ImageChops.subtract(maximum, minimum)
 
-    specular_drive = max(0.1, min(6.0, 0.7 + (strength * 0.6)))
+    specular_drive = max(0.1, min(8.0, 0.7 + (strength * 0.6)))
     specular = generate_specular(rgb_source, strength=specular_drive)
 
     env_reflection = Image.blend(grayscale, specular, alpha=_clamp(0.56 + (strength * 0.06), 0.56, 0.86))
@@ -2001,7 +2046,7 @@ def generate_complex_material(source: Image.Image, strength: float = 1.15) -> Im
     metallic = _lift_black_floor(ImageOps.autocontrast(metallic, cutoff=0), floor=3)
 
     height_specular_alpha = _clamp(0.16 + (strength * 0.1), 0.16, 0.82)
-    raw_height = generate_parallax(rgb_source, strength=max(0.1, min(6.0, strength)))
+    raw_height = generate_parallax(rgb_source, strength=max(0.1, min(8.0, strength)))
     height = Image.blend(raw_height, specular, alpha=height_specular_alpha)
     blend_alpha = _clamp(0.64 + (strength * 0.1), 0.64, 0.92)
     height = Image.blend(Image.new("L", raw_height.size, color=127), height, alpha=blend_alpha)
@@ -2315,6 +2360,36 @@ def build_rmaos_output_path(
     return base_output_dir / f"{rmaos_stem}{ext}"
 
 
+def write_rmaos_json_sidecar(texture_path: Path) -> Path:
+    """Write a lightweight TruePBR sidecar JSON next to a generated RMAOS texture."""
+    json_path = texture_path.with_suffix(".json")
+    map_name = texture_path.name
+    suffix = "_ramos" if texture_path.stem.lower().endswith("_ramos") else "_rmaos"
+    payload = {
+        "format": "truepbr_rmaos",
+        "experimental": True,
+        "note": "Best-effort sidecar generated by Skyrim Texture Generator; verify against your installed TruePBR schema.",
+        "textures": {
+            "rmaos": map_name,
+        },
+        "accepted_suffixes": ["_rmaos", "_ramos"],
+        "selected_suffix": suffix,
+        "channels": {
+            "R": "roughness",
+            "G": "metallic",
+            "B": "ambient_occlusion",
+            "A": "other_or_height",
+        },
+        "visual_expectation": (
+            "Packed grayscale channels; should not look like a purple normal map. "
+            "R/G/B each represent different material properties."
+        ),
+    }
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    return json_path
+
+
 def build_complex_output_path(
     input_path: Path,
     output_dir: Path | None,
@@ -2348,6 +2423,7 @@ def _normalize_texture_family_stem(path_like: Path | str) -> str:
         "_mask",
         "_m",
         "_rmaos",
+        "_ramos",
         "_msn",
         "_c",
         "_cm",
@@ -2665,6 +2741,14 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
         "In this generator, _rmaos naming is reserved for TruePBR. ENB preset output uses _m with ENB channel packing. "
         "Do NOT reuse TruePBR _rmaos maps in ENB complex-material setups.",
     ),
+    "_ramos": (
+        "environment_mask",
+        "Community Shaders TruePBR RAMOS Map alias (_ramos)",
+        "Alias naming for TruePBR packed map output in some pipelines. "
+        "RGBA channel layout matches _rmaos: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (JSON-driven). "
+        "In this generator, _ramos is treated the same as _rmaos and should be paired with a JSON sidecar. "
+        "Do NOT reuse TruePBR _ramos maps in ENB complex-material setups.",
+    ),
     "_s": (
         "subsurface",
         "Subsurface Scattering Map",
@@ -2748,7 +2832,7 @@ _SKYRIM_ROLE_TOKEN_HINTS: dict[str, tuple[str, ...]] = {
     "normal": ("normal", "normalmap", "nrm", "nor", "bump"),
     "parallax": ("parallax", "height", "heightmap", "displace", "displacement"),
     "glow": ("glow", "emissive", "emit", "emission"),
-    "environment_mask": ("env", "envmask", "cubemask", "reflectionmask", "specmask", "rmaos"),
+    "environment_mask": ("env", "envmask", "cubemask", "reflectionmask", "specmask", "rmaos", "ramos"),
     "subsurface": ("subsurface", "sss"),
     "skin_specular": ("skinspec", "skinspecular"),
     "complex_material": ("complex", "complexmaterial", "msn"),
@@ -2937,7 +3021,7 @@ def get_generation_warnings(
             "diffuse_from_derived_source",
             f"The selected input appears to be a '{resolved_source_role}' texture, not a diffuse/albedo source.\n\n"
             "Generating a diffuse output from an already derived map usually produces incorrect colours/shading in-game.\n\n"
-            "Tip: Use an albedo/diffuse source texture (no _n/_p/_g/_m/_rmaos/_msn/_cm/_c suffix) for best results.",
+            "Tip: Use an albedo/diffuse source texture (no _n/_p/_g/_m/_rmaos/_ramos/_msn/_cm/_c suffix) for best results.",
         ))
     if include_normal and resolved_source_role == "normal":
         warnings.append((
@@ -2963,7 +3047,7 @@ def get_generation_warnings(
     if include_environment_mask and resolved_source_role == "environment_mask":
         warnings.append((
             "env_mask_from_env_mask_source",
-            "Input already looks like an environment mask (_m/_rmaos).\n\n"
+            "Input already looks like an environment mask (_m/_rmaos/_ramos).\n\n"
             "Regenerating a mask from a mask can flatten reflection response.\n\n"
             "Tip: Build environment masks from diffuse/albedo sources for better material separation.",
         ))
@@ -2974,12 +3058,12 @@ def get_generation_warnings(
             "Regenerating complex material from packed complex inputs often damages channel meaning.\n\n"
             "Tip: Start from diffuse/albedo source when creating new complex materials.",
         ))
-    if normalized_source_suffix == "_rmaos":
+    if normalized_source_suffix in {"_rmaos", "_ramos"}:
         warnings.append((
             "rmaos_source_requires_renderer_check",
-            "Input uses the '_rmaos' suffix.\n\n"
-            "_rmaos is used for Community Shaders TruePBR JSON workflows and is NOT the same as Community Shaders _cm/_c Extended Materials.\n\n"
-            "Tip: Use the TruePBR renderer/profile path for _rmaos generation and avoid mixing this map into ENB complex-material setups.",
+            "Input uses the '_rmaos' or '_ramos' suffix.\n\n"
+            "_rmaos/_ramos is used for Community Shaders TruePBR JSON workflows and is NOT the same as Community Shaders _cm/_c Extended Materials.\n\n"
+            "Tip: Use the TruePBR renderer/profile path for _rmaos/_ramos generation and avoid mixing this map into ENB complex-material setups.",
         ))
     hint_text = (source_hint or "").lower()
     if "ui/interface texture" in hint_text and (include_parallax or include_environment_mask or include_complex):
@@ -3054,7 +3138,7 @@ def get_generation_warnings(
         warnings.append((
             "complex_env_without_msn",
             "Complex environment-mask mode is enabled but complex-material output is disabled.\n\n"
-            "In this tool, TruePBR-style workflows typically use '_n + _rmaos' with JSON config, while ENB preset output usually pairs '_m' complex env-mask data with '_msn'.\n\n"
+            "In this tool, TruePBR-style workflows typically use '_n + _rmaos/_ramos' with JSON config, while ENB preset output usually pairs '_m' complex env-mask data with '_msn'.\n\n"
             "Tip: If targeting ENB preset output, enable complex-material output; if targeting TruePBR, keep normal-map output and validate your JSON workflow.",
         ))
 
@@ -3145,7 +3229,7 @@ def collect_source_textures(input_path: Path) -> list[Path]:
     if not source_files:
         raise ValueError(
             f"No source DDS textures found in {input_path}. "
-            "Folder mode scans subfolders, processes original DDS files, and skips generated *_n, *_p, *_g, *_m, *_rmaos, *_msn, *_cm, *_c, and *_C variants."
+            "Folder mode scans subfolders, processes original DDS files, and skips generated *_n, *_p, *_g, *_m, *_rmaos, *_ramos, *_msn, *_cm, *_c, and *_C variants."
         )
     return source_files
 
@@ -3397,6 +3481,7 @@ def run_with_options(
                 rmaos_path,
                 preferred_pixel_formats=("DXT5",),
             )
+            outputs["rmaos_json"] = write_rmaos_json_sidecar(outputs["rmaos"])
 
         if include_complex:
             if complex_format == "msn":
@@ -3590,7 +3675,14 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Environment mask output file stem (_m by default).",
     )
-    parser.add_argument("--rmaos-name", type=str, default=None, help="RMAOS output file stem (_rmaos by default).")
+    parser.add_argument(
+        "--rmaos-name",
+        "--ramos-name",
+        dest="rmaos_name",
+        type=str,
+        default=None,
+        help="RMAOS output file stem (_rmaos by default; _ramos also supported).",
+    )
     parser.add_argument("--complex-name", type=str, default=None, help="Complex material output file stem.")
     parser.add_argument(
         "--complex-format",
@@ -3648,7 +3740,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-parallax", action="store_true", help="Skip parallax output generation.")
     parser.add_argument("--glow-map", action="store_true", help="Generate glow output.")
     parser.add_argument("--environment-mask", action="store_true", help="Generate environment mask output.")
-    parser.add_argument("--rmaos", action="store_true", help="Generate dedicated TruePBR RMAOS output (_rmaos).")
+    parser.add_argument(
+        "--rmaos",
+        "--ramos",
+        dest="rmaos",
+        action="store_true",
+        help="Generate dedicated TruePBR RMAOS output (_rmaos or _ramos via custom name) with JSON sidecar.",
+    )
     parser.add_argument(
         "--environment-mask-mode",
         choices=("standard", "complex"),
@@ -3863,7 +3961,7 @@ if GUI_AVAILABLE:
             self.emboss_mode_manual_override = False
             self.relief_mode_manual_override = False
             self.parallax_mode_var = tk.StringVar(value="standard")
-            self.render_profile_var = tk.StringVar(value="auto")
+            self.render_profile_var = tk.StringVar(value="custom")
             self.render_profile_suggestion_var = tk.StringVar(
                 value=build_render_profile_brief_message("vanilla")
             )
@@ -4025,7 +4123,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(_env_mask_check, "🪞 Generate an environment mask for reflections.\nTells Skyrim which parts of a surface are shiny. Science!")
             _rmaos_check = ttk.Checkbutton(options_frame, text="RMAOS / _rmaos", variable=self.include_rmaos_var, command=self._refresh_preview)
             _rmaos_check.grid(row=1, column=2, sticky=tk.W)
-            self._add_tooltip(_rmaos_check, "🧩 Generate a dedicated TruePBR RMAOS map (_rmaos). Separate from vanilla/ENB _m environment masks.")
+            self._add_tooltip(_rmaos_check, "🧩 Generate a dedicated TruePBR RMAOS map (_rmaos/_ramos) plus JSON sidecar. Separate from vanilla/ENB _m environment masks.")
             _complex_check = ttk.Checkbutton(options_frame, text="Complex/PBR material", variable=self.include_complex_var, command=self._refresh_preview)
             _complex_check.grid(row=1, column=3, sticky=tk.W)
             self._add_tooltip(
@@ -4049,17 +4147,19 @@ if GUI_AVAILABLE:
             self._add_tooltip(
                 _render_profile_label,
                 "🎯 Select target renderer preset.\n"
+                "custom = blank manual mode (experimental; nothing auto-enforced).\n"
                 "vanilla = safest stock Skyrim SE setup.\n"
                 "community_shaders = Community Shaders Extended Materials _cm/_c/_C workflow.\n"
-                "truepbr = Community Shaders TruePBR JSON-driven _rmaos workflow.\n"
+                "truepbr = Community Shaders TruePBR JSON-driven _rmaos/_ramos workflow.\n"
                 "enb = tool ENB preset (_msn + complex env-mask mode + optional POM).\n"
+                "Render-profile guidance is experimental and some info may be inaccurate for your setup.\n"
                 "Community Shaders and ENB are separate workflows and should not be combined.\n"
                 "Changing this is the only thing that should auto-switch the mode combos.",
             )
             _render_profile_combo = ttk.Combobox(
                 options_frame,
                 textvariable=self.render_profile_var,
-                values=("auto", "vanilla", "community_shaders", "truepbr", "enb"),
+                values=("custom", "auto", "vanilla", "community_shaders", "truepbr", "enb"),
                 state="readonly",
                 width=20,
             )
@@ -4067,8 +4167,10 @@ if GUI_AVAILABLE:
             _render_profile_combo.bind("<<ComboboxSelected>>", self._on_render_profile_changed)
             self._add_tooltip(
                 _render_profile_combo,
-                "🎯 auto = pick the best renderer preset for the current texture, but only when you change this control.\n"
-                "vanilla = safest defaults; community_shaders = _cm/_c/_C; truepbr = _n + _rmaos JSON-driven path; enb = tool ENB preset _msn + complex env + optional POM.\n"
+                "🎯 custom = blank manual mode (experimental).\n"
+                "auto = pick the best renderer preset for the current texture, but only when you change this control.\n"
+                "vanilla = safest defaults; community_shaders = _cm/_c/_C; truepbr = _n + _rmaos/_ramos + JSON path; enb = tool ENB preset _msn + complex env + optional POM.\n"
+                "Render-profile guidance is experimental and may be inaccurate for some stacks.\n"
                 "Community Shaders and ENB are separate workflows and should not be mixed.",
             )
             self.render_profile_hint_label = ttk.Label(
@@ -4167,7 +4269,7 @@ if GUI_AVAILABLE:
             _env_mask_label = ttk.Label(options_frame, text="Environment mask strength")
             _env_mask_label.grid(row=8, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_env_mask_label, "🪞 Controls environment-mask contrast.\nHigher = stronger shiny-vs-matte separation. Great for dramatic materials.")
-            self.environment_mask_scale = ttk.Scale(options_frame, from_=0.1, to=6.0, variable=self.environment_mask_strength_var, command=lambda _: self._on_slider_changed())
+            self.environment_mask_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.environment_mask_strength_var, command=lambda _: self._on_slider_changed())
             self.environment_mask_scale.grid(row=8, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.environment_mask_scale, "🪞 Slide right for stronger reflection contrast.\nSlide left for chill, less dramatic materials.")
             self.environment_mask_strength_display_label = ttk.Label(options_frame, textvariable=self.environment_mask_strength_display_var)
@@ -4179,7 +4281,7 @@ if GUI_AVAILABLE:
             _rmaos_label = ttk.Label(options_frame, text="RMAOS strength")
             _rmaos_label.grid(row=9, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_rmaos_label, "🧩 Controls TruePBR _rmaos channel contrast/intensity packing.")
-            self.rmaos_scale = ttk.Scale(options_frame, from_=0.1, to=6.0, variable=self.rmaos_strength_var, command=lambda _: self._on_slider_changed())
+            self.rmaos_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.rmaos_strength_var, command=lambda _: self._on_slider_changed())
             self.rmaos_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.rmaos_scale, "🧩 Higher values push stronger channel separation for _rmaos output.")
             self.rmaos_strength_display_label = ttk.Label(options_frame, textvariable=self.rmaos_strength_display_var)
@@ -4191,7 +4293,7 @@ if GUI_AVAILABLE:
             _complex_label = ttk.Label(options_frame, text="Complex strength")
             _complex_label.grid(row=10, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_complex_label, "🔮 Controls complex-material contrast.\nHigher = punchier ENB material response. Lower = subtle, civilized vibes.")
-            self.complex_scale = ttk.Scale(options_frame, from_=0.1, to=6.0, variable=self.complex_strength_var, command=lambda _: self._on_slider_changed())
+            self.complex_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.complex_strength_var, command=lambda _: self._on_slider_changed())
             self.complex_scale.grid(row=10, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.complex_scale, "🔮 Right = louder material definition.\nLeft = quieter output for restrained legends.")
             self.complex_strength_display_label = ttk.Label(options_frame, textvariable=self.complex_strength_display_var)
@@ -4203,7 +4305,7 @@ if GUI_AVAILABLE:
             _specular_label = ttk.Label(options_frame, text="Specular strength (_msn alpha)")
             _specular_label.grid(row=11, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_specular_label, "✨ Controls specular highlight intensity in _msn alpha.\nHigher = shinier. Lower = dusty realism.")
-            self.specular_scale = ttk.Scale(options_frame, from_=0.1, to=6.0, variable=self.specular_strength_var, command=lambda _: self._on_slider_changed())
+            self.specular_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.specular_strength_var, command=lambda _: self._on_slider_changed())
             self.specular_scale.grid(row=11, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.specular_scale, "✨ Turn it up for glorious shine, down for ancient weathered stone.\nLive value shown beside slider.")
             self.specular_strength_display_label = ttk.Label(options_frame, textvariable=self.specular_strength_display_var)
@@ -4449,7 +4551,7 @@ if GUI_AVAILABLE:
                 "parallax": "🏔 Height/parallax preview.\nDarker = lower, lighter = higher. Think of it as tiny grayscale topography for your texture.",
                 "glow": "✨ Emissive/glow preview.\nBright pixels glow in darkness; dark pixels mind their own business like respectable citizens.",
                 "environment_mask": "🪞 Reflection mask preview.\nBrighter = shinier, darker = matte. Basically a \"where may I sparkle\" permit.",
-                "rmaos": "🧩 TruePBR RMAOS preview (_rmaos). Dedicated packed map for TruePBR workflows.",
+                "rmaos": "🧩 TruePBR RMAOS preview (_rmaos/_ramos).\nPacked grayscale channels (not purple normal-map colors). Generator also writes a JSON sidecar for guidance.",
                 "complex_material": "🔮 Complex-material preview.\nFor MSN format this pane is split: LEFT = RGB normal channels, RIGHT = alpha/specular channel.\nFor CM format it shows the packed texture directly. Not a bug — just advanced wizard math.",
             }
             for index, (output_key, output_label) in enumerate(output_specs):
@@ -4831,7 +4933,7 @@ if GUI_AVAILABLE:
                 self.emboss_mode_manual_override = False
                 self.relief_mode_manual_override = False
                 self._set_preview_source(0, apply_recommendations=True)
-                if self.render_profile_var.get() != "auto":
+                if self.render_profile_var.get() not in {"auto", "custom"}:
                     self._apply_render_profile_modes(self.render_profile_var.get(), apply_preset=False)
                 if not self.use_custom_output_var.get():
                     self.output_var.set(str(self._default_output_dir_for_path(path)))
@@ -4960,7 +5062,7 @@ if GUI_AVAILABLE:
                         )
                     )
                 for candidate in expected_paths:
-                    for possible in (candidate, candidate.with_suffix(".png")):
+                    for possible in (candidate, candidate.with_suffix(".png"), candidate.with_suffix(".json")):
                         if not possible.exists() or possible in backups:
                             continue
                         backup_target = backup_dir / f"{len(backups):05d}{possible.suffix}"
@@ -5133,13 +5235,13 @@ if GUI_AVAILABLE:
             self.parallax_strength_display_var.set(_fmt(f"{float(self.parallax_strength_var.get()):.2f} (0.1–6.0)", self.auto_parallax_suggestion_var))
             self.glow_threshold_display_var.set(_fmt(f"{int(round(self.glow_threshold_var.get()))} (0–255)", self.auto_glow_suggestion_var))
             self.environment_mask_strength_display_var.set(
-                _fmt(f"{float(self.environment_mask_strength_var.get()):.2f} (0.1–6.0)", self.auto_environment_mask_suggestion_var)
+                _fmt(f"{float(self.environment_mask_strength_var.get()):.2f} (0.1–8.0)", self.auto_environment_mask_suggestion_var)
             )
             self.rmaos_strength_display_var.set(
-                _fmt(f"{float(self.rmaos_strength_var.get()):.2f} (0.1–6.0)", self.auto_rmaos_suggestion_var)
+                _fmt(f"{float(self.rmaos_strength_var.get()):.2f} (0.1–8.0)", self.auto_rmaos_suggestion_var)
             )
-            self.complex_strength_display_var.set(_fmt(f"{float(self.complex_strength_var.get()):.2f} (0.1–6.0)", self.auto_complex_suggestion_var))
-            self.specular_strength_display_var.set(_fmt(f"{float(self.specular_strength_var.get()):.2f} (0.1–6.0)", self.auto_specular_suggestion_var))
+            self.complex_strength_display_var.set(_fmt(f"{float(self.complex_strength_var.get()):.2f} (0.1–8.0)", self.auto_complex_suggestion_var))
+            self.specular_strength_display_var.set(_fmt(f"{float(self.specular_strength_var.get()):.2f} (0.1–8.0)", self.auto_specular_suggestion_var))
 
         def _on_batch_preview_toggle(self) -> None:
             if self.show_batch_preview_var.get():
@@ -5299,7 +5401,7 @@ if GUI_AVAILABLE:
             container.pack(fill=tk.BOTH, expand=True)
             ttk.Label(
                 container,
-                text="Renderer/channel guidance (ENB vs Community Shaders)",
+                text="Renderer/channel guidance [Experimental] (ENB vs Community Shaders)",
                 justify=tk.LEFT,
                 anchor=tk.W,
             ).pack(fill=tk.X, pady=(0, 8))
@@ -5322,6 +5424,12 @@ if GUI_AVAILABLE:
             selected = _normalize_render_profile(self.render_profile_var.get())
             self.render_profile_var.set(selected)
             recommended_profile = self._update_render_profile_recommendation(apply_auto=False)
+            if selected == "custom":
+                self.status_var.set(
+                    "Target renderer set to Custom [Experimental]. Leaving all toggles/sliders/modes unchanged for manual control. Guidance may be inaccurate."
+                )
+                self._request_preview_refresh()
+                return
             effective = self._apply_render_profile_modes(
                 selected,
                 recommended_profile=recommended_profile,
@@ -5669,7 +5777,7 @@ if GUI_AVAILABLE:
                 include_diffuse=include_diffuse,
                 include_normal=include_normal,
                 include_glow=include_glow,
-                include_environment_mask=include_environment_mask,
+                include_environment_mask=(include_environment_mask or include_rmaos),
                 env_mask_mode=env_mask_mode,
                 env_mask_strength=env_mask_strength,
                 include_parallax=include_parallax,
@@ -6075,7 +6183,7 @@ if GUI_AVAILABLE:
                 renderer_combo = ttk.Combobox(
                     render_row,
                     textvariable=renderer_profile_var,
-                    values=("auto", "vanilla", "community_shaders", "truepbr", "enb"),
+                    values=("custom", "auto", "vanilla", "community_shaders", "truepbr", "enb"),
                     state="readonly",
                     width=20,
                 )
