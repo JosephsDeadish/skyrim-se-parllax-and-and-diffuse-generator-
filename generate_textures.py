@@ -706,6 +706,14 @@ def _detect_vortex_context(
     if staging_root is not None and loaded_mods:
         texture_dirs = _unique_existing_paths([staging_root / mod_name / "textures" for mod_name in loaded_mods])
         mesh_dirs = _unique_existing_paths([staging_root / mod_name / "meshes" for mod_name in loaded_mods])
+        if not texture_dirs:
+            texture_dirs = _unique_existing_paths(
+                [path / "textures" for path in staging_root.iterdir() if path.is_dir() and (path / "textures").exists()]
+            )
+        if not mesh_dirs:
+            mesh_dirs = _unique_existing_paths(
+                [path / "meshes" for path in staging_root.iterdir() if path.is_dir() and (path / "meshes").exists()]
+            )
     elif staging_root is not None:
         texture_dirs = _unique_existing_paths(
             [path / "textures" for path in staging_root.iterdir() if path.is_dir() and (path / "textures").exists()]

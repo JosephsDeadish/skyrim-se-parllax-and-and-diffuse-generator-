@@ -2171,6 +2171,35 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(context.staging_root, staging_root.resolve())
             self.assertEqual(context.output_dir, (tool_dir / "generated_textures").resolve())
 
+    def test_detect_mod_manager_context_vortex_falls_back_to_staging_scan_when_mod_names_do_not_match_folder_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            appdata_dir = temp_path / "AppData" / "Roaming"
+            profile_dir = appdata_dir / "Vortex" / "skyrimse" / "profiles" / "Main"
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "modlist.txt").write_text("+Texture Pack Pretty Name\n", encoding="utf-8")
+
+            staging_root = temp_path / "Vortex Mods" / "skyrimse"
+            textures_dir = staging_root / "Texture Pack-1234" / "textures"
+            meshes_dir = staging_root / "Texture Pack-1234" / "meshes"
+            tool_dir = staging_root / "Skyrim Texture Generator"
+            textures_dir.mkdir(parents=True)
+            meshes_dir.mkdir(parents=True)
+            tool_dir.mkdir(parents=True)
+
+            context = detect_mod_manager_context(
+                {
+                    "APPDATA": str(appdata_dir),
+                    "VORTEX_PROFILE": "Main",
+                },
+                executable_path=tool_dir / "generate_textures.exe",
+            )
+
+            self.assertEqual(context.manager, "Vortex")
+            self.assertEqual(context.loaded_mods, ("Texture Pack Pretty Name",))
+            self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
+            self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
+
     def test_detect_mod_manager_context_includes_mo2_overwrite_dirs_and_game_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
