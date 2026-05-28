@@ -1867,9 +1867,9 @@ def recommend_render_profile(
         return "community_shaders"
     if detected_role == "complex_material":
         return "enb"
-    workflow_hint = _RENDER_PROFILE_WORKFLOW_HINTS.get((inferred_workflow or "").strip().lower())
-    if workflow_hint is not None:
-        return workflow_hint
+    explicit_workflow_hint = _RENDER_PROFILE_WORKFLOW_HINTS.get((workflow_profile or "").strip().lower())
+    if explicit_workflow_hint is not None:
+        return explicit_workflow_hint
     if inferred_material_type == "paper":
         return "vanilla"
     if input_path is not None:
@@ -1880,6 +1880,9 @@ def recommend_render_profile(
     manager_profile = detect_render_profile_from_mod_manager_context(manager_context)
     if manager_profile is not None:
         return manager_profile
+    inferred_workflow_hint = _RENDER_PROFILE_WORKFLOW_HINTS.get((inferred_workflow or "").strip().lower())
+    if inferred_workflow_hint is not None:
+        return inferred_workflow_hint
     if inferred_material_type in {"terrain", "snow", "dirt", "sand"}:
         return "terrain"
     if inferred_material_type == "architecture":
