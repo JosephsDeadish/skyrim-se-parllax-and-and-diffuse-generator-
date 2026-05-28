@@ -293,7 +293,22 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     else:
         state["parallax_mode"] = str(_GUI_STATE_DEFAULTS["parallax_mode"])
     render_profile = str(raw.get("render_profile", state["render_profile"]) or state["render_profile"]).strip().lower()
-    if render_profile in {"auto", "custom", "experimental", "vanilla", "performance", "vr", "community_shaders", "community shaders", "truepbr", "true pbr", "enb"}:
+    if render_profile in {
+        "auto",
+        "custom",
+        "experimental",
+        "vanilla",
+        "performance",
+        "vr",
+        "terrain",
+        "architecture",
+        "characters",
+        "community_shaders",
+        "community shaders",
+        "truepbr",
+        "true pbr",
+        "enb",
+    }:
         if render_profile == "community shaders":
             state["render_profile"] = "community_shaders"
         elif render_profile == "true pbr":
@@ -1150,6 +1165,21 @@ _RENDER_PROFILE_PRESETS: dict[str, dict[str, str]] = {
         "env_mask_mode": "standard",
         "parallax_mode": "standard",
     },
+    "terrain": {
+        "complex_format": "msn",
+        "env_mask_mode": "standard",
+        "parallax_mode": "standard",
+    },
+    "architecture": {
+        "complex_format": "msn",
+        "env_mask_mode": "standard",
+        "parallax_mode": "standard",
+    },
+    "characters": {
+        "complex_format": "msn",
+        "env_mask_mode": "standard",
+        "parallax_mode": "standard",
+    },
     # Community Shaders generally expects packed _cm assets while keeping vanilla-friendly
     # environment/parallax mode selections.
     "community_shaders": {
@@ -1178,10 +1208,17 @@ _RENDER_PROFILE_LABELS: dict[str, str] = {
     "vanilla": "Vanilla",
     "performance": "Performance (low-end)",
     "vr": "VR",
+    "terrain": "Terrain",
+    "architecture": "Architecture",
+    "characters": "Characters / Skin",
     "community_shaders": "Community Shaders",
     "truepbr": "Community Shaders TruePBR",
     "enb": "ENB",
 }
+_RENDER_PROFILE_CLI_VALUES: tuple[str, ...] = tuple(_RENDER_PROFILE_LABELS.keys())
+_RENDER_PROFILE_GUI_VALUES: tuple[str, ...] = ("custom",) + tuple(
+    profile for profile in _RENDER_PROFILE_CLI_VALUES if profile != "custom"
+)
 
 _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     "custom": (
@@ -1210,6 +1247,24 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "Recommended files: diffuse.dds + _n.dds with conservative settings.\n"
         "Parallax is disabled by default to reduce depth shimmer and motion discomfort.\n"
         "Add extra maps only after in-headset validation."
+    ),
+    "terrain": (
+        "Terrain profile tuned for stable large-scale surfaces.\n"
+        "Recommended files: diffuse.dds + _n.dds + _p.dds.\n"
+        "Uses conservative standard parallax to avoid horizon shimmer and texture swimming.\n"
+        "Enable extra packed outputs only when your shader stack specifically needs them."
+    ),
+    "architecture": (
+        "Architecture profile for walls, ruins, and structural assets.\n"
+        "Recommended files: diffuse.dds + _n.dds + _p.dds + _m.dds.\n"
+        "Keeps standard Skyrim-friendly naming with reflection control in slot 5.\n"
+        "Use ENB/Community Shaders-specific packed outputs only when targeting those renderer presets."
+    ),
+    "characters": (
+        "Character/skin profile focused on stable animated shading.\n"
+        "Recommended files: diffuse.dds + _n.dds (+ optional _g.dds for emissive assets).\n"
+        "Parallax and complex env workflows are disabled by default to avoid fragile skin/face setups.\n"
+        "Use dedicated skin/spec slots in your NIF workflow when needed."
     ),
     "community_shaders": (
         "Community Shaders Extended Materials workflow (not ENB, not TruePBR JSON).\n"
@@ -1276,6 +1331,27 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
+    "terrain": {
+        "enable_parallax": True,
+        "enable_pom": False,
+        "enable_env_mapping": False,
+        "force_shader_type_3": False,
+        "prefer_msn_normal": False,
+    },
+    "architecture": {
+        "enable_parallax": True,
+        "enable_pom": False,
+        "enable_env_mapping": True,
+        "force_shader_type_3": False,
+        "prefer_msn_normal": False,
+    },
+    "characters": {
+        "enable_parallax": False,
+        "enable_pom": False,
+        "enable_env_mapping": False,
+        "force_shader_type_3": False,
+        "prefer_msn_normal": False,
+    },
     "community_shaders": {
         "enable_parallax": True,
         "enable_pom": False,
@@ -1328,6 +1404,33 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_complex": False,
     },
     "vr": {
+        "include_diffuse": True,
+        "include_normal": True,
+        "include_parallax": False,
+        "include_glow": False,
+        "include_environment_mask": False,
+        "include_rmaos": False,
+        "include_complex": False,
+    },
+    "terrain": {
+        "include_diffuse": True,
+        "include_normal": True,
+        "include_parallax": True,
+        "include_glow": False,
+        "include_environment_mask": False,
+        "include_rmaos": False,
+        "include_complex": False,
+    },
+    "architecture": {
+        "include_diffuse": True,
+        "include_normal": True,
+        "include_parallax": True,
+        "include_glow": False,
+        "include_environment_mask": True,
+        "include_rmaos": False,
+        "include_complex": False,
+    },
+    "characters": {
         "include_diffuse": True,
         "include_normal": True,
         "include_parallax": False,
@@ -1414,9 +1517,25 @@ def _normalize_render_profile(value: str | None) -> str:
         return "community_shaders"
     if normalized in {"true pbr", "truepbr"}:
         return "truepbr"
+    if normalized in {"character", "character_skin", "character-skin", "skin", "npc"}:
+        return "characters"
+    if normalized in {"arch", "building"}:
+        return "architecture"
     if normalized == "experimental":
         return "custom"
-    if normalized in {"auto", "custom", "vanilla", "performance", "vr", "community_shaders", "truepbr", "enb"}:
+    if normalized in {
+        "auto",
+        "custom",
+        "vanilla",
+        "performance",
+        "vr",
+        "terrain",
+        "architecture",
+        "characters",
+        "community_shaders",
+        "truepbr",
+        "enb",
+    }:
         return normalized
     return "custom"
 
@@ -1608,6 +1727,9 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
         "vanilla": "best for stock Skyrim SE / safest defaults",
         "performance": "best for lower-end systems and stability-first outputs",
         "vr": "best for VR comfort-focused conservative outputs",
+        "terrain": "best for stable terrain outputs with conservative parallax",
+        "architecture": "best for architecture/walls with standard slot-5 env mask defaults",
+        "characters": "best for skin/character assets with safer non-parallax defaults",
         "community_shaders": "best for Community Shaders packed-material workflows",
         "truepbr": "best for Community Shaders TruePBR JSON-driven workflows",
         "enb": "best for ENB complex material + POM workflows",
@@ -1624,7 +1746,18 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
         "",
         "Renderer quick guide:",
     ]
-    for profile in ("custom", "vanilla", "performance", "vr", "community_shaders", "truepbr", "enb"):
+    for profile in (
+        "custom",
+        "vanilla",
+        "performance",
+        "vr",
+        "terrain",
+        "architecture",
+        "characters",
+        "community_shaders",
+        "truepbr",
+        "enb",
+    ):
         lines.append(
             f"- {_RENDER_PROFILE_LABELS[profile]}: "
             f"{describe_render_profile_default_outputs(profile)} "
@@ -1674,6 +1807,12 @@ def recommend_render_profile(
     manager_profile = detect_render_profile_from_mod_manager_context(manager_context)
     if manager_profile is not None:
         return manager_profile
+    if material_type in {"terrain", "snow", "dirt", "sand"}:
+        return "terrain"
+    if material_type == "architecture":
+        return "architecture"
+    if material_type in {"skin", "fur"}:
+        return "characters"
     return "vanilla"
 
 
@@ -4607,7 +4746,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--render-profile",
-        choices=("auto", "custom", "vanilla", "performance", "vr", "community_shaders", "truepbr", "enb"),
+        choices=_RENDER_PROFILE_CLI_VALUES,
         default="auto",
         help=(
             "Target renderer/output profile. "
@@ -4960,6 +5099,9 @@ if GUI_AVAILABLE:
                 "vanilla = safest stock Skyrim SE setup.\n"
                 "performance = low-end focused profile (lightweight defaults).\n"
                 "vr = conservative VR-focused profile.\n"
+                "terrain = conservative terrain-friendly defaults.\n"
+                "architecture = wall/ruin-friendly defaults with slot-5 mask enabled.\n"
+                "characters = skin/character-safe defaults with parallax disabled.\n"
                 "community_shaders = Community Shaders Extended Materials _cm/_c/_C workflow.\n"
                 "truepbr = Community Shaders TruePBR JSON-driven _rmaos/_ramos workflow.\n"
                 "enb = tool ENB preset (_msn + complex env-mask mode + optional POM).\n"
@@ -4970,7 +5112,7 @@ if GUI_AVAILABLE:
             _render_profile_combo = ttk.Combobox(
                 options_frame,
                 textvariable=self.render_profile_var,
-                values=("custom", "auto", "vanilla", "performance", "vr", "community_shaders", "truepbr", "enb"),
+                values=_RENDER_PROFILE_GUI_VALUES,
                 state="readonly",
                 width=20,
             )
@@ -4981,6 +5123,7 @@ if GUI_AVAILABLE:
                 "🎯 custom = blank manual mode.\n"
                 "auto = pick the best renderer preset for the current texture, but only when you change this control.\n"
                 "vanilla = safest defaults; performance = lightweight defaults; vr = conservative VR defaults; "
+                "terrain = stable terrain defaults; architecture = structure-focused defaults; characters = skin-safe defaults; "
                 "community_shaders = _cm/_c/_C; truepbr = _n + _rmaos/_ramos + JSON path; enb = tool ENB preset _msn + complex env + optional POM.\n"
                 "Render-profile guidance is experimental and may be inaccurate for some stacks.\n"
                 "Community Shaders and ENB are separate workflows and should not be mixed.",
@@ -7006,7 +7149,7 @@ if GUI_AVAILABLE:
                 renderer_combo = ttk.Combobox(
                     render_row,
                     textvariable=renderer_profile_var,
-                    values=("custom", "auto", "vanilla", "performance", "vr", "community_shaders", "truepbr", "enb"),
+                    values=_RENDER_PROFILE_GUI_VALUES,
                     state="readonly",
                     width=20,
                 )
@@ -7153,6 +7296,13 @@ if GUI_AVAILABLE:
                 _apply_renderer_defaults()
                 renderer_combo.bind("<<ComboboxSelected>>", _apply_renderer_defaults)
                 renderer_combo.bind("<<ComboboxSelected>>", _update_checkbox_warnings, add="+")
+                def _on_nif_target_changed(*_: object) -> None:
+                    if _normalize_render_profile(renderer_profile_var.get()) == "auto":
+                        _apply_renderer_defaults()
+                    _update_checkbox_warnings()
+
+                nif_path_var.trace_add("write", _on_nif_target_changed)
+                nif_scan_mode.trace_add("write", _on_nif_target_changed)
                 for watch_var in (
                     enable_parallax_var,
                     enable_pom_var,
@@ -7346,6 +7496,9 @@ if GUI_AVAILABLE:
                     if not guessed_from:
                         status_var.set("Auto-fill could not find any usable diffuse/normal texture slots in the selected NIF(s).")
                         return
+                    guessed_parallax = _normalize_nif_texture_input_path(guessed_parallax) if guessed_parallax else ""
+                    guessed_normal = _normalize_nif_texture_input_path(guessed_normal) if guessed_normal else ""
+                    guessed_env = _normalize_nif_texture_input_path(guessed_env) if guessed_env else ""
                     changed = 0
                     if guessed_parallax:
                         if parallax_tex_var.get().strip() != guessed_parallax:
@@ -7357,7 +7510,7 @@ if GUI_AVAILABLE:
                         normal_tex_var.set(guessed_normal)
                     env_mask_guess = guessed_env
                     if not env_mask_guess and guessed_parallax.lower().endswith("_p.dds"):
-                        env_mask_guess = guessed_parallax[:-6] + env_mask_suffix
+                        env_mask_guess = _normalize_nif_texture_input_path(guessed_parallax[:-6] + env_mask_suffix)
                     if env_mask_guess:
                         if env_mask_tex_var.get().strip() != env_mask_guess:
                             changed += 1

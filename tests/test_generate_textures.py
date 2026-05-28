@@ -358,6 +358,14 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(performance["render_profile"]), "performance")
         self.assertEqual(str(vr["render_profile"]), "vr")
 
+    def test_normalize_gui_state_accepts_extended_render_profiles(self) -> None:
+        terrain = _normalize_gui_state({"render_profile": "terrain"})
+        architecture = _normalize_gui_state({"render_profile": "architecture"})
+        characters = _normalize_gui_state({"render_profile": "characters"})
+        self.assertEqual(str(terrain["render_profile"]), "terrain")
+        self.assertEqual(str(architecture["render_profile"]), "architecture")
+        self.assertEqual(str(characters["render_profile"]), "characters")
+
     def test_generate_diffuse_returns_rgb_same_size(self) -> None:
         diffuse = generate_diffuse(_sample_image())
         self.assertEqual(diffuse.mode, "RGB")
@@ -696,6 +704,20 @@ class GenerateTexturesTests(unittest.TestCase):
             "vanilla",
         )
 
+    def test_recommend_render_profile_uses_extended_profiles_for_neutral_material_hints(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(Path("textures/landscape/mountain.dds"), material_type="terrain"),
+            "terrain",
+        )
+        self.assertEqual(
+            recommend_render_profile(Path("textures/architecture/stone/wall.dds"), material_type="architecture"),
+            "architecture",
+        )
+        self.assertEqual(
+            recommend_render_profile(Path("textures/actors/character/face.dds"), material_type="skin"),
+            "characters",
+        )
+
     def test_recommend_render_profile_uses_mod_manager_context_hint_when_path_is_neutral(self) -> None:
         context = ModManagerContext(
             manager="MO2",
@@ -847,6 +869,21 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(vr["env_mask_mode"], "standard")
         self.assertEqual(vr["parallax_mode"], "standard")
 
+        terrain = resolve_render_profile_options("terrain")
+        self.assertEqual(terrain["complex_format"], "msn")
+        self.assertEqual(terrain["env_mask_mode"], "standard")
+        self.assertEqual(terrain["parallax_mode"], "standard")
+
+        architecture = resolve_render_profile_options("architecture")
+        self.assertEqual(architecture["complex_format"], "msn")
+        self.assertEqual(architecture["env_mask_mode"], "standard")
+        self.assertEqual(architecture["parallax_mode"], "standard")
+
+        characters = resolve_render_profile_options("characters")
+        self.assertEqual(characters["complex_format"], "msn")
+        self.assertEqual(characters["env_mask_mode"], "standard")
+        self.assertEqual(characters["parallax_mode"], "standard")
+
         cs = resolve_render_profile_options("community_shaders")
         self.assertEqual(cs["complex_format"], "cm")
         self.assertEqual(cs["env_mask_mode"], "standard")
@@ -878,6 +915,21 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(bool(performance["include_parallax"]))
         self.assertFalse(bool(performance["include_complex"]))
 
+        terrain = resolve_render_profile_output_defaults("terrain")
+        self.assertTrue(bool(terrain["include_parallax"]))
+        self.assertFalse(bool(terrain["include_environment_mask"]))
+        self.assertFalse(bool(terrain["include_complex"]))
+
+        architecture = resolve_render_profile_output_defaults("architecture")
+        self.assertTrue(bool(architecture["include_parallax"]))
+        self.assertTrue(bool(architecture["include_environment_mask"]))
+        self.assertFalse(bool(architecture["include_complex"]))
+
+        characters = resolve_render_profile_output_defaults("characters")
+        self.assertFalse(bool(characters["include_parallax"]))
+        self.assertFalse(bool(characters["include_environment_mask"]))
+        self.assertFalse(bool(characters["include_complex"]))
+
         enb = resolve_render_profile_output_defaults("enb")
         self.assertTrue(bool(enb["include_parallax"]))
         self.assertTrue(bool(enb["include_environment_mask"]))
@@ -905,6 +957,21 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(bool(vr["enable_env_mapping"]))
         self.assertFalse(bool(vr["force_shader_type_3"]))
         self.assertFalse(bool(vr["prefer_msn_normal"]))
+
+        terrain = resolve_nif_patch_defaults_for_render_profile("terrain")
+        self.assertTrue(bool(terrain["enable_parallax"]))
+        self.assertFalse(bool(terrain["enable_pom"]))
+        self.assertFalse(bool(terrain["enable_env_mapping"]))
+
+        architecture = resolve_nif_patch_defaults_for_render_profile("architecture")
+        self.assertTrue(bool(architecture["enable_parallax"]))
+        self.assertFalse(bool(architecture["enable_pom"]))
+        self.assertTrue(bool(architecture["enable_env_mapping"]))
+
+        characters = resolve_nif_patch_defaults_for_render_profile("characters")
+        self.assertFalse(bool(characters["enable_parallax"]))
+        self.assertFalse(bool(characters["enable_pom"]))
+        self.assertFalse(bool(characters["enable_env_mapping"]))
 
         enb = resolve_nif_patch_defaults_for_render_profile("enb")
         self.assertTrue(bool(enb["enable_parallax"]))
@@ -989,6 +1056,9 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("Suggested target: Community Shaders", message)
         self.assertIn("Renderer quick guide:", message)
         self.assertIn("Vanilla:", message)
+        self.assertIn("Terrain:", message)
+        self.assertIn("Architecture:", message)
+        self.assertIn("Characters / Skin:", message)
         self.assertIn("Community Shaders TruePBR:", message)
         self.assertIn("ENB:", message)
         self.assertIn("Auto-check:", message)
@@ -2317,6 +2387,14 @@ class GenerateTexturesTests(unittest.TestCase):
             with mock.patch("sys.argv", ["generate_textures.py", str(input_file), "--render-profile", "enb"]):
                 args = parse_args()
         self.assertEqual(str(args.render_profile), "enb")
+
+    def test_parse_args_accepts_extended_render_profile_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_file = Path(temp_dir) / "brick.dds"
+            input_file.write_bytes(b"dds")
+            with mock.patch("sys.argv", ["generate_textures.py", str(input_file), "--render-profile", "architecture"]):
+                args = parse_args()
+        self.assertEqual(str(args.render_profile), "architecture")
 
     def test_main_pbr_material_forces_complex_material_cm_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
