@@ -3498,6 +3498,98 @@ class ParallaxOcclusionTests(unittest.TestCase):
                     parallax_mode="broken",
                 )
 
+    def test_run_with_options_uses_resolved_truepbr_env_mask_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "stone.png"
+            _sample_image().save(input_path)
+            captured_workflows: list[str] = []
+            original_generate = generate_environment_mask_for_workflow
+
+            def _spy(source, *, strength=1.2, mode="standard", complex_workflow="truepbr"):
+                captured_workflows.append(str(complex_workflow))
+                return original_generate(
+                    source,
+                    strength=strength,
+                    mode=mode,
+                    complex_workflow=complex_workflow,
+                )
+
+            with mock.patch("generate_textures.generate_environment_mask_for_workflow", side_effect=_spy), \
+                 mock.patch(
+                     "generate_textures._save_with_dds_fallback",
+                     side_effect=lambda _image, path, **_kwargs: path,
+                 ):
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=temp_path / "out",
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=True,
+                    include_complex=True,
+                    complex_format="cm",
+                    env_mask_mode="complex",
+                    render_profile="auto",
+                )
+            self.assertEqual(captured_workflows, ["truepbr"])
+
+    def test_generate_preview_outputs_uses_resolved_truepbr_env_mask_workflow(self) -> None:
+        source = _sample_image()
+        captured_workflows: list[str] = []
+        original_generate = generate_environment_mask_for_workflow
+
+        def _spy(source_image, *, strength=1.2, mode="standard", complex_workflow="truepbr"):
+            captured_workflows.append(str(complex_workflow))
+            return original_generate(
+                source_image,
+                strength=strength,
+                mode=mode,
+                complex_workflow=complex_workflow,
+            )
+
+        with mock.patch("generate_textures.generate_environment_mask_for_workflow", side_effect=_spy):
+            generate_preview_outputs(
+                source,
+                normal_strength=2.0,
+                parallax_strength=1.35,
+                glow_threshold=190,
+                environment_mask_strength=1.2,
+                complex_strength=1.2,
+                specular_strength=1.1,
+                complex_format="cm",
+                env_mask_mode="complex",
+                include_diffuse=False,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=True,
+                include_complex=True,
+                render_profile="auto",
+            )
+        self.assertEqual(captured_workflows, ["truepbr"])
+
+    def test_run_with_options_rejects_conflicting_output_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "stone.png"
+            _sample_image().save(input_path)
+            with self.assertRaisesRegex(ValueError, "Conflicting output filenames detected"):
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=temp_path / "out",
+                    diffuse_name="stone_shared",
+                    normal_name="stone_shared",
+                    include_diffuse=True,
+                    include_normal=True,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_rmaos=False,
+                    include_complex=False,
+                )
+
     def test_generate_parallax_occlusion_relief_mode_differs_from_standard(self) -> None:
         """Relief mode should change the occlusion heightmap (luminosity-as-height)."""
         source = _detailed_bright_image()

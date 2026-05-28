@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import uuid
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping
@@ -3035,6 +3036,12 @@ def generate_preview_outputs(
 ) -> dict[str, Image.Image]:
     if parallax_mode not in {"standard", "occlusion"}:
         raise ValueError("parallax_mode must be 'standard' or 'occlusion'.")
+    resolved_env_complex_workflow = resolve_env_mask_complex_workflow(
+        env_mask_mode=env_mask_mode,
+        complex_format=complex_format,
+        render_profile=render_profile,
+        include_complex=include_complex,
+    )
     outputs: dict[str, Image.Image] = {}
     if include_diffuse:
         outputs["diffuse"] = enforce_skyrim_output_profile("diffuse", generate_diffuse(source))
@@ -3060,7 +3067,7 @@ def generate_preview_outputs(
                 source,
                 strength=environment_mask_strength,
                 mode=env_mask_mode,
-                complex_workflow="enb" if _normalize_env_mask_mode(env_mask_mode) == "complex" else "standard",
+                complex_workflow=resolved_env_complex_workflow,
             ),
             env_mask_mode=env_mask_mode,
         )
@@ -3290,6 +3297,104 @@ def build_complex_output_path(
     suffix = "_msn" if complex_format == "msn" else "_cm"
     complex_stem = complex_name or f"{input_path.stem}{suffix}"
     return base_output_dir / f"{complex_stem}{ext}"
+
+
+def _collect_planned_output_paths(
+    *,
+    input_file: Path,
+    output_dir: Path | None,
+    diffuse_name: str | None,
+    normal_name: str | None,
+    parallax_name: str | None,
+    glow_name: str | None,
+    environment_mask_name: str | None,
+    rmaos_name: str | None,
+    complex_name: str | None,
+    complex_format: str,
+    env_mask_mode: str,
+    render_profile: str,
+    include_diffuse: bool,
+    include_normal: bool,
+    include_parallax: bool,
+    include_glow: bool,
+    include_environment_mask: bool,
+    include_rmaos: bool,
+    include_complex: bool,
+) -> dict[str, Path]:
+    planned: dict[str, Path] = {}
+    if include_diffuse or include_parallax:
+        diffuse_path, parallax_path = build_output_paths(
+            input_path=input_file,
+            output_dir=output_dir,
+            diffuse_name=diffuse_name,
+            parallax_name=parallax_name,
+        )
+        if include_diffuse:
+            planned["diffuse"] = diffuse_path
+        if include_parallax:
+            planned["parallax"] = parallax_path
+    if include_normal:
+        planned["normal"] = build_normal_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            normal_name=normal_name,
+        )
+    if include_glow:
+        planned["glow"] = build_glow_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            glow_name=glow_name,
+        )
+    if include_environment_mask:
+        planned["environment_mask"] = build_environment_mask_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            environment_mask_name=environment_mask_name,
+            env_mask_mode=env_mask_mode,
+            complex_format=complex_format,
+            render_profile=render_profile,
+            include_complex=include_complex,
+        )
+    if include_rmaos:
+        planned["rmaos"] = build_rmaos_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            rmaos_name=rmaos_name,
+        )
+    if include_complex:
+        planned["complex_material"] = build_complex_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            complex_name=complex_name,
+            complex_format=complex_format,
+        )
+    return planned
+
+
+def _validate_output_path_conflicts(planned_paths: Mapping[str, Path]) -> None:
+    by_target: dict[str, list[str]] = defaultdict(list)
+    original_paths: dict[str, Path] = {}
+    for output_key, output_path in planned_paths.items():
+        normalized_key = str(output_path.resolve(strict=False)).casefold()
+        by_target[normalized_key].append(output_key)
+        original_paths.setdefault(normalized_key, output_path)
+
+    conflicts = [
+        (original_paths[path_key], sorted(output_keys))
+        for path_key, output_keys in by_target.items()
+        if len(output_keys) > 1
+    ]
+    if not conflicts:
+        return
+
+    details = "; ".join(
+        f"{path} ({', '.join(output_keys)})"
+        for path, output_keys in conflicts
+    )
+    raise ValueError(
+        "Conflicting output filenames detected. Multiple outputs resolve to the same file path: "
+        f"{details}. Use unique output names for each enabled map type."
+    )
 
 
 def _normalize_texture_family_stem(path_like: Path | str) -> str:
@@ -4414,6 +4519,34 @@ def run_with_options(
         raise ValueError("Select at least one output.")
     if parallax_mode not in {"standard", "occlusion"}:
         raise ValueError("parallax_mode must be 'standard' or 'occlusion'.")
+    planned_paths = _collect_planned_output_paths(
+        input_file=input_file,
+        output_dir=output_dir,
+        diffuse_name=diffuse_name,
+        normal_name=normal_name,
+        parallax_name=parallax_name,
+        glow_name=glow_name,
+        environment_mask_name=environment_mask_name,
+        rmaos_name=rmaos_name,
+        complex_name=complex_name,
+        complex_format=complex_format,
+        env_mask_mode=env_mask_mode,
+        render_profile=render_profile,
+        include_diffuse=include_diffuse,
+        include_normal=include_normal,
+        include_parallax=include_parallax,
+        include_glow=include_glow,
+        include_environment_mask=include_environment_mask,
+        include_rmaos=include_rmaos,
+        include_complex=include_complex,
+    )
+    _validate_output_path_conflicts(planned_paths)
+    resolved_env_complex_workflow = resolve_env_mask_complex_workflow(
+        env_mask_mode=env_mask_mode,
+        complex_format=complex_format,
+        render_profile=render_profile,
+        include_complex=include_complex,
+    )
 
     outputs: dict[str, Path] = {}
 
@@ -4511,7 +4644,7 @@ def run_with_options(
                     source,
                     strength=resolved_environment_mask_strength,
                     mode=env_mask_mode,
-                    complex_workflow="enb" if _normalize_env_mask_mode(env_mask_mode) == "complex" else "standard",
+                    complex_workflow=resolved_env_complex_workflow,
                 ),
                 env_mask_mode=env_mask_mode,
             )
