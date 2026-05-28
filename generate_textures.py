@@ -1849,6 +1849,13 @@ def recommend_render_profile(
     manager_context: ModManagerContext | None = None,
 ) -> str:
     """Recommend target rendering profile for map format/mode defaults."""
+    inferred_workflow = workflow_profile
+    inferred_material_type = material_type
+    if input_path is not None:
+        if inferred_workflow is None:
+            inferred_workflow = detect_workflow_profile(input_path)
+        if inferred_material_type == "general":
+            inferred_material_type = classify_material_type(input_path)
     normalized_suffix = (detected_suffix or "").strip().lower()
     if normalized_suffix in {"_cm", "_c"}:
         return "community_shaders"
@@ -1860,10 +1867,10 @@ def recommend_render_profile(
         return "community_shaders"
     if detected_role == "complex_material":
         return "enb"
-    workflow_hint = _RENDER_PROFILE_WORKFLOW_HINTS.get((workflow_profile or "").strip().lower())
+    workflow_hint = _RENDER_PROFILE_WORKFLOW_HINTS.get((inferred_workflow or "").strip().lower())
     if workflow_hint is not None:
         return workflow_hint
-    if material_type == "paper":
+    if inferred_material_type == "paper":
         return "vanilla"
     if input_path is not None:
         combined = " ".join(input_path.parts).lower()
@@ -1873,11 +1880,11 @@ def recommend_render_profile(
     manager_profile = detect_render_profile_from_mod_manager_context(manager_context)
     if manager_profile is not None:
         return manager_profile
-    if material_type in {"terrain", "snow", "dirt", "sand"}:
+    if inferred_material_type in {"terrain", "snow", "dirt", "sand"}:
         return "terrain"
-    if material_type == "architecture":
+    if inferred_material_type == "architecture":
         return "architecture"
-    if material_type in {"skin", "fur"}:
+    if inferred_material_type in {"skin", "fur"}:
         return "characters"
     return "vanilla"
 
@@ -7261,9 +7268,9 @@ if GUI_AVAILABLE:
                     opt_frame,
                     text=(
                         "Option guide: Slot 0=diffuse/albedo, 1=normal/_n or _msn, 2=glow/_g, "
-                        "3=parallax/_p, 4=cubemap, 5=environment mask/_m or _rmaos. "
+                        "3=parallax/_p, 4=cubemap, 5=environment mask/_m or _cm/_c or _rmaos. "
                         "Enable standard parallax for vanilla/community shaders/truepbr workflows. Enable ENB POM only for ENB setups. "
-                        "Enable environment mapping only when using slot 5 (_m/_rmaos). Force shader type 3 lets the tool write stronger parallax scale values."
+                        "Enable environment mapping only when using slot 5 (_m/_cm/_c/_rmaos). Force shader type 3 lets the tool write stronger parallax scale values."
                     ),
                     justify=tk.LEFT,
                     wraplength=860,
@@ -7524,7 +7531,7 @@ if GUI_AVAILABLE:
                             continue
                         candidate_parallax = guess_parallax_path_for_nif(nif_candidate) or ""
                         candidate_normal = guess_normal_path_for_nif(nif_candidate, msn=prefer_msn) or ""
-                        candidate_env = guess_env_mask_path_for_nif(nif_candidate, preferred_suffix=env_mask_suffix) or ""
+                        candidate_env = ""
                         try:
                             infos = scan_nif(nif_candidate)
                         except Exception:
@@ -7550,6 +7557,14 @@ if GUI_AVAILABLE:
                                     candidate_env = str(diffuse_like.parent / f"{diffuse_stem}{env_mask_suffix}").replace("/", "\\")
                             if candidate_parallax and candidate_normal and candidate_env:
                                 break
+                        if not candidate_env:
+                            candidate_env = (
+                                guess_env_mask_path_for_nif(
+                                    nif_candidate,
+                                    preferred_suffix=env_mask_suffix,
+                                )
+                                or ""
+                            )
                         candidate_parallax = candidate_parallax.replace("/", "\\")
                         candidate_normal = candidate_normal.replace("/", "\\")
                         candidate_env = candidate_env.replace("/", "\\")

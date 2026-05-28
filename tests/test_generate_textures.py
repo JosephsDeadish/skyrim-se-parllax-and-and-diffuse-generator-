@@ -703,10 +703,24 @@ class GenerateTexturesTests(unittest.TestCase):
     def test_recommend_render_profile_defaults_to_vanilla_without_renderer_hints(self) -> None:
         self.assertEqual(
             recommend_render_profile(
-                Path("textures/architecture/metalplate.dds"),
+                Path("textures/clutter/misc/metalplate.dds"),
                 source=_detailed_low_saturation_image(),
             ),
             "vanilla",
+        )
+
+    def test_recommend_render_profile_infers_content_profile_from_path_when_unspecified(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(Path("textures/architecture/stone/wall.dds")),
+            "architecture",
+        )
+        self.assertEqual(
+            recommend_render_profile(Path("textures/landscape/mountain.dds")),
+            "terrain",
+        )
+        self.assertEqual(
+            recommend_render_profile(Path("textures/actors/character/face.dds")),
+            "characters",
         )
 
     def test_recommend_render_profile_uses_extended_profiles_for_neutral_material_hints(self) -> None:
