@@ -64,9 +64,11 @@ from generate_textures import (
     recommend_render_profile,
     resolve_nif_patch_defaults_for_render_profile,
     resolve_render_profile_guardrails,
+    resolve_render_profile_mode_control_states,
     resolve_render_profile_mode_selection,
     resolve_render_profile_output_defaults,
     resolve_render_profile_options,
+    build_render_profile_mode_controls_hint,
     render_profile_has_locked_controls,
     restore_nif_backups,
     resolve_env_mask_complex_workflow,
@@ -1055,6 +1057,54 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(render_profile_has_locked_controls("custom"))
         self.assertTrue(render_profile_has_locked_controls("auto"))
         self.assertTrue(render_profile_has_locked_controls("enb"))
+
+    def test_resolve_render_profile_mode_control_states_locks_all_modes_for_non_custom_profile(self) -> None:
+        states = resolve_render_profile_mode_control_states(
+            selected_profile="enb",
+            include_complex=True,
+            include_environment_mask=True,
+            include_parallax=True,
+        )
+        self.assertTrue(bool(states["locked"]))
+        self.assertEqual(str(states["complex_format"]), "disabled")
+        self.assertEqual(str(states["env_mask_mode"]), "disabled")
+        self.assertEqual(str(states["parallax_mode"]), "disabled")
+
+    def test_resolve_render_profile_mode_control_states_only_enables_modes_for_checked_outputs(self) -> None:
+        states = resolve_render_profile_mode_control_states(
+            selected_profile="custom",
+            include_complex=False,
+            include_environment_mask=True,
+            include_parallax=False,
+        )
+        self.assertFalse(bool(states["locked"]))
+        self.assertEqual(str(states["complex_format"]), "disabled")
+        self.assertEqual(str(states["env_mask_mode"]), "readonly")
+        self.assertEqual(str(states["parallax_mode"]), "disabled")
+
+    def test_build_render_profile_mode_controls_hint_reports_disabled_outputs_in_custom_mode(self) -> None:
+        hint = build_render_profile_mode_controls_hint(
+            {
+                "locked": False,
+                "complex_format": "disabled",
+                "env_mask_mode": "readonly",
+                "parallax_mode": "disabled",
+            }
+        )
+        self.assertIn("Custom mode: enable", hint)
+        self.assertIn("Complex/PBR material", hint)
+        self.assertIn("Parallax", hint)
+
+    def test_build_render_profile_mode_controls_hint_reports_locked_state(self) -> None:
+        hint = build_render_profile_mode_controls_hint(
+            {
+                "locked": True,
+                "complex_format": "disabled",
+                "env_mask_mode": "disabled",
+                "parallax_mode": "disabled",
+            }
+        )
+        self.assertIn("locks mode selectors", hint)
 
     def test_resolve_nif_patch_defaults_for_render_profile_returns_expected_toggles(self) -> None:
         vanilla = resolve_nif_patch_defaults_for_render_profile("vanilla")

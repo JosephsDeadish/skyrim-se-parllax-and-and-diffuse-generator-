@@ -1935,6 +1935,49 @@ def render_profile_has_locked_controls(selected_profile: str) -> bool:
     return _normalize_render_profile(selected_profile) != "custom"
 
 
+def resolve_render_profile_mode_control_states(
+    *,
+    selected_profile: str,
+    include_complex: bool,
+    include_environment_mask: bool,
+    include_parallax: bool,
+) -> dict[str, bool | str]:
+    locked = render_profile_has_locked_controls(selected_profile)
+    if locked:
+        disabled_state = "disabled"
+        return {
+            "locked": True,
+            "complex_format": disabled_state,
+            "env_mask_mode": disabled_state,
+            "parallax_mode": disabled_state,
+        }
+    editable_state = "readonly"
+    disabled_state = "disabled"
+    return {
+        "locked": False,
+        "complex_format": editable_state if include_complex else disabled_state,
+        "env_mask_mode": editable_state if include_environment_mask else disabled_state,
+        "parallax_mode": editable_state if include_parallax else disabled_state,
+    }
+
+
+def build_render_profile_mode_controls_hint(control_states: Mapping[str, bool | str]) -> str:
+    if bool(control_states.get("locked")):
+        return "Renderer preset locks mode selectors to prevent conflicting GUI combinations."
+    disabled_controls: list[str] = []
+    if str(control_states.get("complex_format")) == "disabled":
+        disabled_controls.append("Complex/PBR material")
+    if str(control_states.get("env_mask_mode")) == "disabled":
+        disabled_controls.append("Environment mask")
+    if str(control_states.get("parallax_mode")) == "disabled":
+        disabled_controls.append("Parallax")
+    if not disabled_controls:
+        return "Custom mode: all mode selectors are available."
+    if len(disabled_controls) == 3:
+        return "Custom mode: enable Complex/PBR material, Environment mask, or Parallax outputs to unlock mode selectors."
+    return "Custom mode: enable " + ", ".join(disabled_controls) + " output(s) to unlock matching mode selectors."
+
+
 def describe_render_profile_default_outputs(profile: str) -> str:
     normalized = _normalize_render_profile(profile)
     if normalized == "auto":
@@ -6262,6 +6305,7 @@ if GUI_AVAILABLE:
             self.render_profile_suggestion_var = tk.StringVar(
                 value=build_render_profile_brief_message("vanilla")
             )
+            self.mode_controls_hint_var = tk.StringVar(value="")
             self.render_profile_help_window: tk.Toplevel | None = None
             self.auto_suggestions_var = tk.BooleanVar(value=True)
             self.auto_normal_suggestion_var = tk.BooleanVar(value=True)
@@ -6415,13 +6459,13 @@ if GUI_AVAILABLE:
             _normal_check = ttk.Checkbutton(options_frame, text="Normal / _n", variable=self.include_normal_var, command=self._refresh_preview)
             _normal_check.grid(row=0, column=1, sticky=tk.W)
             self._add_tooltip(_normal_check, "🗻 Generate a normal map for fake 3D depth.\nSkyrim's favourite optical illusion since 2011.")
-            _parallax_check = ttk.Checkbutton(options_frame, text="Parallax / _p", variable=self.include_parallax_var, command=self._refresh_preview)
+            _parallax_check = ttk.Checkbutton(options_frame, text="Parallax / _p", variable=self.include_parallax_var, command=self._on_output_selection_changed)
             _parallax_check.grid(row=0, column=2, sticky=tk.W)
             self._add_tooltip(_parallax_check, "🌊 Generate a parallax (height) map.\nMakes surfaces look EXTRA bumpy. Your GPU will feel it, but it's worth it.")
             _glow_check = ttk.Checkbutton(options_frame, text="Glow / _em", variable=self.include_glow_var, command=self._refresh_preview)
             _glow_check.grid(row=1, column=0, sticky=tk.W)
             self._add_tooltip(_glow_check, "✨ Generate a glow map. Bright pixels glow in the dark.\nPerfect for making your cave look like a disco.")
-            _env_mask_check = ttk.Checkbutton(options_frame, text="Environment mask / _m", variable=self.include_environment_mask_var, command=self._refresh_preview)
+            _env_mask_check = ttk.Checkbutton(options_frame, text="Environment mask / _m", variable=self.include_environment_mask_var, command=self._on_output_selection_changed)
             _env_mask_check.grid(row=1, column=1, sticky=tk.W)
             self._add_tooltip(_env_mask_check, "🪞 Generate an environment mask for reflections.\nTells Skyrim which parts of a surface are shiny. Science!")
             _rmaos_check = ttk.Checkbutton(options_frame, text="RMAOS / _rmaos", variable=self.include_rmaos_var, command=self._refresh_preview)
@@ -6433,7 +6477,7 @@ if GUI_AVAILABLE:
             _snow_mask_check = ttk.Checkbutton(options_frame, text="Snow mask / _sm", variable=self.include_snow_mask_var, command=self._refresh_preview)
             _snow_mask_check.grid(row=1, column=3, sticky=tk.W)
             self._add_tooltip(_snow_mask_check, "Generate a Community Shaders Dynamic Snow mask (_sm.dds). Marks which pixels snow will accumulate on — bright = buried, dark = sheltered.")
-            _complex_check = ttk.Checkbutton(options_frame, text="Complex/PBR material", variable=self.include_complex_var, command=self._refresh_preview)
+            _complex_check = ttk.Checkbutton(options_frame, text="Complex/PBR material", variable=self.include_complex_var, command=self._on_output_selection_changed)
             _complex_check.grid(row=1, column=4, sticky=tk.W)
             self._add_tooltip(
                 _complex_check,
@@ -6526,17 +6570,17 @@ if GUI_AVAILABLE:
                 "'cm' = Community Shaders Extended Materials packed map (env reflection / glossiness / metallic / height; _cm default, _c/_C via custom name).\n"
                 "'msn' = ENB complex material (normal RGB + specular alpha).",
             )
-            complex_format = ttk.Combobox(
+            self.complex_format_combo = ttk.Combobox(
                 options_frame,
                 textvariable=self.complex_format_var,
                 values=("msn", "cm"),
                 state="readonly",
                 width=20,
             )
-            complex_format.grid(row=4, column=1, sticky=tk.W)
-            complex_format.bind("<<ComboboxSelected>>", self._on_complex_format_changed)
+            self.complex_format_combo.grid(row=4, column=1, sticky=tk.W)
+            self.complex_format_combo.bind("<<ComboboxSelected>>", self._on_complex_format_changed)
             self._add_tooltip(
-                complex_format,
+                self.complex_format_combo,
                 "🏷 Choose map type:\n"
                 "'cm' for Community Shaders Extended Materials setups (_cm default, _c/_C optional via custom naming).\n"
                 "'msn' for ENB complex material setups.\n"
@@ -6549,16 +6593,16 @@ if GUI_AVAILABLE:
             _env_mode_label = ttk.Label(_env_mode_row, text="Env mask mode")
             _env_mode_label.pack(side=tk.LEFT)
             self._add_tooltip(_env_mode_label, "🌍 How to encode the environment mask.\n'standard' = vanilla Skyrim.\n'complex' = packed RGBA (ENB and TruePBR interpret channels differently).\nUse Target renderer + Help for the correct channel mapping.")
-            env_mask_mode_combo = ttk.Combobox(
+            self.env_mask_mode_combo = ttk.Combobox(
                 _env_mode_row,
                 textvariable=self.env_mask_mode_var,
                 values=("standard", "complex"),
                 state="readonly",
                 width=20,
             )
-            env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
-            env_mask_mode_combo.bind("<<ComboboxSelected>>", self._on_env_mask_mode_changed)
-            self._add_tooltip(env_mask_mode_combo, "🌍 'standard' = vanilla Skyrim SE reflections.\n'complex' = packed RGBA for ENB/TruePBR workflows.\nAlways match this with your selected Target renderer.")
+            self.env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
+            self.env_mask_mode_combo.bind("<<ComboboxSelected>>", self._on_env_mask_mode_changed)
+            self._add_tooltip(self.env_mask_mode_combo, "🌍 'standard' = vanilla Skyrim SE reflections.\n'complex' = packed RGBA for ENB/TruePBR workflows.\nAlways match this with your selected Target renderer.")
             ttk.Label(
                 options_frame,
                 text="standard = vanilla Skyrim SE  |  complex = packed RGBA (renderer-specific channels)",
@@ -6712,17 +6756,17 @@ if GUI_AVAILABLE:
                 "'standard' = micro-detail for vanilla Skyrim SE parallax.\n"
                 "'occlusion (ENB/POM)' = smooth gradient for ENBSeries Parallax Occlusion Mapping.",
             )
-            _parallax_mode_combo = ttk.Combobox(
+            self.parallax_mode_combo = ttk.Combobox(
                 options_frame,
                 textvariable=self.parallax_mode_var,
                 values=("standard", "occlusion (ENB/POM)"),
                 state="readonly",
                 width=24,
             )
-            _parallax_mode_combo.grid(row=15, column=1, columnspan=2, sticky=tk.W)
-            _parallax_mode_combo.bind("<<ComboboxSelected>>", self._on_parallax_mode_changed)
+            self.parallax_mode_combo.grid(row=15, column=1, columnspan=2, sticky=tk.W)
+            self.parallax_mode_combo.bind("<<ComboboxSelected>>", self._on_parallax_mode_changed)
             self._add_tooltip(
-                _parallax_mode_combo,
+                self.parallax_mode_combo,
                 "🏔 'standard' = vanilla/community-shaders-friendly heightmap for the normal Skyrim parallax setup.\n"
                 "'occlusion (ENB/POM)' = ENB-only smooth POM heightmap — use this only when the mesh/material is actually set up for ENB parallax occlusion.",
             )
@@ -6731,7 +6775,21 @@ if GUI_AVAILABLE:
                 text="standard = vanilla  |  occlusion = ENBSeries POM",
                 foreground="gray",
             ).grid(row=15, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
-            self._render_profile_mode_widgets = [complex_format, env_mask_mode_combo, _parallax_mode_combo]
+            self.mode_controls_hint_label = ttk.Label(
+                options_frame,
+                textvariable=self.mode_controls_hint_var,
+                foreground="gray",
+                justify=tk.LEFT,
+                anchor=tk.W,
+                wraplength=520,
+            )
+            self.mode_controls_hint_label.grid(row=16, column=0, columnspan=5, sticky=tk.W, pady=(0, 6))
+            self._add_tooltip(
+                self.mode_controls_hint_label,
+                "Heads-up line for mode-selector availability.\n"
+                "If a selector is disabled in Custom mode, enable the matching output checkbox first.",
+            )
+            self._render_profile_mode_widgets = [self.complex_format_combo, self.env_mask_mode_combo, self.parallax_mode_combo]
 
             options_frame.columnconfigure(2, weight=1)
             options_frame.columnconfigure(3, weight=1)
@@ -7801,11 +7859,24 @@ if GUI_AVAILABLE:
             return recommended_profile
 
         def _update_render_profile_control_states(self) -> None:
-            locked = render_profile_has_locked_controls(self.render_profile_var.get())
-            mode_state = tk.DISABLED if locked else "readonly"
+            mode_states = resolve_render_profile_mode_control_states(
+                selected_profile=self.render_profile_var.get(),
+                include_complex=bool(self.include_complex_var.get()),
+                include_environment_mask=bool(self.include_environment_mask_var.get()),
+                include_parallax=bool(self.include_parallax_var.get()),
+            )
+            self.mode_controls_hint_var.set(build_render_profile_mode_controls_hint(mode_states))
+            mode_widget_states = (
+                ("complex_format", getattr(self, "complex_format_combo", None)),
+                ("env_mask_mode", getattr(self, "env_mask_mode_combo", None)),
+                ("parallax_mode", getattr(self, "parallax_mode_combo", None)),
+            )
+            for key, widget in mode_widget_states:
+                if widget is None:
+                    continue
+                widget.configure(state=str(mode_states.get(key, "disabled")))
+            locked = bool(mode_states.get("locked"))
             output_state = tk.DISABLED if locked else tk.NORMAL
-            for widget in getattr(self, "_render_profile_mode_widgets", []):
-                widget.configure(state=mode_state)
             for widget in getattr(self, "_render_profile_managed_output_widgets", []):
                 widget.configure(state=output_state)
 
@@ -7861,7 +7932,7 @@ if GUI_AVAILABLE:
             recommended_profile = self._update_render_profile_recommendation(apply_auto=False)
             if selected == "custom":
                 self._update_render_profile_control_states()
-                self.status_var.set("Custom mode: all controls are manual. No output checkboxes were changed.")
+                self.status_var.set("Custom mode: outputs stay manual; mode selectors unlock only for enabled outputs.")
                 self._request_preview_refresh()
                 return
             effective = self._apply_render_profile_modes(
@@ -7884,6 +7955,10 @@ if GUI_AVAILABLE:
                     f"Renderer set to {effective_label}. Modes and outputs updated. "
                     f"{describe_render_profile_files_to_create(effective)}"
                 )
+            self._update_render_profile_control_states()
+            self._request_preview_refresh()
+
+        def _on_output_selection_changed(self) -> None:
             self._update_render_profile_control_states()
             self._request_preview_refresh()
 
