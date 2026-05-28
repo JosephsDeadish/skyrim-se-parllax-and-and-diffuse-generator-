@@ -86,6 +86,8 @@ from generate_textures import (
     generate_snow_mask,
     build_wetness_mask_output_path,
     build_snow_mask_output_path,
+    build_ao_output_path,
+    build_roughness_output_path,
     GENERATED_TEXTURE_SUFFIXES,
     recommend_output_resolution,
     write_rmaos_json_sidecar,
@@ -4909,6 +4911,149 @@ class GlowMipmapPrefilterTests(unittest.TestCase):
         noisy.putdata([rng.randint(0, 255) for _ in range(64 * 64)])
         result = _prefilter_for_mipmap_stability(noisy, "glow")
         self.assertIsNot(result, noisy)
+
+
+class AoRoughnessPathTests(unittest.TestCase):
+    def test_build_ao_output_path_uses_ao_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.dds"
+            input_path.write_bytes(b"stub")
+
+            ao_path = build_ao_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+            )
+
+            self.assertEqual(ao_path.name, "brick_ao.dds")
+
+    def test_build_ao_output_path_places_file_in_output_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "subdir" / "stone.dds"
+            output_dir = temp_path / "out"
+
+            ao_path = build_ao_output_path(input_path=input_path, output_dir=output_dir)
+
+            self.assertEqual(ao_path.parent, output_dir)
+
+    def test_build_roughness_output_path_uses_rough_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.dds"
+            input_path.write_bytes(b"stub")
+
+            rough_path = build_roughness_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+            )
+
+            self.assertEqual(rough_path.name, "brick_rough.dds")
+
+    def test_build_roughness_output_path_places_file_in_output_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "subdir" / "stone.dds"
+            output_dir = temp_path / "out"
+
+            rough_path = build_roughness_output_path(input_path=input_path, output_dir=output_dir)
+
+            self.assertEqual(rough_path.parent, output_dir)
+
+
+class AoRoughnessRunWithOptionsTests(unittest.TestCase):
+    def test_run_with_options_generates_ao_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ) as save_mock:
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                    include_ao=True,
+                )
+
+            self.assertEqual(save_mock.call_count, 1)
+            self.assertEqual(save_mock.call_args.args[1].name, "brick_ao.dds")
+
+    def test_run_with_options_generates_roughness_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ) as save_mock:
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                    include_roughness=True,
+                )
+
+            self.assertEqual(save_mock.call_count, 1)
+            self.assertEqual(save_mock.call_args.args[1].name, "brick_rough.dds")
+
+
+class NormalizeGuiStateAoRoughnessTests(unittest.TestCase):
+    def test_normalize_gui_state_includes_ao_roughness_defaults(self) -> None:
+        normalized = _normalize_gui_state({})
+        self.assertIn("include_ao", normalized)
+        self.assertIn("include_roughness", normalized)
+        self.assertIn("auto_ao", normalized)
+        self.assertIn("auto_roughness", normalized)
+        self.assertIn("ao_strength", normalized)
+        self.assertIn("roughness_strength", normalized)
+
+    def test_normalize_gui_state_coerces_ao_roughness_booleans(self) -> None:
+        normalized = _normalize_gui_state({"include_ao": 1, "include_roughness": 0, "auto_ao": 1, "auto_roughness": 0})
+        self.assertIs(normalized["include_ao"], True)
+        self.assertIs(normalized["include_roughness"], False)
+        self.assertIs(normalized["auto_ao"], True)
+        self.assertIs(normalized["auto_roughness"], False)
+
+    def test_normalize_gui_state_coerces_ao_roughness_strengths(self) -> None:
+        normalized = _normalize_gui_state({"ao_strength": "2.5", "roughness_strength": "0.8"})
+        self.assertAlmostEqual(float(normalized["ao_strength"]), 2.5)
+        self.assertAlmostEqual(float(normalized["roughness_strength"]), 0.8)
+
+
+class RecommendGenerationSettingsAoRoughnessTests(unittest.TestCase):
+    def test_recommend_generation_settings_includes_ao_roughness_keys(self) -> None:
+        image = _sample_image()
+        result = recommend_generation_settings(image)
+        self.assertIn("ao_strength", result)
+        self.assertIn("roughness_strength", result)
+
+    def test_recommend_generation_settings_ao_roughness_in_valid_range(self) -> None:
+        image = _sample_image()
+        result = recommend_generation_settings(image)
+        ao_strength = float(result["ao_strength"])
+        roughness_strength = float(result["roughness_strength"])
+        self.assertGreater(ao_strength, 0.0)
+        self.assertLessEqual(ao_strength, 8.0)
+        self.assertGreater(roughness_strength, 0.0)
+        self.assertLessEqual(roughness_strength, 8.0)
 
 
 if __name__ == "__main__":

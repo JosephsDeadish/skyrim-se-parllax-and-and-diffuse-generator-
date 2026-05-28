@@ -128,6 +128,8 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "include_complex": False,
     "include_wetness_mask": False,
     "include_snow_mask": False,
+    "include_ao": False,
+    "include_roughness": False,
     "auto_suggestions": True,
     "auto_normal": True,
     "auto_parallax": True,
@@ -136,6 +138,8 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "auto_rmaos": True,
     "auto_complex": True,
     "auto_specular": True,
+    "auto_ao": True,
+    "auto_roughness": True,
     "normal_strength": 2.0,
     "parallax_strength": 1.35,
     "glow_threshold": 190,
@@ -145,6 +149,8 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "specular_strength": 1.15,
     "wetness_mask_strength": 1.0,
     "snow_mask_strength": 1.0,
+    "ao_strength": 1.2,
+    "roughness_strength": 1.0,
     "dismissed_warnings": [],
 }
 
@@ -280,6 +286,8 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         "include_complex",
         "include_wetness_mask",
         "include_snow_mask",
+        "include_ao",
+        "include_roughness",
         "auto_suggestions",
         "auto_normal",
         "auto_parallax",
@@ -288,6 +296,8 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         "auto_rmaos",
         "auto_complex",
         "auto_specular",
+        "auto_ao",
+        "auto_roughness",
     ):
         state[key] = _coerce_bool(raw.get(key), bool(state[key]))
     if not bool(state["auto_suggestions"]):
@@ -298,6 +308,8 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         state["auto_rmaos"] = False
         state["auto_complex"] = False
         state["auto_specular"] = False
+        state["auto_ao"] = False
+        state["auto_roughness"] = False
     input_path = str(state["input_path"]).strip()
     output_path = str(state["output_path"]).strip()
     if input_path and not Path(input_path).exists():
@@ -365,6 +377,10 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     )
     state["snow_mask_strength"] = _coerce_float(
         raw.get("snow_mask_strength"), float(state["snow_mask_strength"]), 0.1, 3.0
+    )
+    state["ao_strength"] = _coerce_float(raw.get("ao_strength"), float(state["ao_strength"]), 0.1, 8.0)
+    state["roughness_strength"] = _coerce_float(
+        raw.get("roughness_strength"), float(state["roughness_strength"]), 0.1, 8.0
     )
     raw_dismissed = raw.get("dismissed_warnings", [])
     if isinstance(raw_dismissed, list):
@@ -1506,6 +1522,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_environment_mask": False,
         "include_rmaos": False,
         "include_complex": False,
+        "include_ao": False,
+        "include_roughness": False,
     },
     "vanilla": {
         "include_diffuse": True,
@@ -1515,6 +1533,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_environment_mask": False,
         "include_rmaos": False,
         "include_complex": False,
+        "include_ao": False,
+        "include_roughness": False,
     },
     "performance": {
         "include_diffuse": True,
@@ -1524,6 +1544,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_environment_mask": False,
         "include_rmaos": False,
         "include_complex": False,
+        "include_ao": False,
+        "include_roughness": False,
     },
     "vr": {
         "include_diffuse": True,
@@ -1533,6 +1555,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_environment_mask": False,
         "include_rmaos": False,
         "include_complex": False,
+        "include_ao": False,
+        "include_roughness": False,
     },
     "terrain": {
         "include_diffuse": True,
@@ -1542,6 +1566,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_environment_mask": False,
         "include_rmaos": False,
         "include_complex": False,
+        "include_ao": False,
+        "include_roughness": False,
     },
     "architecture": {
         "include_diffuse": True,
@@ -1551,6 +1577,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_environment_mask": True,
         "include_rmaos": False,
         "include_complex": False,
+        "include_ao": False,
+        "include_roughness": False,
     },
     "characters": {
         "include_diffuse": True,
@@ -1560,6 +1588,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_environment_mask": False,
         "include_rmaos": False,
         "include_complex": False,
+        "include_ao": False,
+        "include_roughness": False,
     },
     "community_shaders": {
         "include_diffuse": True,
@@ -1569,6 +1599,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_environment_mask": False,
         "include_rmaos": False,
         "include_complex": True,
+        "include_ao": False,
+        "include_roughness": False,
     },
     "truepbr": {
         "include_diffuse": True,
@@ -1578,6 +1610,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_environment_mask": False,
         "include_rmaos": True,
         "include_complex": False,
+        "include_ao": True,
+        "include_roughness": True,
     },
     "enb": {
         "include_diffuse": True,
@@ -1587,6 +1621,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_environment_mask": True,
         "include_rmaos": False,
         "include_complex": True,
+        "include_ao": False,
+        "include_roughness": False,
     },
 }
 
@@ -1598,6 +1634,8 @@ _RENDER_PROFILE_OUTPUT_LABELS: dict[str, str] = {
     "include_environment_mask": "env mask/_m",
     "include_rmaos": "rmaos/_rmaos/_ramos",
     "include_complex": "complex material",
+    "include_ao": "ambient occlusion/_ao",
+    "include_roughness": "roughness/_rough",
 }
 
 _RENDER_PROFILE_PATH_HINTS: dict[str, tuple[str, ...]] = {
@@ -2378,6 +2416,8 @@ def recommend_generation_settings(source: Image.Image, input_path: Path | None =
         "complex_strength": complex_strength,
         "specular_strength": specular_strength,
         "glow_threshold": glow_threshold,
+        "ao_strength": environment_mask_strength,
+        "roughness_strength": specular_strength,
     }
     detected_role: str | None = None
     material_type = "general"
@@ -3390,6 +3430,10 @@ def generate_preview_outputs(
     wetness_mask_strength: float = 1.0,
     include_snow_mask: bool = False,
     snow_mask_strength: float = 1.0,
+    include_ao: bool = False,
+    ao_strength: float = 1.2,
+    include_roughness: bool = False,
+    roughness_strength: float = 1.0,
 ) -> dict[str, Image.Image]:
     if parallax_mode not in {"standard", "occlusion"}:
         raise ValueError("parallax_mode must be 'standard' or 'occlusion'.")
@@ -3446,6 +3490,14 @@ def generate_preview_outputs(
     if include_snow_mask:
         outputs["snow_mask"] = enforce_skyrim_output_profile(
             "parallax", generate_snow_mask(source, strength=snow_mask_strength)
+        )
+    if include_ao:
+        outputs["ao"] = enforce_skyrim_output_profile(
+            "parallax", generate_ambient_occlusion(source, strength=ao_strength)
+        )
+    if include_roughness:
+        outputs["roughness"] = enforce_skyrim_output_profile(
+            "parallax", generate_roughness(source, strength=roughness_strength)
         )
     if include_complex:
         outputs["complex_material"] = enforce_skyrim_output_profile(
@@ -3616,6 +3668,30 @@ def build_snow_mask_output_path(
     base_output_dir.mkdir(parents=True, exist_ok=True)
     snow_stem = snow_name or f"{input_path.stem}_sm"
     return base_output_dir / f"{snow_stem}{DDS_EXTENSION}"
+
+
+def build_ao_output_path(
+    input_path: Path,
+    output_dir: Path | None,
+    ao_name: str | None = None,
+) -> Path:
+    """Return the output path for a standalone ambient occlusion map (``_ao.dds``)."""
+    base_output_dir = _resolve_output_base_dir(input_path, output_dir)
+    base_output_dir.mkdir(parents=True, exist_ok=True)
+    ao_stem = ao_name or f"{input_path.stem}_ao"
+    return base_output_dir / f"{ao_stem}{DDS_EXTENSION}"
+
+
+def build_roughness_output_path(
+    input_path: Path,
+    output_dir: Path | None,
+    roughness_name: str | None = None,
+) -> Path:
+    """Return the output path for a standalone roughness map (``_rough.dds``)."""
+    base_output_dir = _resolve_output_base_dir(input_path, output_dir)
+    base_output_dir.mkdir(parents=True, exist_ok=True)
+    rough_stem = roughness_name or f"{input_path.stem}_rough"
+    return base_output_dir / f"{rough_stem}{DDS_EXTENSION}"
 
 
 def _find_textures_root(path: Path) -> Path | None:
@@ -3896,8 +3972,12 @@ def _collect_planned_output_paths(
     include_complex: bool,
     wetness_name: str | None = None,
     snow_name: str | None = None,
+    ao_name: str | None = None,
+    roughness_name: str | None = None,
     include_wetness_mask: bool = False,
     include_snow_mask: bool = False,
+    include_ao: bool = False,
+    include_roughness: bool = False,
 ) -> dict[str, Path]:
     planned: dict[str, Path] = {}
     if include_diffuse or include_parallax:
@@ -3950,6 +4030,18 @@ def _collect_planned_output_paths(
             input_path=input_file,
             output_dir=output_dir,
             snow_name=snow_name,
+        )
+    if include_ao:
+        planned["ao"] = build_ao_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            ao_name=ao_name,
+        )
+    if include_roughness:
+        planned["roughness"] = build_roughness_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            roughness_name=roughness_name,
         )
     if include_complex:
         planned["complex_material"] = build_complex_output_path(
@@ -5190,6 +5282,8 @@ def _preferred_dds_formats_for_output(
         return ("BC7", "DXT5", "DXT3")
     if normalized_kind == "complex_material":
         return ("BC7", "DXT5", "DXT3") if normalized_complex_format == "cm" else ("DXT5", "DXT3")
+    if normalized_kind in {"ao", "roughness"}:
+        return ("DXT1", "DXT5")
     return ("DXT5",)
 
 
@@ -5293,6 +5387,12 @@ def run_with_options(
     include_snow_mask: bool = False,
     snow_mask_strength: float | None = None,
     snow_name: str | None = None,
+    include_ao: bool = False,
+    ao_strength: float | None = None,
+    ao_name: str | None = None,
+    include_roughness: bool = False,
+    roughness_strength: float | None = None,
+    roughness_name: str | None = None,
 ) -> dict[str, Path]:
     if not any((
         include_diffuse,
@@ -5304,6 +5404,8 @@ def run_with_options(
         include_complex,
         include_wetness_mask,
         include_snow_mask,
+        include_ao,
+        include_roughness,
     )):
         raise ValueError("Select at least one output.")
     if parallax_mode not in {"standard", "occlusion"}:
@@ -5320,6 +5422,8 @@ def run_with_options(
         complex_name=complex_name,
         wetness_name=wetness_name,
         snow_name=snow_name,
+        ao_name=ao_name,
+        roughness_name=roughness_name,
         complex_format=complex_format,
         env_mask_mode=env_mask_mode,
         render_profile=render_profile,
@@ -5332,6 +5436,8 @@ def run_with_options(
         include_complex=include_complex,
         include_wetness_mask=include_wetness_mask,
         include_snow_mask=include_snow_mask,
+        include_ao=include_ao,
+        include_roughness=include_roughness,
     )
     _validate_output_path_conflicts(planned_paths)
     resolved_env_complex_workflow = resolve_env_mask_complex_workflow(
@@ -5366,6 +5472,8 @@ def run_with_options(
         )
         resolved_wetness_mask_strength = wetness_mask_strength if wetness_mask_strength is not None else 1.0
         resolved_snow_mask_strength = snow_mask_strength if snow_mask_strength is not None else 1.0
+        resolved_ao_strength = ao_strength if ao_strength is not None else float(recommended["ao_strength"])
+        resolved_roughness_strength = roughness_strength if roughness_strength is not None else float(recommended["roughness_strength"])
         resolved_complex_strength = complex_strength if complex_strength is not None else float(recommended["complex_strength"])
         resolved_specular_strength = specular_strength if specular_strength is not None else float(recommended["specular_strength"])
 
@@ -5523,6 +5631,39 @@ def run_with_options(
                 output_kind="parallax",
             )
 
+        if include_ao:
+            ao_map = enforce_skyrim_output_profile(
+                "parallax", generate_ambient_occlusion(source, strength=resolved_ao_strength)
+            )
+            ao_path = build_ao_output_path(
+                input_path=input_file,
+                output_dir=output_dir,
+                ao_name=ao_name,
+            )
+            outputs["ao"] = _save_with_dds_fallback(
+                ao_map,
+                ao_path,
+                preferred_pixel_formats=_preferred_dds_formats_for_output("ao", ao_map),
+                output_kind="ao",
+            )
+
+        if include_roughness:
+            roughness_map = enforce_skyrim_output_profile(
+                "parallax",
+                generate_roughness(source, strength=resolved_roughness_strength, material_type=resolved_material_type),
+            )
+            roughness_path = build_roughness_output_path(
+                input_path=input_file,
+                output_dir=output_dir,
+                roughness_name=roughness_name,
+            )
+            outputs["roughness"] = _save_with_dds_fallback(
+                roughness_map,
+                roughness_path,
+                preferred_pixel_formats=_preferred_dds_formats_for_output("roughness", roughness_map),
+                output_kind="roughness",
+            )
+
         if include_complex:
             if complex_format == "msn":
                 complex_material = enforce_skyrim_output_profile(
@@ -5598,6 +5739,12 @@ def run_batch_with_options(
     include_snow_mask: bool = False,
     snow_mask_strength: float | None = None,
     snow_name: str | None = None,
+    include_ao: bool = False,
+    ao_strength: float | None = None,
+    ao_name: str | None = None,
+    include_roughness: bool = False,
+    roughness_strength: float | None = None,
+    roughness_name: str | None = None,
     progress_callback: Callable[[int, int, Path], None] | None = None,
     error_callback: Callable[[int, int, Path, Exception], None] | None = None,
     continue_on_error: bool = False,
@@ -5649,6 +5796,12 @@ def run_batch_with_options(
                     include_snow_mask=include_snow_mask,
                     snow_mask_strength=snow_mask_strength,
                     snow_name=snow_name,
+                    include_ao=include_ao,
+                    ao_strength=ao_strength,
+                    ao_name=ao_name,
+                    include_roughness=include_roughness,
+                    roughness_strength=roughness_strength,
+                    roughness_name=roughness_name,
                 )
             except Exception as exc:
                 if error_callback is not None:
@@ -5694,6 +5847,12 @@ def run_batch_with_options(
             include_snow_mask=include_snow_mask,
             snow_mask_strength=snow_mask_strength,
             snow_name=snow_name,
+            include_ao=include_ao,
+            ao_strength=ao_strength,
+            ao_name=ao_name,
+            include_roughness=include_roughness,
+            roughness_strength=roughness_strength,
+            roughness_name=roughness_name,
         )
 
     completed = 0
@@ -5794,6 +5953,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wetness-mask-strength", type=float, default=None, metavar="STRENGTH", help="Wetness mask strength (0.1–3.0). Default: 1.0.")
     parser.add_argument("--snow-mask", action="store_true", default=False, help="Generate a dynamic snow mask (_sm.dds) for Community Shaders Dynamic Snow.")
     parser.add_argument("--snow-mask-strength", type=float, default=None, metavar="STRENGTH", help="Snow mask strength (0.1–3.0). Default: 1.0.")
+    parser.add_argument("--ao-map", action="store_true", default=False, help="Generate a standalone ambient occlusion map (_ao.dds) for TruePBR / Community Shaders workflows.")
+    parser.add_argument("--ao-strength", type=float, default=None, metavar="STRENGTH", help="AO map strength (0.1–8.0). Auto-recommended if omitted.")
+    parser.add_argument("--roughness-map", action="store_true", default=False, help="Generate a standalone roughness map (_rough.dds) for TruePBR / Community Shaders workflows.")
+    parser.add_argument("--roughness-strength", type=float, default=None, metavar="STRENGTH", help="Roughness map strength (0.1–8.0). Auto-recommended if omitted.")
     parser.add_argument(
         "--specular-strength",
         type=float,
@@ -6022,6 +6185,8 @@ if GUI_AVAILABLE:
             self.glow_threshold_var = tk.DoubleVar(value=190.0)
             self.environment_mask_strength_var = tk.DoubleVar(value=1.2)
             self.rmaos_strength_var = tk.DoubleVar(value=1.2)
+            self.ao_strength_var = tk.DoubleVar(value=1.2)
+            self.roughness_strength_var = tk.DoubleVar(value=1.0)
             self.normal_strength_display_var = tk.StringVar()
             self.parallax_strength_display_var = tk.StringVar()
             self.glow_threshold_display_var = tk.StringVar()
@@ -6029,6 +6194,8 @@ if GUI_AVAILABLE:
             self.rmaos_strength_display_var = tk.StringVar()
             self.complex_strength_display_var = tk.StringVar()
             self.specular_strength_display_var = tk.StringVar()
+            self.ao_strength_display_var = tk.StringVar()
+            self.roughness_strength_display_var = tk.StringVar()
             self.complex_format_var = tk.StringVar(value="msn")
             self.env_mask_mode_var = tk.StringVar(value="standard")
             self.emboss_mode_var = tk.BooleanVar(value=False)
@@ -6049,6 +6216,8 @@ if GUI_AVAILABLE:
             self.auto_rmaos_suggestion_var = tk.BooleanVar(value=True)
             self.auto_complex_suggestion_var = tk.BooleanVar(value=True)
             self.auto_specular_suggestion_var = tk.BooleanVar(value=True)
+            self.auto_ao_suggestion_var = tk.BooleanVar(value=True)
+            self.auto_roughness_suggestion_var = tk.BooleanVar(value=True)
             self.theme_mode_label_var = tk.StringVar(value="☀ Light mode")
             self.include_diffuse_var = tk.BooleanVar(value=True)
             self.include_normal_var = tk.BooleanVar(value=True)
@@ -6058,6 +6227,8 @@ if GUI_AVAILABLE:
             self.include_rmaos_var = tk.BooleanVar(value=False)
             self.include_wetness_mask_var = tk.BooleanVar(value=False)
             self.include_snow_mask_var = tk.BooleanVar(value=False)
+            self.include_ao_var = tk.BooleanVar(value=False)
+            self.include_roughness_var = tk.BooleanVar(value=False)
             self.include_complex_var = tk.BooleanVar(value=False)
             self.status_var = tk.StringVar(
                 value=self.manager_context.summary if self.manager_context.manager is not None else "Select a DDS file to begin."
@@ -6216,6 +6387,12 @@ if GUI_AVAILABLE:
                 "For ENB complex material workflows use format 'msn'.\n"
                 "Do not mix Community Shaders and ENB outputs in the same install.",
             )
+            _ao_check = ttk.Checkbutton(options_frame, text="Ambient Occlusion / _ao", variable=self.include_ao_var, command=self._refresh_preview)
+            _ao_check.grid(row=0, column=4, sticky=tk.W)
+            self._add_tooltip(_ao_check, "🌑 Generate a standalone ambient occlusion map (_ao.dds).\nBakes cavity/self-shadowing info — super useful for TruePBR and Community Shaders PBR workflows.")
+            _roughness_check = ttk.Checkbutton(options_frame, text="Roughness / _rough", variable=self.include_roughness_var, command=self._refresh_preview)
+            _roughness_check.grid(row=2, column=4, sticky=tk.W)
+            self._add_tooltip(_roughness_check, "🪨 Generate a standalone roughness map (_rough.dds).\nControls how rough vs. glossy the surface looks. Material-aware: stone goes rough, glass goes smooth.")
             _auto_sugg_check = ttk.Checkbutton(
                 options_frame,
                 text="Automatic suggestions (master switch: enables per-slider Auto toggles)",
@@ -6404,6 +6581,30 @@ if GUI_AVAILABLE:
             self.auto_specular_check.grid(row=11, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_specular_check, "🤖 Auto-set specular strength. The AI ponders how shiny\nyour texture DESERVES to be.")
 
+            _ao_label = ttk.Label(options_frame, text="AO strength")
+            _ao_label.grid(row=12, column=0, sticky=tk.W, pady=8)
+            self._add_tooltip(_ao_label, "🌑 Controls ambient occlusion (cavity/self-shadowing) contrast.\nHigher = deeper shadows in crevices.")
+            self.ao_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.ao_strength_var, command=lambda _: self._on_slider_changed())
+            self.ao_scale.grid(row=12, column=1, columnspan=2, sticky=tk.EW)
+            self._add_tooltip(self.ao_scale, "🌑 Right = stronger AO bake, left = subtle cavity hints.")
+            self.ao_strength_display_label = ttk.Label(options_frame, textvariable=self.ao_strength_display_var)
+            self.ao_strength_display_label.grid(row=12, column=3, sticky=tk.W, padx=8)
+            self.auto_ao_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_ao_suggestion_var, command=self._on_auto_slider_preference_changed)
+            self.auto_ao_check.grid(row=12, column=4, sticky=tk.W)
+            self._add_tooltip(self.auto_ao_check, "🤖 Auto-recommend AO strength based on surface contrast.")
+
+            _roughness_label = ttk.Label(options_frame, text="Roughness strength")
+            _roughness_label.grid(row=13, column=0, sticky=tk.W, pady=8)
+            self._add_tooltip(_roughness_label, "🪨 Controls roughness map contrast. Material-aware: stone=rougher, glass=smoother.")
+            self.roughness_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.roughness_strength_var, command=lambda _: self._on_slider_changed())
+            self.roughness_scale.grid(row=13, column=1, columnspan=2, sticky=tk.EW)
+            self._add_tooltip(self.roughness_scale, "🪨 Right = higher contrast roughness, left = uniform surface.")
+            self.roughness_strength_display_label = ttk.Label(options_frame, textvariable=self.roughness_strength_display_var)
+            self.roughness_strength_display_label.grid(row=13, column=3, sticky=tk.W, padx=8)
+            self.auto_roughness_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_roughness_suggestion_var, command=self._on_auto_slider_preference_changed)
+            self.auto_roughness_check.grid(row=13, column=4, sticky=tk.W)
+            self._add_tooltip(self.auto_roughness_check, "🤖 Auto-recommend roughness strength — material-aware so stone gets gritty and glass gets smooth.")
+
             # --- Emboss depth + relief depth + parallax mode options ---
             _emboss_check = ttk.Checkbutton(
                 options_frame,
@@ -6411,7 +6612,7 @@ if GUI_AVAILABLE:
                 variable=self.emboss_mode_var,
                 command=self._on_emboss_mode_changed,
             )
-            _emboss_check.grid(row=12, column=0, columnspan=4, sticky=tk.W, pady=(8, 2))
+            _emboss_check.grid(row=14, column=0, columnspan=4, sticky=tk.W, pady=(8, 2))
             self._add_tooltip(
                 _emboss_check,
                 "📜 Emboss mode generates normals from edge ridges instead of smooth gradients.\n"
@@ -6425,7 +6626,7 @@ if GUI_AVAILABLE:
                 variable=self.relief_mode_var,
                 command=self._on_relief_mode_changed,
             )
-            _relief_check.grid(row=12, column=4, columnspan=4, sticky=tk.W, pady=(8, 2))
+            _relief_check.grid(row=14, column=4, columnspan=4, sticky=tk.W, pady=(8, 2))
             self._add_tooltip(
                 _relief_check,
                 "🖼 Relief mode uses the image's own luminosity as a height field so that\n"
@@ -6436,7 +6637,7 @@ if GUI_AVAILABLE:
             )
 
             _parallax_mode_label = ttk.Label(options_frame, text="Parallax mode")
-            _parallax_mode_label.grid(row=13, column=0, sticky=tk.W, pady=(2, 8))
+            _parallax_mode_label.grid(row=15, column=0, sticky=tk.W, pady=(2, 8))
             self._add_tooltip(
                 _parallax_mode_label,
                 "🏔 Heightmap style for _p.dds output.\n"
@@ -6450,7 +6651,7 @@ if GUI_AVAILABLE:
                 state="readonly",
                 width=24,
             )
-            _parallax_mode_combo.grid(row=13, column=1, columnspan=2, sticky=tk.W)
+            _parallax_mode_combo.grid(row=15, column=1, columnspan=2, sticky=tk.W)
             _parallax_mode_combo.bind("<<ComboboxSelected>>", self._on_parallax_mode_changed)
             self._add_tooltip(
                 _parallax_mode_combo,
@@ -6461,7 +6662,7 @@ if GUI_AVAILABLE:
                 options_frame,
                 text="standard = vanilla  |  occlusion = ENBSeries POM",
                 foreground="gray",
-            ).grid(row=13, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
+            ).grid(row=15, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
 
             options_frame.columnconfigure(2, weight=1)
             options_frame.columnconfigure(3, weight=1)
@@ -6635,6 +6836,8 @@ if GUI_AVAILABLE:
                 ("rmaos", "RMAOS"),
                 ("wetness_mask", "Wetness Mask"),
                 ("snow_mask", "Snow Mask"),
+                ("ao", "Ambient Occlusion"),
+                ("roughness", "Roughness"),
                 ("complex_material", "Complex Material"),
             )
             _output_tooltips = {
@@ -6646,6 +6849,8 @@ if GUI_AVAILABLE:
                 "rmaos": "🧩 TruePBR RMAOS preview (_rmaos/_ramos).\nPacked grayscale channels (not purple normal-map colors). Generator also writes a JSON sidecar in PBRNifPatcher/.",
                 "wetness_mask": "🌧 Wetness-mask preview (_wt).\nDarker areas are more rain-friendly; lighter areas stay less puddly.",
                 "snow_mask": "❄ Dynamic-snow mask preview (_sm).\nBrighter areas collect more snow; darker zones stay more sheltered.",
+                "ao": "🕳 Ambient-occlusion preview (_ao).\nDarker crevices, brighter open surfaces. Cheap fake shadows that make things look pleasingly real.",
+                "roughness": "🪵 Roughness/microsurface preview (_rough).\nBrighter = rougher (matte), darker = smoother (glossy). Controls how blurry reflections look.",
                 "complex_material": "🔮 Complex-material preview.\nFor MSN format this pane is split: LEFT = RGB normal channels, RIGHT = alpha/specular channel.\nFor CM format it shows the packed texture directly. Not a bug — just advanced wizard math.",
             }
             for index, (output_key, output_label) in enumerate(output_specs):
@@ -6826,6 +7031,8 @@ if GUI_AVAILABLE:
             self.include_rmaos_var.set(bool(state["include_rmaos"]))
             self.include_wetness_mask_var.set(bool(state["include_wetness_mask"]))
             self.include_snow_mask_var.set(bool(state["include_snow_mask"]))
+            self.include_ao_var.set(bool(state["include_ao"]))
+            self.include_roughness_var.set(bool(state["include_roughness"]))
             self.include_complex_var.set(bool(state["include_complex"]))
             self.auto_suggestions_var.set(bool(state["auto_suggestions"]))
             self.auto_normal_suggestion_var.set(bool(state["auto_normal"]))
@@ -6835,6 +7042,8 @@ if GUI_AVAILABLE:
             self.auto_rmaos_suggestion_var.set(bool(state["auto_rmaos"]))
             self.auto_complex_suggestion_var.set(bool(state["auto_complex"]))
             self.auto_specular_suggestion_var.set(bool(state["auto_specular"]))
+            self.auto_ao_suggestion_var.set(bool(state["auto_ao"]))
+            self.auto_roughness_suggestion_var.set(bool(state["auto_roughness"]))
             self.normal_strength_var.set(float(state["normal_strength"]))
             self.parallax_strength_var.set(float(state["parallax_strength"]))
             self.glow_threshold_var.set(float(state["glow_threshold"]))
@@ -6842,6 +7051,8 @@ if GUI_AVAILABLE:
             self.rmaos_strength_var.set(float(state["rmaos_strength"]))
             self.complex_strength_var.set(float(state["complex_strength"]))
             self.specular_strength_var.set(float(state["specular_strength"]))
+            self.ao_strength_var.set(float(state["ao_strength"]))
+            self.roughness_strength_var.set(float(state["roughness_strength"]))
             dismissed = state.get("dismissed_warnings", [])
             if isinstance(dismissed, list):
                 self.dismissed_warnings = set(str(w) for w in dismissed if isinstance(w, str))
@@ -6869,6 +7080,8 @@ if GUI_AVAILABLE:
                 "include_rmaos": self.include_rmaos_var.get(),
                 "include_wetness_mask": self.include_wetness_mask_var.get(),
                 "include_snow_mask": self.include_snow_mask_var.get(),
+                "include_ao": self.include_ao_var.get(),
+                "include_roughness": self.include_roughness_var.get(),
                 "include_complex": self.include_complex_var.get(),
                 "auto_suggestions": self.auto_suggestions_var.get(),
                 "auto_normal": self.auto_normal_suggestion_var.get(),
@@ -6878,6 +7091,8 @@ if GUI_AVAILABLE:
                 "auto_rmaos": self.auto_rmaos_suggestion_var.get(),
                 "auto_complex": self.auto_complex_suggestion_var.get(),
                 "auto_specular": self.auto_specular_suggestion_var.get(),
+                "auto_ao": self.auto_ao_suggestion_var.get(),
+                "auto_roughness": self.auto_roughness_suggestion_var.get(),
                 "normal_strength": self.normal_strength_var.get(),
                 "parallax_strength": self.parallax_strength_var.get(),
                 "glow_threshold": int(round(self.glow_threshold_var.get())),
@@ -6885,6 +7100,8 @@ if GUI_AVAILABLE:
                 "rmaos_strength": self.rmaos_strength_var.get(),
                 "complex_strength": self.complex_strength_var.get(),
                 "specular_strength": self.specular_strength_var.get(),
+                "ao_strength": self.ao_strength_var.get(),
+                "roughness_strength": self.roughness_strength_var.get(),
                 "dismissed_warnings": sorted(self.dismissed_warnings),
             }
 
@@ -7099,6 +7316,8 @@ if GUI_AVAILABLE:
                 "glow": bool(generation_kwargs["include_glow"]),
                 "environment_mask": bool(generation_kwargs["include_environment_mask"]),
                 "rmaos": bool(generation_kwargs["include_rmaos"]),
+                "ao": bool(generation_kwargs.get("include_ao", False)),
+                "roughness": bool(generation_kwargs.get("include_roughness", False)),
                 "complex_material": bool(generation_kwargs["include_complex"]),
             }
             for input_file in input_files:
@@ -7155,6 +7374,20 @@ if GUI_AVAILABLE:
                 if includes["rmaos"]:
                     expected_paths.append(
                         build_rmaos_output_path(
+                            input_path=input_file,
+                            output_dir=generation_kwargs["output_dir"],
+                        )
+                    )
+                if includes["ao"]:
+                    expected_paths.append(
+                        build_ao_output_path(
+                            input_path=input_file,
+                            output_dir=generation_kwargs["output_dir"],
+                        )
+                    )
+                if includes["roughness"]:
+                    expected_paths.append(
+                        build_roughness_output_path(
                             input_path=input_file,
                             output_dir=generation_kwargs["output_dir"],
                         )
@@ -7340,6 +7573,8 @@ if GUI_AVAILABLE:
             )
             self.complex_strength_display_var.set(_fmt(f"{float(self.complex_strength_var.get()):.2f} (0.1–8.0)", self.auto_complex_suggestion_var))
             self.specular_strength_display_var.set(_fmt(f"{float(self.specular_strength_var.get()):.2f} (0.1–8.0)", self.auto_specular_suggestion_var))
+            self.ao_strength_display_var.set(_fmt(f"{float(self.ao_strength_var.get()):.2f} (0.1–8.0)", self.auto_ao_suggestion_var))
+            self.roughness_strength_display_var.set(_fmt(f"{float(self.roughness_strength_var.get()):.2f} (0.1–8.0)", self.auto_roughness_suggestion_var))
 
         def _on_batch_preview_toggle(self) -> None:
             if self.show_batch_preview_var.get():
@@ -7363,6 +7598,8 @@ if GUI_AVAILABLE:
             self.auto_rmaos_suggestion_var.set(value)
             self.auto_complex_suggestion_var.set(value)
             self.auto_specular_suggestion_var.set(value)
+            self.auto_ao_suggestion_var.set(value)
+            self.auto_roughness_suggestion_var.set(value)
             self._update_slider_auto_states()
 
         def _on_auto_slider_preference_changed(self) -> None:
@@ -7449,6 +7686,8 @@ if GUI_AVAILABLE:
             self.include_environment_mask_var.set(bool(resolved["include_environment_mask"]))
             self.include_rmaos_var.set(bool(resolved["include_rmaos"]))
             self.include_complex_var.set(bool(resolved["include_complex"]))
+            self.include_ao_var.set(bool(resolved["include_ao"]))
+            self.include_roughness_var.set(bool(resolved["include_roughness"]))
             return str(resolved["effective_profile"])
 
         def _update_render_profile_recommendation(self, *, apply_auto: bool) -> str:
@@ -7614,6 +7853,8 @@ if GUI_AVAILABLE:
                 ),
                 (self.complex_scale, self.auto_complex_suggestion_var, self.complex_strength_display_label, self.auto_complex_check),
                 (self.specular_scale, self.auto_specular_suggestion_var, self.specular_strength_display_label, self.auto_specular_check),
+                (self.ao_scale, self.auto_ao_suggestion_var, self.ao_strength_display_label, self.auto_ao_check),
+                (self.roughness_scale, self.auto_roughness_suggestion_var, self.roughness_strength_display_label, self.auto_roughness_check),
             )
             for slider, auto_var, display_label, auto_check in slider_specs:
                 is_auto = auto_enabled and auto_var.get()
@@ -7647,6 +7888,8 @@ if GUI_AVAILABLE:
                 "rmaos_strength": float(self.rmaos_strength_var.get()),
                 "complex_strength": float(self.complex_strength_var.get()),
                 "specular_strength": float(self.specular_strength_var.get()),
+                "ao_strength": float(self.ao_strength_var.get()),
+                "roughness_strength": float(self.roughness_strength_var.get()),
             }
             auto_flags = {
                 "normal_strength": self.auto_normal_suggestion_var.get(),
@@ -7656,6 +7899,8 @@ if GUI_AVAILABLE:
                 "rmaos_strength": self.auto_rmaos_suggestion_var.get(),
                 "complex_strength": self.auto_complex_suggestion_var.get(),
                 "specular_strength": self.auto_specular_suggestion_var.get(),
+                "ao_strength": self.auto_ao_suggestion_var.get(),
+                "roughness_strength": self.auto_roughness_suggestion_var.get(),
             }
             resolved = apply_recommendations_by_auto_flags(current=current, recommended=recommended, auto_flags=auto_flags)
             self.normal_strength_var.set(float(resolved["normal_strength"]))
@@ -7665,6 +7910,8 @@ if GUI_AVAILABLE:
             self.rmaos_strength_var.set(float(resolved["rmaos_strength"]))
             self.complex_strength_var.set(float(resolved["complex_strength"]))
             self.specular_strength_var.set(float(resolved["specular_strength"]))
+            self.ao_strength_var.set(float(resolved["ao_strength"]))
+            self.roughness_strength_var.set(float(resolved["roughness_strength"]))
             if update_toggles:
                 self._update_render_profile_recommendation(apply_auto=False)
                 # Auto-suggest emboss/relief mode based on material type and image content.
@@ -7839,6 +8086,10 @@ if GUI_AVAILABLE:
                     wetness_mask_strength=float(preview_state.get("wetness_mask_strength", 1.0)),
                     include_snow_mask=self.include_snow_mask_var.get(),
                     snow_mask_strength=float(preview_state.get("snow_mask_strength", 1.0)),
+                    include_ao=self.include_ao_var.get(),
+                    ao_strength=float(self.ao_strength_var.get()),
+                    include_roughness=self.include_roughness_var.get(),
+                    roughness_strength=float(self.roughness_strength_var.get()),
                     include_complex=self.include_complex_var.get(),
                     render_profile=self.render_profile_var.get(),
                 )
@@ -7984,6 +8235,8 @@ if GUI_AVAILABLE:
                 include_rmaos = self.include_rmaos_var.get()
                 include_wetness_mask = bool(self.include_wetness_mask_var.get())
                 include_snow_mask = bool(self.include_snow_mask_var.get())
+                include_ao = bool(self.include_ao_var.get())
+                include_roughness = bool(self.include_roughness_var.get())
                 include_complex = self.include_complex_var.get()
                 if not any((
                     include_diffuse,
@@ -7994,6 +8247,8 @@ if GUI_AVAILABLE:
                     include_rmaos,
                     include_wetness_mask,
                     include_snow_mask,
+                    include_ao,
+                    include_roughness,
                     include_complex,
                 )):
                     messagebox.showwarning("No outputs selected", "Select at least one output type.", parent=self.root)
@@ -8156,6 +8411,12 @@ if GUI_AVAILABLE:
                     "specular_strength": self._resolve_generation_value(
                         self.specular_strength_var.get(), self.auto_specular_suggestion_var
                     ),
+                    "ao_strength": self._resolve_generation_value(
+                        self.ao_strength_var.get(), self.auto_ao_suggestion_var
+                    ),
+                    "roughness_strength": self._resolve_generation_value(
+                        self.roughness_strength_var.get(), self.auto_roughness_suggestion_var
+                    ),
                     "complex_format": self.complex_format_var.get(),
                     "env_mask_mode": self.env_mask_mode_var.get(),
                     "emboss_mode": self.emboss_mode_var.get(),
@@ -8174,6 +8435,8 @@ if GUI_AVAILABLE:
                     "wetness_mask_strength": float(state.get("wetness_mask_strength", 1.0)),
                     "include_snow_mask": include_snow_mask,
                     "snow_mask_strength": float(state.get("snow_mask_strength", 1.0)),
+                    "include_ao": include_ao,
+                    "include_roughness": include_roughness,
                     "include_complex": include_complex,
                 }
                 self.batch_failures = []
@@ -9359,6 +9622,10 @@ def main() -> int:
             wetness_mask_strength=args.wetness_mask_strength,
             include_snow_mask=args.snow_mask,
             snow_mask_strength=args.snow_mask_strength,
+            include_ao=args.ao_map,
+            ao_strength=args.ao_strength,
+            include_roughness=args.roughness_map,
+            roughness_strength=args.roughness_strength,
             include_complex=args.complex_material,
             render_profile=getattr(args, "render_profile", "auto"),
             continue_on_error=True,
@@ -9408,6 +9675,10 @@ def main() -> int:
         wetness_mask_strength=args.wetness_mask_strength,
         include_snow_mask=args.snow_mask,
         snow_mask_strength=args.snow_mask_strength,
+        include_ao=args.ao_map,
+        ao_strength=args.ao_strength,
+        include_roughness=args.roughness_map,
+        roughness_strength=args.roughness_strength,
         include_complex=args.complex_material,
         render_profile=getattr(args, "render_profile", "auto"),
     )
