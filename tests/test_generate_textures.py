@@ -1692,6 +1692,51 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertLessEqual(float(settings["environment_mask_strength"]), 1.15)
         self.assertLessEqual(float(settings["specular_strength"]), 1.15)
 
+    def test_recommend_generation_settings_clamps_performance_workflow_strengths(self) -> None:
+        settings = recommend_generation_settings(
+            _detailed_bright_image(),
+            input_path=Path("textures/performance/armor/steelarmor.dds"),
+        )
+        self.assertLessEqual(float(settings["parallax_strength"]), 1.25)
+        self.assertLessEqual(float(settings["complex_strength"]), 1.7)
+        self.assertLessEqual(float(settings["rmaos_strength"]), 1.75)
+
+    def test_recommend_generation_settings_clamps_vr_workflow_strengths(self) -> None:
+        settings = recommend_generation_settings(
+            _detailed_bright_image(),
+            input_path=Path("textures/vr/architecture/whiterunwall.dds"),
+        )
+        self.assertLessEqual(float(settings["parallax_strength"]), 1.15)
+        self.assertLessEqual(float(settings["normal_strength"]), 2.1)
+        self.assertLessEqual(float(settings["specular_strength"]), 1.3)
+
+    def test_recommend_generation_settings_clamps_terrain_workflow_strengths(self) -> None:
+        settings = recommend_generation_settings(
+            _detailed_bright_image(),
+            input_path=Path("textures/terrain/landscape/mountainslab.dds"),
+        )
+        self.assertLessEqual(float(settings["parallax_strength"]), 1.2)
+        self.assertLessEqual(float(settings["environment_mask_strength"]), 1.3)
+        self.assertLessEqual(float(settings["specular_strength"]), 1.3)
+
+    def test_recommend_generation_settings_clamps_characters_workflow_strengths(self) -> None:
+        settings = recommend_generation_settings(
+            _detailed_bright_image(),
+            input_path=Path("textures/characters/skin/femalebody_1.dds"),
+        )
+        self.assertLessEqual(float(settings["parallax_strength"]), 1.1)
+        self.assertLessEqual(float(settings["normal_strength"]), 2.0)
+        self.assertLessEqual(float(settings["specular_strength"]), 1.4)
+
+    def test_recommend_generation_settings_clamps_architecture_workflow_strengths(self) -> None:
+        settings = recommend_generation_settings(
+            _detailed_bright_image(),
+            input_path=Path("textures/architecture/whiterun/stonewall.dds"),
+        )
+        self.assertLessEqual(float(settings["parallax_strength"]), 1.5)
+        self.assertLessEqual(float(settings["environment_mask_strength"]), 1.6)
+        self.assertLessEqual(float(settings["complex_strength"]), 2.15)
+
     def test_generate_complex_material_slider_produces_visible_change(self) -> None:
         source = _large_high_detail_image()
         low_strength = generate_complex_material(source, strength=0.5)

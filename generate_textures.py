@@ -2399,6 +2399,44 @@ def _adjust_recommendations_for_workflow_profile(
         adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]), 1.0, 1.35)
         adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]), 0.9, 1.15)
         adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]), 200.0, 235.0))
+    elif workflow_profile == "performance":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]), 1.1, 2.2)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]), 0.8, 1.25)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]), 0.9, 1.35)
+        adjusted["rmaos_strength"] = _clamp(float(adjusted["rmaos_strength"]), 0.9, 1.75)
+        adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]), 1.0, 1.7)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]), 0.9, 1.35)
+        adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]), 185.0, 235.0))
+    elif workflow_profile == "vr":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]), 1.1, 2.1)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]), 0.8, 1.15)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]), 0.9, 1.3)
+        adjusted["rmaos_strength"] = _clamp(float(adjusted["rmaos_strength"]), 0.9, 1.7)
+        adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]), 1.0, 1.65)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]), 0.9, 1.3)
+        adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]), 190.0, 235.0))
+    elif workflow_profile == "terrain":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]), 1.1, 2.3)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]), 0.8, 1.2)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]), 0.9, 1.3)
+        adjusted["rmaos_strength"] = _clamp(float(adjusted["rmaos_strength"]), 0.9, 1.8)
+        adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]), 1.0, 1.85)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]), 0.9, 1.3)
+    elif workflow_profile == "characters":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]), 1.1, 2.0)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]), 0.8, 1.1)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]), 0.9, 1.35)
+        adjusted["rmaos_strength"] = _clamp(float(adjusted["rmaos_strength"]), 0.9, 1.8)
+        adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]), 1.0, 1.75)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]), 0.9, 1.4)
+        adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]), 175.0, 235.0))
+    elif workflow_profile == "architecture":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]), 1.1, 2.7)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]), 0.8, 1.5)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]), 0.9, 1.6)
+        adjusted["rmaos_strength"] = _clamp(float(adjusted["rmaos_strength"]), 0.9, 2.1)
+        adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]), 1.0, 2.15)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]), 0.9, 1.55)
     return adjusted
 
 
