@@ -68,6 +68,7 @@ GENERATED_TEXTURE_SUFFIXES = (
     "_g",
     "_glow",
     "_em",
+    "_emis",
     "_emit",
     "_emissive",
     "_m",
@@ -3781,6 +3782,12 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
         "Glow/emissive map. Texture Slot 2 in the NIF. "
         "Controls per-pixel self-illumination strength. "
         "Requires SLSF1_Own_Emit (0x40) shader flag on the BSLightingShaderProperty.",
+    ),
+    "_emis": (
+        "glow",
+        "Glow / Emissive Map (_emis alias)",
+        "Alias naming for glow/emissive maps. Texture Slot 2 in the NIF. "
+        "Equivalent role to _em with the same SLSF1_Own_Emit shader-flag requirement.",
     ),
     "_g": (
         "glow",

@@ -157,6 +157,7 @@ _DIFFUSE_SLOT_DISALLOWED_SUFFIXES: tuple[str, ...] = (
     "_mask.dds",
     "_envmask.dds",
     "_em.dds",
+    "_emis.dds",
     "_cm.dds",
     "_c.dds",
     "_rmaos.dds",
@@ -177,6 +178,8 @@ _CUBEMAP_SLOT_WRONG_SUFFIXES: tuple[str, ...] = (
     "_msn.dds",
     "_p.dds",
     "_g.dds",
+    "_em.dds",
+    "_emis.dds",
     "_m.dds",
     "_cm.dds",
     "_c.dds",
@@ -190,6 +193,7 @@ _NORMAL_SLOT_DISALLOWED_SUFFIXES: tuple[str, ...] = (
     "_mask.dds",
     "_envmask.dds",
     "_em.dds",
+    "_emis.dds",
     "_rmaos.dds",
     "_cm.dds",
     "_c.dds",
@@ -2070,7 +2074,7 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
         glow_path = info.texture_paths.get(TEXTURE_SLOT_GLOW, "").strip()
         if glow_path:
             normalized_glow = _normalise_slot_path(glow_path)
-            if not normalized_glow.endswith(("_g.dds", "_glow.dds", "_emit.dds", "_emissive.dds", "_sk.dds")):
+            if not normalized_glow.endswith(("_g.dds", "_glow.dds", "_em.dds", "_emis.dds", "_emit.dds", "_emissive.dds", "_sk.dds")):
                 _append_unique(
                     result.issues,
                     f"Block {info.block_index}: slot 2 glow path '{glow_path}' does not look like an emissive/glow texture."
@@ -2188,7 +2192,7 @@ def guess_glow_path_for_nif(nif_path: Path) -> str | None:
         if existing:
             p = Path(existing.replace("\\", "/"))
             stem = p.stem
-            for s in ("_g", "_glow", "_emissive", "_emit", "_sk"):
+            for s in ("_g", "_glow", "_em", "_emis", "_emissive", "_emit", "_sk"):
                 if stem.lower().endswith(s):
                     stem = stem[: -len(s)]
                     break

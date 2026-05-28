@@ -477,6 +477,14 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertIn("slot 2 glow path", joined)
         self.assertIn("slot 2 for emissive textures", joined)
 
+    def test_accepts_emis_suffix_in_glow_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_emis.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertNotIn("slot 2 glow path", joined)
+
     def test_reports_wrong_texture_type_in_env_mask_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_g.dds"
@@ -1241,6 +1249,14 @@ class TestGuessHelpers(unittest.TestCase):
     def test_guess_glow_path_from_existing_glow_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_glow.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_glow_path_for_nif(nif)
+        self.assertIsNotNone(guessed)
+        self.assertTrue((guessed or "").endswith("_g.dds"))
+
+    def test_guess_glow_path_from_existing_emis_suffix(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_emis.dds"
         nif = _write_nif(self.tmp, texture_paths=paths)
         guessed = guess_glow_path_for_nif(nif)
         self.assertIsNotNone(guessed)

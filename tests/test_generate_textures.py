@@ -2778,6 +2778,12 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(result["suffix"], "_em")
         self.assertIn("Slot 2", result["notes"])
 
+    def test_identify_skyrim_texture_role_emis_is_glow_alias(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/effects/fire_emis.dds"))
+        self.assertEqual(result["role"], "glow")
+        self.assertEqual(result["suffix"], "_emis")
+        self.assertIn("Slot 2", result["notes"])
+
     def test_identify_skyrim_texture_role_environment_mask(self) -> None:
         result = identify_skyrim_texture_role(Path("textures/armor/iron_m.dds"))
         self.assertEqual(result["role"], "environment_mask")

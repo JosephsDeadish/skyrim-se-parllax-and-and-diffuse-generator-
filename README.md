@@ -67,7 +67,7 @@ This opens a desktop interface where you can:
 - load oversized preview sources with automatic downscaling to keep the GUI responsive when opening very large textures
 - switch preview source images in folder mode, with automatic preview switching to the current file while batch processing
 - use the NIF Editor's resizable results log to review full untruncated scan/patch details while processing whole mesh folders — **NIF editing is an experimental feature; always keep backups of your NIF files**
-- when a folder is selected, only process original `.dds` source textures and skip generated `_n`, `_p`, `_g`/`_glow`/`_em`/`_emit`/`_emissive`, `_m`, `_s`, `_sk`, `_msn`, and `_cm` variants
+- when a folder is selected, only process original `.dds` source textures and skip generated `_n`, `_p`, `_g`/`_glow`/`_em`/`_emis`/`_emit`/`_emissive`, `_m`, `_s`, `_sk`, `_msn`, and `_cm` variants
 - continue processing remaining files in folder mode even if one file is corrupt/unreadable
 - toggle **dark mode** for low-light modding sessions
 - get file-type sanity warnings (with per-warning “don’t show again”) for combinations that usually produce incorrect in-game results
@@ -80,7 +80,7 @@ python generate_textures.py /path/to/input.dds --output-dir ./output --complex-m
 
 Optional arguments:
 
-- positional input may also be a folder; folder mode scans subfolders, processes only original `.dds` source textures, and skips generated `_n`, `_p`, `_g`/`_glow`/`_em`/`_emit`/`_emissive`, `_m`, `_s`, `_sk`, `_msn`, and `_cm` variants
+- positional input may also be a folder; folder mode scans subfolders, processes only original `.dds` source textures, and skips generated `_n`, `_p`, `_g`/`_glow`/`_em`/`_emis`/`_emit`/`_emissive`, `_m`, `_s`, `_sk`, `_msn`, and `_cm` variants
 
 - `--diffuse-name` (default: `<input_stem>`, e.g. `stonewall.dds`)
 - `--normal-name` (default: `<input_stem>_n`, e.g. `stonewall_n.dds`)
@@ -197,7 +197,7 @@ The tool recognises standard Skyrim SE texture naming conventions from the file 
 | *(none)* | Diffuse / Albedo | Texture Slot 0 |
 | `_n` | Normal Map | DirectX tangent-space, Slot 1 |
 | `_p` | Parallax Heightmap | Greyscale, Slot 3, requires SKSE64 memory patch |
-| `_em` / `_g` / `_glow` / `_emit` / `_emissive` | Glow / Emissive | Slot 2, requires `SLSF1_Own_Emit` flag (`_em` preferred; `_g` legacy-compatible) |
+| `_em` / `_emis` / `_g` / `_glow` / `_emit` / `_emissive` | Glow / Emissive | Slot 2, requires `SLSF1_Own_Emit` flag (`_em` preferred; `_g` legacy-compatible) |
 | `_m` | Environment Mask | Greyscale reflection intensity, Slot 5 — vanilla Skyrim SE only |
 | `_rmaos` | Complex Env Mask (TruePBR naming) | RGBA Slot 5 packed data map for Community Shaders TruePBR. Channels: R=Roughness, G=Metallic, B=AO, A=Other/smoothness/height (JSON-driven). |
 | `_s` | Subsurface Scattering | Slot 6, skin/character textures |
@@ -206,7 +206,7 @@ The tool recognises standard Skyrim SE texture naming conventions from the file 
 | `_cm` | Complex Material packed (Community Shaders Extended Materials) | RGBA Slot 5 — **Community Shaders Extended Materials** workflow. Channels: R=Environment reflection amount, G=Glossiness, B=Metallic, A=Height / mode-control alpha. **Not vanilla Skyrim SE.** |
 | `_c` / `_C` | Complex Material packed alias | Identical channel layout and role as `_cm`. `_C.dds` (uppercase) is treated the same on Windows and by this tool. Prefer `_cm` for new mods unless the pack uses `_c` naming. |
 
-Batch folder mode scans subfolders and automatically skips generated variants (`_n`, `_p`, `_g`, `_glow`, `_em`, `_emit`, `_emissive`, `_m`, `_s`, `_sk`, `_rmaos`, `_ramos`, `_msn`, `_cm`, `_c`, `_C`) so it only processes original source textures.
+Batch folder mode scans subfolders and automatically skips generated variants (`_n`, `_p`, `_g`, `_glow`, `_em`, `_emis`, `_emit`, `_emissive`, `_m`, `_s`, `_sk`, `_rmaos`, `_ramos`, `_msn`, `_cm`, `_c`, `_C`) so it only processes original source textures.
 
 ## Renderer quick-reference
 
