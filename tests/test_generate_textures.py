@@ -67,6 +67,7 @@ from generate_textures import (
     resolve_render_profile_mode_selection,
     resolve_render_profile_output_defaults,
     resolve_render_profile_options,
+    render_profile_has_locked_controls,
     restore_nif_backups,
     resolve_env_mask_complex_workflow,
     load_gui_state,
@@ -1035,6 +1036,11 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(truepbr["include_rmaos"]))
         self.assertFalse(bool(truepbr["include_complex"]))
         self.assertTrue(bool(truepbr["include_normal"]))
+
+    def test_render_profile_has_locked_controls_only_in_custom_mode(self) -> None:
+        self.assertFalse(render_profile_has_locked_controls("custom"))
+        self.assertTrue(render_profile_has_locked_controls("auto"))
+        self.assertTrue(render_profile_has_locked_controls("enb"))
 
     def test_resolve_nif_patch_defaults_for_render_profile_returns_expected_toggles(self) -> None:
         vanilla = resolve_nif_patch_defaults_for_render_profile("vanilla")

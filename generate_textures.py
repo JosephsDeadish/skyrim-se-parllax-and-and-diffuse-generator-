@@ -1909,6 +1909,10 @@ def resolve_render_profile_output_defaults(
     return {"selected_profile": normalized_selected, "effective_profile": effective_profile, **defaults}
 
 
+def render_profile_has_locked_controls(selected_profile: str) -> bool:
+    return _normalize_render_profile(selected_profile) != "custom"
+
+
 def describe_render_profile_default_outputs(profile: str) -> str:
     normalized = _normalize_render_profile(profile)
     if normalized == "auto":
@@ -6393,6 +6397,17 @@ if GUI_AVAILABLE:
             _roughness_check = ttk.Checkbutton(options_frame, text="Roughness / _rough", variable=self.include_roughness_var, command=self._refresh_preview)
             _roughness_check.grid(row=2, column=4, sticky=tk.W)
             self._add_tooltip(_roughness_check, "🪨 Generate a standalone roughness map (_rough.dds).\nControls how rough vs. glossy the surface looks. Material-aware: stone goes rough, glass goes smooth.")
+            self._render_profile_managed_output_widgets = [
+                _diffuse_check,
+                _normal_check,
+                _parallax_check,
+                _glow_check,
+                _env_mask_check,
+                _rmaos_check,
+                _complex_check,
+                _ao_check,
+                _roughness_check,
+            ]
             _auto_sugg_check = ttk.Checkbutton(
                 options_frame,
                 text="Automatic suggestions (master switch: enables per-slider Auto toggles)",
@@ -6663,6 +6678,7 @@ if GUI_AVAILABLE:
                 text="standard = vanilla  |  occlusion = ENBSeries POM",
                 foreground="gray",
             ).grid(row=15, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
+            self._render_profile_mode_widgets = [complex_format, env_mask_mode_combo, _parallax_mode_combo]
 
             options_frame.columnconfigure(2, weight=1)
             options_frame.columnconfigure(3, weight=1)
@@ -6872,6 +6888,7 @@ if GUI_AVAILABLE:
 
             self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
             self._apply_theme()
+            self._on_render_profile_changed()
             self._restore_startup_selection()
 
         def _set_app_icon(self) -> None:
@@ -7716,9 +7733,18 @@ if GUI_AVAILABLE:
             else:
                 selected_label = _RENDER_PROFILE_LABELS.get(selected_profile, selected_profile.replace("_", " ").title())
                 self.render_profile_suggestion_var.set(
-                    f"Target renderer locked to {selected_label}. Auto suggestions are disabled for locked presets."
+                    f"Target renderer locked to {selected_label}. Mode and mapped-output controls are locked to prevent conflicting GUI combinations."
                 )
             return recommended_profile
+
+        def _update_render_profile_control_states(self) -> None:
+            locked = render_profile_has_locked_controls(self.render_profile_var.get())
+            mode_state = tk.DISABLED if locked else "readonly"
+            output_state = tk.DISABLED if locked else tk.NORMAL
+            for widget in getattr(self, "_render_profile_mode_widgets", []):
+                widget.configure(state=mode_state)
+            for widget in getattr(self, "_render_profile_managed_output_widgets", []):
+                widget.configure(state=output_state)
 
         def _open_render_profile_help(self) -> None:
             preview_path = self._current_preview_path()
@@ -7771,6 +7797,7 @@ if GUI_AVAILABLE:
             self.render_profile_var.set(selected)
             recommended_profile = self._update_render_profile_recommendation(apply_auto=False)
             if selected == "custom":
+                self._update_render_profile_control_states()
                 self.status_var.set(
                     "Target renderer set to Custom. Leaving all toggles/sliders/modes unchanged for manual control."
                 )
@@ -7797,6 +7824,7 @@ if GUI_AVAILABLE:
                     f"{describe_render_profile_files_to_create(effective)} "
                     f"{describe_render_profile_default_outputs(effective)}"
                 )
+            self._update_render_profile_control_states()
             self._request_preview_refresh()
 
         def _on_parallax_mode_changed(self, _event: object | None = None) -> None:
