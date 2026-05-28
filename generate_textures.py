@@ -1265,7 +1265,7 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "Files: diffuse.dds + _n.dds (DirectX tangent-space normal).\n"
         "Add _p.dds (greyscale height) only for meshes patched for parallax (requires SKSE64 memory patch).\n"
         "Add _m.dds (greyscale, Slot 5) for reflective metals/armour — brighter = more environment reflection.\n"
-        "Add _g.dds only for emissive/glowing assets.\n"
+        "Add _em.dds (legacy _g.dds also works) only for emissive/glowing assets.\n"
         "How files should look: _n stays purple/blue, _p is greyscale, _m is greyscale with brighter pixels on shinier areas.\n"
         "Do NOT generate _rmaos, _msn, _cm, or _c — those are ignored by the vanilla renderer."
     ),
@@ -1295,7 +1295,7 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     ),
     "characters": (
         "Character/skin profile focused on stable animated shading.\n"
-        "Recommended files: diffuse.dds + _n.dds (+ optional _g.dds for emissive assets).\n"
+        "Recommended files: diffuse.dds + _n.dds (+ optional _em.dds for emissive assets; legacy _g.dds also works).\n"
         "Parallax and complex env workflows are disabled by default to avoid fragile skin/face setups.\n"
         "Use dedicated skin/spec slots in your NIF workflow when needed."
     ),
@@ -1306,7 +1306,7 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "G=Glossiness, B=Metallic, A=Height / mode-control alpha.\n"
         "How files should look: _n stays purple/blue, _p stays greyscale, and _cm/_c/_C should NOT look like a normal map — "
         "it should read as packed grayscale data with reflective areas bright in red, glossy areas bright in green, metallic areas bright in blue, and a non-white alpha height channel.\n"
-        "Add _g.dds only for emissive assets.\n"
+        "Add _em.dds (legacy _g.dds also works) only for emissive assets.\n"
         "Do NOT generate _msn or TruePBR-style _rmaos for this preset. Community Shaders and ENB are separate renderer paths and should not be mixed.\n"
         "If you specifically need Community Shaders TruePBR _rmaos, that is a different JSON-driven workflow than this _cm/_c/_C preset."
     ),
@@ -1329,7 +1329,7 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "G=Glossiness, B=Metalness (cubemap tint), A=Parallax height.\n"
         "How files should look: _msn should remain a purple/blue normal map with a useful alpha, while _m should look like packed grayscale data — "
         "red = reflectivity, green = gloss, blue = metalness, alpha = height. It should not look like a second normal map.\n"
-        "Add _g.dds only for emissive assets.\n"
+        "Add _em.dds (legacy _g.dds also works) only for emissive assets.\n"
         "This is not Community Shaders and not 'ENB PBR' — it is ENB complex material. Do not mix it with _cm/_c/_C workflows.\n"
         "Do NOT generate vanilla _n.dds (replaced by _msn), _cm/_c, or TruePBR-style _rmaos for this preset."
     ),
@@ -1716,7 +1716,7 @@ def get_nif_patch_option_warnings(
         ("Diffuse slot", diffuse_texture_path, ("_n.dds", "_msn.dds", "_p.dds", "_g.dds", "_m.dds", "_cm.dds", "_c.dds", "_rmaos.dds", "_ramos.dds"), True),
         ("Parallax slot", parallax_texture_path, ("_p.dds",)),
         ("Normal slot", normal_texture_path, ("_n.dds", "_msn.dds"), False),
-        ("Glow slot", glow_texture_path, ("_g.dds", "_glow.dds", "_emit.dds", "_emissive.dds"), False),
+        ("Glow slot", glow_texture_path, ("_em.dds", "_g.dds", "_glow.dds", "_emit.dds", "_emissive.dds"), False),
         ("Cubemap slot", cubemap_texture_path, ("_e.dds", "_cube.dds", "_env.dds", "_envmap.dds"), False),
         ("Env mask slot", env_mask_texture_path, ("_m.dds", "_mask.dds", "_envmask.dds", "_cm.dds", "_c.dds", "_rmaos.dds", "_ramos.dds"), False),
     )
@@ -1812,7 +1812,7 @@ def describe_render_profile_files_to_create(profile: str) -> str:
         "include_diffuse": "<stem>.dds",
         "include_normal": "<stem>_n.dds",
         "include_parallax": "<stem>_p.dds",
-        "include_glow": "<stem>_g.dds",
+        "include_glow": "<stem>_em.dds (legacy: <stem>_g.dds)",
         "include_environment_mask": "<stem>_m.dds",
         "include_rmaos": "<stem>_rmaos.dds (or <stem>_ramos.dds)",
         "include_complex": "<stem>_msn.dds",
@@ -3259,7 +3259,7 @@ def build_glow_output_path(
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
-    glow_stem = glow_name or f"{input_path.stem}_g"
+    glow_stem = glow_name or f"{input_path.stem}_em"
     return base_output_dir / f"{glow_stem}{ext}"
 
 
@@ -3775,36 +3775,36 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
         "Requires BSLightingShaderProperty with Parallax shader flag set plus the SKSE64 "
         "memory patch (or ENBSeries) to work at runtime. Brighter = raised surface.",
     ),
-    "_g": (
+    "_em": (
         "glow",
         "Glow / Emissive Map",
         "Glow/emissive map. Texture Slot 2 in the NIF. "
         "Controls per-pixel self-illumination strength. "
         "Requires SLSF1_Own_Emit (0x40) shader flag on the BSLightingShaderProperty.",
     ),
+    "_g": (
+        "glow",
+        "Glow / Emissive Map (_g legacy alias)",
+        "Legacy alias naming for glow/emissive maps. Texture Slot 2 in the NIF. "
+        "Equivalent role to _em with the same SLSF1_Own_Emit shader-flag requirement.",
+    ),
     "_glow": (
         "glow",
         "Glow / Emissive Map (_glow alias)",
         "Alias naming for glow/emissive maps. Texture Slot 2 in the NIF. "
-        "Equivalent role to _g with the same SLSF1_Own_Emit shader-flag requirement.",
-    ),
-    "_em": (
-        "glow",
-        "Glow / Emissive Map (_em alias)",
-        "Alias naming for glow/emissive maps. Texture Slot 2 in the NIF. "
-        "Equivalent role to _g with the same SLSF1_Own_Emit shader-flag requirement.",
+        "Equivalent role to _em with the same SLSF1_Own_Emit shader-flag requirement.",
     ),
     "_emit": (
         "glow",
         "Glow / Emissive Map (_emit alias)",
         "Alias naming for glow/emissive maps. Texture Slot 2 in the NIF. "
-        "Equivalent role to _g with the same SLSF1_Own_Emit shader-flag requirement.",
+        "Equivalent role to _em with the same SLSF1_Own_Emit shader-flag requirement.",
     ),
     "_emissive": (
         "glow",
         "Glow / Emissive Map (_emissive alias)",
         "Alias naming for glow/emissive maps. Texture Slot 2 in the NIF. "
-        "Equivalent role to _g with the same SLSF1_Own_Emit shader-flag requirement.",
+        "Equivalent role to _em with the same SLSF1_Own_Emit shader-flag requirement.",
     ),
     "_m": (
         "environment_mask",
@@ -3901,7 +3901,7 @@ _SKYRIM_SE_PATH_HINTS: dict[str, str] = {
 _SKYRIM_ROLE_PRIMARY_SUFFIX: dict[str, str] = {
     "normal": "_n",
     "parallax": "_p",
-    "glow": "_g",
+    "glow": "_em",
     "environment_mask": "_m",
     "subsurface": "_s",
     "skin_specular": "_sk",
@@ -5398,7 +5398,7 @@ if GUI_AVAILABLE:
             _parallax_check = ttk.Checkbutton(options_frame, text="Parallax / _p", variable=self.include_parallax_var, command=self._refresh_preview)
             _parallax_check.grid(row=0, column=2, sticky=tk.W)
             self._add_tooltip(_parallax_check, "🌊 Generate a parallax (height) map.\nMakes surfaces look EXTRA bumpy. Your GPU will feel it, but it's worth it.")
-            _glow_check = ttk.Checkbutton(options_frame, text="Glow / _g", variable=self.include_glow_var, command=self._refresh_preview)
+            _glow_check = ttk.Checkbutton(options_frame, text="Glow / _em", variable=self.include_glow_var, command=self._refresh_preview)
             _glow_check.grid(row=1, column=0, sticky=tk.W)
             self._add_tooltip(_glow_check, "✨ Generate a glow map. Bright pixels glow in the dark.\nPerfect for making your cave look like a disco.")
             _env_mask_check = ttk.Checkbutton(options_frame, text="Environment mask / _m", variable=self.include_environment_mask_var, command=self._refresh_preview)
@@ -7623,7 +7623,7 @@ if GUI_AVAILABLE:
                 clear_env_check.pack(side="left", padx=(12, 0))
                 unpatch_row3 = ttk.Frame(unpatch_frame)
                 unpatch_row3.pack(fill="x", pady=(2, 0))
-                clear_glow_check = ttk.Checkbutton(unpatch_row3, text="Clear slot 2 (_g)", variable=clear_glow_var)
+                clear_glow_check = ttk.Checkbutton(unpatch_row3, text="Clear slot 2 (_em/_g)", variable=clear_glow_var)
                 clear_glow_check.pack(side="left")
                 clear_diffuse_check = ttk.Checkbutton(unpatch_row3, text="Clear slot 0 (diffuse)", variable=clear_diffuse_var)
                 clear_diffuse_check.pack(side="left", padx=(12, 0))
@@ -7849,10 +7849,10 @@ if GUI_AVAILABLE:
                 )
                 _tex_row(
                     tex_frame,
-                    "Glow / _g.dds:",
+                    "Glow / _em.dds (legacy _g.dds):",
                     glow_tex_var,
                     "Select glow texture",
-                    "✨ Slot 2 emissive/glow texture path. Usually _g.dds.",
+                    "✨ Slot 2 emissive/glow texture path. Prefer _em.dds; _g.dds is legacy-compatible.",
                 )
                 _tex_row(
                     tex_frame,
@@ -7925,7 +7925,7 @@ if GUI_AVAILABLE:
                                     normal_suffix = "_msn.dds" if prefer_msn else "_n.dds"
                                     candidate_normal = str(diffuse_like.parent / f"{diffuse_stem}{normal_suffix}").replace("/", "\\")
                                 if not guessed_glow:
-                                    guessed_glow = str(diffuse_like.parent / f"{diffuse_stem}_g.dds").replace("/", "\\")
+                                    guessed_glow = str(diffuse_like.parent / f"{diffuse_stem}_em.dds").replace("/", "\\")
                                 if not candidate_env:
                                     candidate_env = str(diffuse_like.parent / f"{diffuse_stem}{env_mask_suffix}").replace("/", "\\")
                             if candidate_parallax and candidate_normal and candidate_env:

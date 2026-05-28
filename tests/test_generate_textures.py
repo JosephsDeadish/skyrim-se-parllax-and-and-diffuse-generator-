@@ -1776,7 +1776,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 glow_name=None,
             )
 
-            self.assertEqual(glow_path.name, "brick_g.dds")
+            self.assertEqual(glow_path.name, "brick_em.dds")
 
     def test_build_environment_mask_output_path_uses_standard_default_name_and_extension(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1884,7 +1884,7 @@ class GenerateTexturesTests(unittest.TestCase):
             complex_path = build_complex_output_path(input_path=input_path, output_dir=output_dir, complex_format="msn")
 
             self.assertEqual(normal_path.name, "brick_n.dds")
-            self.assertEqual(glow_path.name, "brick_g.dds")
+            self.assertEqual(glow_path.name, "brick_em.dds")
             self.assertEqual(environment_mask_path.name, "brick_m.dds")
             self.assertEqual(complex_path.name, "brick_msn.dds")
 
@@ -2320,7 +2320,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 "diffuse": "brick.dds",
                 "normal": "brick_n.dds",
                 "parallax": "brick_p.dds",
-                "glow": "brick_g.dds",
+                "glow": "brick_em.dds",
                 "environment_mask": "brick_m.dds",
                 "complex_material": "brick_msn.dds",
             }
@@ -2772,11 +2772,11 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(result["role"], "parallax")
         self.assertEqual(result["suffix"], "_p")
 
-    def test_identify_skyrim_texture_role_em_alias_is_glow(self) -> None:
+    def test_identify_skyrim_texture_role_em_is_glow(self) -> None:
         result = identify_skyrim_texture_role(Path("textures/effects/fire_em.dds"))
         self.assertEqual(result["role"], "glow")
         self.assertEqual(result["suffix"], "_em")
-        self.assertIn("Alias", result["notes"])
+        self.assertIn("Slot 2", result["notes"])
 
     def test_identify_skyrim_texture_role_environment_mask(self) -> None:
         result = identify_skyrim_texture_role(Path("textures/armor/iron_m.dds"))

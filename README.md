@@ -85,7 +85,7 @@ Optional arguments:
 - `--diffuse-name` (default: `<input_stem>`, e.g. `stonewall.dds`)
 - `--normal-name` (default: `<input_stem>_n`, e.g. `stonewall_n.dds`)
 - `--parallax-name` (default: `<input_stem>_p`, e.g. `stonewall_p.dds`)
-- `--glow-name` (default: `<input_stem>_g`, e.g. `stonewall_g.dds`)
+- `--glow-name` (default: `<input_stem>_em`, e.g. `stonewall_em.dds`; legacy `_g` still supported)
 - `--environment-mask-name` (default: `<input_stem>_m`)
 - `--rmaos-name` / `--ramos-name` (default: `<input_stem>_rmaos`)
 - `--complex-name` (default from format: `<input_stem>_msn` or `<input_stem>_cm`)
@@ -187,6 +187,9 @@ Generated outputs default to `.dds` filenames regardless of the input format. Ex
 
 ## File name recognition
 
+Skyrim's renderer uses mesh shader slots/flags and assigned texture paths; it does not inherently enforce suffix meaning.  
+This generator still treats suffixes as functional metadata because modding workflows, shader packs, and tooling depend on them for routing.
+
 The tool recognises standard Skyrim SE texture naming conventions from the file name suffix:
 
 | Suffix | Role | Notes |
@@ -194,7 +197,7 @@ The tool recognises standard Skyrim SE texture naming conventions from the file 
 | *(none)* | Diffuse / Albedo | Texture Slot 0 |
 | `_n` | Normal Map | DirectX tangent-space, Slot 1 |
 | `_p` | Parallax Heightmap | Greyscale, Slot 3, requires SKSE64 memory patch |
-| `_g` / `_glow` / `_em` / `_emit` / `_emissive` | Glow / Emissive | Slot 2, requires `SLSF1_Own_Emit` flag |
+| `_em` / `_g` / `_glow` / `_emit` / `_emissive` | Glow / Emissive | Slot 2, requires `SLSF1_Own_Emit` flag (`_em` preferred; `_g` legacy-compatible) |
 | `_m` | Environment Mask | Greyscale reflection intensity, Slot 5 — vanilla Skyrim SE only |
 | `_rmaos` | Complex Env Mask (TruePBR naming) | RGBA Slot 5 packed data map for Community Shaders TruePBR. Channels: R=Roughness, G=Metallic, B=AO, A=Other/smoothness/height (JSON-driven). |
 | `_s` | Subsurface Scattering | Slot 6, skin/character textures |
