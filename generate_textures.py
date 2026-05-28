@@ -1927,10 +1927,10 @@ def get_nif_patch_option_warnings(
             True,
         ),
         ("Parallax slot", parallax_texture_path, ("_p.dds",)),
-        ("Normal slot", normal_texture_path, ("_n.dds", "_msn.dds"), False),
-        ("Glow slot", glow_texture_path, ("_g.dds", "_sk.dds"), False),
-        ("Cubemap slot", cubemap_texture_path, ("_e.dds", "_cube.dds", "_env.dds", "_envmap.dds"), False),
-        ("Env mask slot", env_mask_texture_path, ("_m.dds", "_mask.dds", "_envmask.dds", "_cm.dds", "_c.dds", "_rmaos.dds", "_ramos.dds"), False),
+        ("Normal slot", normal_texture_path, ("_n.dds", "_msn.dds")),
+        ("Glow slot", glow_texture_path, ("_g.dds", "_sk.dds")),
+        ("Cubemap slot", cubemap_texture_path, ("_e.dds", "_cube.dds", "_env.dds", "_envmap.dds")),
+        ("Env mask slot", env_mask_texture_path, ("_m.dds", "_mask.dds", "_envmask.dds", "_cm.dds", "_c.dds", "_rmaos.dds", "_ramos.dds")),
     )
     for rule in path_rules:
         label, raw_path, suffixes, *extra = rule

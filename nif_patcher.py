@@ -1361,7 +1361,6 @@ def _normalise_path(p: str) -> str:
     raise ValueError(
         f"Invalid texture path '{p}'. Expected a Skyrim-relative path under 'textures\\'."
     )
-    return collapsed
 
 
 def _normalise_slot_path(path: str) -> str:
@@ -1712,7 +1711,7 @@ def _apply_patches(
             if slot >= ts.num_textures:
                 return
             new = "" if clear else _normalise_path(new_raw or "")
-            old = ts.slot_paths[slot] if slot < ts.num_textures else ""
+            old = ts.slot_paths[slot]
             if old != new:
                 slot_changes.append((slot, old, new))
 
