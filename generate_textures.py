@@ -844,6 +844,34 @@ def analyze_material_type_from_image(source: Image.Image) -> str | None:
     if g_mean > r_mean and g_mean > b_mean and saturation_ratio > 0.20:
         return "plants"
 
+    # --- Leather (warm brown with medium texture contrast) ---
+    if (
+        r_mean > g_mean > b_mean
+        and 0.07 < saturation_ratio < 0.35
+        and 0.20 < brightness_ratio < 0.68
+        and 16.0 < overall_std < 95.0
+    ):
+        return "leather"
+
+    # --- Fur (warm/neutral but noisy micro-variation and low shine) ---
+    if (
+        r_mean >= g_mean >= b_mean
+        and saturation_ratio < 0.28
+        and 0.18 < brightness_ratio < 0.66
+        and overall_std > 34.0
+        and bright_pixels < 0.08
+    ):
+        return "fur"
+
+    # --- Dirt / Mud (earth tones, darker and less reflective than stone) ---
+    if (
+        (r_mean + g_mean) > (b_mean * 2.0)
+        and saturation_ratio < 0.30
+        and 0.14 < brightness_ratio < 0.56
+        and 15.0 < overall_std < 85.0
+    ):
+        return "dirt"
+
     # --- Stone / Architecture (cool-neutral grey-brown with low saturation) ---
     if saturation_ratio < 0.22 and 0.2 < brightness_ratio < 0.65 and overall_std > 18.0:
         return "stone"
@@ -908,9 +936,12 @@ _MATERIAL_CATEGORY_TOKENS: dict[str, tuple[str, ...]] = {
     "plants": ("leaf", "leaves", "grass", "vine", "plant", "moss", "fern", "weed", "shrub", "bush", "flora", "foliage", "lichen"),
     "metal": ("metal", "iron", "steel", "copper", "bronze", "gold", "silver", "ore", "chain", "blade", "sword", "axe", "armor", "helmet", "shield"),
     "glass": ("glass", "crystal", "gem", "jewel", "diamond", "ruby", "sapphire", "emerald", "amethyst", "quartz"),
-    "cloth": ("cloth", "fabric", "silk", "linen", "wool", "robe", "cloak", "cape", "leather", "hide", "fur"),
+    "leather": ("leather", "hide", "strap", "straps", "belt", "belts"),
+    "fur": ("fur", "pelt", "pelts", "fleece", "mane"),
+    "cloth": ("cloth", "fabric", "silk", "linen", "wool", "robe", "cloak", "cape", "canvas", "tapestry"),
     "skin": ("skin", "body", "face", "head", "hand", "flesh", "creature", "humanoid"),
     "snow": ("snow", "ice", "frost", "frozen", "blizzard", "glacial"),
+    "dirt": ("dirt", "mud", "soil", "earth", "grime", "silt"),
     "sand": ("sand", "dirt", "mud", "earth", "soil", "dust"),
     "paper": (
         "paper",
@@ -944,8 +975,9 @@ def classify_material_type(path: Path) -> str:
     """Classify the likely Skyrim material category from a texture file path.
 
     Returns one of: ``'architecture'``, ``'stone'``, ``'wood'``, ``'plants'``,
-    ``'metal'``, ``'glass'``, ``'cloth'``, ``'skin'``, ``'snow'``,
-    ``'terrain'``, ``'sand'``, ``'paper'``, or ``'general'``.
+    ``'metal'``, ``'glass'``, ``'leather'``, ``'fur'``, ``'cloth'``, ``'skin'``,
+    ``'snow'``, ``'dirt'``, ``'terrain'``, ``'sand'``, ``'paper'``, or
+    ``'general'``.
 
     Priority order matches ``_MATERIAL_CATEGORY_TOKENS`` dictionary ordering so
     more specific categories (``'architecture'``) are checked before broader ones
@@ -1017,6 +1049,18 @@ def _adjust_recommendations_for_material_type(
         adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.55, 0.9, 1.4)
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.75, 0.8, 2.0)
         adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.9, 1.1, 2.8)
+    elif material_type == "leather":
+        # Leather: slightly reflective highlights but far less than polished metal.
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.7, 0.9, 1.7)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.8, 0.9, 1.8)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.95, 0.8, 2.1)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.95, 1.1, 3.0)
+    elif material_type == "fur":
+        # Fur/fleece should avoid harsh shiny highlights and deep parallax.
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.5, 0.9, 1.4)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.6, 0.9, 1.5)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.8, 0.8, 1.9)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.9, 1.1, 2.8)
     elif material_type == "skin":
         # Skin has low, soft cubemap reflection; soften normals to avoid pore over-sharpening
         adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.65, 0.9, 1.6)
@@ -1037,6 +1081,12 @@ def _adjust_recommendations_for_material_type(
         adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.95, 1.1, 2.6)
         adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.75, 0.9, 1.8)
         adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.8, 0.9, 1.6)
+    elif material_type == "dirt":
+        # Dirt/mud should stay matte with minimal reflection sparkle.
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.95, 0.8, 2.0)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 1.0, 1.1, 3.0)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.7, 0.9, 1.7)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.7, 0.9, 1.6)
     elif material_type == "sand":
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 1.05, 0.8, 2.4)
         adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.8, 0.9, 1.8)
@@ -2642,8 +2692,11 @@ def generate_roughness(source: Image.Image, strength: float = 1.0, material_type
         "skin": -12,        # Skin has moderate smoothness
         "stone": 15,        # Stone is rough
         "terrain": 20,      # Terrain is rough
+        "dirt": 22,         # Dirt/mud is rough
         "sand": 18,         # Sand/dirt is rough
         "wood": 10,         # Wood is moderately rough
+        "leather": 6,       # Leather is mid-roughness (less rough than cloth)
+        "fur": 26,          # Fur is very rough / diffuse
         "cloth": 22,        # Cloth is rough
         "plants": 18,       # Plants/leaves are rough
         "architecture": 12, # Architecture surfaces are moderately rough

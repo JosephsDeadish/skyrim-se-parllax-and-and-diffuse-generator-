@@ -573,8 +573,8 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_analyze_material_type_from_image_returns_none_or_valid_type(self) -> None:
         valid_types = {
-            "metal", "stone", "wood", "cloth", "glass", "skin",
-            "snow", "plants", "terrain", "sand", "architecture", "paper", "general", None,
+            "metal", "stone", "wood", "leather", "fur", "cloth", "glass", "skin",
+            "snow", "plants", "terrain", "dirt", "sand", "architecture", "paper", "general", None,
         }
         result = analyze_material_type_from_image(_sample_image())
         self.assertIn(result, valid_types)
@@ -584,8 +584,8 @@ class GenerateTexturesTests(unittest.TestCase):
         result = analyze_material_type_from_image(source)
         # Should not raise; result is None or a valid type string
         valid_types = {
-            "metal", "stone", "wood", "cloth", "glass", "skin",
-            "snow", "plants", "terrain", "sand", "architecture", "paper", "general", None,
+            "metal", "stone", "wood", "leather", "fur", "cloth", "glass", "skin",
+            "snow", "plants", "terrain", "dirt", "sand", "architecture", "paper", "general", None,
         }
         self.assertIn(result, valid_types)
 
@@ -622,6 +622,15 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_classify_material_type_returns_general_for_unknown_path(self) -> None:
         self.assertEqual(classify_material_type(Path("textures/misc/unknown.dds")), "general")
+
+    def test_classify_material_type_returns_leather_for_hide_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/armor/leather/hide_strap.dds")), "leather")
+
+    def test_classify_material_type_returns_fur_for_pelt_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/armor/fur/wolf_pelt.dds")), "fur")
+
+    def test_classify_material_type_returns_dirt_for_mud_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/clutter/mud_pile.dds")), "dirt")
 
     def test_classify_material_type_returns_paper_for_cards_path(self) -> None:
         self.assertEqual(
@@ -720,6 +729,13 @@ class GenerateTexturesTests(unittest.TestCase):
             ),
             "truepbr",
         )
+
+    def test_recommend_generation_settings_leather_is_less_reflective_than_metal(self) -> None:
+        source = _detailed_low_saturation_image()
+        leather = recommend_generation_settings(source, Path("textures/armor/leather/hide_strap.dds"))
+        metal = recommend_generation_settings(source, Path("textures/armor/steel/plate.dds"))
+        self.assertLess(float(leather["environment_mask_strength"]), float(metal["environment_mask_strength"]))
+        self.assertLess(float(leather["specular_strength"]), float(metal["specular_strength"]))
 
     def test_recommend_render_profile_detects_truepbr_from_pbrnifpatcher_path_hint(self) -> None:
         self.assertEqual(
