@@ -1865,7 +1865,32 @@ def get_nif_patch_option_warnings(
         warnings.append("Cubemap slot is set to both clear and write a path.")
 
     path_rules = (
-        ("Diffuse slot", diffuse_texture_path, ("_n.dds", "_msn.dds", "_p.dds", "_g.dds", "_m.dds", "_cm.dds", "_c.dds", "_rmaos.dds", "_ramos.dds"), True),
+        (
+            "Diffuse slot",
+            diffuse_texture_path,
+            (
+                "_n.dds",
+                "_msn.dds",
+                "_p.dds",
+                "_em.dds",
+                "_g.dds",
+                "_glow.dds",
+                "_m.dds",
+                "_cm.dds",
+                "_c.dds",
+                "_rmaos.dds",
+                "_ramos.dds",
+                "_orm.dds",
+                "_orms.dds",
+                "_mrao.dds",
+                "_mra.dds",
+                "_ao.dds",
+                "_rough.dds",
+                "_wt.dds",
+                "_sm.dds",
+            ),
+            True,
+        ),
         ("Parallax slot", parallax_texture_path, ("_p.dds",)),
         ("Normal slot", normal_texture_path, ("_n.dds", "_msn.dds"), False),
         ("Glow slot", glow_texture_path, ("_em.dds", "_g.dds", "_glow.dds", "_emit.dds", "_emissive.dds"), False),
@@ -1893,7 +1918,7 @@ def get_nif_patch_option_warnings(
         if is_diffuse_rule:
             if lowered.endswith(lowered_suffixes):
                 warnings.append(
-                    f"{label} path looks like a generated map type (_n/_p/_g/_m/_cm/_c/_rmaos/_ramos); slot 0 should usually be diffuse/albedo."
+                    f"{label} path looks like a generated map type (_n/_msn/_p/_em/_m/_cm/_c/_rmaos/_ramos/_ao/_rough/_wt/_sm); slot 0 should usually be diffuse/albedo."
                 )
             continue
         if not lowered.endswith(lowered_suffixes):
@@ -4943,7 +4968,7 @@ def get_generation_warnings(
             "diffuse_from_derived_source",
             f"The selected input appears to be a '{resolved_source_role}' texture, not a diffuse/albedo source.\n\n"
             "Generating a diffuse output from an already derived map usually produces incorrect colours/shading in-game.\n\n"
-            "Tip: Use an albedo/diffuse source texture (no _n/_p/_g/_m/_rmaos/_ramos/_msn/_cm/_c suffix) for best results.",
+            "Tip: Use an albedo/diffuse source texture (no _n/_msn/_p/_em/_m/_cm/_c/_rmaos/_ramos/_ao/_rough/_wt/_sm suffix) for best results.",
         ))
     if include_normal and resolved_source_role == "normal":
         warnings.append((

@@ -1239,6 +1239,18 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(any("slot 0" in text.lower() or "diffuse slot" in text.lower() for text in warnings))
         self.assertTrue(any("cubemap slot" in text.lower() for text in warnings))
 
+    def test_get_nif_patch_option_warnings_reports_diffuse_slot_misuse_for_emissive_suffix(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="vanilla",
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=False,
+            force_shader_type_3=False,
+            diffuse_texture_path="textures\\architecture\\stone\\stone_em.dds",
+        )
+        self.assertTrue(any("slot 0" in text.lower() or "diffuse slot" in text.lower() for text in warnings))
+        self.assertTrue(any("_em" in text.lower() for text in warnings))
+
     def test_get_nif_patch_option_warnings_reports_renderer_specific_suffix_mismatch(self) -> None:
         enb_warnings = get_nif_patch_option_warnings(
             selected_profile="enb",
@@ -1623,6 +1635,10 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         ids = [w[0] for w in warnings]
         self.assertIn("diffuse_from_derived_source", ids)
+        warning_lookup = dict(warnings)
+        self.assertIn("_em", warning_lookup["diffuse_from_derived_source"])
+        self.assertIn("_ao", warning_lookup["diffuse_from_derived_source"])
+        self.assertNotIn("_g/_m", warning_lookup["diffuse_from_derived_source"])
 
     def test_get_generation_warnings_normal_from_normal_source(self) -> None:
         warnings = get_generation_warnings(
