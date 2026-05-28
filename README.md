@@ -154,6 +154,51 @@ This app now has a dedicated **TruePBR** renderer profile path for Community Sha
 
 The generated sidecar uses pgen/PBRNifPatcher-style texture entries (for example: `texture`, `parallax`, `specular_level`, `roughness_scale`, `smooth_angle`, `displacement_scale`, `emissive_scale`, `vertex_color_lum_mult`) and is intended as a practical starting point you can tune per asset pack.
 
+### True PBR workflow notes (users vs creators)
+
+#### For users (installing mods)
+
+- True PBR requires **Community Shaders** to render correctly in-game.
+- True PBR texture packs will not display correctly in tools/render paths that do not run Community Shaders (for example Creation Kit, Outfit Studio, or Bodyslide preview paths).
+- Keep renderer workflows separate:
+  - TruePBR: `_n + _rmaos/_ramos + JSON` metadata workflow
+  - Community Shaders Extended Materials: `_cm/_c/_C`
+  - ENB complex material: `_msn + _m`
+
+#### For texture artists and developers
+
+To ship a complete True PBR set, do both:
+
+1. **Mesh/config setup**  
+   Enable PBR on target meshes (`BSLightingShaderProperty` with `SLSF2 Unused01/PBR` flag), or ship PBRNifPatcher/PGPatcher JSON rules for user-side patching.
+2. **Texture setup**  
+   Provide base color, normal (DirectX), and packed RMAOS (R=Roughness, G=Metallic, B=AO, A=Specular/other depending on config), plus optional emission/parallax/feature maps.
+
+Key mesh-side tuning values (when authoring NIFs):
+
+- `Specular Level` (non-metal reflectance multiplier; common starting points 0.04 without spec map, ~0.08 for Unreal-style spec workflows)
+- `Roughness Scale` (roughness multiplier; usually 1.0)
+- `Displacement Scale` (parallax/displacement multiplier; tune per asset)
+
+Texture color space guidance:
+
+- Use **sRGB** for in-game colour textures (albedo/emissive/fuzz/coat/subsurface colour)
+- Use **linear** for data textures (normal/displacement/RMAOS)
+
+Landscape TruePBR:
+
+- Uses `Data/PBRTextureSets/<TXST_EDID>.json` sidecars (for example `LandscapeDirt02.json`)
+- Typical JSON values: `roughnessScale`, `displacementScale`, `specularLevel`
+
+Feature compatibility summary:
+
+- **Subsurface scattering**: compatible with glint/fuzz/parallax/emission; incompatible with dual-layer material
+- **Glint**: incompatible with fuzz and dual-layer material
+- **Fuzz**: incompatible with glint and dual-layer material; compatible with subsurface/parallax/emission
+- **Hair model**: standalone shading model; treat as incompatible with other special models
+- **Dual-layer material**: compatible with parallax/emission; incompatible with glint/fuzz/subsurface
+- **Material Objects (MATO)**: requires single-pass records and PBR material-object JSON; only applies on PBR-enabled surfaces
+
 ### ENB complex material quick start
 
 Requires ENBSeries with `ComplexParallaxMaterial=true` in `enbseries.ini`.

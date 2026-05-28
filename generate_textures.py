@@ -1455,11 +1455,15 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     ),
     "truepbr": (
         "Community Shaders TruePBR workflow (JSON-driven material path).\n"
-        "Typical files: textures/pbr/<name>.dds + textures/pbr/<name>_n.dds + textures/pbr/<name>_rmaos.dds (or _ramos.dds alias) + textures/pbr/<name>_ao.dds + textures/pbr/<name>_rough.dds + matching JSON sidecar in PBRNifPatcher/ (and optional _p.dds depending on your mesh/material setup).\n"
+        "Typical files: textures/pbr/<name>.dds + textures/pbr/<name>_n.dds + textures/pbr/<name>_rmaos.dds (or _ramos.dds alias) + matching JSON sidecar in PBRNifPatcher/ (optional _p/_g and other feature textures by material).\n"
         "_rmaos/_ramos RGBA layout for this preset: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (config-driven).\n"
         "How files should look: _n stays purple/blue, _rmaos/_ramos should look like packed grayscale channels (not like a normal map).\n"
+        "Mesh side must be TruePBR-enabled (BSLightingShaderProperty with SLSF2 Unused01/PBR flag, default shader type unless feature-specific overrides).\n"
+        "Core mesh tuning usually comes from specular level / roughness scale / displacement scale (or equivalent JSON patch values).\n"
         "JSON sidecar should reference the generated base texture prefix (for example via 'texture'/'match_diffuse') and document channel mapping for your TruePBR setup.\n"
         "PGPatcher best-practice: keep PBR textures under textures/pbr and place your patcher JSON files under a top-level PBRNifPatcher/ folder.\n"
+        "For landscape TruePBR, use PBRTextureSets/<TXST_EDID>.json (roughnessScale/displacementScale/specularLevel values).\n"
+        "Remember: TruePBR textures require Community Shaders at runtime and do not render correctly in non-CS tool previews.\n"
         "Do NOT treat this as Community Shaders Extended Materials _cm/_c/_C, and do NOT mix it with ENB _msn workflows."
     ),
     "enb": (
@@ -6613,7 +6617,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(_pbr_note, "ℹ Base color and normal map are shared with Vanilla/ENB workflow outputs.\nEnable them in the Vanilla/ENB section above.")
             _rmaos_check = ttk.Checkbutton(_pbr_section, text="RMAOS / _rmaos", variable=self.include_rmaos_var, command=self._on_rmaos_output_toggled)
             _rmaos_check.grid(row=1, column=0, sticky=tk.W)
-            self._add_tooltip(_rmaos_check, "🧩 Generate Community Shaders TruePBR _rmaos/_ramos plus JSON sidecar.\n_rmaos ≠ _m — these belong to completely different material systems.\nMutually exclusive with Vanilla/ENB _m environment mask.")
+            self._add_tooltip(_rmaos_check, "🧩 Generate Community Shaders TruePBR _rmaos/_ramos plus JSON sidecar.\nRMAOS channels: R=roughness, G=metallic, B=AO, A=config-driven spec/height.\nRequires TruePBR-enabled mesh/patch config; _rmaos ≠ _m.\nMutually exclusive with Vanilla/ENB _m environment mask.")
             _roughness_check = ttk.Checkbutton(_pbr_section, text="Roughness / _rough", variable=self.include_roughness_var, command=self._refresh_preview)
             _roughness_check.grid(row=2, column=0, sticky=tk.W)
             self._add_tooltip(_roughness_check, "🪨 Generate a standalone roughness map (_rough.dds).\nControls how rough vs. glossy the surface looks. Material-aware: stone goes rough, glass goes smooth.")
