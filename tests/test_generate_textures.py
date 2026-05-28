@@ -1326,8 +1326,8 @@ class GenerateTexturesTests(unittest.TestCase):
         for profile in ("vanilla", "terrain", "architecture", "community_shaders", "enb", "truepbr"):
             with self.subTest(profile=profile):
                 summary = describe_render_profile_default_outputs(profile)
-                self.assertIn("custom wetness mask/_wt", summary)
-                self.assertIn("snow mask/_sm", summary)
+                self.assertIn("community shaders wetness/_wt", summary)
+                self.assertIn("community shaders snow/_sm", summary)
 
     def test_describe_render_profile_default_outputs_glow_uses_g_suffix(self) -> None:
         """Glow output label in profile summaries must use _g for Skyrim SE."""
