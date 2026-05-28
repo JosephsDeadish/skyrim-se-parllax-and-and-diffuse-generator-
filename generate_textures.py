@@ -4101,6 +4101,20 @@ _SKYRIM_ROLE_TOKEN_HINTS: dict[str, tuple[str, ...]] = {
     "complex_material_cm": ("complexcm", "cmaterial", "complexgray"),
 }
 
+_SKYRIM_SE_SUFFIX_ALIASES: dict[str, str] = {
+    "_parallax": "_p",
+    "_height": "_p",
+    "_heightmap": "_p",
+    "_emission": "_em",
+    "_env": "_m",
+    "_envmask": "_m",
+    "_cubemask": "_m",
+    "_spec": "_m",
+    "_specular": "_m",
+    "_wetness": "_wt",
+    "_snow": "_sm",
+}
+
 
 def _get_skyrim_path_hint(path: Path) -> str:
     parts = [part.lower() for part in path.parts]
@@ -4141,6 +4155,18 @@ def identify_skyrim_texture_role(path: Path) -> dict[str, str]:
                 "notes": notes,
                 "hint": _get_skyrim_path_hint(path),
             }
+    for alias_suffix in sorted(_SKYRIM_SE_SUFFIX_ALIASES, key=len, reverse=True):
+        if not stem.endswith(alias_suffix):
+            continue
+        canonical_suffix = _SKYRIM_SE_SUFFIX_ALIASES[alias_suffix]
+        role, description, notes = _SKYRIM_SE_SUFFIX_INFO[canonical_suffix]
+        return {
+            "role": role,
+            "suffix": alias_suffix,
+            "description": f"{description} ({alias_suffix} alias)",
+            "notes": notes,
+            "hint": _get_skyrim_path_hint(path),
+        }
     inferred_role = _infer_skyrim_role_from_name_tokens(stem)
     if inferred_role is not None:
         primary_suffix = _SKYRIM_ROLE_PRIMARY_SUFFIX[inferred_role]
