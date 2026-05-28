@@ -4666,6 +4666,197 @@ class RmaosJsonMaterialTypeTests(unittest.TestCase):
         data = self._write_and_read("cloth")
         self.assertAlmostEqual(data["specular_level"], 0.016, places=4)
 
+    def test_fur_has_very_high_roughness_and_very_low_specular(self) -> None:
+        data = self._write_and_read("fur")
+        self.assertGreater(data["roughness_scale"], 1.2)
+        self.assertLess(data["specular_level"], 0.02)
+
+    def test_paper_has_low_specular_and_shallow_displacement(self) -> None:
+        data = self._write_and_read("paper")
+        self.assertLess(data["specular_level"], 0.02)
+        self.assertLess(data["displacement_scale"], 0.1)
+
+    def test_dirt_has_high_roughness(self) -> None:
+        data = self._write_and_read("dirt")
+        self.assertGreater(data["roughness_scale"], 1.1)
+
+    def test_sand_has_low_specular(self) -> None:
+        data = self._write_and_read("sand")
+        self.assertLess(data["specular_level"], 0.03)
+
+    def test_architecture_has_moderate_roughness(self) -> None:
+        data = self._write_and_read("architecture")
+        self.assertGreater(data["roughness_scale"], 1.0)
+        self.assertLess(data["roughness_scale"], 1.2)
+
+    def test_fur_displacement_is_shallow(self) -> None:
+        data = self._write_and_read("fur")
+        self.assertLess(data["displacement_scale"], 0.15)
+
+    def test_dirt_no_subsurface(self) -> None:
+        data = self._write_and_read("dirt")
+        self.assertFalse(data.get("subsurface", False))
+        self.assertFalse(data.get("subsurface_foliage", False))
+
+    def test_sand_no_subsurface(self) -> None:
+        data = self._write_and_read("sand")
+        self.assertFalse(data.get("subsurface", False))
+        self.assertFalse(data.get("subsurface_foliage", False))
+
+
+# ---------------------------------------------------------------------------
+# Terrain parallax high-strength warning
+# ---------------------------------------------------------------------------
+
+
+class TerrainParallaxStrengthWarningTests(unittest.TestCase):
+    """Tests for the terrain-parallax high-strength warning added to get_generation_warnings."""
+
+    def _base_kwargs(self) -> dict:
+        return {
+            "include_glow": False,
+            "include_environment_mask": False,
+            "env_mask_mode": "standard",
+            "env_mask_strength": 1.2,
+            "include_parallax": True,
+            "include_complex": False,
+        }
+
+    def test_terrain_parallax_below_threshold_no_high_strength_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "terrain",
+            parallax_strength=0.9,
+            **self._base_kwargs(),
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("parallax_high_strength_terrain", warning_ids)
+
+    def test_terrain_parallax_at_threshold_no_high_strength_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "terrain",
+            parallax_strength=1.0,
+            **self._base_kwargs(),
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("parallax_high_strength_terrain", warning_ids)
+
+    def test_terrain_parallax_above_threshold_raises_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "terrain",
+            parallax_strength=1.5,
+            **self._base_kwargs(),
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertIn("parallax_high_strength_terrain", warning_ids)
+
+    def test_terrain_parallax_high_strength_warning_includes_value(self) -> None:
+        warnings = get_generation_warnings(
+            "terrain",
+            parallax_strength=2.0,
+            **self._base_kwargs(),
+        )
+        messages = {w[0]: w[1] for w in warnings}
+        self.assertIn("parallax_high_strength_terrain", messages)
+        self.assertIn("2.00", messages["parallax_high_strength_terrain"])
+
+    def test_terrain_parallax_still_emits_shimmer_warning_alongside_high_strength(self) -> None:
+        warnings = get_generation_warnings(
+            "terrain",
+            parallax_strength=1.5,
+            **self._base_kwargs(),
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertIn("parallax_landscape_shimmer", warning_ids)
+        self.assertIn("parallax_high_strength_terrain", warning_ids)
+
+    def test_terrain_parallax_disabled_no_high_strength_warning(self) -> None:
+        kwargs = dict(self._base_kwargs())
+        kwargs["include_parallax"] = False
+        warnings = get_generation_warnings(
+            "terrain",
+            parallax_strength=2.5,
+            **kwargs,
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("parallax_high_strength_terrain", warning_ids)
+
+    def test_non_terrain_material_no_terrain_high_strength_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            parallax_strength=3.0,
+            **self._base_kwargs(),
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("parallax_high_strength_terrain", warning_ids)
+
+
+# ---------------------------------------------------------------------------
+# Glow map mipmap pre-filter
+# ---------------------------------------------------------------------------
+
+
+class GlowMipmapPrefilterTests(unittest.TestCase):
+    """Tests for the glow-map branch added to _prefilter_for_mipmap_stability."""
+
+    def _solid_l(self, value: int = 200, size: tuple[int, int] = (64, 64)) -> Image.Image:
+        return Image.new("L", size, value)
+
+    def _solid_rgb(self, value: tuple[int, int, int] = (200, 150, 50), size: tuple[int, int] = (64, 64)) -> Image.Image:
+        return Image.new("RGB", size, value)
+
+    def test_glow_l_mode_preserved_size_and_mode(self) -> None:
+        src = self._solid_l()
+        result = _prefilter_for_mipmap_stability(src, "glow")
+        self.assertEqual(result.size, src.size)
+        self.assertEqual(result.mode, "L")
+
+    def test_glow_rgb_mode_preserved(self) -> None:
+        src = self._solid_rgb()
+        result = _prefilter_for_mipmap_stability(src, "glow")
+        self.assertEqual(result.size, src.size)
+        self.assertEqual(result.mode, "RGB")
+
+    def test_glow_rgba_mode_preserved(self) -> None:
+        src = Image.new("RGBA", (64, 64), (200, 150, 50, 255))
+        result = _prefilter_for_mipmap_stability(src, "glow")
+        self.assertEqual(result.size, src.size)
+        self.assertEqual(result.mode, "RGBA")
+
+    def test_glow_flat_image_value_unchanged(self) -> None:
+        src = self._solid_l(200)
+        result = _prefilter_for_mipmap_stability(src, "glow")
+        pixels = list(result.getdata())
+        self.assertTrue(all(abs(p - 200) <= 2 for p in pixels))
+
+    def test_glow_noisy_image_is_smoothed(self) -> None:
+        import random
+        rng = random.Random(42)
+        noisy = Image.new("L", (64, 64))
+        pixels = [rng.randint(0, 255) for _ in range(64 * 64)]
+        noisy.putdata(pixels)
+        result = _prefilter_for_mipmap_stability(noisy, "glow")
+        orig_std = float(np.std(np.array(noisy, dtype=np.float32)))
+        result_std = float(np.std(np.array(result, dtype=np.float32)))
+        self.assertLess(result_std, orig_std)
+
+    def test_unknown_mode_glow_passthrough(self) -> None:
+        src = Image.new("P", (64, 64))
+        result = _prefilter_for_mipmap_stability(src, "glow")
+        self.assertIs(result, src)
+
+    def test_non_glow_kind_passthrough(self) -> None:
+        src = self._solid_l()
+        result = _prefilter_for_mipmap_stability(src, "diffuse")
+        self.assertIs(result, src)
+
+    def test_glow_kind_is_applied_not_passthrough(self) -> None:
+        import random
+        rng = random.Random(7)
+        noisy = Image.new("L", (64, 64))
+        noisy.putdata([rng.randint(0, 255) for _ in range(64 * 64)])
+        result = _prefilter_for_mipmap_stability(noisy, "glow")
+        self.assertIsNot(result, noisy)
+
 
 if __name__ == "__main__":
     unittest.main()

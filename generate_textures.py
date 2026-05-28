@@ -3764,6 +3764,56 @@ def write_rmaos_json_sidecar(
             "smooth_angle": 68,
             "displacement_scale": 0.18,
         },
+        "fur": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.014,     # fur/pelt is nearly non-specular — diffuse scatter only
+            "roughness_scale": 1.25,     # very rough, micro-fibres diffuse light strongly
+            "smooth_angle": 80,
+            "displacement_scale": 0.10,  # shallow depth; fur silhouette is geometry, not parallax
+        },
+        "paper": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.016,     # parchment/paper is nearly non-specular
+            "roughness_scale": 1.08,     # moderately rough surface
+            "smooth_angle": 75,
+            "displacement_scale": 0.06,  # paper has little height variation
+        },
+        "dirt": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.025,     # damp dirt can have a slight sheen
+            "roughness_scale": 1.15,     # rough, granular surface
+            "smooth_angle": 65,
+            "displacement_scale": 0.14,
+        },
+        "sand": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.022,     # fine sand grains scatter light diffusely
+            "roughness_scale": 1.12,     # rough, tiling ground material
+            "smooth_angle": 65,
+            "displacement_scale": 0.12,
+        },
+        "architecture": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.04,      # cut stone and stucco have low specular
+            "roughness_scale": 1.08,     # architectural surfaces are moderately rough
+            "smooth_angle": 60,
+            "displacement_scale": 0.20,  # stonework has meaningful surface relief
+        },
     }
 
     overrides = _RMAOS_JSON_MATERIAL_OVERRIDES.get(str(material_type).lower(), {})
@@ -4653,6 +4703,18 @@ def get_generation_warnings(
             "or use 'occlusion' parallax mode (POM) which handles terrain gradients better.",
         ))
 
+    if include_parallax and material_type == "terrain" and resolved_parallax_strength > 1.0:
+        warnings.append((
+            "parallax_high_strength_terrain",
+            f"High parallax strength ({resolved_parallax_strength:.2f}) on a terrain/landscape texture.\n\n"
+            "Terrain parallax should remain very subtle — values above 1.0 cause texture swimming, "
+            "horizon shimmer, and shadow instability on landscape meshes.  The effect is most "
+            "severe at medium-to-far view distances where the low polygon density of the terrain "
+            "mesh is most visible.\n\n"
+            "Tip: Keep terrain parallax strength at or below 1.0.  For deeper perceived depth, "
+            "prefer height map pre-processing (larger macro forms) over a high strength value.",
+        ))
+
     if include_parallax and material_type == "snow" and resolved_parallax_strength > 1.5:
         warnings.append((
             "parallax_high_strength_snow",
@@ -5002,6 +5064,9 @@ def _prefilter_for_mipmap_stability(image: Image.Image, output_kind: str) -> Ima
       very subtle (≈ 8 %) and the directional information is fully preserved at 1:1.
     * ``"parallax"`` — Apply a very light Gaussian pass to suppress random noise
       spikes that cause flickering under POM ray-marching at distance.
+    * ``"glow"`` — Apply a very gentle Gaussian blur to reduce high-frequency emissive
+      noise that produces shimmer in distant mip levels.  The radius is kept tight
+      (0.35) so the emissive pattern remains sharp at 1:1 viewing distance.
     * ``"rmaos"`` / ``"complex_material"`` — No pre-filtering; packed channels are
       left untouched to avoid channel cross-contamination.
     * All other kinds — Pass through unchanged.
@@ -5036,6 +5101,15 @@ def _prefilter_for_mipmap_stability(image: Image.Image, output_kind: str) -> Ima
         # Radius 0.4 at base resolution is nearly invisible at 1:1 but meaningfully
         # stabilises mid-level GPU mipmaps and reduces POM stair-stepping artefacts.
         return image.filter(ImageFilter.GaussianBlur(radius=0.4))
+
+    if normalized_kind == "glow":
+        # Glow/emissive maps with sharp high-frequency spots produce shimmer at distance
+        # because Skyrim's bilinear mip-filter amplifies the abrupt luminance transitions.
+        # A very tight Gaussian (radius 0.35) is imperceptible at full resolution but
+        # softens the mip-transition boundary enough to eliminate distant shimmer.
+        if image.mode not in {"L", "RGB", "RGBA"}:
+            return image
+        return image.filter(ImageFilter.GaussianBlur(radius=0.35))
 
     return image
 
