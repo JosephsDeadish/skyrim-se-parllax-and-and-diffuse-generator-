@@ -68,7 +68,7 @@ This opens a desktop interface where you can:
 - load oversized preview sources with automatic downscaling to keep the GUI responsive when opening very large textures
 - switch preview source images in folder mode, with automatic preview switching to the current file while batch processing
 - use the NIF Editor's resizable results log to review full untruncated scan/patch details while processing whole mesh folders — **NIF editing is an experimental feature; always keep backups of your NIF files**
-- when a folder is selected, only process original `.dds` source textures and skip generated `_n`, `_p`, `_g`/`_glow`/`_em`/`_emis`/`_emit`/`_emissive`, `_m`, `_s`, `_sk`, `_msn`, `_cm`, `_wt`, and `_sm` variants
+- when a folder is selected, only process original `.dds` source textures and skip generated `_n`, `_p`, `_g`/`_glow`/`_em`/`_emis`/`_emit`/`_emissive`, `_m` (plus `_ao`/`_roughness`/`_metalness` aliases), packed `_rmaos`/`_orm` variants, `_s`, `_sk`, `_msn`, `_cm`, `_wt`, and `_sm` variants
 - continue processing remaining files in folder mode even if one file is corrupt/unreadable
 - toggle **dark mode** for low-light modding sessions
 - get file-type sanity warnings (with per-warning “don’t show again”) for combinations that usually produce incorrect in-game results
@@ -81,7 +81,7 @@ python generate_textures.py /path/to/input.dds --output-dir ./output --complex-m
 
 Optional arguments:
 
-- positional input may also be a folder; folder mode scans subfolders, processes only original `.dds` source textures, and skips generated `_n`, `_p`, `_g`/`_glow`/`_em`/`_emis`/`_emit`/`_emissive`, `_m`, `_s`, `_sk`, `_msn`, `_cm`, `_wt`, and `_sm` variants
+- positional input may also be a folder; folder mode scans subfolders, processes only original `.dds` source textures, and skips generated `_n`, `_p`, `_g`/`_glow`/`_em`/`_emis`/`_emit`/`_emissive`, `_m` (plus `_ao`/`_roughness`/`_metalness` aliases), packed `_rmaos`/`_orm` variants, `_s`, `_sk`, `_msn`, `_cm`, `_wt`, and `_sm` variants
 
 - `--diffuse-name` (default: `<input_stem>`, e.g. `stonewall.dds`)
 - `--normal-name` (default: `<input_stem>_n`, e.g. `stonewall_n.dds`)
@@ -215,7 +215,7 @@ The tool recognises standard Skyrim SE texture naming conventions from the file 
 | `_wt` | Wetness Mask (Community Shaders) | Greyscale, Community Shaders wet-surface support. Dark areas (recessed/porous) receive more wetness accumulation; generated from inverted luminance + concavity signal. |
 | `_sm` | Dynamic Snow Mask (Community Shaders) | Greyscale, Community Shaders Dynamic Snow. Bright areas mark where snow accumulates; generated from luminance with contrast boost. |
 
-Batch folder mode scans subfolders and automatically skips generated variants (`_n`, `_p`, `_g`, `_glow`, `_em`, `_emis`, `_emit`, `_emissive`, `_m`, `_s`, `_sk`, `_rmaos`, `_ramos`, `_msn`, `_cm`, `_c`, `_C`, `_wt`, `_sm`) so it only processes original source textures.
+Batch folder mode scans subfolders and automatically skips generated variants (`_n`, `_p`, `_g`, `_glow`, `_em`, `_emis`, `_emit`, `_emissive`, `_m`, `_ao`, `_ambientocclusion`, `_rough`, `_roughness`, `_metal`, `_metallic`, `_metalness`, `_rmaos`, `_ramos`, `_orm`, `_orms`, `_mrao`, `_mra`, `_s`, `_sk`, `_msn`, `_cm`, `_c`, `_C`, `_wt`, `_sm`) so it only processes original source textures.
 
 ## Renderer quick-reference
 

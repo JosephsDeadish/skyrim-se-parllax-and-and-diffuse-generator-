@@ -2564,6 +2564,10 @@ class GenerateTexturesTests(unittest.TestCase):
             _sample_image().save(deeper / "stone_specular.dds", format="DDS", pixel_format="DXT5")
             _sample_image().save(deeper / "stone_height.dds", format="DDS", pixel_format="DXT5")
             _sample_image().save(deeper / "stone_envmask.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_roughness.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_metalness.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_ao.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_orm.dds", format="DDS", pixel_format="DXT5")
 
             discovered = collect_source_textures(root)
             self.assertEqual(
@@ -2968,6 +2972,24 @@ class GenerateTexturesTests(unittest.TestCase):
         result = identify_skyrim_texture_role(Path("textures/armor/iron_specular.dds"))
         self.assertEqual(result["role"], "environment_mask")
         self.assertEqual(result["suffix"], "_specular")
+        self.assertIn("alias", result["description"].lower())
+
+    def test_identify_skyrim_texture_role_roughness_alias_maps_to_environment_mask(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/armor/iron_roughness.dds"))
+        self.assertEqual(result["role"], "environment_mask")
+        self.assertEqual(result["suffix"], "_roughness")
+        self.assertIn("alias", result["description"].lower())
+
+    def test_identify_skyrim_texture_role_ao_alias_maps_to_environment_mask(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/armor/iron_ao.dds"))
+        self.assertEqual(result["role"], "environment_mask")
+        self.assertEqual(result["suffix"], "_ao")
+        self.assertIn("alias", result["description"].lower())
+
+    def test_identify_skyrim_texture_role_orm_alias_maps_to_rmaos_environment_mask(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/armor/iron_orm.dds"))
+        self.assertEqual(result["role"], "environment_mask")
+        self.assertEqual(result["suffix"], "_orm")
         self.assertIn("alias", result["description"].lower())
 
     def test_identify_skyrim_texture_role_c_as_complex_material(self) -> None:
