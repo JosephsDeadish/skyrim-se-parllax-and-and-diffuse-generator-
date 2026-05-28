@@ -56,7 +56,23 @@ except ImportError:
 DDS_EXTENSION = ".dds"
 APP_VERSION = "0.6"
 SUPPORTED_INPUT_EXTENSIONS = {DDS_EXTENSION, ".png", ".jpg", ".jpeg", ".tga", ".bmp"}
-GENERATED_TEXTURE_SUFFIXES = ("_msn", "_cm", "_c", "_rmaos", "_ramos", "_n", "_p", "_g", "_m")
+GENERATED_TEXTURE_SUFFIXES = (
+    "_msn",
+    "_cm",
+    "_c",
+    "_rmaos",
+    "_ramos",
+    "_n",
+    "_p",
+    "_g",
+    "_glow",
+    "_em",
+    "_emit",
+    "_emissive",
+    "_m",
+    "_s",
+    "_sk",
+)
 PREVIEW_MAX_DIMENSION = 1024
 PREVIEW_SIZE_PRESETS: dict[str, tuple[int, int]] = {
     "XS": (160, 120),
@@ -3235,7 +3251,10 @@ def _is_supported_input_file(path: Path) -> bool:
 
 def _is_generated_texture(path: Path) -> bool:
     stem = path.stem.lower()
-    return stem.endswith("_") or any(stem.endswith(suffix) for suffix in GENERATED_TEXTURE_SUFFIXES)
+    if stem.endswith("_") or any(stem.endswith(suffix) for suffix in GENERATED_TEXTURE_SUFFIXES):
+        return True
+    role_info = identify_skyrim_texture_role(path)
+    return bool(role_info.get("suffix"))
 
 
 # ---------------------------------------------------------------------------
@@ -3263,6 +3282,30 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
         "Glow/emissive map. Texture Slot 2 in the NIF. "
         "Controls per-pixel self-illumination strength. "
         "Requires SLSF1_Own_Emit (0x40) shader flag on the BSLightingShaderProperty.",
+    ),
+    "_glow": (
+        "glow",
+        "Glow / Emissive Map (_glow alias)",
+        "Alias naming for glow/emissive maps. Texture Slot 2 in the NIF. "
+        "Equivalent role to _g with the same SLSF1_Own_Emit shader-flag requirement.",
+    ),
+    "_em": (
+        "glow",
+        "Glow / Emissive Map (_em alias)",
+        "Alias naming for glow/emissive maps. Texture Slot 2 in the NIF. "
+        "Equivalent role to _g with the same SLSF1_Own_Emit shader-flag requirement.",
+    ),
+    "_emit": (
+        "glow",
+        "Glow / Emissive Map (_emit alias)",
+        "Alias naming for glow/emissive maps. Texture Slot 2 in the NIF. "
+        "Equivalent role to _g with the same SLSF1_Own_Emit shader-flag requirement.",
+    ),
+    "_emissive": (
+        "glow",
+        "Glow / Emissive Map (_emissive alias)",
+        "Alias naming for glow/emissive maps. Texture Slot 2 in the NIF. "
+        "Equivalent role to _g with the same SLSF1_Own_Emit shader-flag requirement.",
     ),
     "_m": (
         "environment_mask",
@@ -3601,7 +3644,7 @@ def get_generation_warnings(
     if include_glow and resolved_source_role == "glow":
         warnings.append((
             "glow_from_glow_source",
-            "Input already looks like a glow/emissive map (_g).\n\n"
+            "Input already looks like a glow/emissive map (_g/_em/_emit/_emissive).\n\n"
             "Regenerating glow from a glow map can over-compress emissive range.\n\n"
             "Tip: Generate glow from diffuse/albedo unless intentionally post-processing a glow texture.",
         ))
@@ -3806,7 +3849,7 @@ def collect_source_textures(input_path: Path) -> list[Path]:
     if not source_files:
         raise ValueError(
             f"No source DDS textures found in {input_path}. "
-            "Folder mode scans subfolders, processes original DDS files, and skips generated *_n, *_p, *_g, *_m, *_rmaos, *_ramos, *_msn, *_cm, *_c, and *_C variants."
+            "Folder mode scans subfolders, processes original DDS files, and skips generated *_n, *_p, *_g, *_glow, *_em, *_emit, *_emissive, *_m, *_s, *_sk, *_rmaos, *_ramos, *_msn, *_cm, *_c, and *_C variants."
         )
     return source_files
 

@@ -1673,6 +1673,10 @@ class GenerateTexturesTests(unittest.TestCase):
                 "brick_msn.dds",
                 "brick_c.dds",
                 "brick_rmaos.dds",
+                "brick_em.dds",
+                "brick_emissive.dds",
+                "brick_s.dds",
+                "brick_sk.dds",
                 "preview.png",
             ):
                 (temp_path / name).write_bytes(b"stub")
@@ -2162,6 +2166,9 @@ class GenerateTexturesTests(unittest.TestCase):
             _sample_image().save(deeper / "stone_n.dds", format="DDS", pixel_format="DXT5")
             _sample_image().save(deeper / "stone_c.dds", format="DDS", pixel_format="DXT5")
             _sample_image().save(deeper / "stone_rmaos.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_em.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_emissive.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_sk.dds", format="DDS", pixel_format="DXT5")
 
             discovered = collect_source_textures(root)
             self.assertEqual(
@@ -2473,6 +2480,12 @@ class GenerateTexturesTests(unittest.TestCase):
         result = identify_skyrim_texture_role(Path("textures/landscape/dirt_p.dds"))
         self.assertEqual(result["role"], "parallax")
         self.assertEqual(result["suffix"], "_p")
+
+    def test_identify_skyrim_texture_role_em_alias_is_glow(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/effects/fire_em.dds"))
+        self.assertEqual(result["role"], "glow")
+        self.assertEqual(result["suffix"], "_em")
+        self.assertIn("Alias", result["notes"])
 
     def test_identify_skyrim_texture_role_environment_mask(self) -> None:
         result = identify_skyrim_texture_role(Path("textures/armor/iron_m.dds"))
