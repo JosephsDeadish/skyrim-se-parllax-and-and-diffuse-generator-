@@ -2850,6 +2850,22 @@ class GenerateTexturesTests(unittest.TestCase):
                 ["nested/brick.dds", "nested/deeper/stone.dds", "top.dds"],
             )
 
+    def test_collect_source_textures_includes_uppercase_dds_extensions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "input"
+            nested = root / "nested"
+            nested.mkdir(parents=True)
+
+            _sample_image().save(root / "top.DDS", format="DDS", pixel_format="DXT5")
+            _sample_image().save(nested / "stone.DDS", format="DDS", pixel_format="DXT5")
+            _sample_image().save(nested / "stone_n.DDS", format="DDS", pixel_format="DXT5")
+
+            discovered = collect_source_textures(root)
+            self.assertEqual(
+                sorted(path.relative_to(root).as_posix() for path in discovered),
+                ["nested/stone.DDS", "top.DDS"],
+            )
+
     def test_select_generation_context_source_prefers_first_selected_input(self) -> None:
         folder_path = Path("textures/architecture")
         selected = [

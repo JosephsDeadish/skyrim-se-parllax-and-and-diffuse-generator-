@@ -5339,7 +5339,7 @@ def collect_source_textures(input_path: Path) -> list[Path]:
 
     source_files = sorted(
         path
-        for path in input_path.rglob(f"*{DDS_EXTENSION}")
+        for path in input_path.rglob("*")
         if path.is_file() and path.suffix.lower() == DDS_EXTENSION and not _is_generated_texture(path)
     )
     if not source_files:
