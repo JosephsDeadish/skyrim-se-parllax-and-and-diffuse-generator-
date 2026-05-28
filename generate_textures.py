@@ -6566,44 +6566,71 @@ if GUI_AVAILABLE:
             options_frame = ttk.LabelFrame(wrapper, text="Generation Options", padding=10)
             options_frame.pack(fill=tk.X, padx=4, pady=4)
 
-            _diffuse_check = ttk.Checkbutton(options_frame, text="Diffuse", variable=self.include_diffuse_var, command=self._refresh_preview)
+            # --- Workflow-separated output checkboxes ---
+            _workflow_frame = ttk.Frame(options_frame)
+            _workflow_frame.grid(row=0, column=0, columnspan=5, sticky=tk.EW, pady=(0, 4))
+            _workflow_frame.columnconfigure(0, weight=1)
+            _workflow_frame.columnconfigure(1, weight=1)
+            _workflow_frame.columnconfigure(2, weight=1)
+
+            # --- Vanilla / ENB Workflow section ---
+            _enb_section = ttk.LabelFrame(_workflow_frame, text="Vanilla / ENB Workflow", padding=6)
+            _enb_section.grid(row=0, column=0, sticky=tk.NSEW, padx=(0, 4), pady=2)
+            _diffuse_check = ttk.Checkbutton(_enb_section, text="Diffuse", variable=self.include_diffuse_var, command=self._refresh_preview)
             _diffuse_check.grid(row=0, column=0, sticky=tk.W)
             self._add_tooltip(_diffuse_check, "🎨 Generate the diffuse (colour) texture.\nThis is the one that makes your rock look like a rock and not a void of existential dread.")
-            _normal_check = ttk.Checkbutton(options_frame, text="Normal / _n", variable=self.include_normal_var, command=self._refresh_preview)
-            _normal_check.grid(row=0, column=1, sticky=tk.W)
+            _normal_check = ttk.Checkbutton(_enb_section, text="Normal / _n", variable=self.include_normal_var, command=self._refresh_preview)
+            _normal_check.grid(row=1, column=0, sticky=tk.W)
             self._add_tooltip(_normal_check, "🗻 Generate a normal map for fake 3D depth.\nSkyrim's favourite optical illusion since 2011.")
-            _parallax_check = ttk.Checkbutton(options_frame, text="Height/Parallax (workflow-dependent) / _p", variable=self.include_parallax_var, command=self._on_output_selection_changed)
-            _parallax_check.grid(row=0, column=2, sticky=tk.W)
-            self._add_tooltip(_parallax_check, "🌊 Generate a height/parallax map (_p).\nWorkflow-dependent: some setups use _p directly, while others rely on packed/alpha height paths.")
-            _glow_check = ttk.Checkbutton(options_frame, text="Glow / _g", variable=self.include_glow_var, command=self._refresh_preview)
-            _glow_check.grid(row=1, column=0, sticky=tk.W)
+            _env_mask_check = ttk.Checkbutton(_enb_section, text="Environment Mask / _m", variable=self.include_environment_mask_var, command=self._on_environment_mask_output_toggled)
+            _env_mask_check.grid(row=2, column=0, sticky=tk.W)
+            self._add_tooltip(_env_mask_check, "🪞 Generate classic _m environment mask for vanilla/ENB reflection workflows.\nMutually exclusive with Community Shaders PBR _rmaos — these are different material systems, do not combine.")
+            _parallax_check = ttk.Checkbutton(_enb_section, text="Height/Parallax (_p) — optional", variable=self.include_parallax_var, command=self._on_output_selection_changed)
+            _parallax_check.grid(row=3, column=0, sticky=tk.W)
+            self._add_tooltip(_parallax_check, "🌊 Generate a height/parallax map (_p).\nFor vanilla Skyrim SE use 'standard' parallax mode; for ENBSeries POM use 'occlusion' mode.\nNot a universal format — match your workflow before enabling.")
+            _glow_check = ttk.Checkbutton(_enb_section, text="Glow / _g", variable=self.include_glow_var, command=self._refresh_preview)
+            _glow_check.grid(row=4, column=0, sticky=tk.W)
             self._add_tooltip(_glow_check, "✨ Generate a glow map. Bright pixels glow in the dark.\nPerfect for making your cave look like a disco.")
-            _env_mask_check = ttk.Checkbutton(options_frame, text="Environment Mask (Vanilla/ENB) / _m", variable=self.include_environment_mask_var, command=self._on_environment_mask_output_toggled)
-            _env_mask_check.grid(row=1, column=1, sticky=tk.W)
-            self._add_tooltip(_env_mask_check, "🪞 Generate classic _m environment mask output for vanilla/ENB reflection workflows.\nMutually exclusive with Community Shaders PBR _rmaos in this run.")
-            _rmaos_check = ttk.Checkbutton(options_frame, text="Community Shaders PBR / _rmaos", variable=self.include_rmaos_var, command=self._on_rmaos_output_toggled)
-            _rmaos_check.grid(row=1, column=2, sticky=tk.W)
-            self._add_tooltip(_rmaos_check, "🧩 Generate Community Shaders TruePBR _rmaos/_ramos plus JSON sidecar.\nMutually exclusive with vanilla/ENB _m environment-mask workflow in this run.")
-            _wetness_mask_check = ttk.Checkbutton(options_frame, text="Custom Wetness Mask (Generator/Internal) / _wt", variable=self.include_wetness_mask_var, command=self._refresh_preview)
-            _wetness_mask_check.grid(row=0, column=3, sticky=tk.W)
-            self._add_tooltip(_wetness_mask_check, "Generate this tool's custom/internal wetness mask output (_wt.dds).\nNot a baseline vanilla Skyrim texture slot by itself.")
-            _snow_mask_check = ttk.Checkbutton(options_frame, text="Snow mask / _sm", variable=self.include_snow_mask_var, command=self._refresh_preview)
-            _snow_mask_check.grid(row=1, column=3, sticky=tk.W)
-            self._add_tooltip(_snow_mask_check, "Generate a Community Shaders Dynamic Snow mask (_sm.dds). Marks which pixels snow will accumulate on — bright = buried, dark = sheltered.")
-            _complex_check = ttk.Checkbutton(options_frame, text="ENB Complex Material", variable=self.include_complex_var, command=self._on_output_selection_changed)
-            _complex_check.grid(row=1, column=4, sticky=tk.W)
+            _complex_check = ttk.Checkbutton(_enb_section, text="ENB Complex Material", variable=self.include_complex_var, command=self._on_output_selection_changed)
+            _complex_check.grid(row=5, column=0, sticky=tk.W)
             self._add_tooltip(
                 _complex_check,
-                "🔮 Generate ENB complex material output.\n"
-                "This toggle is for ENB complex workflows (typically _msn).\n"
-                "Community Shaders TruePBR uses the separate _rmaos path, not this ENB toggle.",
+                "🔮 Generate ENB complex material output (typically _msn).\n"
+                "ENB Complex Material ≠ Community Shaders PBR — these are separate renderer workflows.\n"
+                "Community Shaders TruePBR uses _rmaos (in the CS PBR section), not this toggle.",
             )
-            _ao_check = ttk.Checkbutton(options_frame, text="Standalone AO (optional/non-standard) / _ao", variable=self.include_ao_var, command=self._refresh_preview)
-            _ao_check.grid(row=0, column=4, sticky=tk.W)
-            self._add_tooltip(_ao_check, "🌑 Generate an optional standalone AO map (_ao.dds).\nMost Skyrim workflows use AO packed in other maps or baked into diffuse, so treat this as optional.")
-            _roughness_check = ttk.Checkbutton(options_frame, text="Roughness / _rough", variable=self.include_roughness_var, command=self._refresh_preview)
-            _roughness_check.grid(row=2, column=4, sticky=tk.W)
+
+            # --- Community Shaders PBR Workflow section ---
+            _pbr_section = ttk.LabelFrame(_workflow_frame, text="Community Shaders PBR Workflow", padding=6)
+            _pbr_section.grid(row=0, column=1, sticky=tk.NSEW, padx=4, pady=2)
+            _pbr_note = ttk.Label(
+                _pbr_section,
+                text="Shares Diffuse + Normal with Vanilla/ENB",
+                foreground="gray",
+                font=("TkDefaultFont", 8),
+            )
+            _pbr_note.grid(row=0, column=0, sticky=tk.W, pady=(0, 2))
+            self._add_tooltip(_pbr_note, "ℹ Base color and normal map are shared with Vanilla/ENB workflow outputs.\nEnable them in the Vanilla/ENB section above.")
+            _rmaos_check = ttk.Checkbutton(_pbr_section, text="RMAOS / _rmaos", variable=self.include_rmaos_var, command=self._on_rmaos_output_toggled)
+            _rmaos_check.grid(row=1, column=0, sticky=tk.W)
+            self._add_tooltip(_rmaos_check, "🧩 Generate Community Shaders TruePBR _rmaos/_ramos plus JSON sidecar.\n_rmaos ≠ _m — these belong to completely different material systems.\nMutually exclusive with Vanilla/ENB _m environment mask.")
+            _roughness_check = ttk.Checkbutton(_pbr_section, text="Roughness / _rough", variable=self.include_roughness_var, command=self._refresh_preview)
+            _roughness_check.grid(row=2, column=0, sticky=tk.W)
             self._add_tooltip(_roughness_check, "🪨 Generate a standalone roughness map (_rough.dds).\nControls how rough vs. glossy the surface looks. Material-aware: stone goes rough, glass goes smooth.")
+            _ao_check = ttk.Checkbutton(_pbr_section, text="Standalone AO (optional) / _ao", variable=self.include_ao_var, command=self._refresh_preview)
+            _ao_check.grid(row=3, column=0, sticky=tk.W)
+            self._add_tooltip(_ao_check, "🌑 Generate an optional standalone AO map (_ao.dds).\nStandalone AO maps are uncommon in traditional Skyrim workflows — AO is usually packed into _rmaos or baked into diffuse.\nTreat this as optional/non-standard.")
+
+            # --- Internal / Custom Generator Maps section ---
+            _custom_section = ttk.LabelFrame(_workflow_frame, text="Internal / Custom Generator Maps", padding=6)
+            _custom_section.grid(row=0, column=2, sticky=tk.NSEW, padx=(4, 0), pady=2)
+            _wetness_mask_check = ttk.Checkbutton(_custom_section, text="Wetness Mask (_wt) — generator internal", variable=self.include_wetness_mask_var, command=self._refresh_preview)
+            _wetness_mask_check.grid(row=0, column=0, sticky=tk.W)
+            self._add_tooltip(_wetness_mask_check, "💧 Generate this tool's custom/internal wetness mask (_wt.dds).\nThis is a generator-defined output — Skyrim does not natively expect _wt.dds as a standard texture slot.")
+            _snow_mask_check = ttk.Checkbutton(_custom_section, text="Snow Mask / _sm", variable=self.include_snow_mask_var, command=self._refresh_preview)
+            _snow_mask_check.grid(row=1, column=0, sticky=tk.W)
+            self._add_tooltip(_snow_mask_check, "❄ Generate a Community Shaders Dynamic Snow mask (_sm.dds). Marks which pixels snow will accumulate on — bright = buried, dark = sheltered.")
+
             self._render_profile_managed_output_widgets = [
                 _diffuse_check,
                 _normal_check,
@@ -6623,11 +6650,11 @@ if GUI_AVAILABLE:
                 variable=self.auto_suggestions_var,
                 command=self._toggle_auto_suggestions,
             )
-            _auto_sugg_check.grid(row=2, column=0, columnspan=4, sticky=tk.W, pady=(6, 2))
+            _auto_sugg_check.grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(6, 2))
             self._add_tooltip(_auto_sugg_check, "🤖 Let the AI™ (actually just math) pick slider values.\nUncheck if you think YOU know better than the algorithm. Spoiler: maybe you do.")
 
             _render_profile_label = ttk.Label(options_frame, text="Target renderer")
-            _render_profile_label.grid(row=3, column=0, sticky=tk.W, pady=8)
+            _render_profile_label.grid(row=2, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(
                 _render_profile_label,
                 "🎯 Select target renderer preset.\n"
@@ -6652,7 +6679,7 @@ if GUI_AVAILABLE:
                 state="readonly",
                 width=20,
             )
-            _render_profile_combo.grid(row=3, column=1, sticky=tk.W)
+            _render_profile_combo.grid(row=2, column=1, sticky=tk.W)
             _render_profile_combo.bind("<<ComboboxSelected>>", self._on_render_profile_changed)
             self._add_tooltip(
                 _render_profile_combo,
@@ -6672,10 +6699,10 @@ if GUI_AVAILABLE:
                 anchor=tk.W,
                 wraplength=520,
             )
-            self.render_profile_hint_label.grid(row=3, column=2, columnspan=3, sticky=tk.EW, padx=(4, 0))
+            self.render_profile_hint_label.grid(row=2, column=2, columnspan=3, sticky=tk.EW, padx=(4, 0))
 
             _complex_fmt_label = ttk.Label(options_frame, text="Complex material format")
-            _complex_fmt_label.grid(row=4, column=0, sticky=tk.W, pady=8)
+            _complex_fmt_label.grid(row=3, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(
                 _complex_fmt_label,
                 "🏷 Output format for complex-material maps.\n"
@@ -6689,7 +6716,7 @@ if GUI_AVAILABLE:
                 state="readonly",
                 width=20,
             )
-            self.complex_format_combo.grid(row=4, column=1, sticky=tk.W)
+            self.complex_format_combo.grid(row=3, column=1, sticky=tk.W)
             self.complex_format_combo.bind("<<ComboboxSelected>>", self._on_complex_format_changed)
             self._add_tooltip(
                 self.complex_format_combo,
@@ -6701,7 +6728,7 @@ if GUI_AVAILABLE:
             )
 
             _env_mode_row = ttk.Frame(options_frame)
-            _env_mode_row.grid(row=4, column=2, columnspan=2, sticky=tk.W, padx=(20, 4), pady=8)
+            _env_mode_row.grid(row=3, column=2, columnspan=2, sticky=tk.W, padx=(20, 4), pady=8)
             _env_mode_label = ttk.Label(_env_mode_row, text="Env mask mode")
             _env_mode_label.pack(side=tk.LEFT)
             self._add_tooltip(_env_mode_label, "🌍 How to encode the environment mask.\n'standard' = vanilla Skyrim.\n'complex' = packed RGBA for renderer-specific workflows (primarily ENB preset output in this tool).\nFor TruePBR, use the dedicated _rmaos/_ramos output path.\nUse Target renderer + Help for channel mapping.")
@@ -6719,114 +6746,114 @@ if GUI_AVAILABLE:
                 options_frame,
                 text="standard = vanilla Skyrim SE  |  complex = packed RGBA (renderer-specific channels)",
                 foreground="gray",
-            ).grid(row=4, column=4, sticky=tk.W, padx=(4, 0))
+            ).grid(row=3, column=4, sticky=tk.W, padx=(4, 0))
 
             _normal_label = ttk.Label(options_frame, text="Normal strength")
-            _normal_label.grid(row=5, column=0, sticky=tk.W, pady=8)
+            _normal_label.grid(row=4, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_normal_label, "💪 Controls normal-map intensity.\nHigher = sharper fake detail. Lower = smooth potato mode.")
             self.normal_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.normal_strength_var, command=lambda _: self._on_slider_changed())
-            self.normal_scale.grid(row=5, column=1, columnspan=2, sticky=tk.EW)
+            self.normal_scale.grid(row=4, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.normal_scale, "💪 Drag right for epic bumps, left for subtle detail.\nLive value is shown next to the slider so you can stop guessing.")
             self.normal_strength_display_label = ttk.Label(options_frame, textvariable=self.normal_strength_display_var)
-            self.normal_strength_display_label.grid(row=5, column=3, sticky=tk.W, padx=8)
+            self.normal_strength_display_label.grid(row=4, column=3, sticky=tk.W, padx=8)
             self.auto_normal_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_normal_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_normal_check.grid(row=5, column=4, sticky=tk.W)
+            self.auto_normal_check.grid(row=4, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_normal_check, "🤖 Let the app analyse the image and choose this value.\nUncheck to manually control, as the control freak you truly are.")
 
             _parallax_label = ttk.Label(options_frame, text="Parallax strength")
-            _parallax_label.grid(row=6, column=0, sticky=tk.W, pady=8)
+            _parallax_label.grid(row=5, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_parallax_label, "🏔 Controls parallax depth contrast.\nToo high and your pebble becomes a canyon. Too low and your canyon becomes toast.")
             self.parallax_scale = ttk.Scale(options_frame, from_=0.1, to=6.0, variable=self.parallax_strength_var, command=lambda _: self._on_slider_changed())
-            self.parallax_scale.grid(row=6, column=1, columnspan=2, sticky=tk.EW)
+            self.parallax_scale.grid(row=5, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.parallax_scale, "🏔 Slide right for deeper depth illusion, left for subtle relief.\nYes, this can absolutely make stones look dramatic.")
             self.parallax_strength_display_label = ttk.Label(options_frame, textvariable=self.parallax_strength_display_var)
-            self.parallax_strength_display_label.grid(row=6, column=3, sticky=tk.W, padx=8)
+            self.parallax_strength_display_label.grid(row=5, column=3, sticky=tk.W, padx=8)
             self.auto_parallax_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_parallax_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_parallax_check.grid(row=6, column=4, sticky=tk.W)
+            self.auto_parallax_check.grid(row=5, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_parallax_check, "🤖 Automatic parallax strength suggestion.\nBased on actual image analysis, not a horoscope.")
 
             _glow_label = ttk.Label(options_frame, text="Glow threshold")
-            _glow_label.grid(row=7, column=0, sticky=tk.W, pady=8)
+            _glow_label.grid(row=6, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_glow_label, "💡 Brightness cutoff for glow.\nLower = more glow. Higher = only brightest bits glow like tiny supernovas.")
             self.glow_scale = ttk.Scale(options_frame, from_=0, to=255, variable=self.glow_threshold_var, command=lambda _: self._on_slider_changed())
-            self.glow_scale.grid(row=7, column=1, columnspan=2, sticky=tk.EW)
+            self.glow_scale.grid(row=6, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.glow_scale, "💡 0 means everything glows like a rave. 255 means almost nothing glows.\nUse the live value display to tune precisely.")
             self.glow_threshold_display_label = ttk.Label(options_frame, textvariable=self.glow_threshold_display_var)
-            self.glow_threshold_display_label.grid(row=7, column=3, sticky=tk.W, padx=8)
+            self.glow_threshold_display_label.grid(row=6, column=3, sticky=tk.W, padx=8)
             self.auto_glow_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_glow_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_glow_check.grid(row=7, column=4, sticky=tk.W)
+            self.auto_glow_check.grid(row=6, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_glow_check, "🤖 Auto-detect the ideal glow threshold.\nBased on luminance analysis. The computer is trying its best.")
 
             _env_mask_label = ttk.Label(options_frame, text="Environment mask strength")
-            _env_mask_label.grid(row=8, column=0, sticky=tk.W, pady=8)
+            _env_mask_label.grid(row=7, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_env_mask_label, "🪞 Controls environment-mask contrast.\nHigher = stronger shiny-vs-matte separation. Great for dramatic materials.")
             self.environment_mask_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.environment_mask_strength_var, command=lambda _: self._on_slider_changed())
-            self.environment_mask_scale.grid(row=8, column=1, columnspan=2, sticky=tk.EW)
+            self.environment_mask_scale.grid(row=7, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.environment_mask_scale, "🪞 Slide right for stronger reflection contrast.\nSlide left for chill, less dramatic materials.")
             self.environment_mask_strength_display_label = ttk.Label(options_frame, textvariable=self.environment_mask_strength_display_var)
-            self.environment_mask_strength_display_label.grid(row=8, column=3, sticky=tk.W, padx=8)
+            self.environment_mask_strength_display_label.grid(row=7, column=3, sticky=tk.W, padx=8)
             self.auto_environment_mask_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_environment_mask_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_environment_mask_check.grid(row=8, column=4, sticky=tk.W)
+            self.auto_environment_mask_check.grid(row=7, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_environment_mask_check, "🤖 Auto-select environment mask strength.\nThe machine will judge your texture's reflective potential.")
 
             _rmaos_label = ttk.Label(options_frame, text="RMAOS strength")
-            _rmaos_label.grid(row=9, column=0, sticky=tk.W, pady=8)
+            _rmaos_label.grid(row=8, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_rmaos_label, "🧩 Controls TruePBR _rmaos channel contrast/intensity packing.")
             self.rmaos_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.rmaos_strength_var, command=lambda _: self._on_slider_changed())
-            self.rmaos_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
+            self.rmaos_scale.grid(row=8, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.rmaos_scale, "🧩 Higher values push stronger channel separation for _rmaos output.")
             self.rmaos_strength_display_label = ttk.Label(options_frame, textvariable=self.rmaos_strength_display_var)
-            self.rmaos_strength_display_label.grid(row=9, column=3, sticky=tk.W, padx=8)
+            self.rmaos_strength_display_label.grid(row=8, column=3, sticky=tk.W, padx=8)
             self.auto_rmaos_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_rmaos_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_rmaos_check.grid(row=9, column=4, sticky=tk.W)
+            self.auto_rmaos_check.grid(row=8, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_rmaos_check, "🤖 Auto-select dedicated RMAOS strength.")
 
             _complex_label = ttk.Label(options_frame, text="Complex strength")
-            _complex_label.grid(row=10, column=0, sticky=tk.W, pady=8)
+            _complex_label.grid(row=9, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_complex_label, "🔮 Controls complex-material contrast.\nHigher = punchier ENB material response. Lower = subtle, civilized vibes.")
             self.complex_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.complex_strength_var, command=lambda _: self._on_slider_changed())
-            self.complex_scale.grid(row=10, column=1, columnspan=2, sticky=tk.EW)
+            self.complex_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.complex_scale, "🔮 Right = louder material definition.\nLeft = quieter output for restrained legends.")
             self.complex_strength_display_label = ttk.Label(options_frame, textvariable=self.complex_strength_display_var)
-            self.complex_strength_display_label.grid(row=10, column=3, sticky=tk.W, padx=8)
+            self.complex_strength_display_label.grid(row=9, column=3, sticky=tk.W, padx=8)
             self.auto_complex_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_complex_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_complex_check.grid(row=10, column=4, sticky=tk.W)
+            self.auto_complex_check.grid(row=9, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_complex_check, "🤖 Auto-set complex strength. Let the algorithm\nscrutinise your texture's material complexity.")
 
             _specular_label = ttk.Label(options_frame, text="Specular strength (_msn alpha)")
-            _specular_label.grid(row=11, column=0, sticky=tk.W, pady=8)
+            _specular_label.grid(row=10, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_specular_label, "✨ Controls specular highlight intensity in _msn alpha.\nHigher = shinier. Lower = dusty realism.")
             self.specular_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.specular_strength_var, command=lambda _: self._on_slider_changed())
-            self.specular_scale.grid(row=11, column=1, columnspan=2, sticky=tk.EW)
+            self.specular_scale.grid(row=10, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.specular_scale, "✨ Turn it up for glorious shine, down for ancient weathered stone.\nLive value shown beside slider.")
             self.specular_strength_display_label = ttk.Label(options_frame, textvariable=self.specular_strength_display_var)
-            self.specular_strength_display_label.grid(row=11, column=3, sticky=tk.W, padx=8)
+            self.specular_strength_display_label.grid(row=10, column=3, sticky=tk.W, padx=8)
             self.auto_specular_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_specular_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_specular_check.grid(row=11, column=4, sticky=tk.W)
+            self.auto_specular_check.grid(row=10, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_specular_check, "🤖 Auto-set specular strength. The AI ponders how shiny\nyour texture DESERVES to be.")
 
             _ao_label = ttk.Label(options_frame, text="AO strength")
-            _ao_label.grid(row=12, column=0, sticky=tk.W, pady=8)
+            _ao_label.grid(row=11, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_ao_label, "🌑 Controls ambient occlusion (cavity/self-shadowing) contrast.\nHigher = deeper shadows in crevices.")
             self.ao_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.ao_strength_var, command=lambda _: self._on_slider_changed())
-            self.ao_scale.grid(row=12, column=1, columnspan=2, sticky=tk.EW)
+            self.ao_scale.grid(row=11, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.ao_scale, "🌑 Right = stronger AO bake, left = subtle cavity hints.")
             self.ao_strength_display_label = ttk.Label(options_frame, textvariable=self.ao_strength_display_var)
-            self.ao_strength_display_label.grid(row=12, column=3, sticky=tk.W, padx=8)
+            self.ao_strength_display_label.grid(row=11, column=3, sticky=tk.W, padx=8)
             self.auto_ao_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_ao_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_ao_check.grid(row=12, column=4, sticky=tk.W)
+            self.auto_ao_check.grid(row=11, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_ao_check, "🤖 Auto-recommend AO strength based on surface contrast.")
 
             _roughness_label = ttk.Label(options_frame, text="Roughness strength")
-            _roughness_label.grid(row=13, column=0, sticky=tk.W, pady=8)
+            _roughness_label.grid(row=12, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_roughness_label, "🪨 Controls roughness map contrast. Material-aware: stone=rougher, glass=smoother.")
             self.roughness_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.roughness_strength_var, command=lambda _: self._on_slider_changed())
-            self.roughness_scale.grid(row=13, column=1, columnspan=2, sticky=tk.EW)
+            self.roughness_scale.grid(row=12, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.roughness_scale, "🪨 Right = higher contrast roughness, left = uniform surface.")
             self.roughness_strength_display_label = ttk.Label(options_frame, textvariable=self.roughness_strength_display_var)
-            self.roughness_strength_display_label.grid(row=13, column=3, sticky=tk.W, padx=8)
+            self.roughness_strength_display_label.grid(row=12, column=3, sticky=tk.W, padx=8)
             self.auto_roughness_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_roughness_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_roughness_check.grid(row=13, column=4, sticky=tk.W)
+            self.auto_roughness_check.grid(row=12, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_roughness_check, "🤖 Auto-recommend roughness strength — material-aware so stone gets gritty and glass gets smooth.")
 
             # --- Emboss depth + relief depth + parallax mode options ---
@@ -6836,7 +6863,7 @@ if GUI_AVAILABLE:
                 variable=self.emboss_mode_var,
                 command=self._on_emboss_mode_changed,
             )
-            _emboss_check.grid(row=14, column=0, columnspan=4, sticky=tk.W, pady=(8, 2))
+            _emboss_check.grid(row=13, column=0, columnspan=4, sticky=tk.W, pady=(8, 2))
             self._add_tooltip(
                 _emboss_check,
                 "📜 Emboss mode generates normals from edge ridges instead of smooth gradients.\n"
@@ -6850,7 +6877,7 @@ if GUI_AVAILABLE:
                 variable=self.relief_mode_var,
                 command=self._on_relief_mode_changed,
             )
-            _relief_check.grid(row=14, column=4, columnspan=4, sticky=tk.W, pady=(8, 2))
+            _relief_check.grid(row=13, column=4, columnspan=4, sticky=tk.W, pady=(8, 2))
             self._add_tooltip(
                 _relief_check,
                 "🖼 Relief mode uses the image's own luminosity as a height field so that\n"
@@ -6861,7 +6888,7 @@ if GUI_AVAILABLE:
             )
 
             _parallax_mode_label = ttk.Label(options_frame, text="Parallax mode")
-            _parallax_mode_label.grid(row=15, column=0, sticky=tk.W, pady=(2, 8))
+            _parallax_mode_label.grid(row=14, column=0, sticky=tk.W, pady=(2, 8))
             self._add_tooltip(
                 _parallax_mode_label,
                 "🏔 Heightmap style for _p.dds output.\n"
@@ -6875,7 +6902,7 @@ if GUI_AVAILABLE:
                 state="readonly",
                 width=24,
             )
-            self.parallax_mode_combo.grid(row=15, column=1, columnspan=2, sticky=tk.W)
+            self.parallax_mode_combo.grid(row=14, column=1, columnspan=2, sticky=tk.W)
             self.parallax_mode_combo.bind("<<ComboboxSelected>>", self._on_parallax_mode_changed)
             self._add_tooltip(
                 self.parallax_mode_combo,
@@ -6886,7 +6913,7 @@ if GUI_AVAILABLE:
                 options_frame,
                 text="standard = vanilla  |  occlusion = ENBSeries POM",
                 foreground="gray",
-            ).grid(row=15, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
+            ).grid(row=14, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
             self.mode_controls_hint_label = ttk.Label(
                 options_frame,
                 textvariable=self.mode_controls_hint_var,
@@ -6895,7 +6922,7 @@ if GUI_AVAILABLE:
                 anchor=tk.W,
                 wraplength=520,
             )
-            self.mode_controls_hint_label.grid(row=16, column=0, columnspan=5, sticky=tk.W, pady=(0, 6))
+            self.mode_controls_hint_label.grid(row=15, column=0, columnspan=5, sticky=tk.W, pady=(0, 6))
             self._add_tooltip(
                 self.mode_controls_hint_label,
                 "Heads-up line for mode-selector availability.\n"
