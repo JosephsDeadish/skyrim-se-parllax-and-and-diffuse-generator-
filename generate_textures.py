@@ -1691,8 +1691,8 @@ _RENDER_PROFILE_OUTPUT_LABELS: dict[str, str] = {
     "include_glow": "glow/_g",
     "include_environment_mask": "vanilla/enb env mask/_m",
     "include_rmaos": "community shaders pbr/_rmaos/_ramos",
-    "include_wetness_mask": "custom wetness mask/_wt",
-    "include_snow_mask": "snow mask/_sm",
+    "include_wetness_mask": "community shaders wetness/_wt",
+    "include_snow_mask": "community shaders snow/_sm",
     "include_complex": "enb complex material",
     "include_ao": "standalone ao/_ao (optional)",
     "include_roughness": "roughness/_rough",
@@ -6621,15 +6621,15 @@ if GUI_AVAILABLE:
             _ao_check.grid(row=3, column=0, sticky=tk.W)
             self._add_tooltip(_ao_check, "🌑 Generate an optional standalone AO map (_ao.dds).\nStandalone AO maps are uncommon in traditional Skyrim workflows — AO is usually packed into _rmaos or baked into diffuse.\nTreat this as optional/non-standard.")
 
-            # --- Internal / Custom Generator Maps section ---
-            _custom_section = ttk.LabelFrame(_workflow_frame, text="Internal / Custom Generator Maps", padding=6)
+            # --- Community Shaders workflow-specific maps section ---
+            _custom_section = ttk.LabelFrame(_workflow_frame, text="Community Shaders / Workflow-Specific Maps", padding=6)
             _custom_section.grid(row=0, column=2, sticky=tk.NSEW, padx=(4, 0), pady=2)
-            _wetness_mask_check = ttk.Checkbutton(_custom_section, text="Wetness Mask (_wt) — generator internal", variable=self.include_wetness_mask_var, command=self._refresh_preview)
+            _wetness_mask_check = ttk.Checkbutton(_custom_section, text="Wetness Mask / _wt (Community Shaders)", variable=self.include_wetness_mask_var, command=self._refresh_preview)
             _wetness_mask_check.grid(row=0, column=0, sticky=tk.W)
-            self._add_tooltip(_wetness_mask_check, "💧 Generate this tool's custom/internal wetness mask (_wt.dds).\nThis is a generator-defined output — Skyrim does not natively expect _wt.dds as a standard texture slot.")
-            _snow_mask_check = ttk.Checkbutton(_custom_section, text="Snow Mask / _sm", variable=self.include_snow_mask_var, command=self._refresh_preview)
+            self._add_tooltip(_wetness_mask_check, "💧 Generate a Community Shaders wetness mask (_wt.dds).\nUseful in supported shader/mod setups, but not part of vanilla Skyrim's standard texture slot set.")
+            _snow_mask_check = ttk.Checkbutton(_custom_section, text="Snow Mask / _sm (Community Shaders)", variable=self.include_snow_mask_var, command=self._refresh_preview)
             _snow_mask_check.grid(row=1, column=0, sticky=tk.W)
-            self._add_tooltip(_snow_mask_check, "❄ Generate a Community Shaders Dynamic Snow mask (_sm.dds). Marks which pixels snow will accumulate on — bright = buried, dark = sheltered.")
+            self._add_tooltip(_snow_mask_check, "❄ Generate a Community Shaders Dynamic Snow mask (_sm.dds).\nMarks where snow accumulates in supported shader/mod setups; this is workflow-specific, not a universal vanilla slot.")
 
             self._render_profile_managed_output_widgets = [
                 _diffuse_check,

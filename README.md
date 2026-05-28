@@ -197,7 +197,7 @@ Generated outputs default to `.dds` filenames regardless of the input format. Ex
 Skyrim's renderer uses mesh shader slots/flags and assigned texture paths; it does not inherently enforce suffix meaning.  
 This generator still treats suffixes as functional metadata because modding workflows, shader packs, and tooling depend on them for routing.
 
-The tool recognises standard Skyrim SE texture naming conventions from the file name suffix:
+The tool recognises a mix of common Skyrim SE suffix conventions and workflow-specific mod/shader suffixes:
 
 | Suffix | Role | Notes |
 |--------|------|-------|
@@ -205,15 +205,15 @@ The tool recognises standard Skyrim SE texture naming conventions from the file 
 | `_n` | Normal Map | DirectX tangent-space, Slot 1 |
 | `_p` | Parallax Heightmap | Greyscale, Slot 3, requires SKSE64 memory patch |
 | `_g` | Glow / Emissive | Slot 2, requires `SLSF1_Own_Emit` flag |
-| `_m` | Environment Mask | Greyscale reflection intensity, Slot 5 — vanilla Skyrim SE only |
+| `_m` | Environment Mask | Context-dependent Slot 5 map. Vanilla workflow uses greyscale reflection intensity; this app's ENB complex preset can also write channel-packed `_m` data. |
 | `_rmaos` | Complex Env Mask (TruePBR naming) | RGBA Slot 5 packed data map for Community Shaders TruePBR. Channels: R=Roughness, G=Metallic, B=AO, A=Other/smoothness/height (JSON-driven). |
 | `_s` | Subsurface Scattering | Slot 6, skin/character textures |
 | `_sk` | Skin Specular | Slot 7, character-specific |
 | `_msn` | Complex Parallax Material (ENBSeries) | RGBA Slot 1 — replaces `_n` when ENBSeries complex material is active. Channels: R=Normal X, G=Normal Y, B=Normal Z, A=Specular intensity. **ENBSeries only — not vanilla Skyrim SE.** |
 | `_cm` | Complex Material packed (Community Shaders Extended Materials) | RGBA Slot 5 — **Community Shaders Extended Materials** workflow. Channels: R=Environment reflection amount, G=Glossiness, B=Metallic, A=Height / mode-control alpha. **Not vanilla Skyrim SE.** |
 | `_c` / `_C` | Complex Material packed alias | Identical channel layout and role as `_cm`. `_C.dds` (uppercase) is treated the same on Windows and by this tool. Prefer `_cm` for new mods unless the pack uses `_c` naming. |
-| `_wt` | Wetness Mask (Community Shaders) | Greyscale, Community Shaders wet-surface support. Dark areas (recessed/porous) receive more wetness accumulation; generated from inverted luminance + concavity signal. |
-| `_sm` | Dynamic Snow Mask (Community Shaders) | Greyscale, Community Shaders Dynamic Snow. Bright areas mark where snow accumulates; generated from luminance with contrast boost. |
+| `_wt` | Wetness Mask (Community Shaders) | Workflow-specific (non-vanilla) greyscale mask used by Community Shaders wet-surface support in compatible mods/shaders. |
+| `_sm` | Dynamic Snow Mask (Community Shaders) | Workflow-specific (non-vanilla) greyscale mask used by Community Shaders Dynamic Snow in compatible mods/shaders. |
 
 Skyrim SE workflows in this project treat `_em`, `_emit`, and `_glow` glow suffixes as exporter aliases to rename to `_g`.
 
