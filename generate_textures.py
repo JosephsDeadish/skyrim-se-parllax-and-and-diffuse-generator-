@@ -1687,14 +1687,14 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
 _RENDER_PROFILE_OUTPUT_LABELS: dict[str, str] = {
     "include_diffuse": "diffuse",
     "include_normal": "normal/_n",
-    "include_parallax": "parallax/_p",
+    "include_parallax": "height/parallax/_p",
     "include_glow": "glow/_g",
-    "include_environment_mask": "env mask/_m",
-    "include_rmaos": "rmaos/_rmaos/_ramos",
-    "include_wetness_mask": "wetness mask/_wt",
+    "include_environment_mask": "vanilla/enb env mask/_m",
+    "include_rmaos": "community shaders pbr/_rmaos/_ramos",
+    "include_wetness_mask": "custom wetness mask/_wt",
     "include_snow_mask": "snow mask/_sm",
-    "include_complex": "complex material",
-    "include_ao": "ambient occlusion/_ao",
+    "include_complex": "enb complex material",
+    "include_ao": "standalone ao/_ao (optional)",
     "include_roughness": "roughness/_rough",
 }
 
@@ -2029,7 +2029,7 @@ def build_render_profile_mode_controls_hint(control_states: Mapping[str, bool | 
         return "Renderer preset locks mode selectors to prevent conflicting GUI combinations."
     disabled_controls: list[str] = []
     if str(control_states.get("complex_format")) == "disabled":
-        disabled_controls.append("Complex/PBR material")
+        disabled_controls.append("ENB Complex Material")
     if str(control_states.get("env_mask_mode")) == "disabled":
         disabled_controls.append("Environment mask")
     if str(control_states.get("parallax_mode")) == "disabled":
@@ -2037,7 +2037,7 @@ def build_render_profile_mode_controls_hint(control_states: Mapping[str, bool | 
     if not disabled_controls:
         return "Custom mode: all mode selectors are available."
     if len(disabled_controls) == 3:
-        return "Custom mode: enable Complex/PBR material, Environment mask, or Parallax outputs to unlock mode selectors."
+        return "Custom mode: enable ENB Complex Material, Environment mask, or Parallax outputs to unlock mode selectors."
     return "Custom mode: enable " + ", ".join(disabled_controls) + " output(s) to unlock matching mode selectors."
 
 
@@ -5601,6 +5601,10 @@ def run_with_options(
     roughness_strength: float | None = None,
     roughness_name: str | None = None,
 ) -> dict[str, Path]:
+    if include_environment_mask and include_rmaos:
+        raise ValueError(
+            "Environment mask (_m) and Community Shaders PBR (_rmaos/_ramos) are different workflows and cannot be generated together in one run."
+        )
     if not any((
         include_diffuse,
         include_normal,
@@ -6568,36 +6572,35 @@ if GUI_AVAILABLE:
             _normal_check = ttk.Checkbutton(options_frame, text="Normal / _n", variable=self.include_normal_var, command=self._refresh_preview)
             _normal_check.grid(row=0, column=1, sticky=tk.W)
             self._add_tooltip(_normal_check, "🗻 Generate a normal map for fake 3D depth.\nSkyrim's favourite optical illusion since 2011.")
-            _parallax_check = ttk.Checkbutton(options_frame, text="Parallax / _p", variable=self.include_parallax_var, command=self._on_output_selection_changed)
+            _parallax_check = ttk.Checkbutton(options_frame, text="Height/Parallax (workflow-dependent) / _p", variable=self.include_parallax_var, command=self._on_output_selection_changed)
             _parallax_check.grid(row=0, column=2, sticky=tk.W)
-            self._add_tooltip(_parallax_check, "🌊 Generate a parallax (height) map.\nMakes surfaces look EXTRA bumpy. Your GPU will feel it, but it's worth it.")
+            self._add_tooltip(_parallax_check, "🌊 Generate a height/parallax map (_p).\nWorkflow-dependent: some setups use _p directly, while others rely on packed/alpha height paths.")
             _glow_check = ttk.Checkbutton(options_frame, text="Glow / _g", variable=self.include_glow_var, command=self._refresh_preview)
             _glow_check.grid(row=1, column=0, sticky=tk.W)
             self._add_tooltip(_glow_check, "✨ Generate a glow map. Bright pixels glow in the dark.\nPerfect for making your cave look like a disco.")
-            _env_mask_check = ttk.Checkbutton(options_frame, text="Environment mask / _m", variable=self.include_environment_mask_var, command=self._on_output_selection_changed)
+            _env_mask_check = ttk.Checkbutton(options_frame, text="Environment Mask (Vanilla/ENB) / _m", variable=self.include_environment_mask_var, command=self._on_environment_mask_output_toggled)
             _env_mask_check.grid(row=1, column=1, sticky=tk.W)
-            self._add_tooltip(_env_mask_check, "🪞 Generate an environment mask for reflections.\nTells Skyrim which parts of a surface are shiny. Science!")
-            _rmaos_check = ttk.Checkbutton(options_frame, text="RMAOS / _rmaos", variable=self.include_rmaos_var, command=self._refresh_preview)
+            self._add_tooltip(_env_mask_check, "🪞 Generate classic _m environment mask output for vanilla/ENB reflection workflows.\nMutually exclusive with Community Shaders PBR _rmaos in this run.")
+            _rmaos_check = ttk.Checkbutton(options_frame, text="Community Shaders PBR / _rmaos", variable=self.include_rmaos_var, command=self._on_rmaos_output_toggled)
             _rmaos_check.grid(row=1, column=2, sticky=tk.W)
-            self._add_tooltip(_rmaos_check, "🧩 Generate a dedicated TruePBR RMAOS map (_rmaos/_ramos) plus JSON sidecar in PBRNifPatcher/. Separate from vanilla/ENB _m environment masks.")
-            _wetness_mask_check = ttk.Checkbutton(options_frame, text="Wetness mask / _wt", variable=self.include_wetness_mask_var, command=self._refresh_preview)
+            self._add_tooltip(_rmaos_check, "🧩 Generate Community Shaders TruePBR _rmaos/_ramos plus JSON sidecar.\nMutually exclusive with vanilla/ENB _m environment-mask workflow in this run.")
+            _wetness_mask_check = ttk.Checkbutton(options_frame, text="Custom Wetness Mask (Generator/Internal) / _wt", variable=self.include_wetness_mask_var, command=self._refresh_preview)
             _wetness_mask_check.grid(row=0, column=3, sticky=tk.W)
-            self._add_tooltip(_wetness_mask_check, "Generate a Community Shaders wetness mask (_wt.dds). Like giving surfaces their own rain puddle detector — dark areas get wetter.")
+            self._add_tooltip(_wetness_mask_check, "Generate this tool's custom/internal wetness mask output (_wt.dds).\nNot a baseline vanilla Skyrim texture slot by itself.")
             _snow_mask_check = ttk.Checkbutton(options_frame, text="Snow mask / _sm", variable=self.include_snow_mask_var, command=self._refresh_preview)
             _snow_mask_check.grid(row=1, column=3, sticky=tk.W)
             self._add_tooltip(_snow_mask_check, "Generate a Community Shaders Dynamic Snow mask (_sm.dds). Marks which pixels snow will accumulate on — bright = buried, dark = sheltered.")
-            _complex_check = ttk.Checkbutton(options_frame, text="Complex/PBR material", variable=self.include_complex_var, command=self._on_output_selection_changed)
+            _complex_check = ttk.Checkbutton(options_frame, text="ENB Complex Material", variable=self.include_complex_var, command=self._on_output_selection_changed)
             _complex_check.grid(row=1, column=4, sticky=tk.W)
             self._add_tooltip(
                 _complex_check,
-                "🔮 Generate complex/PBR material output.\n"
-                "For Community Shaders Extended Materials use format 'cm' (or custom name ending with _c/_C).\n"
-                "For ENB complex material workflows use format 'msn'.\n"
-                "Do not mix Community Shaders and ENB outputs in the same install.",
+                "🔮 Generate ENB complex material output.\n"
+                "This toggle is for ENB complex workflows (typically _msn).\n"
+                "Community Shaders TruePBR uses the separate _rmaos path, not this ENB toggle.",
             )
-            _ao_check = ttk.Checkbutton(options_frame, text="Ambient Occlusion / _ao", variable=self.include_ao_var, command=self._refresh_preview)
+            _ao_check = ttk.Checkbutton(options_frame, text="Standalone AO (optional/non-standard) / _ao", variable=self.include_ao_var, command=self._refresh_preview)
             _ao_check.grid(row=0, column=4, sticky=tk.W)
-            self._add_tooltip(_ao_check, "🌑 Generate a standalone ambient occlusion map (_ao.dds).\nBakes cavity/self-shadowing info — super useful for TruePBR and Community Shaders PBR workflows.")
+            self._add_tooltip(_ao_check, "🌑 Generate an optional standalone AO map (_ao.dds).\nMost Skyrim workflows use AO packed in other maps or baked into diffuse, so treat this as optional.")
             _roughness_check = ttk.Checkbutton(options_frame, text="Roughness / _rough", variable=self.include_roughness_var, command=self._refresh_preview)
             _roughness_check.grid(row=2, column=4, sticky=tk.W)
             self._add_tooltip(_roughness_check, "🪨 Generate a standalone roughness map (_rough.dds).\nControls how rough vs. glossy the surface looks. Material-aware: stone goes rough, glass goes smooth.")
@@ -6671,11 +6674,11 @@ if GUI_AVAILABLE:
             )
             self.render_profile_hint_label.grid(row=3, column=2, columnspan=3, sticky=tk.EW, padx=(4, 0))
 
-            _complex_fmt_label = ttk.Label(options_frame, text="Complex/PBR format")
+            _complex_fmt_label = ttk.Label(options_frame, text="Complex material format")
             _complex_fmt_label.grid(row=4, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(
                 _complex_fmt_label,
-                "🏷 Output format for complex/PBR maps.\n"
+                "🏷 Output format for complex-material maps.\n"
                 "'cm' = Community Shaders Extended Materials packed map (env reflection / glossiness / metallic / height; _cm default, _c/_C via custom name).\n"
                 "'msn' = ENB complex material (normal RGB + specular alpha).",
             )
@@ -6693,7 +6696,7 @@ if GUI_AVAILABLE:
                 "🏷 Choose map type:\n"
                 "'cm' for Community Shaders Extended Materials setups (_cm default, _c/_C optional via custom naming).\n"
                 "'msn' for ENB complex material setups.\n"
-                "Quick start for Community Shaders: set Target renderer=community_shaders, enable Complex/PBR material, keep format=cm.\n"
+                "Quick start for Community Shaders: set Target renderer=community_shaders and keep format=cm.\n"
                 "Do not use 'cm' together with ENB _m/_msn outputs.",
             )
 
@@ -8070,6 +8073,28 @@ if GUI_AVAILABLE:
         def _on_output_selection_changed(self) -> None:
             self._update_render_profile_control_states()
             self._request_preview_refresh()
+
+        def _enforce_material_workflow_output_exclusivity(self, changed_output: str) -> None:
+            if not (self.include_environment_mask_var.get() and self.include_rmaos_var.get()):
+                return
+            if changed_output == "environment_mask":
+                self.include_rmaos_var.set(False)
+                self.status_var.set(
+                    "Disabled Community Shaders PBR (_rmaos) because Environment Mask (_m) is enabled. Use one workflow per output set."
+                )
+            else:
+                self.include_environment_mask_var.set(False)
+                self.status_var.set(
+                    "Disabled Environment Mask (_m) because Community Shaders PBR (_rmaos) is enabled. Use one workflow per output set."
+                )
+
+        def _on_environment_mask_output_toggled(self) -> None:
+            self._enforce_material_workflow_output_exclusivity("environment_mask")
+            self._on_output_selection_changed()
+
+        def _on_rmaos_output_toggled(self) -> None:
+            self._enforce_material_workflow_output_exclusivity("rmaos")
+            self._on_output_selection_changed()
 
         def _on_parallax_mode_changed(self, _event: object | None = None) -> None:
             if "occlusion" in self.parallax_mode_var.get():

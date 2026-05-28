@@ -1118,7 +1118,7 @@ class GenerateTexturesTests(unittest.TestCase):
             }
         )
         self.assertIn("Custom mode: enable", hint)
-        self.assertIn("Complex/PBR material", hint)
+        self.assertIn("ENB Complex Material", hint)
         self.assertIn("Parallax", hint)
 
     def test_build_render_profile_mode_controls_hint_reports_locked_state(self) -> None:
@@ -1326,7 +1326,7 @@ class GenerateTexturesTests(unittest.TestCase):
         for profile in ("vanilla", "terrain", "architecture", "community_shaders", "enb", "truepbr"):
             with self.subTest(profile=profile):
                 summary = describe_render_profile_default_outputs(profile)
-                self.assertIn("wetness mask/_wt", summary)
+                self.assertIn("custom wetness mask/_wt", summary)
                 self.assertIn("snow mask/_sm", summary)
 
     def test_describe_render_profile_default_outputs_glow_uses_g_suffix(self) -> None:
@@ -3538,6 +3538,25 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(save_mock.call_count, 1)
             self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("BC7", "DXT5", "DXT3"))
             self.assertEqual(save_mock.call_args.args[1].name, "brick_rmaos.dds")
+
+    def test_run_with_options_rejects_env_mask_with_rmaos_combination(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            _sample_image().save(input_path)
+
+            with self.assertRaises(ValueError) as err:
+                run_with_options(
+                    input_file=input_path,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=True,
+                    include_rmaos=True,
+                    include_complex=False,
+                )
+            self.assertIn("cannot be generated together", str(err.exception))
 
     def test_run_with_options_rmaos_writes_json_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
