@@ -86,7 +86,7 @@ Optional arguments:
 - `--diffuse-name` (default: `<input_stem>`, e.g. `stonewall.dds`)
 - `--normal-name` (default: `<input_stem>_n`, e.g. `stonewall_n.dds`)
 - `--parallax-name` (default: `<input_stem>_p`, e.g. `stonewall_p.dds`)
-- `--glow-name` (default: `<input_stem>_em`, e.g. `stonewall_em.dds`; legacy `_g` still supported)
+- `--glow-name` (default: `<input_stem>_g`, e.g. `stonewall_g.dds`)
 - `--environment-mask-name` (default: `<input_stem>_m`)
 - `--rmaos-name` / `--ramos-name` (default: `<input_stem>_rmaos`)
 - `--complex-name` (default from format: `<input_stem>_msn` or `<input_stem>_cm`)
@@ -204,7 +204,7 @@ The tool recognises standard Skyrim SE texture naming conventions from the file 
 | *(none)* | Diffuse / Albedo | Texture Slot 0 |
 | `_n` | Normal Map | DirectX tangent-space, Slot 1 |
 | `_p` | Parallax Heightmap | Greyscale, Slot 3, requires SKSE64 memory patch |
-| `_em` / `_emis` / `_g` / `_glow` / `_emit` / `_emissive` | Glow / Emissive | Slot 2, requires `SLSF1_Own_Emit` flag (`_em` preferred; `_g` legacy-compatible) |
+| `_g` | Glow / Emissive | Slot 2, requires `SLSF1_Own_Emit` flag |
 | `_m` | Environment Mask | Greyscale reflection intensity, Slot 5 — vanilla Skyrim SE only |
 | `_rmaos` | Complex Env Mask (TruePBR naming) | RGBA Slot 5 packed data map for Community Shaders TruePBR. Channels: R=Roughness, G=Metallic, B=AO, A=Other/smoothness/height (JSON-driven). |
 | `_s` | Subsurface Scattering | Slot 6, skin/character textures |
@@ -214,6 +214,8 @@ The tool recognises standard Skyrim SE texture naming conventions from the file 
 | `_c` / `_C` | Complex Material packed alias | Identical channel layout and role as `_cm`. `_C.dds` (uppercase) is treated the same on Windows and by this tool. Prefer `_cm` for new mods unless the pack uses `_c` naming. |
 | `_wt` | Wetness Mask (Community Shaders) | Greyscale, Community Shaders wet-surface support. Dark areas (recessed/porous) receive more wetness accumulation; generated from inverted luminance + concavity signal. |
 | `_sm` | Dynamic Snow Mask (Community Shaders) | Greyscale, Community Shaders Dynamic Snow. Bright areas mark where snow accumulates; generated from luminance with contrast boost. |
+
+Skyrim SE workflows in this project treat `_em`, `_emit`, and `_glow` glow suffixes as exporter aliases to rename to `_g`.
 
 Batch folder mode scans subfolders and automatically skips generated variants (`_n`, `_p`, `_g`, `_glow`, `_em`, `_emis`, `_emit`, `_emissive`, `_m`, `_ao`, `_ambientocclusion`, `_rough`, `_roughness`, `_metal`, `_metallic`, `_metalness`, `_rmaos`, `_ramos`, `_orm`, `_orms`, `_mrao`, `_mra`, `_s`, `_sk`, `_msn`, `_cm`, `_c`, `_C`, `_wt`, `_sm`) so it only processes original source textures.
 

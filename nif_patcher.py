@@ -2155,14 +2155,14 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
         glow_path = info.texture_paths.get(TEXTURE_SLOT_GLOW, "").strip()
         if glow_path:
             normalized_glow = _normalise_slot_path(glow_path)
-            if not normalized_glow.endswith(("_g.dds", "_glow.dds", "_em.dds", "_emis.dds", "_emit.dds", "_emissive.dds", "_sk.dds")):
+            if not normalized_glow.endswith(("_g.dds", "_sk.dds")):
                 _append_unique(
                     result.issues,
                     f"Block {info.block_index}: slot 2 glow path '{glow_path}' does not look like an emissive/glow texture."
                 )
                 _append_unique(
                     result.suggestions,
-                    "Use slot 2 for emissive textures (usually _g.dds) and keep normal/parallax/env-mask maps in their own slots."
+                    "Use slot 2 for emissive textures (_g.dds). Skyrim SE ignores _em/_emit/_glow-style aliases."
                 )
         if glow_path and not info.has_glow_map_flag:
             _append_unique(

@@ -487,9 +487,9 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertIn("slot 2 glow path", joined)
         self.assertIn("slot 2 for emissive textures", joined)
 
-    def test_accepts_emis_suffix_in_glow_slot(self) -> None:
+    def test_accepts_g_suffix_in_glow_slot(self) -> None:
         paths = [""] * 9
-        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_emis.dds"
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_g.dds"
         nif = _write_nif(self.tmp, texture_paths=paths)
         v = validate_nif_for_parallax(nif)
         joined = "\n".join(v.issues + v.suggestions).lower()

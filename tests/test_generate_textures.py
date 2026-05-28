@@ -1308,15 +1308,15 @@ class GenerateTexturesTests(unittest.TestCase):
                 self.assertIn("wetness mask/_wt", summary)
                 self.assertIn("snow mask/_sm", summary)
 
-    def test_describe_render_profile_default_outputs_glow_uses_em_suffix(self) -> None:
-        """Glow output label in profile summaries must say _em, not the legacy _g."""
+    def test_describe_render_profile_default_outputs_glow_uses_g_suffix(self) -> None:
+        """Glow output label in profile summaries must use _g for Skyrim SE."""
         for profile in ("vanilla", "enb", "community_shaders", "truepbr"):
             with self.subTest(profile=profile):
                 summary = describe_render_profile_default_outputs(profile)
-                # The summary string should contain "glow/_em" wherever glow appears
+                # The summary string should contain "glow/_g" wherever glow appears
                 if "glow/" in summary:
-                    self.assertIn("glow/_em", summary)
-                    self.assertNotIn("glow/_g", summary)
+                    self.assertIn("glow/_g", summary)
+                    self.assertNotIn("glow/_em", summary)
 
     def test_describe_render_profile_files_to_create_mentions_enb_msn_outputs(self) -> None:
         summary = describe_render_profile_files_to_create("enb")
@@ -2062,7 +2062,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 glow_name=None,
             )
 
-            self.assertEqual(glow_path.name, "brick_em.dds")
+            self.assertEqual(glow_path.name, "brick_g.dds")
 
     def test_build_environment_mask_output_path_uses_standard_default_name_and_extension(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2170,7 +2170,7 @@ class GenerateTexturesTests(unittest.TestCase):
             complex_path = build_complex_output_path(input_path=input_path, output_dir=output_dir, complex_format="msn")
 
             self.assertEqual(normal_path.name, "brick_n.dds")
-            self.assertEqual(glow_path.name, "brick_em.dds")
+            self.assertEqual(glow_path.name, "brick_g.dds")
             self.assertEqual(environment_mask_path.name, "brick_m.dds")
             self.assertEqual(complex_path.name, "brick_msn.dds")
 
@@ -2681,7 +2681,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 "diffuse": "brick.dds",
                 "normal": "brick_n.dds",
                 "parallax": "brick_p.dds",
-                "glow": "brick_em.dds",
+                "glow": "brick_g.dds",
                 "environment_mask": "brick_m.dds",
                 "complex_material": "brick_msn.dds",
             }
