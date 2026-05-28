@@ -300,6 +300,9 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         "auto_roughness",
     ):
         state[key] = _coerce_bool(raw.get(key), bool(state[key]))
+    if bool(state["emboss_mode"]) and bool(state["relief_mode"]):
+        # Keep depth-mode startup state unambiguous: relief mode wins.
+        state["emboss_mode"] = False
     if not bool(state["auto_suggestions"]):
         state["auto_normal"] = False
         state["auto_parallax"] = False
@@ -6744,7 +6747,7 @@ if GUI_AVAILABLE:
                 "🖼 Relief mode uses the image's own luminosity as a height field so that\n"
                 "bright subjects (painted figures, murals, heraldic signs, decorative plaques)\n"
                 "physically protrude from the surface in game — a bas-relief effect.\n"
-                "Takes priority over Emboss depth when both are enabled.\n"
+                "Relief and Emboss are mutually exclusive; enabling one disables the other.\n"
                 "Best combined with parallax output for full 3-D pop-out depth.",
             )
 

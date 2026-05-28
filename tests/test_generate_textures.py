@@ -242,6 +242,11 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(bool(normalized["auto_complex"]))
         self.assertFalse(bool(normalized["auto_specular"]))
 
+    def test_normalize_gui_state_prevents_emboss_relief_conflict(self) -> None:
+        normalized = _normalize_gui_state({"emboss_mode": True, "relief_mode": True})
+        self.assertFalse(bool(normalized["emboss_mode"]))
+        self.assertTrue(bool(normalized["relief_mode"]))
+
     def test_normalize_gui_state_clears_missing_input_path(self) -> None:
         normalized = _normalize_gui_state({"input_path": "/definitely/not/a/real/path.dds"})
         self.assertEqual(normalized["input_path"], "")
