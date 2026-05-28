@@ -1226,6 +1226,40 @@ def _adjust_recommendations_for_material_type(
     return adjusted
 
 
+def _adjust_recommendations_for_material_path_hints(
+    recommended: dict[str, float | int],
+    material_type: str,
+    input_path: Path | None,
+) -> dict[str, float | int]:
+    """Apply filename-aware cubemap/specular tuning for nuanced material variants."""
+    if input_path is None:
+        return recommended
+    words = {
+        token
+        for token in re.split(r"[^a-z0-9]+", " ".join(input_path.parts).lower())
+        if token
+    }
+    if not words:
+        return recommended
+
+    adjusted = dict(recommended)
+    if material_type == "metal":
+        if words.intersection({"iron", "rust", "rusty", "corroded", "oxidized", "oxide"}):
+            # Iron/rusted metals should read as medium reflectivity, not mirror-shiny.
+            adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.82, 0.9, 2.4)
+            adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.86, 0.9, 2.2)
+        elif words.intersection({"polished", "chrome", "gilded", "gold", "steel", "silver", "mirror", "brass"}):
+            # Polished steel/gold should stay in the high-reflectivity range.
+            adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.12, 0.9, 2.4)
+            adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.1, 0.9, 2.2)
+    elif material_type == "stone" and words.intersection({"wet", "rain", "water", "damp", "soaked", "slime", "slimy"}):
+        # Wet stone should have stronger cubemap response than dry stone.
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.22, 0.9, 2.4)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.16, 0.9, 2.2)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.95, 0.8, 2.4)
+    return adjusted
+
+
 _WORKFLOW_PROFILE_TOKENS: dict[str, tuple[str, ...]] = {
     "performance": (
         "performance",
@@ -2578,7 +2612,12 @@ def recommend_generation_settings(source: Image.Image, input_path: Path | None =
             material_type = image_material
     role_adjusted = _adjust_recommendations_for_role(recommended, detected_role)
     material_adjusted = _adjust_recommendations_for_material_type(role_adjusted, material_type)
-    workflow_adjusted = _adjust_recommendations_for_workflow_profile(material_adjusted, workflow_profile)
+    path_hint_adjusted = _adjust_recommendations_for_material_path_hints(
+        material_adjusted,
+        material_type,
+        input_path,
+    )
+    workflow_adjusted = _adjust_recommendations_for_workflow_profile(path_hint_adjusted, workflow_profile)
     final = _adjust_recommendations_for_role(workflow_adjusted, detected_role)
     final["rmaos_strength"] = _clamp(
         float(final.get("rmaos_strength", final["environment_mask_strength"])),

@@ -1737,6 +1737,20 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertLessEqual(float(settings["environment_mask_strength"]), 1.6)
         self.assertLessEqual(float(settings["complex_strength"]), 2.15)
 
+    def test_recommend_generation_settings_uses_material_path_hints_for_metal_reflectivity(self) -> None:
+        source = _detailed_bright_image()
+        iron = recommend_generation_settings(source, input_path=Path("textures/armor/iron/ironplate.dds"))
+        polished = recommend_generation_settings(source, input_path=Path("textures/armor/steel/polished_steel_plate.dds"))
+        self.assertLess(float(iron["environment_mask_strength"]), float(polished["environment_mask_strength"]))
+        self.assertLess(float(iron["specular_strength"]), float(polished["specular_strength"]))
+
+    def test_recommend_generation_settings_boosts_wet_stone_reflectivity(self) -> None:
+        source = _detailed_bright_image()
+        dry_stone = recommend_generation_settings(source, input_path=Path("textures/dungeons/stone/rough_rock.dds"))
+        wet_stone = recommend_generation_settings(source, input_path=Path("textures/dungeons/stone/wet_rock.dds"))
+        self.assertGreater(float(wet_stone["environment_mask_strength"]), float(dry_stone["environment_mask_strength"]))
+        self.assertGreater(float(wet_stone["specular_strength"]), float(dry_stone["specular_strength"]))
+
     def test_generate_complex_material_slider_produces_visible_change(self) -> None:
         source = _large_high_detail_image()
         low_strength = generate_complex_material(source, strength=0.5)
