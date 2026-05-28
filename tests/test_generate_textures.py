@@ -2085,6 +2085,30 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertIn("plugin(s)", context.summary)
             self.assertIn("load-order", context.summary)
 
+    def test_detect_mod_manager_context_detects_body_and_skeleton_hints(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            instance_root = temp_path / "MO2"
+            textures_dir = instance_root / "mods" / "CBBE 3BA" / "textures"
+            tool_dir = instance_root / "mods" / "Skyrim Texture Generator"
+            profile_dir = instance_root / "profiles" / "Default"
+            textures_dir.mkdir(parents=True)
+            tool_dir.mkdir(parents=True)
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "modlist.txt").write_text("+CBBE 3BA\n+XPMSSE\n", encoding="utf-8")
+            (profile_dir / "plugins.txt").write_text("*Skyrim.esm\n", encoding="utf-8")
+            (profile_dir / "loadorder.txt").write_text("Skyrim.esm\n", encoding="utf-8")
+
+            context = detect_mod_manager_context(
+                {"MO_PROFILE": "Default"},
+                executable_path=tool_dir / "generate_textures.exe",
+            )
+
+            self.assertEqual(context.detected_body_profiles, ("CBBE", "3BA"))
+            self.assertEqual(context.detected_skeleton_profiles, ("XPMSSE",))
+            self.assertIn("body hints CBBE, 3BA", context.summary)
+            self.assertIn("skeleton hints XPMSSE", context.summary)
+
     def test_detect_mod_manager_context_reads_vortex_profile_and_staging_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)

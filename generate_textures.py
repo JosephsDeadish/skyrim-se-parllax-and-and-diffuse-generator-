@@ -390,6 +390,8 @@ class ModManagerContext:
     load_order: tuple[str, ...] = ()
     loaded_texture_dirs: tuple[Path, ...] = ()
     loaded_mesh_dirs: tuple[Path, ...] = ()
+    detected_body_profiles: tuple[str, ...] = ()
+    detected_skeleton_profiles: tuple[str, ...] = ()
 
     @property
     def summary(self) -> str:
@@ -408,6 +410,10 @@ class ModManagerContext:
             details.append(f"{len(self.load_order)} load-order entry/entries")
         if self.loaded_mesh_dirs:
             details.append(f"{len(self.loaded_mesh_dirs)} mesh folder(s)")
+        if self.detected_body_profiles:
+            details.append(f"body hints {', '.join(self.detected_body_profiles)}")
+        if self.detected_skeleton_profiles:
+            details.append(f"skeleton hints {', '.join(self.detected_skeleton_profiles)}")
         if self.game_root is not None:
             details.append(f"game root {self.game_root}")
         return " — ".join(details)
@@ -492,6 +498,37 @@ def _parse_load_order(loadorder_path: Path) -> tuple[str, ...]:
         if line:
             entries.append(line)
     return tuple(entries)
+
+
+_BODY_PROFILE_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("CBBE", ("cbbe", "caliente")),
+    ("3BA", ("3ba", "3bbb")),
+    ("UNP", ("unp",)),
+    ("BHUNP", ("bhunp",)),
+    ("HIMBO", ("himbo",)),
+    ("SAM", ("schlongs of skyrim", "sam light", "shape atlas for men", "sam")),
+)
+
+_SKELETON_PROFILE_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("XPMSSE", ("xpmsse", "xpmse", "xp32")),
+)
+
+
+def _normalize_profile_hint_source(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _detect_profile_hints(
+    sources: tuple[str, ...], hint_map: tuple[tuple[str, tuple[str, ...]], ...]
+) -> tuple[str, ...]:
+    if not sources:
+        return ()
+    normalized_sources = tuple(_normalize_profile_hint_source(source) for source in sources if source)
+    detected: list[str] = []
+    for profile, hints in hint_map:
+        if any(any(hint in source for hint in hints) for source in normalized_sources):
+            detected.append(profile)
+    return tuple(detected)
 
 
 def _find_manager_instance_root(start: Path, required_children: tuple[str, ...]) -> Path | None:
@@ -591,6 +628,9 @@ def _detect_mo2_context(
         loaded_mesh_candidates.insert(0, instance_root / "overwrite" / "meshes")
     loaded_texture_dirs = _unique_existing_paths(loaded_texture_candidates)
     loaded_mesh_dirs = _unique_existing_paths(loaded_mesh_candidates)
+    detection_sources = tuple((*loaded_mods, *enabled_plugins, *load_order))
+    detected_body_profiles = _detect_profile_hints(detection_sources, _BODY_PROFILE_HINTS)
+    detected_skeleton_profiles = _detect_profile_hints(detection_sources, _SKELETON_PROFILE_HINTS)
 
     output_dir = instance_root / "overwrite" if instance_root is not None else None
     return ModManagerContext(
@@ -605,6 +645,8 @@ def _detect_mo2_context(
         load_order=load_order,
         loaded_texture_dirs=loaded_texture_dirs,
         loaded_mesh_dirs=loaded_mesh_dirs,
+        detected_body_profiles=detected_body_profiles,
+        detected_skeleton_profiles=detected_skeleton_profiles,
     )
 
 
@@ -655,6 +697,9 @@ def _detect_vortex_context(
     else:
         texture_dirs = ()
         mesh_dirs = ()
+    detection_sources = tuple((*loaded_mods, *enabled_plugins, *load_order))
+    detected_body_profiles = _detect_profile_hints(detection_sources, _BODY_PROFILE_HINTS)
+    detected_skeleton_profiles = _detect_profile_hints(detection_sources, _SKELETON_PROFILE_HINTS)
 
     return ModManagerContext(
         manager="Vortex",
@@ -668,6 +713,8 @@ def _detect_vortex_context(
         load_order=load_order,
         loaded_texture_dirs=texture_dirs,
         loaded_mesh_dirs=mesh_dirs,
+        detected_body_profiles=detected_body_profiles,
+        detected_skeleton_profiles=detected_skeleton_profiles,
     )
 
 
