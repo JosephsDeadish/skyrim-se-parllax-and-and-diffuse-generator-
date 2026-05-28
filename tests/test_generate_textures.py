@@ -82,6 +82,11 @@ from generate_textures import (
     generate_roughness,
     analyze_material_type_from_image,
     _prefilter_for_mipmap_stability,
+    generate_wetness_mask,
+    generate_snow_mask,
+    build_wetness_mask_output_path,
+    build_snow_mask_output_path,
+    GENERATED_TEXTURE_SUFFIXES,
 )
 
 
@@ -207,8 +212,8 @@ def _shield_art_image() -> Image.Image:
 
 
 class GenerateTexturesTests(unittest.TestCase):
-    def test_app_version_is_0_6(self) -> None:
-        self.assertEqual(APP_VERSION, "0.6")
+    def test_app_version_is_0_7(self) -> None:
+        self.assertEqual(APP_VERSION, "0.7")
 
     def test_normalize_gui_state_turns_off_individual_auto_flags_when_master_off(self) -> None:
         normalized = _normalize_gui_state(
@@ -4172,6 +4177,202 @@ class ParallaxOcclusionTests(unittest.TestCase):
         from generate_textures import _normalize_gui_state
         state = _normalize_gui_state({})
         self.assertFalse(state["auto_patch_nifs"])
+
+    # --- Wetness mask tests ---
+
+    def test_generate_wetness_mask_returns_l_mode_same_size(self) -> None:
+        source = _sample_image()
+        result = generate_wetness_mask(source, strength=1.0)
+        self.assertEqual(result.mode, "L")
+        self.assertEqual(result.size, source.size)
+
+    def test_generate_wetness_mask_no_pure_black(self) -> None:
+        source = _sample_image()
+        result = generate_wetness_mask(source, strength=1.0)
+        pixels = list(result.get_flattened_data())
+        self.assertTrue(all(v > 0 for v in pixels), "Wetness mask should have no pure-black pixels (floor-lifted)")
+
+    def test_generate_wetness_mask_higher_strength_increases_contrast(self) -> None:
+        source = Image.new("RGB", (32, 32))
+        pixels = source.load()
+        for y in range(32):
+            for x in range(32):
+                pixels[x, y] = (x * 8, y * 8, 0)
+        low = generate_wetness_mask(source, strength=0.5)
+        high = generate_wetness_mask(source, strength=2.5)
+        low_vals = list(low.get_flattened_data())
+        high_vals = list(high.get_flattened_data())
+        low_range = max(low_vals) - min(low_vals)
+        high_range = max(high_vals) - min(high_vals)
+        self.assertGreaterEqual(high_range, low_range, "Higher strength should produce >= contrast range")
+
+    # --- Snow mask tests ---
+
+    def test_generate_snow_mask_returns_l_mode_same_size(self) -> None:
+        source = _sample_image()
+        result = generate_snow_mask(source, strength=1.0)
+        self.assertEqual(result.mode, "L")
+        self.assertEqual(result.size, source.size)
+
+    def test_generate_snow_mask_no_pure_black(self) -> None:
+        source = _sample_image()
+        result = generate_snow_mask(source, strength=1.0)
+        pixels = list(result.get_flattened_data())
+        self.assertTrue(all(v > 0 for v in pixels), "Snow mask should have no pure-black pixels (floor-lifted)")
+
+    def test_generate_snow_mask_higher_strength_increases_brightness(self) -> None:
+        source = _sample_image()
+        low = generate_snow_mask(source, strength=0.5)
+        high = generate_snow_mask(source, strength=2.5)
+        low_mean = sum(low.get_flattened_data()) / (source.width * source.height)
+        high_mean = sum(high.get_flattened_data()) / (source.width * source.height)
+        self.assertGreaterEqual(high_mean, low_mean, "Higher snow mask strength should produce >= mean brightness")
+
+    # --- Output path builder tests ---
+
+    def test_build_wetness_mask_output_path_uses_wt_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "stone.dds"
+            input_path.write_bytes(b"stub")
+            result = build_wetness_mask_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+                wetness_name=None,
+            )
+            self.assertEqual(result.name, "stone_wt.dds")
+
+    def test_build_snow_mask_output_path_uses_sm_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "stone.dds"
+            input_path.write_bytes(b"stub")
+            result = build_snow_mask_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+                snow_name=None,
+            )
+            self.assertEqual(result.name, "stone_sm.dds")
+
+    # --- GENERATED_TEXTURE_SUFFIXES tests ---
+
+    def test_wt_in_generated_texture_suffixes(self) -> None:
+        self.assertIn("_wt", GENERATED_TEXTURE_SUFFIXES)
+
+    def test_sm_in_generated_texture_suffixes(self) -> None:
+        self.assertIn("_sm", GENERATED_TEXTURE_SUFFIXES)
+
+    # --- run_with_options wetness/snow integration tests ---
+
+    def test_run_with_options_generates_wetness_mask(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ) as save_mock:
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                    include_wetness_mask=True,
+                )
+
+            self.assertEqual(save_mock.call_count, 1)
+            self.assertEqual(save_mock.call_args.args[1].name, "brick_wt.dds")
+
+    def test_run_with_options_generates_snow_mask(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ) as save_mock:
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                    include_snow_mask=True,
+                )
+
+            self.assertEqual(save_mock.call_count, 1)
+            self.assertEqual(save_mock.call_args.args[1].name, "brick_sm.dds")
+
+    # --- Generation warnings for snow/wetness tests ---
+
+    def test_snow_mask_on_glass_raises_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "glass",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            include_complex=False,
+            include_snow_mask=True,
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertIn("snow_mask_on_non_accumulating_material", warning_ids)
+
+    def test_snow_mask_on_stone_raises_no_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            include_complex=False,
+            include_snow_mask=True,
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("snow_mask_on_non_accumulating_material", warning_ids)
+
+    def test_wetness_mask_on_glass_raises_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "glass",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            include_complex=False,
+            include_wetness_mask=True,
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertIn("wetness_mask_on_reflective_material", warning_ids)
+
+    def test_wetness_mask_on_stone_raises_no_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            include_complex=False,
+            include_wetness_mask=True,
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("wetness_mask_on_reflective_material", warning_ids)
 
 
 if __name__ == "__main__":

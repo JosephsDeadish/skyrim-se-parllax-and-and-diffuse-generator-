@@ -55,7 +55,7 @@ except ImportError:
 
 
 DDS_EXTENSION = ".dds"
-APP_VERSION = "0.6"
+APP_VERSION = "0.7"
 SUPPORTED_INPUT_EXTENSIONS = {DDS_EXTENSION, ".png", ".jpg", ".jpeg", ".tga", ".bmp"}
 GENERATED_TEXTURE_SUFFIXES = (
     "_msn",
@@ -74,6 +74,8 @@ GENERATED_TEXTURE_SUFFIXES = (
     "_m",
     "_s",
     "_sk",
+    "_wt",
+    "_sm",
 )
 PREVIEW_MAX_DIMENSION = 1024
 PREVIEW_SIZE_PRESETS: dict[str, tuple[int, int]] = {
@@ -105,6 +107,8 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "include_environment_mask": False,
     "include_rmaos": False,
     "include_complex": False,
+    "include_wetness_mask": False,
+    "include_snow_mask": False,
     "auto_suggestions": True,
     "auto_normal": True,
     "auto_parallax": True,
@@ -120,6 +124,8 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "rmaos_strength": 1.2,
     "complex_strength": 1.15,
     "specular_strength": 1.15,
+    "wetness_mask_strength": 1.0,
+    "snow_mask_strength": 1.0,
     "dismissed_warnings": [],
 }
 
@@ -253,6 +259,8 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         "include_environment_mask",
         "include_rmaos",
         "include_complex",
+        "include_wetness_mask",
+        "include_snow_mask",
         "auto_suggestions",
         "auto_normal",
         "auto_parallax",
@@ -333,6 +341,12 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     )
     state["complex_strength"] = _coerce_float(raw.get("complex_strength"), float(state["complex_strength"]), 0.1, 8.0)
     state["specular_strength"] = _coerce_float(raw.get("specular_strength"), float(state["specular_strength"]), 0.1, 8.0)
+    state["wetness_mask_strength"] = _coerce_float(
+        raw.get("wetness_mask_strength"), float(state["wetness_mask_strength"]), 0.1, 3.0
+    )
+    state["snow_mask_strength"] = _coerce_float(
+        raw.get("snow_mask_strength"), float(state["snow_mask_strength"]), 0.1, 3.0
+    )
     raw_dismissed = raw.get("dismissed_warnings", [])
     if isinstance(raw_dismissed, list):
         state["dismissed_warnings"] = [str(w) for w in raw_dismissed if isinstance(w, str)]
@@ -3052,6 +3066,94 @@ def generate_roughness(source: Image.Image, strength: float = 1.0, material_type
     return _lift_black_floor(roughness, floor=12)
 
 
+def generate_wetness_mask(source: Image.Image, strength: float = 1.0) -> Image.Image:
+    """Generate a surface wetness/puddle accumulation mask from a diffuse texture.
+
+    Returns a greyscale ``L``-mode image where bright pixels indicate surfaces
+    that collect and hold moisture (concave recesses, crevices, ground-level
+    areas), and dark pixels indicate exposed, dry, or elevated surfaces.
+
+    The mask is intended for Community Shaders wet-surface effects and similar
+    environment-driven wetness overlays.  It is stored as ``_wt.dds``.
+
+    Parameters
+    ----------
+    source:
+        Input diffuse texture (any size/mode; converted to RGB internally).
+    strength:
+        Intensity multiplier (0.1–3.0).  Values around 1.0 give a natural
+        moisture distribution.  Higher values exaggerate the wet/dry contrast.
+    """
+    rgb_source = source.convert("RGB")
+    grayscale = ImageOps.grayscale(rgb_source)
+    clamped_strength = _clamp(float(strength), 0.1, 3.0)
+    resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.4)
+
+    # Broad-blur captures macro surface shape: concave low-points are naturally
+    # darker than their surroundings in the diffuse, so inverting the luminance
+    # gives a first approximation of where water pools.
+    dark_bias = ImageOps.invert(grayscale)
+    dark_bias = _lift_black_floor(ImageOps.autocontrast(dark_bias, cutoff=1), floor=6)
+
+    # Concavity signal: blurred luminance minus sharp luminance is positive
+    # where the local region is recessed relative to its neighbourhood.
+    blur_radius = (3.5 + (clamped_strength * 0.6)) * resolution_scale
+    blurred = grayscale.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    concavity = ImageChops.subtract(blurred, grayscale, scale=1.0, offset=64)
+    concavity = ImageEnhance.Contrast(concavity).enhance(0.9 + (clamped_strength * 0.3))
+    concavity = _lift_black_floor(ImageOps.autocontrast(concavity, cutoff=1), floor=6)
+
+    # Blend dark-bias (macro wet areas) with concavity (local pockets).
+    blend_alpha = _clamp(0.48 + (clamped_strength * 0.08), 0.48, 0.74)
+    wetness = Image.blend(dark_bias, concavity, alpha=blend_alpha)
+    wetness = ImageEnhance.Contrast(wetness).enhance(0.78 + (clamped_strength * 0.28))
+    wetness = _lift_black_floor(ImageOps.autocontrast(wetness, cutoff=1), floor=8)
+    return wetness.convert("L")
+
+
+def generate_snow_mask(source: Image.Image, strength: float = 1.0) -> Image.Image:
+    """Generate a dynamic snow/frost coverage mask from a diffuse texture.
+
+    Returns a greyscale ``L``-mode image where bright pixels indicate surfaces
+    that accumulate snow or frost (flat, upward-facing, or exposed high-points),
+    and dark pixels indicate sheltered, vertical, or recessed surfaces.
+
+    The mask is intended for Community Shaders Dynamic Snow and similar
+    weather/season shader packs.  It is stored as ``_sm.dds``.
+
+    Parameters
+    ----------
+    source:
+        Input diffuse texture (any size/mode; converted to RGB internally).
+    strength:
+        Intensity multiplier (0.1–3.0).  Values around 1.0 produce a
+        natural snow distribution.  Higher values exaggerate snow coverage
+        on bright surfaces.
+    """
+    rgb_source = source.convert("RGB")
+    grayscale = ImageOps.grayscale(rgb_source)
+    clamped_strength = _clamp(float(strength), 0.1, 3.0)
+    resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.4)
+
+    # Snow accumulates on bright, open surfaces — use luminance as a first
+    # approximation of upward-facing or horizontally-exposed areas.
+    brightness = ImageOps.autocontrast(grayscale, cutoff=1)
+
+    # Smooth out micro-noise: snow covers macro-form shapes, not individual
+    # pixel-level bumps.  A moderate blur preserves large exposed surfaces
+    # while suppressing speckling that would create unrealistic snow freckles.
+    blur_radius = (2.8 + (clamped_strength * 0.4)) * resolution_scale
+    blurred = brightness.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+
+    # Slight blend back to the original sharpened version so small-scale
+    # exposed highlights are still represented.
+    smooth_brightness = Image.blend(blurred, brightness, alpha=0.35)
+
+    snow = ImageEnhance.Contrast(smooth_brightness).enhance(0.72 + (clamped_strength * 0.26))
+    snow = _lift_black_floor(ImageOps.autocontrast(snow, cutoff=1), floor=6)
+    return snow.convert("L")
+
+
 def generate_msn(
     source: Image.Image,
     normal_strength: float = 2.0,
@@ -3097,6 +3199,10 @@ def generate_preview_outputs(
     render_profile: str = "auto",
     include_rmaos: bool = False,
     rmaos_strength: float = 1.2,
+    include_wetness_mask: bool = False,
+    wetness_mask_strength: float = 1.0,
+    include_snow_mask: bool = False,
+    snow_mask_strength: float = 1.0,
 ) -> dict[str, Image.Image]:
     if parallax_mode not in {"standard", "occlusion"}:
         raise ValueError("parallax_mode must be 'standard' or 'occlusion'.")
@@ -3145,6 +3251,14 @@ def generate_preview_outputs(
                 complex_workflow="truepbr",
             ),
             env_mask_mode="complex",
+        )
+    if include_wetness_mask:
+        outputs["wetness_mask"] = enforce_skyrim_output_profile(
+            "parallax", generate_wetness_mask(source, strength=wetness_mask_strength)
+        )
+    if include_snow_mask:
+        outputs["snow_mask"] = enforce_skyrim_output_profile(
+            "parallax", generate_snow_mask(source, strength=snow_mask_strength)
         )
     if include_complex:
         outputs["complex_material"] = enforce_skyrim_output_profile(
@@ -3293,6 +3407,30 @@ def build_rmaos_output_path(
     return base_output_dir / f"{rmaos_stem}{ext}"
 
 
+def build_wetness_mask_output_path(
+    input_path: Path,
+    output_dir: Path | None,
+    wetness_name: str | None = None,
+) -> Path:
+    """Return the output path for a wetness/puddle accumulation mask (``_wt.dds``)."""
+    base_output_dir = _resolve_output_base_dir(input_path, output_dir)
+    base_output_dir.mkdir(parents=True, exist_ok=True)
+    wetness_stem = wetness_name or f"{input_path.stem}_wt"
+    return base_output_dir / f"{wetness_stem}{DDS_EXTENSION}"
+
+
+def build_snow_mask_output_path(
+    input_path: Path,
+    output_dir: Path | None,
+    snow_name: str | None = None,
+) -> Path:
+    """Return the output path for a dynamic snow/frost coverage mask (``_sm.dds``)."""
+    base_output_dir = _resolve_output_base_dir(input_path, output_dir)
+    base_output_dir.mkdir(parents=True, exist_ok=True)
+    snow_stem = snow_name or f"{input_path.stem}_sm"
+    return base_output_dir / f"{snow_stem}{DDS_EXTENSION}"
+
+
 def _find_textures_root(path: Path) -> Path | None:
     for candidate in (path.parent, *path.parents):
         if candidate.name.lower() == "textures":
@@ -3384,6 +3522,10 @@ def _collect_planned_output_paths(
     include_environment_mask: bool,
     include_rmaos: bool,
     include_complex: bool,
+    wetness_name: str | None = None,
+    snow_name: str | None = None,
+    include_wetness_mask: bool = False,
+    include_snow_mask: bool = False,
 ) -> dict[str, Path]:
     planned: dict[str, Path] = {}
     if include_diffuse or include_parallax:
@@ -3424,6 +3566,18 @@ def _collect_planned_output_paths(
             input_path=input_file,
             output_dir=output_dir,
             rmaos_name=rmaos_name,
+        )
+    if include_wetness_mask:
+        planned["wetness_mask"] = build_wetness_mask_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            wetness_name=wetness_name,
+        )
+    if include_snow_mask:
+        planned["snow_mask"] = build_snow_mask_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            snow_name=snow_name,
         )
     if include_complex:
         planned["complex_material"] = build_complex_output_path(
@@ -3849,6 +4003,22 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
         "Specular map for character skin. Texture Slot 7 in the NIF. "
         "Character-specific shader slot for skin specularity.",
     ),
+    "_wt": (
+        "wetness_mask",
+        "Surface Wetness / Puddle Accumulation Mask",
+        "NOT a vanilla Skyrim SE texture. Greyscale mask where bright pixels indicate concave "
+        "or recessed surfaces that collect moisture (puddles, crevice water). "
+        "Used by Community Shaders wet-surface effect addons. "
+        "Generated by this tool from diffuse luminance and local concavity analysis.",
+    ),
+    "_sm": (
+        "snow_mask",
+        "Dynamic Snow / Frost Coverage Mask",
+        "NOT a vanilla Skyrim SE texture. Greyscale mask where bright pixels indicate flat, "
+        "upward-facing, or exposed surfaces that accumulate snow or frost. "
+        "Used by Community Shaders Dynamic Snow and season shader packs. "
+        "Generated by this tool from diffuse luminance and surface brightness analysis.",
+    ),
     "_msn": (
         "complex_material",
         "Complex Parallax Material (ENBSeries only)",
@@ -3912,6 +4082,8 @@ _SKYRIM_ROLE_PRIMARY_SUFFIX: dict[str, str] = {
     "environment_mask": "_m",
     "subsurface": "_s",
     "skin_specular": "_sk",
+    "wetness_mask": "_wt",
+    "snow_mask": "_sm",
     "complex_material": "_msn",
     "complex_material_cm": "_cm",
 }
@@ -3923,6 +4095,8 @@ _SKYRIM_ROLE_TOKEN_HINTS: dict[str, tuple[str, ...]] = {
     "environment_mask": ("env", "envmask", "cubemask", "reflectionmask", "specmask", "rmaos", "ramos"),
     "subsurface": ("subsurface", "sss"),
     "skin_specular": ("skinspec", "skinspecular"),
+    "wetness_mask": ("wetness", "wet", "puddle", "moisture"),
+    "snow_mask": ("snowmask", "snowcoverage", "frostmask"),
     "complex_material": ("complex", "complexmaterial", "msn"),
     "complex_material_cm": ("complexcm", "cmaterial", "complexgray"),
 }
@@ -4011,6 +4185,8 @@ def get_generation_warnings(
     parallax_mode: str = "standard",
     emboss_mode: bool = False,
     relief_mode: bool = False,
+    include_wetness_mask: bool = False,
+    include_snow_mask: bool = False,
 ) -> list[tuple[str, str]]:
     """Return a list of (warning_id, human-readable message) pairs for suspicious generation choices.
 
@@ -4297,6 +4473,38 @@ def get_generation_warnings(
             "Tip: Use standard parallax mode for '_cm/_c/_C', or switch the complex format to '_msn' for an ENB workflow.",
         ))
 
+    # --- Wetness and snow mask warnings ---
+    snow_incompatible_types = {"glass", "metal", "skin", "cloth", "plants"}
+    if include_snow_mask and material_type in snow_incompatible_types:
+        warnings.append((
+            "snow_mask_on_non_accumulating_material",
+            f"Snow mask enabled for a '{material_type}' texture.\n\n"
+            "Dynamic snow shaders accumulate snow on rough, horizontal surfaces. "
+            "Glass, polished metal, skin, cloth, and plant textures are unlikely to accumulate "
+            "visible snow — the mask will produce unexpected brightening on non-snow-covered surfaces.\n\n"
+            "Tip: Reserve snow masks for terrain, stone, wood, and architecture textures.",
+        ))
+
+    if include_snow_mask and material_type == "terrain":
+        warnings.append((
+            "snow_mask_terrain_check",
+            "Snow mask enabled for a terrain/landscape texture.\n\n"
+            "Terrain snow masks can cause horizon shimmer when used at high strengths. "
+            "Make sure the target shader pack supports terrain-space snow masking.\n\n"
+            "Tip: Keep snow mask strength at or below 1.2 for landscape/terrain textures.",
+        ))
+
+    wetness_incompatible_types = {"glass", "metal"}
+    if include_wetness_mask and material_type in wetness_incompatible_types:
+        warnings.append((
+            "wetness_mask_on_reflective_material",
+            f"Wetness mask enabled for a '{material_type}' texture.\n\n"
+            "Wet-surface effects on glass or polished metal surfaces are typically "
+            "driven by cubemap reflection intensity, not by a separate wetness mask. "
+            "A standard wetness mask on these materials may produce double-wet visual artefacts.\n\n"
+            "Tip: Use environment mask strength instead of a wetness mask for glass and polished metal.",
+        ))
+
     return warnings
 
 
@@ -4376,7 +4584,7 @@ def collect_source_textures(input_path: Path) -> list[Path]:
     if not source_files:
         raise ValueError(
             f"No source DDS textures found in {input_path}. "
-            "Folder mode scans subfolders, processes original DDS files, and skips generated *_n, *_p, *_g, *_glow, *_em, *_emit, *_emissive, *_m, *_s, *_sk, *_rmaos, *_ramos, *_msn, *_cm, *_c, and *_C variants."
+            "Folder mode scans subfolders, processes original DDS files, and skips generated *_n, *_p, *_g, *_glow, *_em, *_emit, *_emissive, *_m, *_s, *_sk, *_wt, *_sm, *_rmaos, *_ramos, *_msn, *_cm, *_c, and *_C variants."
         )
     return source_files
 
@@ -4605,8 +4813,24 @@ def run_with_options(
     include_rmaos: bool = False,
     include_complex: bool = False,
     render_profile: str = "auto",
+    include_wetness_mask: bool = False,
+    wetness_mask_strength: float | None = None,
+    wetness_name: str | None = None,
+    include_snow_mask: bool = False,
+    snow_mask_strength: float | None = None,
+    snow_name: str | None = None,
 ) -> dict[str, Path]:
-    if not any((include_diffuse, include_normal, include_parallax, include_glow, include_environment_mask, include_rmaos, include_complex)):
+    if not any((
+        include_diffuse,
+        include_normal,
+        include_parallax,
+        include_glow,
+        include_environment_mask,
+        include_rmaos,
+        include_complex,
+        include_wetness_mask,
+        include_snow_mask,
+    )):
         raise ValueError("Select at least one output.")
     if parallax_mode not in {"standard", "occlusion"}:
         raise ValueError("parallax_mode must be 'standard' or 'occlusion'.")
@@ -4620,6 +4844,8 @@ def run_with_options(
         environment_mask_name=environment_mask_name,
         rmaos_name=rmaos_name,
         complex_name=complex_name,
+        wetness_name=wetness_name,
+        snow_name=snow_name,
         complex_format=complex_format,
         env_mask_mode=env_mask_mode,
         render_profile=render_profile,
@@ -4630,6 +4856,8 @@ def run_with_options(
         include_environment_mask=include_environment_mask,
         include_rmaos=include_rmaos,
         include_complex=include_complex,
+        include_wetness_mask=include_wetness_mask,
+        include_snow_mask=include_snow_mask,
     )
     _validate_output_path_conflicts(planned_paths)
     resolved_env_complex_workflow = resolve_env_mask_complex_workflow(
@@ -4660,6 +4888,8 @@ def run_with_options(
         resolved_rmaos_strength = (
             rmaos_strength if rmaos_strength is not None else float(recommended["rmaos_strength"])
         )
+        resolved_wetness_mask_strength = wetness_mask_strength if wetness_mask_strength is not None else 1.0
+        resolved_snow_mask_strength = snow_mask_strength if snow_mask_strength is not None else 1.0
         resolved_complex_strength = complex_strength if complex_strength is not None else float(recommended["complex_strength"])
         resolved_specular_strength = specular_strength if specular_strength is not None else float(recommended["specular_strength"])
 
@@ -4781,6 +5011,38 @@ def run_with_options(
             )
             outputs["rmaos_json"] = write_rmaos_json_sidecar(outputs["rmaos"], parallax_enabled=include_parallax)
 
+        if include_wetness_mask:
+            wetness_map = enforce_skyrim_output_profile(
+                "parallax", generate_wetness_mask(source, strength=resolved_wetness_mask_strength)
+            )
+            wetness_path = build_wetness_mask_output_path(
+                input_path=input_file,
+                output_dir=output_dir,
+                wetness_name=wetness_name,
+            )
+            outputs["wetness_mask"] = _save_with_dds_fallback(
+                wetness_map,
+                wetness_path,
+                preferred_pixel_formats=_preferred_dds_formats_for_output("parallax", wetness_map),
+                output_kind="parallax",
+            )
+
+        if include_snow_mask:
+            snow_map = enforce_skyrim_output_profile(
+                "parallax", generate_snow_mask(source, strength=resolved_snow_mask_strength)
+            )
+            snow_path = build_snow_mask_output_path(
+                input_path=input_file,
+                output_dir=output_dir,
+                snow_name=snow_name,
+            )
+            outputs["snow_mask"] = _save_with_dds_fallback(
+                snow_map,
+                snow_path,
+                preferred_pixel_formats=_preferred_dds_formats_for_output("parallax", snow_map),
+                output_kind="parallax",
+            )
+
         if include_complex:
             if complex_format == "msn":
                 complex_material = enforce_skyrim_output_profile(
@@ -4850,6 +5112,12 @@ def run_batch_with_options(
     include_rmaos: bool = False,
     include_complex: bool = False,
     render_profile: str = "auto",
+    include_wetness_mask: bool = False,
+    wetness_mask_strength: float | None = None,
+    wetness_name: str | None = None,
+    include_snow_mask: bool = False,
+    snow_mask_strength: float | None = None,
+    snow_name: str | None = None,
     progress_callback: Callable[[int, int, Path], None] | None = None,
     error_callback: Callable[[int, int, Path, Exception], None] | None = None,
     continue_on_error: bool = False,
@@ -4895,6 +5163,12 @@ def run_batch_with_options(
                     include_rmaos=include_rmaos,
                     include_complex=include_complex,
                     render_profile=render_profile,
+                    include_wetness_mask=include_wetness_mask,
+                    wetness_mask_strength=wetness_mask_strength,
+                    wetness_name=wetness_name,
+                    include_snow_mask=include_snow_mask,
+                    snow_mask_strength=snow_mask_strength,
+                    snow_name=snow_name,
                 )
             except Exception as exc:
                 if error_callback is not None:
@@ -4934,6 +5208,12 @@ def run_batch_with_options(
             include_rmaos=include_rmaos,
             include_complex=include_complex,
             render_profile=render_profile,
+            include_wetness_mask=include_wetness_mask,
+            wetness_mask_strength=wetness_mask_strength,
+            wetness_name=wetness_name,
+            include_snow_mask=include_snow_mask,
+            snow_mask_strength=snow_mask_strength,
+            snow_name=snow_name,
         )
 
     completed = 0
@@ -5030,6 +5310,10 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="RMAOS channel packing strength factor (auto if omitted).",
     )
+    parser.add_argument("--wetness-mask", action="store_true", default=False, help="Generate a wetness mask (_wt.dds) for Community Shaders wet surface support.")
+    parser.add_argument("--wetness-mask-strength", type=float, default=None, metavar="STRENGTH", help="Wetness mask strength (0.1–3.0). Default: 1.0.")
+    parser.add_argument("--snow-mask", action="store_true", default=False, help="Generate a dynamic snow mask (_sm.dds) for Community Shaders Dynamic Snow.")
+    parser.add_argument("--snow-mask-strength", type=float, default=None, metavar="STRENGTH", help="Snow mask strength (0.1–3.0). Default: 1.0.")
     parser.add_argument(
         "--specular-strength",
         type=float,
@@ -5292,6 +5576,8 @@ if GUI_AVAILABLE:
             self.include_glow_var = tk.BooleanVar(value=False)
             self.include_environment_mask_var = tk.BooleanVar(value=False)
             self.include_rmaos_var = tk.BooleanVar(value=False)
+            self.include_wetness_mask_var = tk.BooleanVar(value=False)
+            self.include_snow_mask_var = tk.BooleanVar(value=False)
             self.include_complex_var = tk.BooleanVar(value=False)
             self.status_var = tk.StringVar(
                 value=self.manager_context.summary if self.manager_context.manager is not None else "Select a DDS file to begin."
@@ -5435,8 +5721,14 @@ if GUI_AVAILABLE:
             _rmaos_check = ttk.Checkbutton(options_frame, text="RMAOS / _rmaos", variable=self.include_rmaos_var, command=self._refresh_preview)
             _rmaos_check.grid(row=1, column=2, sticky=tk.W)
             self._add_tooltip(_rmaos_check, "🧩 Generate a dedicated TruePBR RMAOS map (_rmaos/_ramos) plus JSON sidecar in PBRNifPatcher/. Separate from vanilla/ENB _m environment masks.")
+            _wetness_mask_check = ttk.Checkbutton(options_frame, text="Wetness mask / _wt", variable=self.include_wetness_mask_var, command=self._refresh_preview)
+            _wetness_mask_check.grid(row=0, column=3, sticky=tk.W)
+            self._add_tooltip(_wetness_mask_check, "Generate a Community Shaders wetness mask (_wt.dds). Like giving surfaces their own rain puddle detector — dark areas get wetter.")
+            _snow_mask_check = ttk.Checkbutton(options_frame, text="Snow mask / _sm", variable=self.include_snow_mask_var, command=self._refresh_preview)
+            _snow_mask_check.grid(row=1, column=3, sticky=tk.W)
+            self._add_tooltip(_snow_mask_check, "Generate a Community Shaders Dynamic Snow mask (_sm.dds). Marks which pixels snow will accumulate on — bright = buried, dark = sheltered.")
             _complex_check = ttk.Checkbutton(options_frame, text="Complex/PBR material", variable=self.include_complex_var, command=self._refresh_preview)
-            _complex_check.grid(row=1, column=3, sticky=tk.W)
+            _complex_check.grid(row=1, column=4, sticky=tk.W)
             self._add_tooltip(
                 _complex_check,
                 "🔮 Generate complex/PBR material output.\n"
@@ -5861,6 +6153,8 @@ if GUI_AVAILABLE:
                 ("glow", "Glow"),
                 ("environment_mask", "Environment Mask"),
                 ("rmaos", "RMAOS"),
+                ("wetness_mask", "Wetness Mask"),
+                ("snow_mask", "Snow Mask"),
                 ("complex_material", "Complex Material"),
             )
             _output_tooltips = {
@@ -5870,6 +6164,8 @@ if GUI_AVAILABLE:
                 "glow": "✨ Emissive/glow preview.\nBright pixels glow in darkness; dark pixels mind their own business like respectable citizens.",
                 "environment_mask": "🪞 Reflection mask preview.\nBrighter = shinier, darker = matte. Basically a \"where may I sparkle\" permit.",
                 "rmaos": "🧩 TruePBR RMAOS preview (_rmaos/_ramos).\nPacked grayscale channels (not purple normal-map colors). Generator also writes a JSON sidecar in PBRNifPatcher/.",
+                "wetness_mask": "🌧 Wetness-mask preview (_wt).\nDarker areas are more rain-friendly; lighter areas stay less puddly.",
+                "snow_mask": "❄ Dynamic-snow mask preview (_sm).\nBrighter areas collect more snow; darker zones stay more sheltered.",
                 "complex_material": "🔮 Complex-material preview.\nFor MSN format this pane is split: LEFT = RGB normal channels, RIGHT = alpha/specular channel.\nFor CM format it shows the packed texture directly. Not a bug — just advanced wizard math.",
             }
             for index, (output_key, output_label) in enumerate(output_specs):
@@ -6048,6 +6344,8 @@ if GUI_AVAILABLE:
             self.include_glow_var.set(bool(state["include_glow"]))
             self.include_environment_mask_var.set(bool(state["include_environment_mask"]))
             self.include_rmaos_var.set(bool(state["include_rmaos"]))
+            self.include_wetness_mask_var.set(bool(state["include_wetness_mask"]))
+            self.include_snow_mask_var.set(bool(state["include_snow_mask"]))
             self.include_complex_var.set(bool(state["include_complex"]))
             self.auto_suggestions_var.set(bool(state["auto_suggestions"]))
             self.auto_normal_suggestion_var.set(bool(state["auto_normal"]))
@@ -6089,6 +6387,8 @@ if GUI_AVAILABLE:
                 "include_glow": self.include_glow_var.get(),
                 "include_environment_mask": self.include_environment_mask_var.get(),
                 "include_rmaos": self.include_rmaos_var.get(),
+                "include_wetness_mask": self.include_wetness_mask_var.get(),
+                "include_snow_mask": self.include_snow_mask_var.get(),
                 "include_complex": self.include_complex_var.get(),
                 "auto_suggestions": self.auto_suggestions_var.get(),
                 "auto_normal": self.auto_normal_suggestion_var.get(),
@@ -7034,6 +7334,7 @@ if GUI_AVAILABLE:
                 # Map the GUI parallax mode combo value to the internal key.
                 _pm_raw = self.parallax_mode_var.get()
                 _parallax_mode = "occlusion" if "occlusion" in _pm_raw else "standard"
+                preview_state = load_gui_state()
                 outputs = generate_preview_outputs(
                     self.source_image,
                     normal_strength=float(self.normal_strength_var.get()),
@@ -7054,6 +7355,10 @@ if GUI_AVAILABLE:
                     include_glow=self.include_glow_var.get(),
                     include_environment_mask=self.include_environment_mask_var.get(),
                     include_rmaos=self.include_rmaos_var.get(),
+                    include_wetness_mask=self.include_wetness_mask_var.get(),
+                    wetness_mask_strength=float(preview_state.get("wetness_mask_strength", 1.0)),
+                    include_snow_mask=self.include_snow_mask_var.get(),
+                    snow_mask_strength=float(preview_state.get("snow_mask_strength", 1.0)),
                     include_complex=self.include_complex_var.get(),
                     render_profile=self.render_profile_var.get(),
                 )
@@ -7090,6 +7395,8 @@ if GUI_AVAILABLE:
             include_glow: bool,
             include_environment_mask: bool,
             include_rmaos: bool,
+            include_wetness_mask: bool,
+            include_snow_mask: bool,
             env_mask_mode: str,
             env_mask_strength: float,
             include_parallax: bool,
@@ -7110,6 +7417,8 @@ if GUI_AVAILABLE:
                 include_glow=include_glow,
                 include_environment_mask=(include_environment_mask or include_rmaos),
                 include_rmaos=include_rmaos,
+                include_wetness_mask=include_wetness_mask,
+                include_snow_mask=include_snow_mask,
                 env_mask_mode=env_mask_mode,
                 env_mask_strength=env_mask_strength,
                 include_parallax=include_parallax,
@@ -7193,8 +7502,20 @@ if GUI_AVAILABLE:
                 include_glow = self.include_glow_var.get()
                 include_environment_mask = self.include_environment_mask_var.get()
                 include_rmaos = self.include_rmaos_var.get()
+                include_wetness_mask = bool(self.include_wetness_mask_var.get())
+                include_snow_mask = bool(self.include_snow_mask_var.get())
                 include_complex = self.include_complex_var.get()
-                if not any((include_diffuse, include_normal, include_parallax, include_glow, include_environment_mask, include_rmaos, include_complex)):
+                if not any((
+                    include_diffuse,
+                    include_normal,
+                    include_parallax,
+                    include_glow,
+                    include_environment_mask,
+                    include_rmaos,
+                    include_wetness_mask,
+                    include_snow_mask,
+                    include_complex,
+                )):
                     messagebox.showwarning("No outputs selected", "Select at least one output type.", parent=self.root)
                     return
 
@@ -7206,6 +7527,7 @@ if GUI_AVAILABLE:
                     return
 
                 output_dir: Path | None = None
+                state = load_gui_state()
                 if self.use_custom_output_var.get():
                     output_value = self.output_var.get().strip()
                     if not output_value:
@@ -7255,6 +7577,8 @@ if GUI_AVAILABLE:
                     include_glow=include_glow,
                     include_environment_mask=include_environment_mask,
                     include_rmaos=include_rmaos,
+                    include_wetness_mask=include_wetness_mask,
+                    include_snow_mask=include_snow_mask,
                     env_mask_mode=self.env_mask_mode_var.get(),
                     env_mask_strength=float(self.environment_mask_strength_var.get()),
                     include_parallax=include_parallax,
@@ -7366,6 +7690,10 @@ if GUI_AVAILABLE:
                     "include_glow": include_glow,
                     "include_environment_mask": include_environment_mask,
                     "include_rmaos": include_rmaos,
+                    "include_wetness_mask": include_wetness_mask,
+                    "wetness_mask_strength": float(state.get("wetness_mask_strength", 1.0)),
+                    "include_snow_mask": include_snow_mask,
+                    "snow_mask_strength": float(state.get("snow_mask_strength", 1.0)),
                     "include_complex": include_complex,
                 }
                 self.batch_failures = []
@@ -8547,6 +8875,10 @@ def main() -> int:
             include_glow=args.glow_map,
             include_environment_mask=args.environment_mask,
             include_rmaos=args.rmaos,
+            include_wetness_mask=args.wetness_mask,
+            wetness_mask_strength=args.wetness_mask_strength,
+            include_snow_mask=args.snow_mask,
+            snow_mask_strength=args.snow_mask_strength,
             include_complex=args.complex_material,
             render_profile=getattr(args, "render_profile", "auto"),
             continue_on_error=True,
@@ -8592,6 +8924,10 @@ def main() -> int:
         include_glow=args.glow_map,
         include_environment_mask=args.environment_mask,
         include_rmaos=args.rmaos,
+        include_wetness_mask=args.wetness_mask,
+        wetness_mask_strength=args.wetness_mask_strength,
+        include_snow_mask=args.snow_mask,
+        snow_mask_strength=args.snow_mask_strength,
         include_complex=args.complex_material,
         render_profile=getattr(args, "render_profile", "auto"),
     )
