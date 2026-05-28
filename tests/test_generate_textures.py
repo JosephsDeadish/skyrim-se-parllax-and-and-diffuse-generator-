@@ -9,6 +9,7 @@ from PIL import Image, ImageStat
 
 from generate_textures import (
     APP_VERSION,
+    MODDING_WIKI_SKYRIM_URL,
     PATREON_URL,
     _create_panda_icon_image,
     _map_parallax_strength_to_nif_scale,
@@ -1316,6 +1317,14 @@ class GenerateTexturesTests(unittest.TestCase):
         lowered = message.lower()
         self.assertNotIn("experimental", lowered)
         self.assertNotIn("may be inaccurate", lowered)
+
+    def test_build_render_profile_recommendation_message_includes_truepbr_reference_notes(self) -> None:
+        message = build_render_profile_recommendation_message("truepbr")
+        self.assertIn("TruePBR essentials (Community Shaders):", message)
+        self.assertIn("For players/users", message)
+        self.assertIn("Landscape workflow:", message)
+        self.assertIn("Feature compatibility:", message)
+        self.assertIn(MODDING_WIKI_SKYRIM_URL, message)
 
     def test_describe_render_profile_default_outputs_mentions_auto_checked_outputs(self) -> None:
         summary = describe_render_profile_default_outputs("enb")
@@ -2975,6 +2984,9 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_patreon_url_is_correct(self) -> None:
         self.assertEqual(PATREON_URL, "https://www.patreon.com/cw/DeadOnTheInside")
+
+    def test_modding_wiki_url_is_correct(self) -> None:
+        self.assertEqual(MODDING_WIKI_SKYRIM_URL, "https://modding.wiki/en/skyrim")
 
     def test_parse_args_accepts_pbr_material_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

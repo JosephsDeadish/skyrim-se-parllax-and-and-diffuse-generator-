@@ -158,6 +158,8 @@ The generated sidecar uses pgen/PBRNifPatcher-style texture entries (for example
 
 #### For users (installing mods)
 
+- True PBR brings a more modern physically based look than vanilla or ENB/CS complex-material-only setups, and can combine effects such as parallax, glow, subsurface scattering, or dual-layer materials on the same shader path.
+- Because it follows a standard PBR workflow, materials exported from modern tools/texturing suites are easier to reuse without blindly retuning brightness/specular for Skyrim's older vanilla conventions.
 - True PBR requires **Community Shaders** to render correctly in-game.
 - True PBR texture packs will not display correctly in tools/render paths that do not run Community Shaders (for example Creation Kit, Outfit Studio, or Bodyslide preview paths).
 - Keep renderer workflows separate:
@@ -172,7 +174,7 @@ To ship a complete True PBR set, do both:
 1. **Mesh/config setup**  
    Enable PBR on target meshes (`BSLightingShaderProperty` with `SLSF2 Unused01/PBR` flag), or ship PBRNifPatcher/PGPatcher JSON rules for user-side patching.
 2. **Texture setup**  
-   Provide base color, normal (DirectX), and packed RMAOS (R=Roughness, G=Metallic, B=AO, A=Specular/other depending on config), plus optional emission/parallax/feature maps.
+   Provide base color, normal (DirectX), roughness, metallic, ambient occlusion, and specular data — usually packed into `_rmaos` in this tool (R=Roughness, G=Metallic, B=AO, A=Specular/other depending on config) — plus optional emission/parallax/feature maps.
 
 Key mesh-side tuning values (when authoring NIFs):
 
@@ -198,6 +200,8 @@ Feature compatibility summary:
 - **Hair model**: standalone shading model; treat as incompatible with other special models
 - **Dual-layer material**: compatible with parallax/emission; incompatible with glint/fuzz/subsurface
 - **Material Objects (MATO)**: requires single-pass records and PBR material-object JSON; only applies on PBR-enabled surfaces
+
+Reference: <https://modding.wiki/en/skyrim>
 
 ### ENB complex material quick start
 

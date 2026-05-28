@@ -2152,6 +2152,22 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
             f"{describe_render_profile_default_outputs(profile)} "
             f"{describe_render_profile_output_recommendation(profile)}"
         )
+    lines.extend(
+        [
+            "",
+            "TruePBR essentials (Community Shaders):",
+            "- For players/users: TruePBR gives more realistic lighting than vanilla/complex material, can combine effects like parallax, glow, subsurface scattering, or dual-layer materials, and uses the same general PBR workflow seen in modern tools such as Blender and common texturing suites.",
+            "- Runtime requirement: TruePBR texture packs need Community Shaders enabled in-game. They will not preview/render correctly in non-CS tool paths such as Creation Kit, Outfit Studio, or Bodyslide.",
+            "- For texture artists/developers: ship both sides of the workflow — (1) meshes flagged for PBR or PGPatcher/PBRNifPatcher JSON rules, and (2) the actual TruePBR textures.",
+            "- Core texture set: albedo/base colour, DirectX normal, roughness, metallic, ambient occlusion, and specular; optional maps include emission and displacement/parallax plus feature-specific textures.",
+            "- Core mesh tuning: Specular Level controls non-metal reflectance, Roughness Scale controls surface smoothness, and Displacement Scale controls parallax/displacement depth.",
+            "- Colour-space rule of thumb: save in-game colour textures as sRGB; save data textures like normal/displacement/RMAOS in linear space.",
+            "- Landscape workflow: use Data/PBRTextureSets/<TXST_EDID>.json with roughnessScale, displacementScale, and specularLevel values.",
+            "- Feature compatibility: subsurface scattering conflicts with dual-layer material; glint conflicts with fuzz and dual-layer; fuzz conflicts with glint and dual-layer; hair model is a standalone shading model; dual-layer material works with parallax/emission but not glint/fuzz/subsurface.",
+            "- Material objects: PBR MATOs need single-pass records plus matching Data/PBRMaterialObjects JSON and only render on PBR-enabled surfaces.",
+            f"- Reference: {MODDING_WIKI_SKYRIM_URL}",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -6281,6 +6297,7 @@ def _apply_cli_pbr_overrides(args: argparse.Namespace) -> argparse.Namespace:
 
 
 PATREON_URL = "https://www.patreon.com/cw/DeadOnTheInside"
+MODDING_WIKI_SKYRIM_URL = "https://modding.wiki/en/skyrim"
 
 
 def _create_panda_icon_image(size: int = 128) -> Image.Image:
@@ -6492,6 +6509,12 @@ if GUI_AVAILABLE:
                 command=lambda: webbrowser.open(PATREON_URL),
             )
             _patreon_button.pack(side=tk.RIGHT, padx=4)
+            _wiki_button = ttk.Button(
+                top_bar,
+                text="Skyrim Wiki",
+                command=lambda: webbrowser.open(MODDING_WIKI_SKYRIM_URL),
+            )
+            _wiki_button.pack(side=tk.RIGHT, padx=4)
             _help_button = ttk.Button(
                 top_bar,
                 text="Help",
@@ -6512,9 +6535,14 @@ if GUI_AVAILABLE:
                 "Your support buys bug-fixing time, feature upgrades, and enough caffeine to keep the texture goblin alive.",
             )
             self._add_tooltip(
+                _wiki_button,
+                "📚 Open the Skyrim modding wiki reference.\n"
+                "Handy when you need the authoritative TruePBR workflow, slot, and feature-compatibility notes.",
+            )
+            self._add_tooltip(
                 _help_button,
                 "❓ Open the full renderer/channel guide.\n"
-                "Includes ENB vs Community Shaders channel mappings and workflow do/don't notes.",
+                "Includes ENB vs Community Shaders channel mappings, corrected TruePBR workflow notes, and a link back to the Skyrim modding wiki.",
             )
 
             file_frame = ttk.LabelFrame(wrapper, text="Files", padding=10)
