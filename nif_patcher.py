@@ -2291,6 +2291,36 @@ def guess_glow_path_for_nif(nif_path: Path) -> str | None:
     return None
 
 
+def guess_cubemap_path_for_nif(nif_path: Path) -> str | None:
+    """Guess a cubemap/environment path from slot 4 or the diffuse slot.
+
+    Returns a Windows-style relative ``_e.dds`` path, or ``None`` if no
+    suitable texture path is found in the NIF.
+    """
+    infos = scan_nif(nif_path)
+    for info in infos:
+        existing = info.texture_paths.get(TEXTURE_SLOT_CUBEMAP, "").strip()
+        if existing:
+            p = Path(existing.replace("\\", "/"))
+            stem = p.stem
+            for s in ("_cubemap", "_cube", "_envmap", "_env", "_e"):
+                if stem.lower().endswith(s):
+                    stem = stem[: -len(s)]
+                    break
+            return str(p.parent / (stem + "_e.dds")).replace("/", "\\")
+        diffuse = info.texture_paths.get(TEXTURE_SLOT_DIFFUSE, "").strip()
+        if not diffuse:
+            continue
+        p = Path(diffuse.replace("\\", "/"))
+        stem = p.stem
+        for s in ("_d", "_diff", "_diffuse", "_albedo"):
+            if stem.lower().endswith(s):
+                stem = stem[: -len(s)]
+                break
+        return str(p.parent / (stem + "_e.dds")).replace("/", "\\")
+    return None
+
+
 def guess_env_mask_path_for_nif(nif_path: Path, *, preferred_suffix: str = "_m.dds") -> str | None:
     """Guess the environment-mask path from a NIF's diffuse or env-mask slot.
 

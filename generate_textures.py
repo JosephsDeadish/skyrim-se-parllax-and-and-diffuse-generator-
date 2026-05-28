@@ -41,6 +41,7 @@ try:
     from nif_patcher import (
         NifPatchOptions,
         find_nif_files,
+        guess_cubemap_path_for_nif,
         guess_env_mask_path_for_nif,
         guess_glow_path_for_nif,
         guess_normal_path_for_nif,
@@ -9205,6 +9206,8 @@ if GUI_AVAILABLE:
                                 )
                                 or ""
                             )
+                        if not guessed_cubemap:
+                            guessed_cubemap = guess_cubemap_path_for_nif(nif_candidate) or ""
                         candidate_parallax = candidate_parallax.replace("/", "\\")
                         candidate_normal = candidate_normal.replace("/", "\\")
                         candidate_env = candidate_env.replace("/", "\\")

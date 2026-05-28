@@ -27,6 +27,7 @@ from nif_patcher import (
     NifPatchOptions,
     NifPatchResult,
     find_nif_files,
+    guess_cubemap_path_for_nif,
     guess_env_mask_path_for_nif,
     guess_glow_path_for_nif,
     guess_normal_path_for_nif,
@@ -1345,6 +1346,23 @@ class TestGuessHelpers(unittest.TestCase):
     def test_guess_glow_returns_none_for_no_diffuse(self) -> None:
         nif = _write_nif(self.tmp)
         self.assertIsNone(guess_glow_path_for_nif(nif))
+
+    def test_guess_cubemap_path_from_diffuse(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_cubemap_path_for_nif(nif)
+        self.assertEqual(guessed, "textures\\arch\\stone_e.dds")
+
+    def test_guess_cubemap_path_from_existing_env_suffix(self) -> None:
+        paths = [""] * 9
+        paths[4] = "textures\\arch\\stone_env.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_cubemap_path_for_nif(nif)
+        self.assertEqual(guessed, "textures\\arch\\stone_e.dds")
+
+    def test_guess_cubemap_returns_none_for_no_paths(self) -> None:
+        nif = _write_nif(self.tmp)
+        self.assertIsNone(guess_cubemap_path_for_nif(nif))
 
     def test_guess_env_mask_path_from_diffuse(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8
