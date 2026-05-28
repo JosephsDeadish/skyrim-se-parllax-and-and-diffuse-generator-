@@ -2206,12 +2206,23 @@ def guess_glow_path_for_nif(nif_path: Path) -> str | None:
     return None
 
 
-def guess_env_mask_path_for_nif(nif_path: Path) -> str | None:
+def guess_env_mask_path_for_nif(nif_path: Path, *, preferred_suffix: str = "_m.dds") -> str | None:
     """Guess the environment-mask path from a NIF's diffuse or env-mask slot.
 
-    Returns a Windows-style relative ``_m.dds`` path, or ``None`` if no
-    suitable texture path is found in the NIF.
+    Returns a Windows-style relative path using *preferred_suffix* (default:
+    ``_m.dds``), or ``None`` if no suitable texture path is found in the NIF.
     """
+    suffix_aliases = {
+        "_m": "_m.dds",
+        "_m.dds": "_m.dds",
+        "_cm": "_cm.dds",
+        "_cm.dds": "_cm.dds",
+        "_rmaos": "_rmaos.dds",
+        "_rmaos.dds": "_rmaos.dds",
+        "_ramos": "_rmaos.dds",
+        "_ramos.dds": "_rmaos.dds",
+    }
+    resolved_suffix = suffix_aliases.get(str(preferred_suffix or "").strip().lower(), "_m.dds")
     infos = scan_nif(nif_path)
     for info in infos:
         existing = info.texture_paths.get(TEXTURE_SLOT_ENV_MASK, "").strip()
@@ -2222,7 +2233,7 @@ def guess_env_mask_path_for_nif(nif_path: Path) -> str | None:
                 if stem.lower().endswith(s):
                     stem = stem[: -len(s)]
                     break
-            return str(p.parent / (stem + "_m.dds")).replace("/", "\\")
+            return str(p.parent / (stem + resolved_suffix)).replace("/", "\\")
         diffuse = info.texture_paths.get(TEXTURE_SLOT_DIFFUSE, "").strip()
         if not diffuse:
             continue
@@ -2232,7 +2243,7 @@ def guess_env_mask_path_for_nif(nif_path: Path) -> str | None:
             if stem.lower().endswith(s):
                 stem = stem[: -len(s)]
                 break
-        return str(p.parent / (stem + "_m.dds")).replace("/", "\\")
+        return str(p.parent / (stem + resolved_suffix)).replace("/", "\\")
     return None
 
 

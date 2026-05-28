@@ -2310,6 +2310,14 @@ class GenerateTexturesTests(unittest.TestCase):
                 args = parse_args()
         self.assertTrue(args.pbr_material)
 
+    def test_parse_args_accepts_render_profile_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_file = Path(temp_dir) / "brick.dds"
+            input_file.write_bytes(b"dds")
+            with mock.patch("sys.argv", ["generate_textures.py", str(input_file), "--render-profile", "enb"]):
+                args = parse_args()
+        self.assertEqual(str(args.render_profile), "enb")
+
     def test_main_pbr_material_forces_complex_material_cm_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             input_file = Path(temp_dir) / "brick.dds"
@@ -2342,6 +2350,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 environment_mask=False,
                 complex_material=False,
                 pbr_material=True,
+                render_profile="auto",
             )
             with mock.patch("generate_textures.parse_args", return_value=args):
                 with mock.patch("generate_textures.run_with_options", return_value={}) as run_with_options_mock:
@@ -2354,6 +2363,51 @@ class GenerateTexturesTests(unittest.TestCase):
         run_with_options_mock.assert_called_once()
         self.assertTrue(bool(run_with_options_mock.call_args.kwargs["include_complex"]))
         self.assertEqual(str(run_with_options_mock.call_args.kwargs["complex_format"]), "cm")
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["render_profile"]), "auto")
+
+    def test_main_passes_selected_render_profile_to_run_with_options(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_file = Path(temp_dir) / "brick.dds"
+            input_file.write_bytes(b"dds")
+            args = mock.Mock(
+                gui=False,
+                input_file=input_file,
+                output_dir=None,
+                diffuse_name=None,
+                normal_name=None,
+                parallax_name=None,
+                glow_name=None,
+                environment_mask_name=None,
+                rmaos_name=None,
+                complex_name=None,
+                normal_strength=None,
+                parallax_strength=None,
+                glow_threshold=None,
+                environment_mask_strength=None,
+                rmaos_strength=None,
+                complex_strength=None,
+                specular_strength=None,
+                complex_format="msn",
+                environment_mask_mode="standard",
+                emboss_mode=False,
+                relief_mode=False,
+                parallax_mode="standard",
+                no_diffuse=False,
+                no_normal=False,
+                no_parallax=False,
+                glow_map=False,
+                environment_mask=False,
+                rmaos=False,
+                complex_material=False,
+                pbr_material=False,
+                render_profile="enb",
+            )
+            with mock.patch("generate_textures.parse_args", return_value=args):
+                with mock.patch("generate_textures.run_with_options", return_value={}) as run_with_options_mock:
+                    exit_code = main()
+        self.assertEqual(exit_code, 0)
+        run_with_options_mock.assert_called_once()
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["render_profile"]), "enb")
 
     def test_run_cli_handles_missing_gui_dependencies_without_traceback(self) -> None:
         with mock.patch("generate_textures.main", side_effect=RuntimeError("GUI dependencies are unavailable in this environment.")):

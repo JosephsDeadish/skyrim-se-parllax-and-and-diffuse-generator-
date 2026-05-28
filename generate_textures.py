@@ -4606,6 +4606,16 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--render-profile",
+        choices=("auto", "custom", "vanilla", "performance", "vr", "community_shaders", "truepbr", "enb"),
+        default="auto",
+        help=(
+            "Target renderer/output profile. "
+            "'auto' (default) infers workflow from file path/mod-manager context; "
+            "other presets force profile-specific format/mode/output defaults."
+        ),
+    )
+    parser.add_argument(
         "--batch-workers",
         type=int,
         default=0,
@@ -7090,12 +7100,31 @@ if GUI_AVAILABLE:
                 clear_env_check = ttk.Checkbutton(unpatch_row2, text="Clear slot 5 (_m/_rmaos)", variable=clear_env_var)
                 clear_env_check.pack(side="left", padx=(12, 0))
 
+                def _recommended_nif_editor_profile() -> str:
+                    selected = _normalize_render_profile(renderer_profile_var.get())
+                    if selected != "auto":
+                        return selected
+                    path_value = nif_path_var.get().strip()
+                    input_path = Path(path_value) if path_value else None
+                    return recommend_render_profile(
+                        input_path,
+                        manager_context=self.manager_context,
+                    )
+
+                def _preferred_env_mask_suffix_for_profile() -> str:
+                    effective = _normalize_render_profile(_recommended_nif_editor_profile())
+                    if effective == "truepbr":
+                        return "_rmaos.dds"
+                    if effective == "community_shaders":
+                        return "_cm.dds"
+                    return "_m.dds"
+
                 def _apply_renderer_defaults(*_: object) -> None:
+                    recommended_profile = _recommended_nif_editor_profile()
                     defaults = resolve_nif_patch_defaults_for_render_profile(
                         renderer_profile_var.get(),
-                        recommended_profile="vanilla",
+                        recommended_profile=recommended_profile,
                     )
-                    effective_profile = str(defaults["effective_profile"])
                     enable_parallax_var.set(bool(defaults["enable_parallax"]))
                     enable_pom_var.set(bool(defaults["enable_pom"]))
                     enable_env_var.set(bool(defaults["enable_env_mapping"]))
@@ -7250,7 +7279,7 @@ if GUI_AVAILABLE:
                 )
                 _tex_row(
                     tex_frame,
-                    "Env mask / _m.dds:",
+                    "Env mask / _m/_cm/_rmaos:",
                     env_mask_tex_var,
                     "Select environment mask texture",
                     "🪞 Slot 5 environment mask path. Usually _m.dds (standard), _cm/_c.dds (CS complex), or _rmaos.dds (TruePBR; usually under textures\\pbr\\...).",
@@ -7261,8 +7290,13 @@ if GUI_AVAILABLE:
                     if not path_value:
                         status_var.set("Pick a NIF file or folder first, then use Auto-fill.")
                         return
-                    defaults = resolve_nif_patch_defaults_for_render_profile(renderer_profile_var.get(), recommended_profile="vanilla")
+                    recommended_profile = _recommended_nif_editor_profile()
+                    defaults = resolve_nif_patch_defaults_for_render_profile(
+                        renderer_profile_var.get(),
+                        recommended_profile=recommended_profile,
+                    )
                     prefer_msn = bool(defaults.get("prefer_msn_normal"))
+                    env_mask_suffix = _preferred_env_mask_suffix_for_profile()
                     selected_path = Path(path_value)
                     nifs = list(selected_path.rglob("*.nif")) if selected_path.is_dir() else [selected_path]
                     guessed_from: Path | None = None
@@ -7274,7 +7308,7 @@ if GUI_AVAILABLE:
                             continue
                         candidate_parallax = guess_parallax_path_for_nif(nif_candidate) or ""
                         candidate_normal = guess_normal_path_for_nif(nif_candidate, msn=prefer_msn) or ""
-                        candidate_env = ""
+                        candidate_env = guess_env_mask_path_for_nif(nif_candidate, preferred_suffix=env_mask_suffix) or ""
                         try:
                             infos = scan_nif(nif_candidate)
                         except Exception:
@@ -7297,7 +7331,7 @@ if GUI_AVAILABLE:
                                     normal_suffix = "_msn.dds" if prefer_msn else "_n.dds"
                                     candidate_normal = str(diffuse_like.parent / f"{diffuse_stem}{normal_suffix}").replace("/", "\\")
                                 if not candidate_env:
-                                    candidate_env = str(diffuse_like.parent / f"{diffuse_stem}_m.dds").replace("/", "\\")
+                                    candidate_env = str(diffuse_like.parent / f"{diffuse_stem}{env_mask_suffix}").replace("/", "\\")
                             if candidate_parallax and candidate_normal and candidate_env:
                                 break
                         candidate_parallax = candidate_parallax.replace("/", "\\")
@@ -7323,7 +7357,7 @@ if GUI_AVAILABLE:
                         normal_tex_var.set(guessed_normal)
                     env_mask_guess = guessed_env
                     if not env_mask_guess and guessed_parallax.lower().endswith("_p.dds"):
-                        env_mask_guess = guessed_parallax[:-6] + "_m.dds"
+                        env_mask_guess = guessed_parallax[:-6] + env_mask_suffix
                     if env_mask_guess:
                         if env_mask_tex_var.get().strip() != env_mask_guess:
                             changed += 1
@@ -7802,7 +7836,7 @@ def main() -> int:
             include_environment_mask=args.environment_mask,
             include_rmaos=args.rmaos,
             include_complex=args.complex_material,
-            render_profile="auto",
+            render_profile=getattr(args, "render_profile", "auto"),
             continue_on_error=True,
             batch_workers=args.batch_workers,
             error_callback=lambda _index, _total, current, exc: failures.append((current, str(exc))),
@@ -7847,7 +7881,7 @@ def main() -> int:
         include_environment_mask=args.environment_mask,
         include_rmaos=args.rmaos,
         include_complex=args.complex_material,
-        render_profile="auto",
+        render_profile=getattr(args, "render_profile", "auto"),
     )
     for output_type, path in outputs.items():
         print(f"{output_type.replace('_', ' ').title()} texture: {path}")

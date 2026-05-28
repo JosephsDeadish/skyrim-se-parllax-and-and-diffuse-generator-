@@ -1280,6 +1280,19 @@ class TestGuessHelpers(unittest.TestCase):
         guessed = guess_env_mask_path_for_nif(nif)
         self.assertEqual(guessed, "textures\\arch\\stone_m.dds")
 
+    def test_guess_env_mask_path_prefers_rmaos_suffix_when_requested(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_env_mask_path_for_nif(nif, preferred_suffix="_rmaos.dds")
+        self.assertEqual(guessed, "textures\\arch\\stone_rmaos.dds")
+
+    def test_guess_env_mask_path_prefers_cm_suffix_when_requested(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_mask.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_env_mask_path_for_nif(nif, preferred_suffix="_cm")
+        self.assertEqual(guessed, "textures\\arch\\stone_cm.dds")
+
     def test_guess_env_mask_returns_none_for_no_paths(self) -> None:
         nif = _write_nif(self.tmp)
         self.assertIsNone(guess_env_mask_path_for_nif(nif))
