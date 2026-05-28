@@ -670,6 +670,11 @@ class GenerateTexturesTests(unittest.TestCase):
             "interface",
         )
 
+    def test_detect_workflow_profile_detects_renderer_and_content_profiles(self) -> None:
+        self.assertEqual(detect_workflow_profile(Path("textures/vr/armor/helmet.dds")), "vr")
+        self.assertEqual(detect_workflow_profile(Path("textures/performance/stone.dds")), "performance")
+        self.assertEqual(detect_workflow_profile(Path("textures/architecture/ruins/wall.dds")), "architecture")
+
     def test_recommend_render_profile_detects_enb_from_path_hint(self) -> None:
         self.assertEqual(
             recommend_render_profile(Path("mods/ENBSeries/textures/architecture/stone.dds")),
@@ -716,6 +721,22 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(
             recommend_render_profile(Path("textures/actors/character/face.dds"), material_type="skin"),
             "characters",
+        )
+
+    def test_recommend_render_profile_uses_workflow_profile_hints(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/architecture/stone.dds"),
+                workflow_profile="vr",
+            ),
+            "vr",
+        )
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/architecture/stone.dds"),
+                workflow_profile="performance",
+            ),
+            "performance",
         )
 
     def test_recommend_render_profile_uses_mod_manager_context_hint_when_path_is_neutral(self) -> None:
@@ -951,8 +972,15 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(bool(vanilla["force_shader_type_3"]))
         self.assertFalse(bool(vanilla["prefer_msn_normal"]))
 
+        performance = resolve_nif_patch_defaults_for_render_profile("performance")
+        self.assertFalse(bool(performance["enable_parallax"]))
+        self.assertFalse(bool(performance["enable_pom"]))
+        self.assertFalse(bool(performance["enable_env_mapping"]))
+        self.assertFalse(bool(performance["force_shader_type_3"]))
+        self.assertFalse(bool(performance["prefer_msn_normal"]))
+
         vr = resolve_nif_patch_defaults_for_render_profile("vr")
-        self.assertTrue(bool(vr["enable_parallax"]))
+        self.assertFalse(bool(vr["enable_parallax"]))
         self.assertFalse(bool(vr["enable_pom"]))
         self.assertFalse(bool(vr["enable_env_mapping"]))
         self.assertFalse(bool(vr["force_shader_type_3"]))
@@ -1050,6 +1078,31 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         self.assertTrue(any("slot 0" in text.lower() or "diffuse slot" in text.lower() for text in warnings))
         self.assertTrue(any("cubemap slot" in text.lower() for text in warnings))
+
+    def test_get_nif_patch_option_warnings_reports_renderer_specific_suffix_mismatch(self) -> None:
+        enb_warnings = get_nif_patch_option_warnings(
+            selected_profile="enb",
+            enable_parallax=True,
+            enable_pom=True,
+            enable_env_mapping=True,
+            force_shader_type_3=True,
+            normal_texture_path="textures\\architecture\\stone\\stone_n.dds",
+            env_mask_texture_path="textures\\architecture\\stone\\stone_cm.dds",
+        )
+        self.assertTrue(any("_msn" in text.lower() for text in enb_warnings))
+        self.assertTrue(any("slot 5" in text.lower() and "_m" in text.lower() for text in enb_warnings))
+
+        truepbr_warnings = get_nif_patch_option_warnings(
+            selected_profile="truepbr",
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            force_shader_type_3=True,
+            normal_texture_path="textures\\pbr\\stone_msn.dds",
+            env_mask_texture_path="textures\\pbr\\stone_cm.dds",
+        )
+        self.assertTrue(any("_n" in text.lower() and "_msn" in text.lower() for text in truepbr_warnings))
+        self.assertTrue(any("_rmaos" in text.lower() for text in truepbr_warnings))
 
     def test_build_render_profile_recommendation_message_lists_renderer_guidance(self) -> None:
         message = build_render_profile_recommendation_message("community_shaders")

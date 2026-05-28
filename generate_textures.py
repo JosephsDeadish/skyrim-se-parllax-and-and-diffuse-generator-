@@ -1117,6 +1117,38 @@ def _adjust_recommendations_for_material_type(
 
 
 _WORKFLOW_PROFILE_TOKENS: dict[str, tuple[str, ...]] = {
+    "performance": (
+        "performance",
+        "perf",
+        "lowend",
+        "low-end",
+        "low_end",
+        "potato",
+    ),
+    "vr": (
+        "vr",
+        "virtualreality",
+        "virtual_reality",
+        "virtual-reality",
+    ),
+    "terrain": (
+        "terrain",
+        "landscape",
+        "ground",
+    ),
+    "architecture": (
+        "architecture",
+        "building",
+        "ruins",
+        "wall",
+    ),
+    "characters": (
+        "character",
+        "characters",
+        "skin",
+        "npc",
+        "actor",
+    ),
     "interface": (
         "interface",
         "ui",
@@ -1318,14 +1350,14 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "prefer_msn_normal": False,
     },
     "performance": {
-        "enable_parallax": True,
+        "enable_parallax": False,
         "enable_pom": False,
         "enable_env_mapping": False,
         "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
     "vr": {
-        "enable_parallax": True,
+        "enable_parallax": False,
         "enable_pom": False,
         "enable_env_mapping": False,
         "force_shader_type_3": False,
@@ -1490,6 +1522,15 @@ _RENDER_PROFILE_MANAGER_HINT_TOKENS: dict[str, tuple[str, ...]] = {
     "truepbr": ("truepbr", "true pbr", "pbrnifpatcher", "pbr nif patcher", "rmaos", "ramos"),
 }
 
+_RENDER_PROFILE_WORKFLOW_HINTS: dict[str, str] = {
+    "performance": "performance",
+    "vr": "vr",
+    "terrain": "terrain",
+    "architecture": "architecture",
+    "characters": "characters",
+    "interface": "vanilla",
+}
+
 _RENDER_PROFILE_ENB_MARKERS: tuple[tuple[str, ...], ...] = (
     ("d3d11.dll",),
     ("d3dcompiler_46e.dll",),
@@ -1625,6 +1666,10 @@ def get_nif_patch_option_warnings(
     normalized_profile = _normalize_render_profile(profile)
     if profile in {"auto", "vanilla"} and enable_pom:
         warnings.append("ENB POM is usually incorrect for vanilla meshes.")
+    if normalized_profile in {"performance", "vr"} and enable_parallax:
+        warnings.append("Performance/VR workflows usually keep parallax disabled to reduce shimmer and GPU cost.")
+    if normalized_profile == "characters" and enable_parallax:
+        warnings.append("Character workflows usually keep parallax disabled to avoid unstable face/skin shading.")
     if enable_pom and not force_shader_type_3:
         warnings.append("POM works best with shader type 3 enabled.")
     if enable_env_mapping and not env_mask_texture_path.strip() and normalized_profile not in {"enb", "auto"}:
@@ -1680,6 +1725,24 @@ def get_nif_patch_option_warnings(
             continue
         if not lowered.endswith(lowered_suffixes):
             warnings.append(f"{label} path should usually end with {', '.join(suffixes)}.")
+
+    normal_lower = normal_texture_path.strip().replace("/", "\\").lower()
+    env_lower = env_mask_texture_path.strip().replace("/", "\\").lower()
+    if normalized_profile == "enb":
+        if normal_lower.endswith("_n.dds"):
+            warnings.append("ENB workflows usually use _msn.dds in slot 1 instead of _n.dds.")
+        if env_lower.endswith(("_cm.dds", "_c.dds", "_rmaos.dds", "_ramos.dds")):
+            warnings.append("ENB slot 5 usually uses _m.dds, not _cm/_c/_rmaos variants.")
+    elif normalized_profile == "community_shaders":
+        if normal_lower.endswith("_msn.dds"):
+            warnings.append("Community Shaders workflows usually use _n.dds normals, not _msn.dds.")
+        if env_lower.endswith(("_rmaos.dds", "_ramos.dds")):
+            warnings.append("Community Shaders (non-TruePBR) slot 5 usually uses _cm/_c, not _rmaos/_ramos.")
+    elif normalized_profile == "truepbr":
+        if normal_lower.endswith("_msn.dds"):
+            warnings.append("TruePBR workflows usually use _n.dds normals, not _msn.dds.")
+        if env_lower.endswith(("_cm.dds", "_c.dds")):
+            warnings.append("TruePBR slot 5 usually uses _rmaos/_ramos, not _cm/_c.")
 
     return warnings
 
@@ -1797,7 +1860,10 @@ def recommend_render_profile(
         return "community_shaders"
     if detected_role == "complex_material":
         return "enb"
-    if workflow_profile == "interface" or material_type == "paper":
+    workflow_hint = _RENDER_PROFILE_WORKFLOW_HINTS.get((workflow_profile or "").strip().lower())
+    if workflow_hint is not None:
+        return workflow_hint
+    if material_type == "paper":
         return "vanilla"
     if input_path is not None:
         combined = " ".join(input_path.parts).lower()
