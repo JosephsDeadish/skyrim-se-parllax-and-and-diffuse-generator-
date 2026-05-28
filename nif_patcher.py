@@ -156,11 +156,23 @@ _DIFFUSE_SLOT_DISALLOWED_SUFFIXES: tuple[str, ...] = (
     "_m.dds",
     "_mask.dds",
     "_envmask.dds",
+    "_ao.dds",
+    "_ambientocclusion.dds",
+    "_rough.dds",
+    "_roughness.dds",
+    "_metal.dds",
+    "_metallic.dds",
+    "_metalness.dds",
     "_em.dds",
     "_emis.dds",
     "_cm.dds",
     "_c.dds",
     "_rmaos.dds",
+    "_ramos.dds",
+    "_orm.dds",
+    "_orms.dds",
+    "_mrao.dds",
+    "_mra.dds",
     "_e.dds",
     "_cube.dds",
     "_env.dds",
@@ -181,9 +193,21 @@ _CUBEMAP_SLOT_WRONG_SUFFIXES: tuple[str, ...] = (
     "_em.dds",
     "_emis.dds",
     "_m.dds",
+    "_ao.dds",
+    "_ambientocclusion.dds",
+    "_rough.dds",
+    "_roughness.dds",
+    "_metal.dds",
+    "_metallic.dds",
+    "_metalness.dds",
     "_cm.dds",
     "_c.dds",
     "_rmaos.dds",
+    "_ramos.dds",
+    "_orm.dds",
+    "_orms.dds",
+    "_mrao.dds",
+    "_mra.dds",
 )
 _NORMAL_SLOT_DISALLOWED_SUFFIXES: tuple[str, ...] = (
     "_p.dds",
@@ -192,9 +216,21 @@ _NORMAL_SLOT_DISALLOWED_SUFFIXES: tuple[str, ...] = (
     "_m.dds",
     "_mask.dds",
     "_envmask.dds",
+    "_ao.dds",
+    "_ambientocclusion.dds",
+    "_rough.dds",
+    "_roughness.dds",
+    "_metal.dds",
+    "_metallic.dds",
+    "_metalness.dds",
     "_em.dds",
     "_emis.dds",
     "_rmaos.dds",
+    "_ramos.dds",
+    "_orm.dds",
+    "_orms.dds",
+    "_mrao.dds",
+    "_mra.dds",
     "_cm.dds",
     "_c.dds",
     "_e.dds",
@@ -202,6 +238,35 @@ _NORMAL_SLOT_DISALLOWED_SUFFIXES: tuple[str, ...] = (
     "_envmap.dds",
     "_cube.dds",
     "_cubemap.dds",
+)
+_ENV_MASK_SLOT_EXPECTED_SUFFIXES: tuple[str, ...] = (
+    "_m.dds",
+    "_mask.dds",
+    "_envmask.dds",
+    "_em.dds",
+    "_rmaos.dds",
+    "_ramos.dds",
+    "_orm.dds",
+    "_orms.dds",
+    "_mrao.dds",
+    "_mra.dds",
+    "_cm.dds",
+    "_c.dds",
+    "_ao.dds",
+    "_ambientocclusion.dds",
+    "_rough.dds",
+    "_roughness.dds",
+    "_metal.dds",
+    "_metallic.dds",
+    "_metalness.dds",
+)
+_TRUEPBR_ENV_MASK_SUFFIXES: tuple[str, ...] = (
+    "_rmaos.dds",
+    "_ramos.dds",
+    "_orm.dds",
+    "_orms.dds",
+    "_mrao.dds",
+    "_mra.dds",
 )
 
 # BSLightingShaderPropertyShaderType values
@@ -2049,16 +2114,16 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
         env_mask_path = info.texture_paths.get(TEXTURE_SLOT_ENV_MASK, "").strip()
         if env_mask_path:
             normalized_env_mask = _normalise_slot_path(env_mask_path)
-            if not normalized_env_mask.endswith(("_m.dds", "_mask.dds", "_envmask.dds", "_em.dds", "_rmaos.dds", "_cm.dds", "_c.dds")):
+            if not normalized_env_mask.endswith(_ENV_MASK_SLOT_EXPECTED_SUFFIXES):
                 _append_unique(
                     result.issues,
                     f"Block {info.block_index}: slot 5 environment-mask path '{env_mask_path}' does not look like an environment mask."
                 )
                 _append_unique(
                     result.suggestions,
-                    "Use slot 5 for _m.dds (standard env mask) or complex-material mask naming such as _cm/_c/_rmaos."
+                    "Use slot 5 for _m.dds aliases (_ao/_roughness/_metalness) or complex-material/TruePBR naming such as _cm/_c/_rmaos/_orm."
                 )
-            if normalized_env_mask.endswith("_rmaos.dds") and not normalized_env_mask.startswith("textures\\pbr\\"):
+            if normalized_env_mask.endswith(_TRUEPBR_ENV_MASK_SUFFIXES) and not normalized_env_mask.startswith("textures\\pbr\\"):
                 _append_unique(
                     result.suggestions,
                     "TruePBR _rmaos workflows are usually placed under textures\\pbr\\... and paired with a matching PBRNifPatcher JSON entry."
@@ -2241,6 +2306,14 @@ def guess_env_mask_path_for_nif(nif_path: Path, *, preferred_suffix: str = "_m.d
         "_rmaos.dds": "_rmaos.dds",
         "_ramos": "_rmaos.dds",
         "_ramos.dds": "_rmaos.dds",
+        "_orm": "_rmaos.dds",
+        "_orm.dds": "_rmaos.dds",
+        "_orms": "_rmaos.dds",
+        "_orms.dds": "_rmaos.dds",
+        "_mrao": "_rmaos.dds",
+        "_mrao.dds": "_rmaos.dds",
+        "_mra": "_rmaos.dds",
+        "_mra.dds": "_rmaos.dds",
     }
     resolved_suffix = suffix_aliases.get(str(preferred_suffix or "").strip().lower(), "_m.dds")
     infos = scan_nif(nif_path)
@@ -2249,7 +2322,28 @@ def guess_env_mask_path_for_nif(nif_path: Path, *, preferred_suffix: str = "_m.d
         if existing:
             p = Path(existing.replace("\\", "/"))
             stem = p.stem
-            for s in ("_m", "_mask", "_envmask", "_env", "_em", "_rmaos", "_cm", "_c"):
+            for s in (
+                "_m",
+                "_mask",
+                "_envmask",
+                "_env",
+                "_em",
+                "_rmaos",
+                "_ramos",
+                "_orm",
+                "_orms",
+                "_mrao",
+                "_mra",
+                "_ao",
+                "_ambientocclusion",
+                "_rough",
+                "_roughness",
+                "_metal",
+                "_metallic",
+                "_metalness",
+                "_cm",
+                "_c",
+            ):
                 if stem.lower().endswith(s):
                     stem = stem[: -len(s)]
                     break

@@ -468,6 +468,15 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertIn("slot 1 normal path", joined)
         self.assertIn("_n.dds or _msn.dds", joined)
 
+    def test_reports_wrong_texture_type_in_normal_slot_for_truepbr_alias_suffix(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_NORMAL] = "textures\\arch\\stone_orm.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 1 normal path", joined)
+        self.assertIn("_n.dds or _msn.dds", joined)
+
     def test_reports_wrong_texture_type_in_glow_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_n.dds"
@@ -507,9 +516,36 @@ class TestValidateNifForParallax(unittest.TestCase):
         joined = "\n".join(v.issues + v.suggestions).lower()
         self.assertNotIn("slot 5 environment-mask path", joined)
 
+    def test_accepts_orm_suffix_in_env_mask_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_orm.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            shader_type=SHADER_TYPE_ENVMAP,
+        )
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertNotIn("slot 5 environment-mask path", joined)
+
     def test_truepbr_rmaos_path_warns_when_not_in_textures_pbr(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_ENV_MASK] = "textures\\architecture\\stone_rmaos.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            shader_type=SHADER_TYPE_ENVMAP,
+        )
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("textures\\pbr\\", joined)
+        self.assertIn("pbrnifpatcher json", joined)
+
+    def test_truepbr_orm_path_warns_when_not_in_textures_pbr(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\architecture\\stone_orm.dds"
         nif = _write_nif(
             self.tmp,
             texture_paths=paths,
@@ -533,6 +569,15 @@ class TestValidateNifForParallax(unittest.TestCase):
     def test_reports_env_mask_suffix_in_diffuse_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_DIFFUSE] = "textures\\arch\\stone_em.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 0 diffuse path", joined)
+        self.assertIn("use slot 0 for diffuse/albedo", joined)
+
+    def test_reports_truepbr_alias_suffix_in_diffuse_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_DIFFUSE] = "textures\\arch\\stone_orms.dds"
         nif = _write_nif(self.tmp, texture_paths=paths)
         v = validate_nif_for_parallax(nif)
         joined = "\n".join(v.issues + v.suggestions).lower()
@@ -1324,10 +1369,23 @@ class TestGuessHelpers(unittest.TestCase):
         guessed = guess_env_mask_path_for_nif(nif)
         self.assertEqual(guessed, "textures\\arch\\stone_m.dds")
 
+    def test_guess_env_mask_path_from_existing_orm_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_orm.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_env_mask_path_for_nif(nif)
+        self.assertEqual(guessed, "textures\\arch\\stone_m.dds")
+
     def test_guess_env_mask_path_prefers_rmaos_suffix_when_requested(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8
         nif = _write_nif(self.tmp, texture_paths=paths)
         guessed = guess_env_mask_path_for_nif(nif, preferred_suffix="_rmaos.dds")
+        self.assertEqual(guessed, "textures\\arch\\stone_rmaos.dds")
+
+    def test_guess_env_mask_path_prefers_orm_suffix_when_requested(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_env_mask_path_for_nif(nif, preferred_suffix="_orm")
         self.assertEqual(guessed, "textures\\arch\\stone_rmaos.dds")
 
     def test_guess_env_mask_path_prefers_cm_suffix_when_requested(self) -> None:
