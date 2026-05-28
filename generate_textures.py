@@ -1365,7 +1365,7 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     "custom": (
         "Custom profile.\n"
         "No renderer assumptions are applied; this profile is intentionally blank so you can choose all options manually.\n"
-        "Guidance text and channel hints are best-effort and may be inaccurate for your specific shader stack.\n"
+        "Guidance text and channel hints describe this tool's built-in presets and naming defaults.\n"
         "For TruePBR workflows, use dedicated _rmaos/_ramos output plus its JSON sidecar and validate against your installed shader docs."
     ),
     "vanilla": (
@@ -2062,7 +2062,7 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
         f"parallax {resolved['parallax_mode']}"
     )
     lines = [
-        "⚠ Render profile guidance is EXPERIMENTAL and may be inaccurate for some setups.",
+        "Renderer guidance below reflects this tool's built-in presets and channel mappings.",
         f"Suggested target: {label} ({workflow_hint}) → {tuple_hint}.",
         describe_render_profile_output_recommendation(normalized),
         describe_render_profile_default_outputs(normalized),
@@ -6532,8 +6532,8 @@ if GUI_AVAILABLE:
                 "community_shaders = Community Shaders Extended Materials _cm/_c/_C workflow.\n"
                 "truepbr = Community Shaders TruePBR JSON-driven _rmaos/_ramos workflow.\n"
                 "enb = tool ENB preset (_msn + complex env-mask mode + optional POM).\n"
-                "Render-profile guidance is experimental and some info may be inaccurate for your setup.\n"
-                "Community Shaders and ENB are separate workflows and should not be combined.\n"
+                "Presets keep format/mode/output defaults aligned to avoid conflicting combinations.\n"
+                "Community Shaders and ENB are separate workflows and should not be combined in one output set.\n"
                 "Changing this is the only thing that should auto-switch the mode combos.",
             )
             _render_profile_combo = ttk.Combobox(
@@ -6552,7 +6552,7 @@ if GUI_AVAILABLE:
                 "vanilla = safest defaults; performance = lightweight defaults; vr = conservative VR defaults; "
                 "terrain = stable terrain defaults; architecture = structure-focused defaults; characters = skin-safe defaults; "
                 "community_shaders = _cm/_c/_C; truepbr = _n + _rmaos/_ramos + JSON path; enb = tool ENB preset _msn + complex env + optional POM.\n"
-                "Render-profile guidance is experimental and may be inaccurate for some stacks.\n"
+                "Presets keep format/mode/output defaults aligned to avoid conflicting combinations.\n"
                 "Community Shaders and ENB are separate workflows and should not be mixed.",
             )
             self.render_profile_hint_label = ttk.Label(
@@ -6595,7 +6595,7 @@ if GUI_AVAILABLE:
             _env_mode_row.grid(row=4, column=2, columnspan=2, sticky=tk.W, padx=(20, 4), pady=8)
             _env_mode_label = ttk.Label(_env_mode_row, text="Env mask mode")
             _env_mode_label.pack(side=tk.LEFT)
-            self._add_tooltip(_env_mode_label, "🌍 How to encode the environment mask.\n'standard' = vanilla Skyrim.\n'complex' = packed RGBA (ENB and TruePBR interpret channels differently).\nUse Target renderer + Help for the correct channel mapping.")
+            self._add_tooltip(_env_mode_label, "🌍 How to encode the environment mask.\n'standard' = vanilla Skyrim.\n'complex' = packed RGBA for renderer-specific workflows (primarily ENB preset output in this tool).\nFor TruePBR, use the dedicated _rmaos/_ramos output path.\nUse Target renderer + Help for channel mapping.")
             self.env_mask_mode_combo = ttk.Combobox(
                 _env_mode_row,
                 textvariable=self.env_mask_mode_var,
@@ -6605,7 +6605,7 @@ if GUI_AVAILABLE:
             )
             self.env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
             self.env_mask_mode_combo.bind("<<ComboboxSelected>>", self._on_env_mask_mode_changed)
-            self._add_tooltip(self.env_mask_mode_combo, "🌍 'standard' = vanilla Skyrim SE reflections.\n'complex' = packed RGBA for ENB/TruePBR workflows.\nAlways match this with your selected Target renderer.")
+            self._add_tooltip(self.env_mask_mode_combo, "🌍 'standard' = vanilla Skyrim SE reflections.\n'complex' = packed RGBA for renderer-specific workflows (ENB preset in this tool).\nTruePBR usually uses _rmaos/_ramos instead of _m.\nAlways match this with your selected Target renderer.")
             ttk.Label(
                 options_frame,
                 text="standard = vanilla Skyrim SE  |  complex = packed RGBA (renderer-specific channels)",
@@ -7910,7 +7910,7 @@ if GUI_AVAILABLE:
             container.pack(fill=tk.BOTH, expand=True)
             ttk.Label(
                 container,
-                text="Renderer/channel guidance [Experimental] (ENB vs Community Shaders)",
+                text="Renderer/channel guidance (ENB vs Community Shaders)",
                 justify=tk.LEFT,
                 anchor=tk.W,
             ).pack(fill=tk.X, pady=(0, 8))
@@ -7990,7 +7990,7 @@ if GUI_AVAILABLE:
                 self.env_mask_mode_var.set(selected)
             if selected == "complex":
                 self.status_var.set(
-                    "Environment mask mode: complex — RGBA packed output (ENB and TruePBR use different channel meanings; use the renderer preset + Help guide)."
+                    "Environment mask mode: complex — RGBA packed output for renderer-specific workflows (ENB preset in this tool). TruePBR usually uses _rmaos/_ramos."
                 )
             else:
                 self.status_var.set("Environment mask mode: standard — vanilla Skyrim SE grayscale reflection mask.")

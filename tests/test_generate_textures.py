@@ -1278,6 +1278,12 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("_C.dds", message)
         self.assertIn("How files should look:", message)
 
+    def test_build_render_profile_recommendation_message_avoids_experimental_inaccuracy_copy(self) -> None:
+        message = build_render_profile_recommendation_message("community_shaders")
+        lowered = message.lower()
+        self.assertNotIn("experimental", lowered)
+        self.assertNotIn("may be inaccurate", lowered)
+
     def test_describe_render_profile_default_outputs_mentions_auto_checked_outputs(self) -> None:
         summary = describe_render_profile_default_outputs("enb")
         self.assertIn("Auto-check:", summary)
