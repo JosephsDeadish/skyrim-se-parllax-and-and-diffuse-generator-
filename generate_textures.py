@@ -88,6 +88,14 @@ GENERATED_TEXTURE_SUFFIXES = (
     "_wt",
     "_sm",
 )
+TRUEPBR_ENV_MASK_SUFFIXES: frozenset[str] = frozenset({
+    "_rmaos",
+    "_ramos",
+    "_orm",
+    "_orms",
+    "_mrao",
+    "_mra",
+})
 PREVIEW_MAX_DIMENSION = 1024
 PREVIEW_SIZE_PRESETS: dict[str, tuple[int, int]] = {
     "XS": (160, 120),
@@ -1998,7 +2006,7 @@ def recommend_render_profile(
         return "community_shaders"
     if normalized_suffix == "_msn":
         return "enb"
-    if normalized_suffix in {"_rmaos", "_ramos"}:
+    if normalized_suffix in TRUEPBR_ENV_MASK_SUFFIXES:
         return "truepbr"
     if detected_role == "complex_material_cm":
         return "community_shaders"
@@ -4796,12 +4804,12 @@ def get_generation_warnings(
             "Regenerating complex material from packed complex inputs often damages channel meaning.\n\n"
             "Tip: Start from diffuse/albedo source when creating new complex materials.",
         ))
-    if normalized_source_suffix in {"_rmaos", "_ramos"}:
+    if normalized_source_suffix in TRUEPBR_ENV_MASK_SUFFIXES:
         warnings.append((
             "rmaos_source_requires_renderer_check",
-            "Input uses the '_rmaos' or '_ramos' suffix.\n\n"
-            "_rmaos/_ramos is used for Community Shaders TruePBR JSON workflows and is NOT the same as Community Shaders _cm/_c Extended Materials.\n\n"
-            "Tip: Use the TruePBR renderer/profile path for _rmaos/_ramos generation and avoid mixing this map into ENB complex-material setups.",
+            "Input uses a TruePBR packed-map suffix (_rmaos/_ramos/_orm/_orms/_mrao/_mra).\n\n"
+            "These suffixes are used for Community Shaders TruePBR JSON workflows and are NOT the same as Community Shaders _cm/_c Extended Materials.\n\n"
+            "Tip: Use the TruePBR renderer/profile path for these packed maps and avoid mixing them into ENB complex-material setups.",
         ))
     hint_text = (source_hint or "").lower()
     if "ui/interface texture" in hint_text and (include_parallax or include_environment_mask or include_complex):

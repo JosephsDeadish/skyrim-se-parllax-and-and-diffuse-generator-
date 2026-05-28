@@ -806,6 +806,16 @@ class GenerateTexturesTests(unittest.TestCase):
             "truepbr",
         )
 
+    def test_recommend_render_profile_detects_truepbr_from_orm_suffix(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/architecture/stone_orm.dds"),
+                detected_role="environment_mask",
+                detected_suffix="_orm",
+            ),
+            "truepbr",
+        )
+
     def test_recommend_generation_settings_leather_is_less_reflective_than_metal(self) -> None:
         source = _detailed_low_saturation_image()
         leather = recommend_generation_settings(source, Path("textures/armor/leather/hide_strap.dds"))
@@ -1540,6 +1550,20 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         ids = [w[0] for w in warnings]
         self.assertIn("ui_texture_advanced_maps", ids)
+
+    def test_get_generation_warnings_orm_source_triggers_truepbr_suffix_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            source_suffix="_orm",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("rmaos_source_requires_renderer_check", ids)
 
     def test_recommend_generation_settings_clamps_interface_workflow_strengths(self) -> None:
         settings = recommend_generation_settings(
