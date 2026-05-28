@@ -2279,6 +2279,8 @@ def detect_render_profile_from_mod_manager_context(context: ModManagerContext | 
         return "community_shaders"
     if has_enb and not has_cs:
         return "enb"
+    if context.detected_body_profiles or context.detected_skeleton_profiles:
+        return "characters"
     return None
 
 

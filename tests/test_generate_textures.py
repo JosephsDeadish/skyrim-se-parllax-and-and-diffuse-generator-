@@ -927,6 +927,27 @@ class GenerateTexturesTests(unittest.TestCase):
             )
             self.assertEqual(detect_render_profile_from_mod_manager_context(context), "community_shaders")
 
+    def test_detect_render_profile_from_mod_manager_context_uses_character_fallback_for_body_hints(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            detected_body_profiles=("cbbe",),
+        )
+        self.assertEqual(detect_render_profile_from_mod_manager_context(context), "characters")
+
+    def test_recommend_render_profile_uses_character_fallback_for_mod_manager_body_hints(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            detected_body_profiles=("himbo",),
+            detected_skeleton_profiles=("xpmsse",),
+        )
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/misc/neutral_asset.dds"),
+                manager_context=context,
+            ),
+            "characters",
+        )
+
     def test_resolve_render_profile_options_returns_expected_modes(self) -> None:
         enb = resolve_render_profile_options("enb")
         self.assertEqual(enb["complex_format"], "msn")
