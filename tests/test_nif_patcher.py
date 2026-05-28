@@ -798,6 +798,34 @@ class TestPatchTexturePaths(unittest.TestCase):
             "textures\\architecture\\stone\\stone_p.dds",
         )
 
+    def test_rejects_texture_paths_outside_textures_root(self) -> None:
+        nif = _write_nif(self.tmp)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_texture_path=r"C:\Users\Desktop\stone_p.dds",
+                backup=False,
+            ),
+        )
+        self.assertFalse(result.success)
+        self.assertIn("Patch error:", " ".join(result.errors))
+        self.assertIn("Expected a Skyrim-relative path under 'textures\\'", result.message)
+
+    def test_rejects_whitespace_only_texture_path_option(self) -> None:
+        nif = _write_nif(self.tmp)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_texture_path="   ",
+                backup=False,
+            ),
+        )
+        self.assertFalse(result.success)
+        self.assertEqual(result.message, "Invalid parallax_texture_path.")
+        self.assertIn("parallax_texture_path cannot be empty or whitespace-only.", result.errors)
+
     def test_writes_normal_texture_path(self) -> None:
         nif = _write_nif(self.tmp)
         patch_nif(

@@ -1293,6 +1293,9 @@ def _normalise_path(p: str) -> str:
         while tail.lower().startswith("texture\\"):
             tail = tail[len("texture\\"):]
         return f"textures\\{tail}" if tail else "textures"
+    raise ValueError(
+        f"Invalid texture path '{p}'. Expected a Skyrim-relative path under 'textures\\'."
+    )
     return collapsed
 
 
@@ -1746,6 +1749,19 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
     if not has_any_toggle:
         result.message = "Nothing to patch — all options are disabled."
         return result
+
+    for field_name, path_value in (
+        ("parallax_texture_path", opts.parallax_texture_path),
+        ("normal_texture_path", opts.normal_texture_path),
+        ("glow_texture_path", opts.glow_texture_path),
+        ("diffuse_texture_path", opts.diffuse_texture_path),
+        ("env_mask_texture_path", opts.env_mask_texture_path),
+        ("cubemap_texture_path", opts.cubemap_texture_path),
+    ):
+        if path_value is not None and not path_value.strip():
+            result.errors.append(f"{field_name} cannot be empty or whitespace-only.")
+            result.message = f"Invalid {field_name}."
+            return result
 
     try:
         original_data = nif_path.read_bytes()
