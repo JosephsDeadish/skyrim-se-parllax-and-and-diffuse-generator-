@@ -817,12 +817,12 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         self.assertEqual(detect_render_profile_from_mod_manager_context(context), "truepbr")
 
-    def test_detect_render_profile_from_mod_manager_context_handles_ambiguous_enb_and_cs(self) -> None:
+    def test_detect_render_profile_from_mod_manager_context_prefers_cs_when_enb_and_cs_both_detected(self) -> None:
         context = ModManagerContext(
             manager="Vortex",
             loaded_mods=("Community Shaders", "ENB Light"),
         )
-        self.assertIsNone(detect_render_profile_from_mod_manager_context(context))
+        self.assertEqual(detect_render_profile_from_mod_manager_context(context), "community_shaders")
 
     def test_detect_render_profile_from_mod_manager_context_uses_plugin_and_load_order_hints(self) -> None:
         context = ModManagerContext(
@@ -1051,6 +1051,19 @@ class GenerateTexturesTests(unittest.TestCase):
             force_shader_type_3=True,
             env_mask_texture_path="",
         )
+        self.assertFalse(any("empty slot 5 path" in text.lower() for text in warnings))
+
+    def test_get_nif_patch_option_warnings_uses_recommended_profile_when_selected_is_auto(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="auto",
+            recommended_profile="enb",
+            enable_parallax=True,
+            enable_pom=True,
+            enable_env_mapping=True,
+            force_shader_type_3=True,
+            env_mask_texture_path="",
+        )
+        self.assertFalse(any("vanilla meshes" in text.lower() for text in warnings))
         self.assertFalse(any("empty slot 5 path" in text.lower() for text in warnings))
 
     def test_get_nif_patch_option_warnings_reports_absolute_and_non_textures_paths(self) -> None:

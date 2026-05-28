@@ -1644,6 +1644,7 @@ def resolve_nif_patch_defaults_for_render_profile(
 def get_nif_patch_option_warnings(
     *,
     selected_profile: str,
+    recommended_profile: str | None = None,
     enable_parallax: bool,
     enable_pom: bool,
     enable_env_mapping: bool,
@@ -1662,17 +1663,24 @@ def get_nif_patch_option_warnings(
     clear_env_mask_texture_path: bool = False,
 ) -> list[str]:
     warnings: list[str] = []
-    profile = str(selected_profile or "auto")
-    normalized_profile = _normalize_render_profile(profile)
-    if profile in {"auto", "vanilla"} and enable_pom:
+    normalized_selected_profile = _normalize_render_profile(str(selected_profile or "auto"))
+    normalized_recommended_profile = _normalize_render_profile(recommended_profile)
+    effective_profile = (
+        normalized_recommended_profile
+        if normalized_selected_profile == "auto"
+        else normalized_selected_profile
+    )
+    if effective_profile == "auto":
+        effective_profile = "vanilla"
+    if effective_profile == "vanilla" and enable_pom:
         warnings.append("ENB POM is usually incorrect for vanilla meshes.")
-    if normalized_profile in {"performance", "vr"} and enable_parallax:
+    if effective_profile in {"performance", "vr"} and enable_parallax:
         warnings.append("Performance/VR workflows usually keep parallax disabled to reduce shimmer and GPU cost.")
-    if normalized_profile == "characters" and enable_parallax:
+    if effective_profile == "characters" and enable_parallax:
         warnings.append("Character workflows usually keep parallax disabled to avoid unstable face/skin shading.")
     if enable_pom and not force_shader_type_3:
         warnings.append("POM works best with shader type 3 enabled.")
-    if enable_env_mapping and not env_mask_texture_path.strip() and normalized_profile not in {"enb", "auto"}:
+    if enable_env_mapping and not env_mask_texture_path.strip() and effective_profile != "enb":
         warnings.append("Environment mapping enabled with empty slot 5 path.")
     if parallax_texture_path.strip() and not (enable_parallax or enable_pom):
         warnings.append("Parallax slot path set, but parallax/POM flags are disabled.")
@@ -1728,17 +1736,17 @@ def get_nif_patch_option_warnings(
 
     normal_lower = normal_texture_path.strip().replace("/", "\\").lower()
     env_lower = env_mask_texture_path.strip().replace("/", "\\").lower()
-    if normalized_profile == "enb":
+    if effective_profile == "enb":
         if normal_lower.endswith("_n.dds"):
             warnings.append("ENB workflows usually use _msn.dds in slot 1 instead of _n.dds.")
         if env_lower.endswith(("_cm.dds", "_c.dds", "_rmaos.dds", "_ramos.dds")):
             warnings.append("ENB slot 5 usually uses _m.dds, not _cm/_c/_rmaos variants.")
-    elif normalized_profile == "community_shaders":
+    elif effective_profile == "community_shaders":
         if normal_lower.endswith("_msn.dds"):
             warnings.append("Community Shaders workflows usually use _n.dds normals, not _msn.dds.")
         if env_lower.endswith(("_rmaos.dds", "_ramos.dds")):
             warnings.append("Community Shaders (non-TruePBR) slot 5 usually uses _cm/_c, not _rmaos/_ramos.")
-    elif normalized_profile == "truepbr":
+    elif effective_profile == "truepbr":
         if normal_lower.endswith("_msn.dds"):
             warnings.append("TruePBR workflows usually use _n.dds normals, not _msn.dds.")
         if env_lower.endswith(("_cm.dds", "_c.dds")):
@@ -1835,7 +1843,11 @@ def build_render_profile_brief_message(recommended_profile: str) -> str:
         normalized = "vanilla"
     label = _RENDER_PROFILE_LABELS.get(normalized, normalized.replace("_", " ").title())
     defaults = describe_render_profile_default_outputs(normalized)
-    return f"Suggested target: {label}. {defaults} Click Help for full renderer/channel guide."
+    return (
+        f"Suggested target: {label}. {defaults} "
+        "Auto-detect prioritizes installed renderer markers/suffix hints first, then falls back to content profile hints. "
+        "Click Help for full renderer/channel guide."
+    )
 
 
 def recommend_render_profile(
@@ -1948,7 +1960,7 @@ def detect_render_profile_from_mod_manager_context(context: ModManagerContext | 
                 break
     if has_truepbr:
         return "truepbr"
-    if has_cs and not has_enb:
+    if has_cs:
         return "community_shaders"
     if has_enb and not has_cs:
         return "enb"
@@ -7351,8 +7363,10 @@ if GUI_AVAILABLE:
                     option_warning_var.set("")
 
                 def _update_checkbox_warnings(*_: object) -> None:
+                    recommended_profile = _recommended_nif_editor_profile()
                     warnings = get_nif_patch_option_warnings(
                         selected_profile=str(renderer_profile_var.get() or "auto"),
+                        recommended_profile=recommended_profile,
                         enable_parallax=enable_parallax_var.get(),
                         enable_pom=enable_pom_var.get(),
                         enable_env_mapping=enable_env_var.get(),
@@ -7837,6 +7851,7 @@ if GUI_AVAILABLE:
                         return
                     warnings_to_confirm = get_nif_patch_option_warnings(
                         selected_profile=str(renderer_profile_var.get() or "auto"),
+                        recommended_profile=_recommended_nif_editor_profile(),
                         enable_parallax=enable_parallax_var.get(),
                         enable_pom=enable_pom_var.get(),
                         enable_env_mapping=enable_env_var.get(),
