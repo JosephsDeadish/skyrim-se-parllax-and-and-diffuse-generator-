@@ -959,7 +959,7 @@ _MATERIAL_CATEGORY_TOKENS: dict[str, tuple[str, ...]] = {
     "skin": ("skin", "body", "face", "head", "hand", "flesh", "creature", "humanoid"),
     "snow": ("snow", "ice", "frost", "frozen", "blizzard", "glacial"),
     "dirt": ("dirt", "mud", "soil", "earth", "grime", "silt"),
-    "sand": ("sand", "dirt", "mud", "earth", "soil", "dust"),
+    "sand": ("sand", "dune", "arid", "dust"),
     "paper": (
         "paper",
         "parchment",
@@ -4005,6 +4005,7 @@ def get_generation_warnings(
     env_mask_mode: str,
     env_mask_strength: float,
     include_parallax: bool,
+    parallax_strength: float | None = None,
     include_complex: bool,
     complex_format: str = "msn",
     parallax_mode: str = "standard",
@@ -4094,15 +4095,35 @@ def get_generation_warnings(
             "Tip: Disable parallax unless the source has clear embossed depth detail.",
         ))
 
-    if include_parallax and material_type == "terrain" and source_hint and "landscape" in str(source_hint).lower():
+    resolved_parallax_strength = parallax_strength if parallax_strength is not None else 0.0
+
+    if include_parallax and material_type == "terrain":
         warnings.append((
             "parallax_landscape_shimmer",
-            "Strong parallax on a landscape/terrain texture may cause horizon shimmer.\n\n"
+            "Parallax on a landscape/terrain texture may cause horizon shimmer.\n\n"
             "Skyrim SE's terrain mesh has lower polygon density than objects — "
-            "high parallax strength on landscape textures can produce visible wavering "
+            "parallax height maps on landscape textures can produce visible wavering "
             "artefacts at medium-to-far distances, especially near the horizon.\n\n"
             "Tip: Keep parallax strength below 1.3 for landscape/terrain textures, "
             "or use 'occlusion' parallax mode (POM) which handles terrain gradients better.",
+        ))
+
+    if include_parallax and material_type == "snow" and resolved_parallax_strength > 1.5:
+        warnings.append((
+            "parallax_high_strength_snow",
+            f"High parallax strength ({resolved_parallax_strength:.2f}) on a snow/ice texture.\n\n"
+            "Snow and ice surfaces have low-frequency height variation — strong parallax values "
+            "amplify microdetail noise and cause mipmap instability at mid-to-far distances.\n\n"
+            "Tip: Keep parallax strength at or below 1.5 for snow and ice textures.",
+        ))
+
+    if include_parallax and material_type in {"dirt", "sand"} and resolved_parallax_strength > 2.0:
+        warnings.append((
+            "parallax_high_strength_ground",
+            f"High parallax strength ({resolved_parallax_strength:.2f}) on a '{material_type}' texture.\n\n"
+            "Ground-cover textures (dirt, mud, sand) tile aggressively — very high parallax values "
+            "amplify per-pixel noise and can produce distracting depth artefacts at close range.\n\n"
+            "Tip: Keep parallax strength at or below 2.0 for ground-cover materials.",
         ))
 
     if include_environment_mask and material_type == "architecture" and env_mask_strength > 1.8:
@@ -7076,6 +7097,7 @@ if GUI_AVAILABLE:
             parallax_mode: str,
             emboss_mode: bool = False,
             relief_mode: bool = False,
+            parallax_strength: float | None = None,
         ) -> bool:
             """Show any applicable sanity warnings. Returns False if user chose to abort."""
             warnings = get_generation_warnings(
@@ -7091,6 +7113,7 @@ if GUI_AVAILABLE:
                 env_mask_mode=env_mask_mode,
                 env_mask_strength=env_mask_strength,
                 include_parallax=include_parallax,
+                parallax_strength=parallax_strength,
                 include_complex=include_complex,
                 complex_format=self.complex_format_var.get(),
                 parallax_mode=self.parallax_mode_var.get(),
@@ -7235,6 +7258,7 @@ if GUI_AVAILABLE:
                     env_mask_mode=self.env_mask_mode_var.get(),
                     env_mask_strength=float(self.environment_mask_strength_var.get()),
                     include_parallax=include_parallax,
+                    parallax_strength=float(self.parallax_strength_var.get()),
                     include_complex=include_complex,
                     parallax_mode=self.parallax_mode_var.get(),
                     emboss_mode=self.emboss_mode_var.get(),

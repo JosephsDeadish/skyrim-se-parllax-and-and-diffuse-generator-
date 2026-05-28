@@ -642,6 +642,16 @@ class GenerateTexturesTests(unittest.TestCase):
     def test_classify_material_type_returns_dirt_for_mud_path(self) -> None:
         self.assertEqual(classify_material_type(Path("textures/clutter/mud_pile.dds")), "dirt")
 
+    def test_classify_material_type_returns_sand_for_dune_token(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/environment/dune_surface.dds")), "sand")
+
+    def test_classify_material_type_returns_sand_for_sand_token(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/misc/sand_pile.dds")), "sand")
+
+    def test_classify_material_type_dirt_path_classifies_as_dirt_not_sand(self) -> None:
+        # "dirt" is a dirt token; sand no longer includes it so a dirt-named path stays dirt
+        self.assertEqual(classify_material_type(Path("textures/clutter/dirt_road.dds")), "dirt")
+
     def test_classify_material_type_returns_paper_for_cards_path(self) -> None:
         self.assertEqual(
             classify_material_type(Path("textures/interface/cards/collectible_waifu_card_01.dds")),
@@ -1352,6 +1362,133 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         ids = [w[0] for w in warnings]
         self.assertIn("parallax_flat_plants", ids)
+
+    def test_get_generation_warnings_parallax_on_terrain_always_warns(self) -> None:
+        # Terrain shimmer warning must fire regardless of source_hint content
+        warnings = get_generation_warnings(
+            "terrain",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("parallax_landscape_shimmer", ids)
+
+    def test_get_generation_warnings_parallax_on_terrain_fires_without_landscape_hint(self) -> None:
+        # Previously required "landscape" in source_hint — now fires on material_type alone
+        warnings_no_hint = get_generation_warnings(
+            "terrain",
+            source_hint=None,
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            include_complex=False,
+        )
+        warnings_unrelated_hint = get_generation_warnings(
+            "terrain",
+            source_hint="forest path texture",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            include_complex=False,
+        )
+        self.assertIn("parallax_landscape_shimmer", [w[0] for w in warnings_no_hint])
+        self.assertIn("parallax_landscape_shimmer", [w[0] for w in warnings_unrelated_hint])
+
+    def test_get_generation_warnings_parallax_high_strength_snow_warns(self) -> None:
+        warnings = get_generation_warnings(
+            "snow",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            parallax_strength=2.0,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("parallax_high_strength_snow", ids)
+
+    def test_get_generation_warnings_parallax_low_strength_snow_no_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "snow",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            parallax_strength=1.2,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertNotIn("parallax_high_strength_snow", ids)
+
+    def test_get_generation_warnings_parallax_high_strength_dirt_warns(self) -> None:
+        warnings = get_generation_warnings(
+            "dirt",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            parallax_strength=2.5,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("parallax_high_strength_ground", ids)
+
+    def test_get_generation_warnings_parallax_high_strength_sand_warns(self) -> None:
+        warnings = get_generation_warnings(
+            "sand",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            parallax_strength=3.0,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("parallax_high_strength_ground", ids)
+
+    def test_get_generation_warnings_parallax_within_threshold_ground_no_warning(self) -> None:
+        for mat in ("dirt", "sand"):
+            warnings = get_generation_warnings(
+                mat,
+                include_glow=False,
+                include_environment_mask=False,
+                env_mask_mode="standard",
+                env_mask_strength=1.0,
+                include_parallax=True,
+                parallax_strength=1.8,
+                include_complex=False,
+            )
+            ids = [w[0] for w in warnings]
+            self.assertNotIn("parallax_high_strength_ground", ids, msg=f"Unexpected warning for {mat}")
+
+    def test_get_generation_warnings_parallax_strength_none_no_false_positives(self) -> None:
+        # When parallax_strength is not provided the strength-based warnings must not fire
+        for mat in ("snow", "dirt", "sand"):
+            warnings = get_generation_warnings(
+                mat,
+                include_glow=False,
+                include_environment_mask=False,
+                env_mask_mode="standard",
+                env_mask_strength=1.0,
+                include_parallax=True,
+                parallax_strength=None,
+                include_complex=False,
+            )
+            ids = [w[0] for w in warnings]
+            self.assertNotIn("parallax_high_strength_snow", ids, msg=f"Unexpected snow warning for {mat}")
+            self.assertNotIn("parallax_high_strength_ground", ids, msg=f"Unexpected ground warning for {mat}")
 
     def test_get_generation_warnings_diffuse_from_normal_source(self) -> None:
         warnings = get_generation_warnings(
