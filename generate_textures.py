@@ -1658,9 +1658,13 @@ def get_nif_patch_option_warnings(
     disable_parallax: bool = False,
     disable_pom: bool = False,
     disable_env_mapping: bool = False,
+    disable_glow_map: bool = False,
     clear_parallax_texture_path: bool = False,
     clear_normal_texture_path: bool = False,
     clear_env_mask_texture_path: bool = False,
+    clear_glow_texture_path: bool = False,
+    clear_diffuse_texture_path: bool = False,
+    clear_cubemap_texture_path: bool = False,
 ) -> list[str]:
     warnings: list[str] = []
     normalized_selected_profile = _normalize_render_profile(str(selected_profile or "auto"))
@@ -1692,12 +1696,20 @@ def get_nif_patch_option_warnings(
         warnings.append("Both enable and disable POM are checked.")
     if disable_env_mapping and enable_env_mapping:
         warnings.append("Both enable and disable environment mapping are checked.")
+    if disable_glow_map and glow_texture_path.strip():
+        warnings.append("Glow map is set to both disable and write a slot 2 path.")
     if clear_parallax_texture_path and parallax_texture_path.strip():
         warnings.append("Parallax slot is set to both clear and write a path.")
     if clear_normal_texture_path and normal_texture_path.strip():
         warnings.append("Normal slot is set to both clear and write a path.")
     if clear_env_mask_texture_path and env_mask_texture_path.strip():
         warnings.append("Environment mask slot is set to both clear and write a path.")
+    if clear_glow_texture_path and glow_texture_path.strip():
+        warnings.append("Glow slot is set to both clear and write a path.")
+    if clear_diffuse_texture_path and diffuse_texture_path.strip():
+        warnings.append("Diffuse slot is set to both clear and write a path.")
+    if clear_cubemap_texture_path and cubemap_texture_path.strip():
+        warnings.append("Cubemap slot is set to both clear and write a path.")
 
     path_rules = (
         ("Diffuse slot", diffuse_texture_path, ("_n.dds", "_msn.dds", "_p.dds", "_g.dds", "_m.dds", "_cm.dds", "_c.dds", "_rmaos.dds", "_ramos.dds"), True),
@@ -1787,6 +1799,44 @@ def describe_render_profile_default_outputs(profile: str) -> str:
     return f"Auto-check: {enabled_text}. Auto-uncheck: {disabled_text}."
 
 
+def describe_render_profile_files_to_create(profile: str) -> str:
+    normalized = _normalize_render_profile(profile)
+    if normalized == "auto":
+        normalized = "vanilla"
+    if normalized == "custom":
+        return "Suggested files: custom/manual workflow (choose only the maps your shader stack expects)."
+
+    defaults = _RENDER_PROFILE_OUTPUT_DEFAULTS.get(normalized, _RENDER_PROFILE_OUTPUT_DEFAULTS["vanilla"])
+    suffix_map = {
+        "include_diffuse": "<stem>.dds",
+        "include_normal": "<stem>_n.dds",
+        "include_parallax": "<stem>_p.dds",
+        "include_glow": "<stem>_g.dds",
+        "include_environment_mask": "<stem>_m.dds",
+        "include_rmaos": "<stem>_rmaos.dds (or <stem>_ramos.dds)",
+        "include_complex": "<stem>_msn.dds",
+    }
+    if normalized == "community_shaders":
+        suffix_map["include_environment_mask"] = "<stem>_cm.dds (or <stem>_c.dds)"
+        suffix_map["include_complex"] = "<stem>_cm.dds (or <stem>_c.dds)"
+    elif normalized == "truepbr":
+        suffix_map["include_environment_mask"] = "<stem>_rmaos.dds (or <stem>_ramos.dds)"
+        suffix_map["include_complex"] = "<stem>_rmaos.dds (or <stem>_ramos.dds)"
+    elif normalized == "enb":
+        suffix_map["include_normal"] = "<stem>_msn.dds"
+        suffix_map["include_complex"] = "<stem>_msn.dds"
+
+    files: list[str] = []
+    for key in _RENDER_PROFILE_OUTPUT_LABELS:
+        if defaults.get(key):
+            file_hint = suffix_map.get(key)
+            if file_hint and file_hint not in files:
+                files.append(file_hint)
+    if not files:
+        return "Suggested files: none by default for this profile."
+    return f"Suggested files: {', '.join(files)}."
+
+
 def build_render_profile_recommendation_message(recommended_profile: str) -> str:
     normalized = _normalize_render_profile(recommended_profile)
     if normalized == "auto":
@@ -1843,8 +1893,9 @@ def build_render_profile_brief_message(recommended_profile: str) -> str:
         normalized = "vanilla"
     label = _RENDER_PROFILE_LABELS.get(normalized, normalized.replace("_", " ").title())
     defaults = describe_render_profile_default_outputs(normalized)
+    files = describe_render_profile_files_to_create(normalized)
     return (
-        f"Suggested target: {label}. {defaults} "
+        f"Suggested target: {label}. {defaults} {files} "
         "Auto-detect prioritizes installed renderer markers/suffix hints first, then falls back to content profile hints. "
         "Click Help for full renderer/channel guide."
     )
@@ -6493,13 +6544,15 @@ if GUI_AVAILABLE:
             )
             if selected == "auto":
                 self.status_var.set(
-                    f"Target renderer set to auto-detect; applied the current {_RENDER_PROFILE_LABELS.get(effective, effective)} preset and matching output checkboxes."
+                    f"Target renderer set to auto-detect; applied the current {_RENDER_PROFILE_LABELS.get(effective, effective)} preset and matching output checkboxes. "
+                    f"{describe_render_profile_files_to_create(effective)}"
                 )
             else:
                 self.status_var.set(
                     f"Target renderer set to {_RENDER_PROFILE_LABELS.get(effective, effective)}. "
                     f"Complex naming, env mask mode, parallax mode, and output checkboxes were updated to match that renderer. "
-                    f"{describe_render_profile_output_recommendation(effective)}"
+                    f"{describe_render_profile_files_to_create(effective)} "
+                    f"{describe_render_profile_default_outputs(effective)}"
                 )
             self._request_preview_refresh()
 
@@ -7219,13 +7272,18 @@ if GUI_AVAILABLE:
                 enable_parallax_var = tk.BooleanVar(value=True)
                 enable_pom_var = tk.BooleanVar(value=False)
                 enable_env_var = tk.BooleanVar(value=False)
+                enable_glow_var = tk.BooleanVar(value=False)
                 force_type3_var = tk.BooleanVar(value=False)
                 disable_parallax_var = tk.BooleanVar(value=False)
                 disable_pom_var = tk.BooleanVar(value=False)
                 disable_env_var = tk.BooleanVar(value=False)
+                disable_glow_var = tk.BooleanVar(value=False)
                 clear_parallax_var = tk.BooleanVar(value=False)
                 clear_normal_var = tk.BooleanVar(value=False)
                 clear_env_var = tk.BooleanVar(value=False)
+                clear_glow_var = tk.BooleanVar(value=False)
+                clear_diffuse_var = tk.BooleanVar(value=False)
+                clear_cubemap_var = tk.BooleanVar(value=False)
                 backup_var = tk.BooleanVar(value=True)
                 dry_run_var = tk.BooleanVar(value=False)
                 option_warning_var = tk.StringVar(value="")
@@ -7272,6 +7330,14 @@ if GUI_AVAILABLE:
                     variable=force_type3_var,
                 )
                 force_type3_check.pack(side="left", padx=(12, 0))
+                flag_row3 = ttk.Frame(opt_frame)
+                flag_row3.pack(fill="x", pady=(2, 0))
+                enable_glow_check = ttk.Checkbutton(
+                    flag_row3,
+                    text="Enable glow-map flag (_g slot)",
+                    variable=enable_glow_var,
+                )
+                enable_glow_check.pack(side="left")
 
                 misc_row = ttk.Frame(opt_frame)
                 misc_row.pack(fill="x", pady=(4, 0))
@@ -7285,7 +7351,8 @@ if GUI_AVAILABLE:
                         "Option guide: Slot 0=diffuse/albedo, 1=normal/_n or _msn, 2=glow/_g, "
                         "3=parallax/_p, 4=cubemap, 5=environment mask/_m or _cm/_c or _rmaos. "
                         "Enable standard parallax for vanilla/community shaders/truepbr workflows. Enable ENB POM only for ENB setups. "
-                        "Enable environment mapping only when using slot 5 (_m/_cm/_c/_rmaos). Force shader type 3 lets the tool write stronger parallax scale values."
+                        "Enable environment mapping only when using slot 5 (_m/_cm/_c/_rmaos). Enable glow-map when slot 2 points at an emissive texture. "
+                        "Force shader type 3 lets the tool write stronger parallax scale values."
                     ),
                     justify=tk.LEFT,
                     wraplength=860,
@@ -7322,14 +7389,28 @@ if GUI_AVAILABLE:
                     variable=disable_env_var,
                 )
                 disable_env_check.pack(side="left", padx=(12, 0))
+                disable_glow_check = ttk.Checkbutton(
+                    unpatch_row,
+                    text="Disable glow-map flag",
+                    variable=disable_glow_var,
+                )
+                disable_glow_check.pack(side="left", padx=(12, 0))
                 unpatch_row2 = ttk.Frame(unpatch_frame)
                 unpatch_row2.pack(fill="x", pady=(2, 0))
                 clear_parallax_check = ttk.Checkbutton(unpatch_row2, text="Clear slot 3 (_p)", variable=clear_parallax_var)
                 clear_parallax_check.pack(side="left")
                 clear_normal_check = ttk.Checkbutton(unpatch_row2, text="Clear slot 1 (_n/_msn)", variable=clear_normal_var)
                 clear_normal_check.pack(side="left", padx=(12, 0))
-                clear_env_check = ttk.Checkbutton(unpatch_row2, text="Clear slot 5 (_m/_rmaos)", variable=clear_env_var)
+                clear_env_check = ttk.Checkbutton(unpatch_row2, text="Clear slot 5 (_m/_cm/_rmaos)", variable=clear_env_var)
                 clear_env_check.pack(side="left", padx=(12, 0))
+                unpatch_row3 = ttk.Frame(unpatch_frame)
+                unpatch_row3.pack(fill="x", pady=(2, 0))
+                clear_glow_check = ttk.Checkbutton(unpatch_row3, text="Clear slot 2 (_g)", variable=clear_glow_var)
+                clear_glow_check.pack(side="left")
+                clear_diffuse_check = ttk.Checkbutton(unpatch_row3, text="Clear slot 0 (diffuse)", variable=clear_diffuse_var)
+                clear_diffuse_check.pack(side="left", padx=(12, 0))
+                clear_cubemap_check = ttk.Checkbutton(unpatch_row3, text="Clear slot 4 (cubemap)", variable=clear_cubemap_var)
+                clear_cubemap_check.pack(side="left", padx=(12, 0))
 
                 def _recommended_nif_editor_profile() -> str:
                     selected = _normalize_render_profile(renderer_profile_var.get())
@@ -7359,6 +7440,7 @@ if GUI_AVAILABLE:
                     enable_parallax_var.set(bool(defaults["enable_parallax"]))
                     enable_pom_var.set(bool(defaults["enable_pom"]))
                     enable_env_var.set(bool(defaults["enable_env_mapping"]))
+                    enable_glow_var.set(False)
                     force_type3_var.set(bool(defaults["force_shader_type_3"]))
                     option_warning_var.set("")
 
@@ -7371,15 +7453,22 @@ if GUI_AVAILABLE:
                         enable_pom=enable_pom_var.get(),
                         enable_env_mapping=enable_env_var.get(),
                         force_shader_type_3=force_type3_var.get(),
+                        diffuse_texture_path=diffuse_tex_var.get(),
                         parallax_texture_path=parallax_tex_var.get(),
                         normal_texture_path=normal_tex_var.get(),
+                        glow_texture_path=glow_tex_var.get(),
                         env_mask_texture_path=env_mask_tex_var.get(),
+                        cubemap_texture_path=cubemap_tex_var.get(),
                         disable_parallax=disable_parallax_var.get(),
                         disable_pom=disable_pom_var.get(),
                         disable_env_mapping=disable_env_var.get(),
+                        disable_glow_map=disable_glow_var.get(),
                         clear_parallax_texture_path=clear_parallax_var.get(),
                         clear_normal_texture_path=clear_normal_var.get(),
                         clear_env_mask_texture_path=clear_env_var.get(),
+                        clear_glow_texture_path=clear_glow_var.get(),
+                        clear_diffuse_texture_path=clear_diffuse_var.get(),
+                        clear_cubemap_texture_path=clear_cubemap_var.get(),
                     )
                     option_warning_var.set("⚠ " + " ".join(warnings[:3]) if warnings else "")
 
@@ -7397,13 +7486,18 @@ if GUI_AVAILABLE:
                     enable_parallax_var,
                     enable_pom_var,
                     enable_env_var,
+                    enable_glow_var,
                     force_type3_var,
                     disable_parallax_var,
                     disable_pom_var,
                     disable_env_var,
+                    disable_glow_var,
                     clear_parallax_var,
                     clear_normal_var,
                     clear_env_var,
+                    clear_glow_var,
+                    clear_diffuse_var,
+                    clear_cubemap_var,
                 ):
                     watch_var.trace_add("write", _update_checkbox_warnings)
                 self._add_tooltip(
@@ -7417,6 +7511,7 @@ if GUI_AVAILABLE:
                 self._add_tooltip(enable_parallax_check, "🪨 Enables Skyrim parallax shader flag and slot-3 _p usage.")
                 self._add_tooltip(enable_pom_check, "🌊 ENB-only parallax occlusion mode. Leave off for vanilla workflows.")
                 self._add_tooltip(enable_env_check, "🪞 Enables environment-mapping shader flag for reflective materials.")
+                self._add_tooltip(enable_glow_check, "✨ Enables glow/emissive flag so slot 2 _g textures render in-game.")
                 self._add_tooltip(force_type3_check, "💪 Upgrades shader type so stronger parallax scale can be written.")
                 self._add_tooltip(backup_check, "🧷 Writes .nif.bak safety copies before patching.")
                 self._add_tooltip(dry_run_check, "🧪 Scan and simulate changes without writing file edits.")
@@ -7425,9 +7520,13 @@ if GUI_AVAILABLE:
                 self._add_tooltip(disable_parallax_check, "🚫 Removes parallax and POM flags from BSLightingShaderProperty.")
                 self._add_tooltip(disable_pom_check, "🚫 Removes only ENB POM flag while keeping standard parallax if desired.")
                 self._add_tooltip(disable_env_check, "🚫 Removes environment-mapping flag from BSLightingShaderProperty.")
+                self._add_tooltip(disable_glow_check, "🚫 Removes emissive/glow shader flag from BSLightingShaderProperty.")
                 self._add_tooltip(clear_parallax_check, "🧹 Clears texture slot 3 path from BSShaderTextureSet.")
                 self._add_tooltip(clear_normal_check, "🧹 Clears texture slot 1 path from BSShaderTextureSet.")
                 self._add_tooltip(clear_env_check, "🧹 Clears texture slot 5 path from BSShaderTextureSet.")
+                self._add_tooltip(clear_glow_check, "🧹 Clears texture slot 2 path from BSShaderTextureSet.")
+                self._add_tooltip(clear_diffuse_check, "🧹 Clears texture slot 0 path from BSShaderTextureSet.")
+                self._add_tooltip(clear_cubemap_check, "🧹 Clears texture slot 4 path from BSShaderTextureSet.")
 
                 scale_frame = ttk.LabelFrame(
                     win,
@@ -7460,11 +7559,17 @@ if GUI_AVAILABLE:
                     padding=6,
                 )
                 tex_frame.pack(fill="x", padx=10, pady=4)
+                diffuse_tex_var = tk.StringVar()
                 parallax_tex_var = tk.StringVar()
                 normal_tex_var = tk.StringVar()
+                glow_tex_var = tk.StringVar()
+                cubemap_tex_var = tk.StringVar()
                 env_mask_tex_var = tk.StringVar()
+                diffuse_tex_var.trace_add("write", _update_checkbox_warnings)
                 parallax_tex_var.trace_add("write", _update_checkbox_warnings)
                 normal_tex_var.trace_add("write", _update_checkbox_warnings)
+                glow_tex_var.trace_add("write", _update_checkbox_warnings)
+                cubemap_tex_var.trace_add("write", _update_checkbox_warnings)
                 env_mask_tex_var.trace_add("write", _update_checkbox_warnings)
 
                 def _normalize_nif_texture_input_path(raw_path: str) -> str:
@@ -7505,6 +7610,13 @@ if GUI_AVAILABLE:
 
                 _tex_row(
                     tex_frame,
+                    "Diffuse / base:",
+                    diffuse_tex_var,
+                    "Select diffuse texture",
+                    "🧾 Slot 0 diffuse/albedo texture path. Usually the base <stem>.dds texture.",
+                )
+                _tex_row(
+                    tex_frame,
                     "Parallax / _p.dds:",
                     parallax_tex_var,
                     "Select parallax texture",
@@ -7516,6 +7628,20 @@ if GUI_AVAILABLE:
                     normal_tex_var,
                     "Select normal or MSN texture",
                     "🧱 Slot 1 normal path. Use _n for vanilla/CS, or _msn for ENB complex material workflows.",
+                )
+                _tex_row(
+                    tex_frame,
+                    "Glow / _g.dds:",
+                    glow_tex_var,
+                    "Select glow texture",
+                    "✨ Slot 2 emissive/glow texture path. Usually _g.dds.",
+                )
+                _tex_row(
+                    tex_frame,
+                    "Cubemap / _e/_env:",
+                    cubemap_tex_var,
+                    "Select cubemap texture",
+                    "🧊 Slot 4 cubemap/environment texture path (often _e/_env/_cube naming).",
                 )
                 _tex_row(
                     tex_frame,
@@ -7540,8 +7666,11 @@ if GUI_AVAILABLE:
                     selected_path = Path(path_value)
                     nifs = list(selected_path.rglob("*.nif")) if selected_path.is_dir() else [selected_path]
                     guessed_from: Path | None = None
+                    guessed_diffuse = ""
                     guessed_parallax = ""
                     guessed_normal = ""
+                    guessed_glow = ""
+                    guessed_cubemap = ""
                     guessed_env = ""
                     for nif_candidate in nifs:
                         if not nif_candidate.exists():
@@ -7561,8 +7690,15 @@ if GUI_AVAILABLE:
                                 candidate_normal = str(texture_paths.get(1, "")).strip()
                             if not candidate_env:
                                 candidate_env = str(texture_paths.get(5, "")).strip()
+                            candidate_glow = str(texture_paths.get(2, "")).strip()
+                            candidate_cubemap = str(texture_paths.get(4, "")).strip()
+                            if not guessed_glow and candidate_glow:
+                                guessed_glow = candidate_glow
+                            if not guessed_cubemap and candidate_cubemap:
+                                guessed_cubemap = candidate_cubemap
                             diffuse_path = str(texture_paths.get(0, "")).strip()
                             if diffuse_path:
+                                guessed_diffuse = guessed_diffuse or diffuse_path
                                 diffuse_like = Path(diffuse_path.replace("\\", "/"))
                                 diffuse_stem = _normalize_texture_family_stem(diffuse_like)
                                 if not candidate_parallax:
@@ -7570,6 +7706,8 @@ if GUI_AVAILABLE:
                                 if not candidate_normal:
                                     normal_suffix = "_msn.dds" if prefer_msn else "_n.dds"
                                     candidate_normal = str(diffuse_like.parent / f"{diffuse_stem}{normal_suffix}").replace("/", "\\")
+                                if not guessed_glow:
+                                    guessed_glow = str(diffuse_like.parent / f"{diffuse_stem}_g.dds").replace("/", "\\")
                                 if not candidate_env:
                                     candidate_env = str(diffuse_like.parent / f"{diffuse_stem}{env_mask_suffix}").replace("/", "\\")
                             if candidate_parallax and candidate_normal and candidate_env:
@@ -7585,7 +7723,10 @@ if GUI_AVAILABLE:
                         candidate_parallax = candidate_parallax.replace("/", "\\")
                         candidate_normal = candidate_normal.replace("/", "\\")
                         candidate_env = candidate_env.replace("/", "\\")
-                        if candidate_parallax or candidate_normal or candidate_env:
+                        guessed_glow = guessed_glow.replace("/", "\\")
+                        guessed_cubemap = guessed_cubemap.replace("/", "\\")
+                        guessed_diffuse = guessed_diffuse.replace("/", "\\")
+                        if candidate_parallax or candidate_normal or candidate_env or guessed_diffuse or guessed_glow or guessed_cubemap:
                             guessed_from = nif_candidate
                             guessed_parallax = candidate_parallax
                             guessed_normal = candidate_normal
@@ -7597,7 +7738,14 @@ if GUI_AVAILABLE:
                     guessed_parallax = _normalize_nif_texture_input_path(guessed_parallax) if guessed_parallax else ""
                     guessed_normal = _normalize_nif_texture_input_path(guessed_normal) if guessed_normal else ""
                     guessed_env = _normalize_nif_texture_input_path(guessed_env) if guessed_env else ""
+                    guessed_glow = _normalize_nif_texture_input_path(guessed_glow) if guessed_glow else ""
+                    guessed_cubemap = _normalize_nif_texture_input_path(guessed_cubemap) if guessed_cubemap else ""
+                    guessed_diffuse = _normalize_nif_texture_input_path(guessed_diffuse) if guessed_diffuse else ""
                     changed = 0
+                    if guessed_diffuse:
+                        if diffuse_tex_var.get().strip() != guessed_diffuse:
+                            changed += 1
+                        diffuse_tex_var.set(guessed_diffuse)
                     if guessed_parallax:
                         if parallax_tex_var.get().strip() != guessed_parallax:
                             changed += 1
@@ -7606,6 +7754,14 @@ if GUI_AVAILABLE:
                         if normal_tex_var.get().strip() != guessed_normal:
                             changed += 1
                         normal_tex_var.set(guessed_normal)
+                    if guessed_glow:
+                        if glow_tex_var.get().strip() != guessed_glow:
+                            changed += 1
+                        glow_tex_var.set(guessed_glow)
+                    if guessed_cubemap:
+                        if cubemap_tex_var.get().strip() != guessed_cubemap:
+                            changed += 1
+                        cubemap_tex_var.set(guessed_cubemap)
                     env_mask_guess = guessed_env
                     if not env_mask_guess and guessed_parallax.lower().endswith("_p.dds"):
                         env_mask_guess = _normalize_nif_texture_input_path(guessed_parallax[:-6] + env_mask_suffix)
@@ -7856,15 +8012,22 @@ if GUI_AVAILABLE:
                         enable_pom=enable_pom_var.get(),
                         enable_env_mapping=enable_env_var.get(),
                         force_shader_type_3=force_type3_var.get(),
+                        diffuse_texture_path=diffuse_tex_var.get(),
                         parallax_texture_path=parallax_tex_var.get(),
                         normal_texture_path=normal_tex_var.get(),
+                        glow_texture_path=glow_tex_var.get(),
                         env_mask_texture_path=env_mask_tex_var.get(),
+                        cubemap_texture_path=cubemap_tex_var.get(),
                         disable_parallax=disable_parallax_var.get(),
                         disable_pom=disable_pom_var.get(),
                         disable_env_mapping=disable_env_var.get(),
+                        disable_glow_map=disable_glow_var.get(),
                         clear_parallax_texture_path=clear_parallax_var.get(),
                         clear_normal_texture_path=clear_normal_var.get(),
                         clear_env_mask_texture_path=clear_env_var.get(),
+                        clear_glow_texture_path=clear_glow_var.get(),
+                        clear_diffuse_texture_path=clear_diffuse_var.get(),
+                        clear_cubemap_texture_path=clear_cubemap_var.get(),
                     )
                     if warnings_to_confirm:
                         proceed = messagebox.askyesno(
@@ -7881,11 +8044,15 @@ if GUI_AVAILABLE:
                         enable_parallax=enable_parallax_var.get(),
                         enable_pom=enable_pom_var.get(),
                         enable_env_mapping=enable_env_var.get(),
+                        enable_glow_map=enable_glow_var.get(),
                         parallax_scale=pscale_var.get() if (enable_parallax_var.get() or enable_pom_var.get()) else None,
                         force_shader_type_3=force_type3_var.get(),
+                        diffuse_texture_path=diffuse_tex_var.get().strip() or None,
                         parallax_texture_path=parallax_tex_var.get().strip() or None,
                         normal_texture_path=normal_tex_var.get().strip() or None,
+                        glow_texture_path=glow_tex_var.get().strip() or None,
                         env_mask_texture_path=env_mask_tex_var.get().strip() or None,
+                        cubemap_texture_path=cubemap_tex_var.get().strip() or None,
                         backup=backup_var.get(),
                         dry_run=dry_run_var.get(),
                     )
@@ -7926,9 +8093,13 @@ if GUI_AVAILABLE:
                         disable_parallax_var.get(),
                         disable_pom_var.get(),
                         disable_env_var.get(),
+                        disable_glow_var.get(),
                         clear_parallax_var.get(),
                         clear_normal_var.get(),
                         clear_env_var.get(),
+                        clear_glow_var.get(),
+                        clear_diffuse_var.get(),
+                        clear_cubemap_var.get(),
                     ]
                     if not any(selected_unpatch_actions):
                         _add_result_row("WARN", "—", "Pick at least one Remove Features checkbox before unpatching.")
@@ -7937,9 +8108,13 @@ if GUI_AVAILABLE:
                         disable_parallax=disable_parallax_var.get(),
                         disable_pom=disable_pom_var.get(),
                         disable_env_mapping=disable_env_var.get(),
+                        disable_glow_map=disable_glow_var.get(),
                         clear_parallax_texture_path=clear_parallax_var.get(),
                         clear_normal_texture_path=clear_normal_var.get(),
                         clear_env_mask_texture_path=clear_env_var.get(),
+                        clear_glow_texture_path=clear_glow_var.get(),
+                        clear_diffuse_texture_path=clear_diffuse_var.get(),
+                        clear_cubemap_texture_path=clear_cubemap_var.get(),
                         backup=backup_var.get(),
                         dry_run=dry_run_var.get(),
                     )

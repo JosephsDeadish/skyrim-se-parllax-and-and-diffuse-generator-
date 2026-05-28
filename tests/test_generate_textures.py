@@ -34,6 +34,7 @@ from generate_textures import (
     compute_wrapped_preview_index,
     ModManagerContext,
     describe_render_profile_default_outputs,
+    describe_render_profile_files_to_create,
     detect_workflow_profile,
     detect_mod_manager_context,
     detect_render_profile_from_mod_manager_context,
@@ -1149,6 +1150,37 @@ class GenerateTexturesTests(unittest.TestCase):
         summary = describe_render_profile_default_outputs("enb")
         self.assertIn("Auto-check:", summary)
         self.assertIn("parallax/_p", summary)
+
+    def test_describe_render_profile_files_to_create_mentions_enb_msn_outputs(self) -> None:
+        summary = describe_render_profile_files_to_create("enb")
+        self.assertIn("<stem>_msn.dds", summary)
+        self.assertIn("<stem>_m.dds", summary)
+        self.assertNotIn("<stem>_n.dds", summary)
+
+    def test_describe_render_profile_files_to_create_mentions_truepbr_outputs(self) -> None:
+        summary = describe_render_profile_files_to_create("truepbr")
+        self.assertIn("<stem>_rmaos.dds", summary)
+        self.assertIn("<stem>_n.dds", summary)
+
+    def test_get_nif_patch_option_warnings_reports_glow_and_cubemap_clear_write_conflicts(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="custom",
+            enable_parallax=False,
+            enable_pom=False,
+            enable_env_mapping=False,
+            force_shader_type_3=False,
+            glow_texture_path="textures\\arch\\stone_g.dds",
+            diffuse_texture_path="textures\\arch\\stone.dds",
+            cubemap_texture_path="textures\\arch\\stone_env.dds",
+            disable_glow_map=True,
+            clear_glow_texture_path=True,
+            clear_diffuse_texture_path=True,
+            clear_cubemap_texture_path=True,
+        )
+        self.assertTrue(any("disable and write a slot 2 path" in text.lower() for text in warnings))
+        self.assertTrue(any("glow slot is set to both clear and write a path" in text.lower() for text in warnings))
+        self.assertTrue(any("diffuse slot is set to both clear and write a path" in text.lower() for text in warnings))
+        self.assertTrue(any("cubemap slot is set to both clear and write a path" in text.lower() for text in warnings))
 
     def test_resolve_render_profile_mode_selection_preserves_current_modes_without_preset_apply(self) -> None:
         resolved = resolve_render_profile_mode_selection(
