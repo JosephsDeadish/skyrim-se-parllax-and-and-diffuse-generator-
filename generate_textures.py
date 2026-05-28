@@ -3924,6 +3924,10 @@ def _validate_output_path_conflicts(planned_paths: Mapping[str, Path]) -> None:
 def _normalize_texture_family_stem(path_like: Path | str) -> str:
     normalized = str(path_like).replace("\\", "/").strip()
     stem = Path(normalized).stem.lower()
+    role_info = identify_skyrim_texture_role(Path(normalized))
+    detected_suffix = str(role_info.get("suffix", "")).strip().lower()
+    if detected_suffix and stem.endswith(detected_suffix):
+        return stem[: -len(detected_suffix)]
     for suffix in (
         "_diffuse",
         "_albedo",

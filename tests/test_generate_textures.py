@@ -2204,6 +2204,28 @@ class GenerateTexturesTests(unittest.TestCase):
 
             self.assertEqual(related, (nif_path.resolve(),))
 
+    def test_find_related_nif_files_for_texture_matches_alias_family_stem(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            nif_path = temp_path / "meshes" / "sign01.nif"
+            nif_path.parent.mkdir(parents=True)
+            nif_path.write_bytes(b"")
+            source = temp_path / "textures" / "sign01_envmask.dds"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"")
+
+            class _FakeInfo:
+                def __init__(self, texture_paths: dict[int, str]) -> None:
+                    self.texture_paths = texture_paths
+
+            related = find_related_nif_files_for_texture(
+                source,
+                candidate_roots=(nif_path.parent,),
+                nif_info_provider=lambda _: [_FakeInfo({0: "textures\\sign01.dds"})],
+            )
+
+            self.assertEqual(related, (nif_path.resolve(),))
+
     def test_find_related_nif_files_for_texture_falls_back_to_nif_name_when_scan_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
