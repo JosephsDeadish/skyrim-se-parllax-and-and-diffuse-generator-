@@ -1521,6 +1521,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
         "include_complex": False,
         "include_ao": False,
         "include_roughness": False,
@@ -1532,6 +1534,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
         "include_complex": False,
         "include_ao": False,
         "include_roughness": False,
@@ -1543,6 +1547,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
         "include_complex": False,
         "include_ao": False,
         "include_roughness": False,
@@ -1554,6 +1560,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
         "include_complex": False,
         "include_ao": False,
         "include_roughness": False,
@@ -1565,6 +1573,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
         "include_complex": False,
         "include_ao": False,
         "include_roughness": False,
@@ -1576,6 +1586,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": True,
         "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
         "include_complex": False,
         "include_ao": False,
         "include_roughness": False,
@@ -1587,6 +1599,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
         "include_complex": False,
         "include_ao": False,
         "include_roughness": False,
@@ -1598,6 +1612,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
         "include_complex": True,
         "include_ao": False,
         "include_roughness": False,
@@ -1609,6 +1625,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": True,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
         "include_complex": False,
         "include_ao": True,
         "include_roughness": True,
@@ -1620,6 +1638,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": True,
         "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
         "include_complex": True,
         "include_ao": False,
         "include_roughness": False,
@@ -1633,6 +1653,8 @@ _RENDER_PROFILE_OUTPUT_LABELS: dict[str, str] = {
     "include_glow": "glow/_g",
     "include_environment_mask": "env mask/_m",
     "include_rmaos": "rmaos/_rmaos/_ramos",
+    "include_wetness_mask": "wetness mask/_wt",
+    "include_snow_mask": "snow mask/_sm",
     "include_complex": "complex material",
     "include_ao": "ambient occlusion/_ao",
     "include_roughness": "roughness/_rough",
@@ -1946,6 +1968,8 @@ def describe_render_profile_files_to_create(profile: str) -> str:
         "include_glow": "<stem>_em.dds (legacy: <stem>_g.dds)",
         "include_environment_mask": "<stem>_m.dds",
         "include_rmaos": "<stem>_rmaos.dds (or <stem>_ramos.dds)",
+        "include_wetness_mask": "<stem>_wt.dds",
+        "include_snow_mask": "<stem>_sm.dds",
         "include_complex": "<stem>_msn.dds",
     }
     if normalized == "community_shaders":
@@ -6404,6 +6428,8 @@ if GUI_AVAILABLE:
                 _glow_check,
                 _env_mask_check,
                 _rmaos_check,
+                _wetness_mask_check,
+                _snow_mask_check,
                 _complex_check,
                 _ao_check,
                 _roughness_check,
@@ -7629,7 +7655,10 @@ if GUI_AVAILABLE:
         def _on_emboss_mode_changed(self) -> None:
             self.emboss_mode_manual_override = True
             if self.emboss_mode_var.get():
-                self.status_var.set("Emboss depth mode enabled for flat printed surfaces (books/cards/scrolls).")
+                if self.relief_mode_var.get():
+                    self.relief_mode_var.set(False)
+                    self.relief_mode_manual_override = True
+                self.status_var.set("Emboss depth mode enabled (relief mode disabled). For flat printed surfaces like books/cards/scrolls.")
             else:
                 self.status_var.set("Emboss depth mode disabled; using standard normal-map generation.")
             self._request_preview_refresh()
@@ -7637,7 +7666,10 @@ if GUI_AVAILABLE:
         def _on_relief_mode_changed(self) -> None:
             self.relief_mode_manual_override = True
             if self.relief_mode_var.get():
-                self.status_var.set("Relief depth mode enabled — paintings/signs/murals will pop out as bas-relief.")
+                if self.emboss_mode_var.get():
+                    self.emboss_mode_var.set(False)
+                    self.emboss_mode_manual_override = True
+                self.status_var.set("Relief depth mode enabled (emboss mode disabled) — paintings/signs/murals will pop out as bas-relief.")
             else:
                 self.status_var.set("Relief depth mode disabled; using standard normal-map generation.")
             self._request_preview_refresh()
@@ -7702,6 +7734,8 @@ if GUI_AVAILABLE:
             self.include_glow_var.set(bool(resolved["include_glow"]))
             self.include_environment_mask_var.set(bool(resolved["include_environment_mask"]))
             self.include_rmaos_var.set(bool(resolved["include_rmaos"]))
+            self.include_wetness_mask_var.set(bool(resolved.get("include_wetness_mask", False)))
+            self.include_snow_mask_var.set(bool(resolved.get("include_snow_mask", False)))
             self.include_complex_var.set(bool(resolved["include_complex"]))
             self.include_ao_var.set(bool(resolved["include_ao"]))
             self.include_roughness_var.set(bool(resolved["include_roughness"]))
@@ -7798,9 +7832,7 @@ if GUI_AVAILABLE:
             recommended_profile = self._update_render_profile_recommendation(apply_auto=False)
             if selected == "custom":
                 self._update_render_profile_control_states()
-                self.status_var.set(
-                    "Target renderer set to Custom. Leaving all toggles/sliders/modes unchanged for manual control."
-                )
+                self.status_var.set("Custom mode: all controls are manual. No output checkboxes were changed.")
                 self._request_preview_refresh()
                 return
             effective = self._apply_render_profile_modes(
@@ -7812,17 +7844,16 @@ if GUI_AVAILABLE:
                 selected,
                 recommended_profile=recommended_profile,
             )
+            effective_label = _RENDER_PROFILE_LABELS.get(effective, effective)
             if selected == "auto":
                 self.status_var.set(
-                    f"Target renderer set to auto-detect; applied the current {_RENDER_PROFILE_LABELS.get(effective, effective)} preset and matching output checkboxes. "
+                    f"Auto-detect: applied {effective_label} preset. "
                     f"{describe_render_profile_files_to_create(effective)}"
                 )
             else:
                 self.status_var.set(
-                    f"Target renderer set to {_RENDER_PROFILE_LABELS.get(effective, effective)}. "
-                    f"Complex naming, env mask mode, parallax mode, and output checkboxes were updated to match that renderer. "
-                    f"{describe_render_profile_files_to_create(effective)} "
-                    f"{describe_render_profile_default_outputs(effective)}"
+                    f"Renderer set to {effective_label}. Modes and outputs updated. "
+                    f"{describe_render_profile_files_to_create(effective)}"
                 )
             self._update_render_profile_control_states()
             self._request_preview_refresh()
@@ -8143,6 +8174,62 @@ if GUI_AVAILABLE:
             except Exception as exc:
                 self.status_var.set(f"Preview update failed: {exc}")
 
+        def _show_dismissible_warning_dialog(
+            self,
+            title: str,
+            warning_id: str,
+            message: str,
+        ) -> bool:
+            """Show a dismissible warning dialog. Returns False if the user chose to abort."""
+            if warning_id in self.dismissed_warnings:
+                return True
+            dismiss_var = tk.BooleanVar(value=False)
+            dialog = tk.Toplevel(self.root)
+            dialog.title(title)
+            dialog.transient(self.root)
+            dialog.resizable(False, False)
+            dialog_result: list[bool] = [True]
+            colors = _DARK_THEME if self.dark_mode_var.get() else _LIGHT_THEME
+            dialog.configure(background=colors["bg"])
+            tk.Label(
+                dialog,
+                text=f"⚠ {message}",
+                justify=tk.LEFT,
+                wraplength=420,
+                padx=14,
+                pady=10,
+                background=colors["bg"],
+                foreground=colors["fg"],
+            ).pack(anchor=tk.W)
+            check_frame = tk.Frame(dialog, background=colors["bg"])
+            check_frame.pack(anchor=tk.W, padx=14, pady=(0, 6))
+            tk.Checkbutton(
+                check_frame,
+                text="Don't show this warning again",
+                variable=dismiss_var,
+                background=colors["bg"],
+                foreground=colors["fg"],
+                activebackground=colors["bg"],
+                selectcolor=colors["field_bg"],
+            ).pack(side=tk.LEFT)
+            btn_frame = tk.Frame(dialog, background=colors["bg"])
+            btn_frame.pack(pady=(4, 12), padx=14, anchor=tk.E)
+
+            def _continue(d: tk.Toplevel = dialog, wid: str = warning_id) -> None:
+                if dismiss_var.get():
+                    self.dismissed_warnings.add(wid)
+                d.destroy()
+
+            def _abort(d: tk.Toplevel = dialog) -> None:
+                dialog_result[0] = False
+                d.destroy()
+
+            ttk.Button(btn_frame, text="Continue anyway", command=_continue).pack(side=tk.LEFT, padx=(0, 8))
+            ttk.Button(btn_frame, text="Cancel generation", command=_abort).pack(side=tk.LEFT)
+            dialog.grab_set()
+            self.root.wait_window(dialog)
+            return dialog_result[0]
+
         def _check_and_show_generation_warnings(
             self,
             material_type: str,
@@ -8189,54 +8276,7 @@ if GUI_AVAILABLE:
                 relief_mode=relief_mode,
             )
             for warning_id, message in warnings:
-                if warning_id in self.dismissed_warnings:
-                    continue
-                dismiss_var = tk.BooleanVar(value=False)
-                dialog = tk.Toplevel(self.root)
-                dialog.title("Generation Warning")
-                dialog.transient(self.root)
-                dialog.resizable(False, False)
-                dialog_result: list[bool] = [True]
-                colors = _DARK_THEME if self.dark_mode_var.get() else _LIGHT_THEME
-                dialog.configure(background=colors["bg"])
-                tk.Label(
-                    dialog,
-                    text=f"⚠ {message}",
-                    justify=tk.LEFT,
-                    wraplength=420,
-                    padx=14,
-                    pady=10,
-                    background=colors["bg"],
-                    foreground=colors["fg"],
-                ).pack(anchor=tk.W)
-                check_frame = tk.Frame(dialog, background=colors["bg"])
-                check_frame.pack(anchor=tk.W, padx=14, pady=(0, 6))
-                tk.Checkbutton(
-                    check_frame,
-                    text="Don't show this warning again",
-                    variable=dismiss_var,
-                    background=colors["bg"],
-                    foreground=colors["fg"],
-                    activebackground=colors["bg"],
-                    selectcolor=colors["field_bg"],
-                ).pack(side=tk.LEFT)
-                btn_frame = tk.Frame(dialog, background=colors["bg"])
-                btn_frame.pack(pady=(4, 12), padx=14, anchor=tk.E)
-
-                def _continue(d: tk.Toplevel = dialog, wid: str = warning_id) -> None:
-                    if dismiss_var.get():
-                        self.dismissed_warnings.add(wid)
-                    d.destroy()
-
-                def _abort(d: tk.Toplevel = dialog) -> None:
-                    dialog_result[0] = False
-                    d.destroy()
-
-                ttk.Button(btn_frame, text="Continue anyway", command=_continue).pack(side=tk.LEFT, padx=(0, 8))
-                ttk.Button(btn_frame, text="Cancel generation", command=_abort).pack(side=tk.LEFT)
-                dialog.grab_set()
-                self.root.wait_window(dialog)
-                if not dialog_result[0]:
+                if not self._show_dismissible_warning_dialog("Generation Warning", warning_id, message):
                     return False
             return True
 
@@ -8364,54 +8404,7 @@ if GUI_AVAILABLE:
                         complex_format=self.complex_format_var.get(),
                     )
                     for warning_id, message in folder_warnings:
-                        if warning_id in self.dismissed_warnings:
-                            continue
-                        dismiss_var = tk.BooleanVar(value=False)
-                        dialog = tk.Toplevel(self.root)
-                        dialog.title("Output Folder Warning")
-                        dialog.transient(self.root)
-                        dialog.resizable(False, False)
-                        dialog_result: list[bool] = [True]
-                        colors = _DARK_THEME if self.dark_mode_var.get() else _LIGHT_THEME
-                        dialog.configure(background=colors["bg"])
-                        tk.Label(
-                            dialog,
-                            text=f"⚠ {message}",
-                            justify=tk.LEFT,
-                            wraplength=420,
-                            padx=14,
-                            pady=10,
-                            background=colors["bg"],
-                            foreground=colors["fg"],
-                        ).pack(anchor=tk.W)
-                        check_frame = tk.Frame(dialog, background=colors["bg"])
-                        check_frame.pack(anchor=tk.W, padx=14, pady=(0, 6))
-                        tk.Checkbutton(
-                            check_frame,
-                            text="Don't show this warning again",
-                            variable=dismiss_var,
-                            background=colors["bg"],
-                            foreground=colors["fg"],
-                            activebackground=colors["bg"],
-                            selectcolor=colors["field_bg"],
-                        ).pack(side=tk.LEFT)
-                        btn_frame = tk.Frame(dialog, background=colors["bg"])
-                        btn_frame.pack(pady=(4, 12), padx=14, anchor=tk.E)
-
-                        def _fw_continue(d: tk.Toplevel = dialog, wid: str = warning_id) -> None:
-                            if dismiss_var.get():
-                                self.dismissed_warnings.add(wid)
-                            d.destroy()
-
-                        def _fw_abort(d: tk.Toplevel = dialog) -> None:
-                            dialog_result[0] = False
-                            d.destroy()
-
-                        ttk.Button(btn_frame, text="Continue anyway", command=_fw_continue).pack(side=tk.LEFT, padx=(0, 8))
-                        ttk.Button(btn_frame, text="Cancel generation", command=_fw_abort).pack(side=tk.LEFT)
-                        dialog.grab_set()
-                        self.root.wait_window(dialog)
-                        if not dialog_result[0]:
+                        if not self._show_dismissible_warning_dialog("Output Folder Warning", warning_id, message):
                             return
 
                 _pm_raw = self.parallax_mode_var.get()

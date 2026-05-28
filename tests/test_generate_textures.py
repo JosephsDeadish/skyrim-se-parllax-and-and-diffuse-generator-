@@ -1002,33 +1002,45 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(vanilla["include_normal"]))
         self.assertFalse(bool(vanilla["include_parallax"]))
         self.assertFalse(bool(vanilla["include_complex"]))
+        self.assertFalse(bool(vanilla["include_wetness_mask"]))
+        self.assertFalse(bool(vanilla["include_snow_mask"]))
 
         performance = resolve_render_profile_output_defaults("performance")
         self.assertTrue(bool(performance["include_diffuse"]))
         self.assertTrue(bool(performance["include_normal"]))
         self.assertFalse(bool(performance["include_parallax"]))
         self.assertFalse(bool(performance["include_complex"]))
+        self.assertFalse(bool(performance["include_wetness_mask"]))
+        self.assertFalse(bool(performance["include_snow_mask"]))
 
         terrain = resolve_render_profile_output_defaults("terrain")
         self.assertTrue(bool(terrain["include_parallax"]))
         self.assertFalse(bool(terrain["include_environment_mask"]))
         self.assertFalse(bool(terrain["include_complex"]))
+        self.assertFalse(bool(terrain["include_wetness_mask"]))
+        self.assertFalse(bool(terrain["include_snow_mask"]))
 
         architecture = resolve_render_profile_output_defaults("architecture")
         self.assertTrue(bool(architecture["include_parallax"]))
         self.assertTrue(bool(architecture["include_environment_mask"]))
         self.assertFalse(bool(architecture["include_complex"]))
+        self.assertFalse(bool(architecture["include_wetness_mask"]))
+        self.assertFalse(bool(architecture["include_snow_mask"]))
 
         characters = resolve_render_profile_output_defaults("characters")
         self.assertFalse(bool(characters["include_parallax"]))
         self.assertFalse(bool(characters["include_environment_mask"]))
         self.assertFalse(bool(characters["include_complex"]))
+        self.assertFalse(bool(characters["include_wetness_mask"]))
+        self.assertFalse(bool(characters["include_snow_mask"]))
 
         enb = resolve_render_profile_output_defaults("enb")
         self.assertTrue(bool(enb["include_parallax"]))
         self.assertTrue(bool(enb["include_environment_mask"]))
         self.assertTrue(bool(enb["include_complex"]))
         self.assertFalse(bool(enb["include_normal"]))
+        self.assertFalse(bool(enb["include_wetness_mask"]))
+        self.assertFalse(bool(enb["include_snow_mask"]))
 
         truepbr = resolve_render_profile_output_defaults("truepbr")
         self.assertTrue(bool(truepbr["include_parallax"]))
@@ -1036,6 +1048,8 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(truepbr["include_rmaos"]))
         self.assertFalse(bool(truepbr["include_complex"]))
         self.assertTrue(bool(truepbr["include_normal"]))
+        self.assertFalse(bool(truepbr["include_wetness_mask"]))
+        self.assertFalse(bool(truepbr["include_snow_mask"]))
 
     def test_render_profile_has_locked_controls_only_in_custom_mode(self) -> None:
         self.assertFalse(render_profile_has_locked_controls("custom"))
@@ -1213,6 +1227,13 @@ class GenerateTexturesTests(unittest.TestCase):
         summary = describe_render_profile_default_outputs("enb")
         self.assertIn("Auto-check:", summary)
         self.assertIn("parallax/_p", summary)
+
+    def test_describe_render_profile_default_outputs_includes_wetness_snow_in_disabled_list(self) -> None:
+        for profile in ("vanilla", "terrain", "architecture", "community_shaders", "enb", "truepbr"):
+            with self.subTest(profile=profile):
+                summary = describe_render_profile_default_outputs(profile)
+                self.assertIn("wetness mask/_wt", summary)
+                self.assertIn("snow mask/_sm", summary)
 
     def test_describe_render_profile_files_to_create_mentions_enb_msn_outputs(self) -> None:
         summary = describe_render_profile_files_to_create("enb")
