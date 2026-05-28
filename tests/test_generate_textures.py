@@ -1235,6 +1235,16 @@ class GenerateTexturesTests(unittest.TestCase):
                 self.assertIn("wetness mask/_wt", summary)
                 self.assertIn("snow mask/_sm", summary)
 
+    def test_describe_render_profile_default_outputs_glow_uses_em_suffix(self) -> None:
+        """Glow output label in profile summaries must say _em, not the legacy _g."""
+        for profile in ("vanilla", "enb", "community_shaders", "truepbr"):
+            with self.subTest(profile=profile):
+                summary = describe_render_profile_default_outputs(profile)
+                # The summary string should contain "glow/_em" wherever glow appears
+                if "glow/" in summary:
+                    self.assertIn("glow/_em", summary)
+                    self.assertNotIn("glow/_g", summary)
+
     def test_describe_render_profile_files_to_create_mentions_enb_msn_outputs(self) -> None:
         summary = describe_render_profile_files_to_create("enb")
         self.assertIn("<stem>_msn.dds", summary)
@@ -4071,6 +4081,44 @@ class ParallaxOcclusionTests(unittest.TestCase):
             )
             ids = [w[0] for w in warnings]
             self.assertNotIn("depth_mode_without_normal", ids)
+
+    def test_emboss_non_paper_material_triggers_warning(self) -> None:
+        """Emboss mode on a solid material (stone, terrain, metal…) should warn."""
+        for material in ("stone", "terrain", "metal", "wood", "skin"):
+            with self.subTest(material=material):
+                warnings = get_generation_warnings(
+                    material,
+                    include_normal=True,
+                    emboss_mode=True,
+                    relief_mode=False,
+                    **self._base_kwargs(),
+                )
+                ids = [w[0] for w in warnings]
+                self.assertIn("emboss_non_paper_material", ids)
+
+    def test_emboss_paper_no_false_positive_for_non_paper_warning(self) -> None:
+        """Emboss mode on paper is correct usage — should NOT trigger the non-paper warning."""
+        warnings = get_generation_warnings(
+            "paper",
+            include_normal=True,
+            emboss_mode=True,
+            relief_mode=False,
+            **self._base_kwargs(),
+        )
+        ids = [w[0] for w in warnings]
+        self.assertNotIn("emboss_non_paper_material", ids)
+
+    def test_emboss_non_paper_warning_not_raised_when_emboss_off(self) -> None:
+        """No false positive when emboss_mode is False on a non-paper material."""
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=True,
+            emboss_mode=False,
+            relief_mode=False,
+            **self._base_kwargs(),
+        )
+        ids = [w[0] for w in warnings]
+        self.assertNotIn("emboss_non_paper_material", ids)
 
     def test_env_mask_with_complex_material_triggers_warning(self) -> None:
         warnings = get_generation_warnings(

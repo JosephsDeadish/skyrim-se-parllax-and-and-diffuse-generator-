@@ -1650,7 +1650,7 @@ _RENDER_PROFILE_OUTPUT_LABELS: dict[str, str] = {
     "include_diffuse": "diffuse",
     "include_normal": "normal/_n",
     "include_parallax": "parallax/_p",
-    "include_glow": "glow/_g",
+    "include_glow": "glow/_em",
     "include_environment_mask": "env mask/_m",
     "include_rmaos": "rmaos/_rmaos/_ramos",
     "include_wetness_mask": "wetness mask/_wt",
@@ -4967,6 +4967,23 @@ def get_generation_warnings(
             "Tip: Enable 'Normal map' output to use depth mode, or disable the depth mode toggle.",
         ))
 
+    _emboss_inappropriate_types = {
+        "stone", "terrain", "metal", "wood", "skin", "plants",
+        "cloth", "snow", "dirt", "sand", "glass", "fur", "ice",
+        "architecture",
+    }
+    if emboss_mode and material_type in _emboss_inappropriate_types:
+        warnings.append((
+            "emboss_non_paper_material",
+            f"Emboss depth mode is enabled for a '{material_type}' texture.\n\n"
+            "Emboss depth is designed for flat printed surfaces (books, scrolls, cards, signs) — "
+            "it generates normals from ink/edge ridges rather than smooth surface gradients. "
+            f"On '{material_type}' surfaces this produces artificial-looking normals and may break "
+            "in-game lighting response.\n\n"
+            "Tip: Use Emboss depth only for paper/card/printed artwork. For all other materials "
+            "leave both depth modes disabled.",
+        ))
+
     if include_environment_mask and include_complex and not is_enb_complex_combo:
         warnings.append((
             "env_mask_with_complex_material",
@@ -8003,7 +8020,10 @@ if GUI_AVAILABLE:
                                 and bg_uniformity >= 0.35
                                 and not self.relief_mode_manual_override
                             ):
+                                # Relief takes priority over emboss — clear emboss to keep
+                                # the two mutually exclusive modes visually consistent.
                                 self.relief_mode_var.set(True)
+                                self.emboss_mode_var.set(False)
             self._update_slider_auto_states()
 
         def _photo_image(self, image: Image.Image, max_size: int = 260) -> ImageTk.PhotoImage:
