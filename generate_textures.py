@@ -5024,6 +5024,16 @@ def get_generation_warnings(
             "Tip: For ENB use '_msn' workflow outputs; for TruePBR use '_n + _rmaos/_ramos' with the generated JSON sidecar.",
         ))
 
+    if include_rmaos and include_environment_mask:
+        warnings.append((
+            "rmaos_with_env_mask",
+            "Both 'RMAOS (_rmaos/_ramos)' and 'Environment mask (_m)' outputs are enabled.\n\n"
+            "RMAOS is the TruePBR/Community Shaders PBR map; the vanilla _m environment mask is for standard Skyrim SE or ENB "
+            "reflections. Generating both together is only useful when producing files for two separate renderer installs at once.\n\n"
+            "Tip: For a single renderer, use only the output that matches your target: "
+            "vanilla/ENB → Environment mask (_m), TruePBR → RMAOS (_rmaos/_ramos).",
+        ))
+
     if include_environment_mask and env_mask_mode == "complex" and not include_complex:
         warnings.append((
             "complex_env_without_msn",
@@ -7143,6 +7153,8 @@ if GUI_AVAILABLE:
                 "rmaos_strength": self.rmaos_strength_var.get(),
                 "complex_strength": self.complex_strength_var.get(),
                 "specular_strength": self.specular_strength_var.get(),
+                "wetness_mask_strength": float(_GUI_STATE_DEFAULTS["wetness_mask_strength"]),
+                "snow_mask_strength": float(_GUI_STATE_DEFAULTS["snow_mask_strength"]),
                 "ao_strength": self.ao_strength_var.get(),
                 "roughness_strength": self.roughness_strength_var.get(),
                 "dismissed_warnings": sorted(self.dismissed_warnings),
@@ -8120,7 +8132,6 @@ if GUI_AVAILABLE:
                 # Map the GUI parallax mode combo value to the internal key.
                 _pm_raw = self.parallax_mode_var.get()
                 _parallax_mode = "occlusion" if "occlusion" in _pm_raw else "standard"
-                preview_state = load_gui_state()
                 outputs = generate_preview_outputs(
                     self.source_image,
                     normal_strength=float(self.normal_strength_var.get()),
@@ -8142,9 +8153,9 @@ if GUI_AVAILABLE:
                     include_environment_mask=self.include_environment_mask_var.get(),
                     include_rmaos=self.include_rmaos_var.get(),
                     include_wetness_mask=self.include_wetness_mask_var.get(),
-                    wetness_mask_strength=float(preview_state.get("wetness_mask_strength", 1.0)),
+                    wetness_mask_strength=float(_GUI_STATE_DEFAULTS["wetness_mask_strength"]),
                     include_snow_mask=self.include_snow_mask_var.get(),
-                    snow_mask_strength=float(preview_state.get("snow_mask_strength", 1.0)),
+                    snow_mask_strength=float(_GUI_STATE_DEFAULTS["snow_mask_strength"]),
                     include_ao=self.include_ao_var.get(),
                     ao_strength=float(self.ao_strength_var.get()),
                     include_roughness=self.include_roughness_var.get(),
@@ -8261,7 +8272,7 @@ if GUI_AVAILABLE:
                 include_diffuse=include_diffuse,
                 include_normal=include_normal,
                 include_glow=include_glow,
-                include_environment_mask=(include_environment_mask or include_rmaos),
+                include_environment_mask=include_environment_mask,
                 include_rmaos=include_rmaos,
                 include_wetness_mask=include_wetness_mask,
                 include_snow_mask=include_snow_mask,
@@ -8811,11 +8822,19 @@ if GUI_AVAILABLE:
                         clear_diffuse_texture_path=clear_diffuse_var.get(),
                         clear_cubemap_texture_path=clear_cubemap_var.get(),
                     )
-                    option_warning_var.set("⚠ " + " ".join(warnings[:3]) if warnings else "")
+                    option_warning_var.set("⚠ " + " | ".join(warnings[:3]) if warnings else "")
 
                 _apply_renderer_defaults()
                 renderer_combo.bind("<<ComboboxSelected>>", _apply_renderer_defaults)
                 renderer_combo.bind("<<ComboboxSelected>>", _update_checkbox_warnings, add="+")
+
+                def _on_pom_toggled(*_: object) -> None:
+                    """Auto-enable standard parallax when ENB POM is checked (mirrors nif_patcher logic)."""
+                    if enable_pom_var.get():
+                        enable_parallax_var.set(True)
+
+                enable_pom_var.trace_add("write", _on_pom_toggled)
+
                 def _on_nif_target_changed(*_: object) -> None:
                     if _normalize_render_profile(renderer_profile_var.get()) == "auto":
                         _apply_renderer_defaults()
@@ -8849,8 +8868,8 @@ if GUI_AVAILABLE:
                     renderer_combo,
                     "🎯 Renderer preset helper.\nAuto applies patch options for Vanilla, Community Shaders, TruePBR, or ENB.",
                 )
-                self._add_tooltip(enable_parallax_check, "🪨 Enables Skyrim parallax shader flag and slot-3 _p usage.")
-                self._add_tooltip(enable_pom_check, "🌊 ENB-only parallax occlusion mode. Leave off for vanilla workflows.")
+                self._add_tooltip(enable_parallax_check, "🪨 Enables Skyrim parallax shader flag and slot-3 _p usage.\nNote: auto-checked when ENB POM is enabled (both flags are required for POM).")
+                self._add_tooltip(enable_pom_check, "🌊 ENB-only parallax occlusion mode. Also auto-enables standard parallax (required). Leave off for vanilla workflows.")
                 self._add_tooltip(enable_env_check, "🪞 Enables environment-mapping shader flag for reflective materials.")
                 self._add_tooltip(enable_glow_check, "✨ Enables glow/emissive flag so slot 2 _g textures render in-game.")
                 self._add_tooltip(force_type3_check, "💪 Upgrades shader type so stronger parallax scale can be written.")

@@ -4205,6 +4205,44 @@ class ParallaxOcclusionTests(unittest.TestCase):
         ids = [w[0] for w in warnings]
         self.assertIn("rmaos_with_msn_mix", ids)
 
+    def test_get_generation_warnings_rmaos_with_env_mask_triggers_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=True,
+            include_environment_mask=True,
+            include_rmaos=True,
+            include_complex=False,
+            include_glow=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("rmaos_with_env_mask", ids)
+
+    def test_get_generation_warnings_rmaos_without_env_mask_no_false_env_mask_warnings(self) -> None:
+        """RMAOS alone must not trigger env-mask-specific warnings (false-positive guard)."""
+        warnings = get_generation_warnings(
+            "organic",
+            include_normal=True,
+            include_environment_mask=False,
+            include_rmaos=True,
+            include_complex=False,
+            include_glow=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.8,
+            include_parallax=False,
+        )
+        ids = [w[0] for w in warnings]
+        env_mask_specific = {
+            "high_env_mask_organic",
+            "high_env_mask_glass",
+            "low_env_mask_metal",
+            "high_env_mask_strength",
+        }
+        for warning_id in env_mask_specific:
+            self.assertNotIn(warning_id, ids, f"False-positive: {warning_id} fired with RMAOS only")
+
     def test_msn_with_normal_output_triggers_warning(self) -> None:
         warnings = get_generation_warnings(
             "stone",
