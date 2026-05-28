@@ -755,6 +755,86 @@ def _infer_likely_role_from_image(source: Image.Image) -> str | None:
     return None
 
 
+def analyze_material_type_from_image(source: Image.Image) -> str | None:
+    """Infer a Skyrim material category from image colour and texture statistics.
+
+    Returns one of the material category strings (e.g. ``'metal'``, ``'skin'``,
+    ``'snow'``, ``'glass'``) if a confident match is found, or ``None`` when the
+    image content is ambiguous.  This is a *supplemental* hint — filename-based
+    :func:`classify_material_type` always takes priority.
+
+    Heuristic rules:
+    * Very low saturation + high brightness → snow/ice or metal candidate.
+    * Very high brightness + very low saturation → snow.
+    * High saturation + warm hue bias (red/orange range) → metal (gold/copper) or
+      skin candidate.
+    * Cool neutral colours with a warm-grey average → stone/architecture.
+    * High saturation + concentrated green channel → plants.
+    * Very pale, warm, low-contrast image → skin.
+    * High specular highlight cluster (bright white spots) + low-saturation base
+      → glass/crystal or polished metal.
+    """
+    rgb = source.convert("RGB")
+    analysis_source = rgb
+    if max(rgb.width, rgb.height) > 512:
+        analysis_source = rgb.copy()
+        analysis_source.thumbnail((512, 512), Image.Resampling.BILINEAR)
+
+    arr = np.asarray(analysis_source, dtype=np.float32)
+    if arr.size == 0:
+        return None
+
+    r_mean = float(arr[:, :, 0].mean())
+    g_mean = float(arr[:, :, 1].mean())
+    b_mean = float(arr[:, :, 2].mean())
+    overall_mean = (r_mean + g_mean + b_mean) / 3.0
+    r_std = float(arr[:, :, 0].std())
+    g_std = float(arr[:, :, 1].std())
+    b_std = float(arr[:, :, 2].std())
+    overall_std = (r_std + g_std + b_std) / 3.0
+
+    hsv_arr = np.asarray(analysis_source.convert("HSV"), dtype=np.float32)
+    sat_mean = float(hsv_arr[:, :, 1].mean())
+    val_mean = float(hsv_arr[:, :, 2].mean())
+    hue_mean = float(hsv_arr[:, :, 0].mean())
+
+    brightness_ratio = overall_mean / 255.0
+    saturation_ratio = sat_mean / 255.0
+
+    # Bright cluster detection: fraction of pixels brighter than 230
+    bright_pixels = float(np.mean(arr.max(axis=2) > 230.0))
+
+    # --- Snow / Ice ---
+    # Very bright, very low saturation, cool tone
+    if brightness_ratio > 0.72 and saturation_ratio < 0.12 and b_mean >= r_mean:
+        return "snow"
+
+    # --- Glass / Crystal (polished transparent material) ---
+    # High bright cluster, very low saturation, moderate overall brightness
+    if bright_pixels > 0.18 and saturation_ratio < 0.15 and 0.3 < brightness_ratio < 0.85:
+        return "glass"
+
+    # --- Metal (grey-scale high-value with low saturation) ---
+    if saturation_ratio < 0.18 and 0.25 < brightness_ratio < 0.78 and overall_std < 60.0:
+        return "metal"
+
+    # --- Skin (warm peachy / flesh tones) ---
+    # Red channel dominant, warm hue (10–40 degrees in HSV), moderate saturation
+    warm_hue = 10.0 <= (hue_mean / 255.0 * 360.0) <= 45.0
+    if warm_hue and 0.12 < saturation_ratio < 0.45 and 0.3 < brightness_ratio < 0.72 and r_mean > g_mean > b_mean:
+        return "skin"
+
+    # --- Plants (green-dominant with moderate saturation) ---
+    if g_mean > r_mean and g_mean > b_mean and saturation_ratio > 0.20:
+        return "plants"
+
+    # --- Stone / Architecture (cool-neutral grey-brown with low saturation) ---
+    if saturation_ratio < 0.22 and 0.2 < brightness_ratio < 0.65 and overall_std > 18.0:
+        return "stone"
+
+    return None
+
+
 def _adjust_recommendations_for_role(
     recommended: dict[str, float | int], detected_role: str | None
 ) -> dict[str, float | int]:
@@ -780,6 +860,33 @@ def _adjust_recommendations_for_role(
 
 
 _MATERIAL_CATEGORY_TOKENS: dict[str, tuple[str, ...]] = {
+    "architecture": (
+        "architecture",
+        "whiterun",
+        "windhelm",
+        "solitude",
+        "riften",
+        "markarth",
+        "falkreath",
+        "dwemer",
+        "imperial",
+        "nordic",
+        "castle",
+        "ruin",
+        "ruins",
+        "pillar",
+        "column",
+        "facade",
+        "cornerstone",
+        "battlement",
+        "tower",
+        "staircase",
+        "stair",
+        "crypt",
+        "cathedral",
+        "fortress",
+    ),
+    "terrain": ("landscape", "land", "terrain", "ground"),
     "stone": ("stone", "brick", "rock", "cobble", "slate", "granite", "marble", "limestone", "pebble", "rubble", "dungeon", "wall", "cave", "cliff"),
     "wood": ("wood", "timber", "plank", "log", "bark", "trunk", "beam", "wooden", "oak", "pine", "lumber"),
     "plants": ("leaf", "leaves", "grass", "vine", "plant", "moss", "fern", "weed", "shrub", "bush", "flora", "foliage", "lichen"),
@@ -788,7 +895,7 @@ _MATERIAL_CATEGORY_TOKENS: dict[str, tuple[str, ...]] = {
     "cloth": ("cloth", "fabric", "silk", "linen", "wool", "robe", "cloak", "cape", "leather", "hide", "fur"),
     "skin": ("skin", "body", "face", "head", "hand", "flesh", "creature", "humanoid"),
     "snow": ("snow", "ice", "frost", "frozen", "blizzard", "glacial"),
-    "sand": ("sand", "dirt", "mud", "earth", "soil", "ground", "terrain", "dust"),
+    "sand": ("sand", "dirt", "mud", "earth", "soil", "dust"),
     "paper": (
         "paper",
         "parchment",
@@ -820,9 +927,13 @@ _MATERIAL_CATEGORY_TOKENS: dict[str, tuple[str, ...]] = {
 def classify_material_type(path: Path) -> str:
     """Classify the likely Skyrim material category from a texture file path.
 
-    Returns one of: ``'stone'``, ``'wood'``, ``'plants'``, ``'metal'``,
-    ``'glass'``, ``'cloth'``, ``'skin'``, ``'snow'``, ``'sand'``, or
-    ``'general'``.
+    Returns one of: ``'architecture'``, ``'stone'``, ``'wood'``, ``'plants'``,
+    ``'metal'``, ``'glass'``, ``'cloth'``, ``'skin'``, ``'snow'``,
+    ``'terrain'``, ``'sand'``, ``'paper'``, or ``'general'``.
+
+    Priority order matches ``_MATERIAL_CATEGORY_TOKENS`` dictionary ordering so
+    more specific categories (``'architecture'``) are checked before broader ones
+    (``'stone'``).
     """
     combined = " ".join(path.parts).lower()
     words = tuple(token for token in re.split(r"[^a-z0-9]+", combined) if token)
@@ -836,48 +947,84 @@ def classify_material_type(path: Path) -> str:
 def _adjust_recommendations_for_material_type(
     recommended: dict[str, float | int], material_type: str
 ) -> dict[str, float | int]:
-    """Fine-tune generated slider recommendations for common Skyrim material categories."""
+    """Fine-tune generated slider recommendations for common Skyrim material categories.
+
+    Cubemap/environment-mask strength is tuned to match realistic reflectivity per
+    the Skyrim material guide: glass/ice = very high, polished metal/gold = high,
+    wet stone = medium-high, dry stone/wood = medium-low, cloth/skin = very low.
+    """
     adjusted = dict(recommended)
-    if material_type == "stone":
+    if material_type == "architecture":
+        # Architecture: stable medium-form normals, conservative parallax to avoid
+        # tiling artefacts, modest env mask (stone/plaster is not highly reflective).
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.95, 1.1, 2.8)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.9, 0.8, 1.8)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.8, 0.9, 1.8)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.85, 0.9, 1.6)
+        adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]) * 1.05, 140, 235))
+    elif material_type == "stone":
         adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 1.1, 1.1, 3.8)
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 1.1, 0.8, 2.4)
-        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.85, 0.9, 2.4)
+        # Stone is not highly reflective; medium-low cubemap strength
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.85, 0.9, 2.0)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.85, 0.9, 1.8)
         adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]) * 1.05, 140, 235))
     elif material_type == "wood":
         adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 1.05, 1.1, 3.8)
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 1.0, 0.8, 2.4)
-        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.7, 0.9, 2.4)
-        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.75, 0.9, 2.2)
+        # Wood is low-reflectivity; suppress cubemap/specular
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.7, 0.9, 1.6)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.75, 0.9, 1.6)
     elif material_type == "plants":
         adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.85, 1.1, 3.8)
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.6, 0.8, 2.4)
-        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.5, 0.9, 2.4)
+        # Plants have no meaningful cubemap reflection
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.5, 0.9, 1.4)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.55, 0.9, 1.4)
         adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]) * 1.1, 140, 235))
     elif material_type == "metal":
         adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 1.15, 1.1, 3.8)
+        # Metal has high cubemap reflection; boost env mask and specular significantly
         adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.45, 0.9, 2.4)
         adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.4, 0.9, 2.2)
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.9, 0.8, 2.4)
     elif material_type == "glass":
-        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.6, 0.9, 2.4)
-        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.5, 0.9, 2.2)
-        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.7, 0.8, 2.4)
+        # Glass/crystal has very high cubemap reflection; maximum env/specular boost
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.75, 0.9, 2.4)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.65, 0.9, 2.2)
+        # Glass is mostly flat — minimal parallax depth
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.6, 0.8, 1.4)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.9, 1.1, 2.4)
     elif material_type == "cloth":
-        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.55, 0.9, 2.4)
-        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.65, 0.9, 2.2)
-        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.75, 0.8, 2.4)
-        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.9, 1.1, 3.8)
+        # Cloth has virtually no cubemap reflection; suppress both env mask and specular
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.5, 0.9, 1.4)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.55, 0.9, 1.4)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.75, 0.8, 2.0)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.9, 1.1, 2.8)
     elif material_type == "skin":
-        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.65, 0.9, 2.4)
-        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.8, 0.9, 2.2)
-        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.5, 0.8, 2.4)
+        # Skin has low, soft cubemap reflection; soften normals to avoid pore over-sharpening
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.65, 0.9, 1.6)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.8, 0.9, 1.6)
+        # Skin normals should be soft — reduce strength to avoid harsh microdetail
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.82, 1.1, 2.4)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.5, 0.8, 1.4)
     elif material_type == "snow":
-        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.2, 0.9, 2.4)
+        # Ice has very high cubemap, snow surface itself medium-high
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.3, 0.9, 2.4)
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 1.15, 0.8, 2.4)
-        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.1, 0.9, 2.2)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.15, 0.9, 2.2)
+        # Ice/snow normals need gentle treatment to avoid grain artefacts
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.95, 1.1, 3.0)
+    elif material_type == "terrain":
+        # Terrain/landscape: subtle parallax, stable normals, low cubemap to avoid shimmer
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.85, 0.8, 1.6)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.95, 1.1, 2.6)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.75, 0.9, 1.8)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.8, 0.9, 1.6)
     elif material_type == "sand":
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 1.05, 0.8, 2.4)
-        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.8, 0.9, 2.4)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.8, 0.9, 1.8)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.75, 0.9, 1.6)
     elif material_type == "paper":
         adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.8, 1.1, 2.2)
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.55, 0.8, 1.35)
@@ -1747,6 +1894,11 @@ def recommend_generation_settings(source: Image.Image, input_path: Path | None =
         inferred_from_image = _infer_likely_role_from_image(source)
         if inferred_from_image is not None:
             detected_role = inferred_from_image
+    # When the filename gives no specific material, fall back to image-content analysis.
+    if material_type == "general":
+        image_material = analyze_material_type_from_image(source)
+        if image_material is not None:
+            material_type = image_material
     role_adjusted = _adjust_recommendations_for_role(recommended, detected_role)
     material_adjusted = _adjust_recommendations_for_material_type(role_adjusted, material_type)
     workflow_adjusted = _adjust_recommendations_for_workflow_profile(material_adjusted, workflow_profile)
@@ -2370,6 +2522,122 @@ def generate_specular(source: Image.Image, strength: float = 1.15) -> Image.Imag
         _reshape_image_channel(normalized_arr, grayscale.size, label="Specular").astype(np.uint8),
         mode="L",
     )
+
+
+def generate_ambient_occlusion(source: Image.Image, strength: float = 1.2) -> Image.Image:
+    """Generate an ambient occlusion (AO) map from a diffuse texture.
+
+    Approximates self-shadowing by detecting local cavity regions — areas where
+    surrounding surface curvature would block ambient light.  The result is a
+    greyscale ``L``-mode image where dark pixels indicate recessed/shadowed areas
+    and bright pixels indicate exposed/open areas.
+
+    The AO signal is intentionally subtle: crushed blacks and harsh cavity rings
+    are avoided because Skyrim's lighting engine is not path-traced and an
+    over-aggressive AO bake will make surfaces look dirty rather than shaded.
+
+    Parameters
+    ----------
+    source:
+        Input diffuse texture (any size/mode; converted to RGB internally).
+    strength:
+        Intensity multiplier (0.1–4.0).  Values around 1.0–1.5 give natural
+        results for most materials.  Values above 2.5 suit carved stone or
+        heavily worn metal.
+    """
+    rgb_source = source.convert("RGB")
+    grayscale = ImageOps.grayscale(rgb_source)
+    resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.6)
+    clamped_strength = _clamp(float(strength), 0.1, 4.0)
+
+    # Broad ambient light field — represents the large-scale illumination envelope.
+    broad = grayscale.filter(ImageFilter.GaussianBlur(radius=(4.5 + (clamped_strength * 0.8)) * resolution_scale))
+
+    # Medium-scale cavity signal: surface dips that are too small to affect the
+    # broad field but deep enough to trap ambient light.
+    medium = grayscale.filter(ImageFilter.GaussianBlur(radius=(1.8 + (clamped_strength * 0.4)) * resolution_scale))
+    cavity_medium = ImageChops.subtract(broad, medium, scale=1.0, offset=128)
+    cavity_medium = ImageEnhance.Contrast(cavity_medium).enhance(0.9 + (clamped_strength * 0.35))
+
+    # Fine-scale cavity: micro-pores, cracks, grout lines, fabric weave.
+    fine = grayscale.filter(ImageFilter.GaussianBlur(radius=0.9 * resolution_scale))
+    cavity_fine = ImageChops.subtract(medium, fine, scale=1.0, offset=128)
+    cavity_fine = ImageEnhance.Contrast(cavity_fine).enhance(0.6 + (clamped_strength * 0.2))
+
+    # Blend cavity scales: medium carries more weight than fine micro-detail.
+    ao_raw = Image.blend(cavity_medium, cavity_fine, alpha=0.32)
+    ao_blurred = ao_raw.filter(ImageFilter.GaussianBlur(radius=0.8 * resolution_scale))
+
+    # Autocontrast stretches the signal to the full 0–255 range.
+    ao_contrasted = ImageOps.autocontrast(ao_blurred, cutoff=1)
+
+    # Blend toward a bright neutral so AO stays subtle (not pitch-black cavities).
+    ao_final = Image.blend(Image.new("L", ao_contrasted.size, color=200), ao_contrasted, alpha=_clamp(0.3 + (clamped_strength * 0.18), 0.3, 0.82))
+
+    # Hard floor to avoid pure-black pixels that look like missing textures.
+    return _lift_black_floor(ao_final, floor=28)
+
+
+def generate_roughness(source: Image.Image, strength: float = 1.0, material_type: str = "general") -> Image.Image:
+    """Generate a roughness map from a diffuse texture.
+
+    Roughness is the inverse of glossiness/specularity: bright areas are rough
+    (diffuse scatter), dark areas are smooth (specular reflection).  The output
+    is a greyscale ``L``-mode image in the PBR roughness convention used by
+    Community Shaders TruePBR and Unreal Engine / modern PBR tools.
+
+    The algorithm inverts the specular estimate derived from the diffuse, then
+    applies material-type corrections so that known-smooth materials (polished
+    metal, glass, skin) come out with a lower base roughness while known-rough
+    materials (stone, terrain, cloth) come out with a higher base roughness.
+
+    Parameters
+    ----------
+    source:
+        Input diffuse texture.
+    strength:
+        Contrast/intensity multiplier (0.1–4.0).  1.0 gives a neutral result;
+        values above 1.5 sharpen the roughness variation.
+    material_type:
+        Optional Skyrim material category string (from :func:`classify_material_type`
+        or :func:`analyze_material_type_from_image`).  Used to apply a material-
+        specific roughness bias so that e.g. metal defaults to a lower baseline
+        roughness than stone.
+    """
+    clamped_strength = _clamp(float(strength), 0.1, 4.0)
+
+    # Start from the inverted specular (high specular = low roughness).
+    specular = generate_specular(source, strength=max(0.9, min(2.5, clamped_strength * 0.85)))
+    roughness = ImageOps.invert(specular)
+
+    # Blend in some diffuse luminance to capture large-scale surface texture variation.
+    luminance = ImageOps.grayscale(source.convert("RGB"))
+    local_detail = ImageChops.difference(luminance, luminance.filter(ImageFilter.GaussianBlur(radius=2.5)))
+    roughness = Image.blend(roughness, ImageOps.autocontrast(local_detail, cutoff=1), alpha=0.22)
+
+    roughness = ImageEnhance.Contrast(roughness).enhance(0.8 + (clamped_strength * 0.3))
+    roughness = ImageOps.autocontrast(roughness, cutoff=1)
+
+    # Material-type roughness bias: shift overall brightness up (rougher) or down (smoother).
+    _roughness_bias: dict[str, int] = {
+        "metal": -30,       # Polished metal is smooth
+        "glass": -45,       # Glass is very smooth
+        "snow": -15,        # Ice/packed snow is somewhat smooth
+        "skin": -12,        # Skin has moderate smoothness
+        "stone": 15,        # Stone is rough
+        "terrain": 20,      # Terrain is rough
+        "sand": 18,         # Sand/dirt is rough
+        "wood": 10,         # Wood is moderately rough
+        "cloth": 22,        # Cloth is rough
+        "plants": 18,       # Plants/leaves are rough
+        "architecture": 12, # Architecture surfaces are moderately rough
+        "paper": 8,         # Parchment/paper is moderately rough
+    }
+    bias = _roughness_bias.get(str(material_type or "general").lower(), 0)
+    if bias != 0:
+        roughness = roughness.point(lambda v: int(_clamp(float(v) + bias, 0.0, 255.0)))
+
+    return _lift_black_floor(roughness, floor=12)
 
 
 def generate_msn(
@@ -3277,6 +3545,27 @@ def get_generation_warnings(
             "Tip: Disable parallax unless the source has clear embossed depth detail.",
         ))
 
+    if include_parallax and material_type == "terrain" and source_hint and "landscape" in str(source_hint).lower():
+        warnings.append((
+            "parallax_landscape_shimmer",
+            "Strong parallax on a landscape/terrain texture may cause horizon shimmer.\n\n"
+            "Skyrim SE's terrain mesh has lower polygon density than objects — "
+            "high parallax strength on landscape textures can produce visible wavering "
+            "artefacts at medium-to-far distances, especially near the horizon.\n\n"
+            "Tip: Keep parallax strength below 1.3 for landscape/terrain textures, "
+            "or use 'occlusion' parallax mode (POM) which handles terrain gradients better.",
+        ))
+
+    if include_environment_mask and material_type == "architecture" and env_mask_strength > 1.8:
+        warnings.append((
+            "high_env_mask_architecture",
+            f"High environment mask strength ({env_mask_strength:.2f}) on an architecture texture.\n\n"
+            "Nordic/Imperial stone and woodwork surfaces are rough rather than polished — "
+            "very high cubemap reflections will make city walls look like wet metal.\n\n"
+            "Tip: Use environment mask strength between 1.0–1.5 for architecture textures. "
+            "Reserve values above 1.6 for polished materials like Dwemer brass.",
+        ))
+
     resolved_source_role = source_role or "diffuse"
     derived_roles = {
         "normal",
@@ -3532,6 +3821,63 @@ def _dds_pixel_format_uses_alpha(pixel_format: str) -> bool:
     return normalized not in {"DXT1", "BC1", "BC1_UNORM"}
 
 
+def _prefilter_for_mipmap_stability(image: Image.Image, output_kind: str) -> Image.Image:
+    """Apply a lightweight pre-filter that reduces shimmer in GPU-generated mipmaps.
+
+    Pillow's built-in DDS writer does not generate custom mipmap chains.  When
+    Skyrim's renderer builds the mip pyramid from the saved base-level texture it
+    uses a simple box/bilinear filter.  High-frequency noise (fine grain in normal
+    maps, repetitive micro-detail in parallax maps) survives into mid-level mipmaps
+    and produces shimmering or moiré patterns at medium-to-far view distances.
+
+    This function applies a subtle frequency-reduction pass that "pre-bakes" some of
+    the mipmap quality work into the base texture, making the GPU-generated mip
+    chain more stable without visibly softening the full-resolution view.
+
+    Rules per output kind:
+    * ``"normal"`` — Gently blend toward a flat neutral (128, 128, 255) normal so
+      high-frequency micro-bumps don't create shimmer at distance.  The blend is
+      very subtle (≈ 8 %) and the directional information is fully preserved at 1:1.
+    * ``"parallax"`` — Apply a very light Gaussian pass to suppress random noise
+      spikes that cause flickering under POM ray-marching at distance.
+    * ``"rmaos"`` / ``"complex_material"`` — No pre-filtering; packed channels are
+      left untouched to avoid channel cross-contamination.
+    * All other kinds — Pass through unchanged.
+    """
+    normalized_kind = str(output_kind or "").strip().lower()
+
+    if normalized_kind == "normal":
+        if image.mode not in {"RGB", "RGBA"}:
+            return image
+        has_alpha = image.mode == "RGBA"
+        rgb = image.convert("RGB")
+        r, g, b = rgb.split()
+        # Gentle directional smoothing — preserve the blue channel (hemisphere normal)
+        # but lightly smooth R and G (XY tangent directions) to reduce micro-detail shimmer.
+        smooth_radius = 0.5
+        r_smoothed = r.filter(ImageFilter.GaussianBlur(radius=smooth_radius))
+        g_smoothed = g.filter(ImageFilter.GaussianBlur(radius=smooth_radius))
+        # Blue channel: blend toward 255 (flat-up vector) to reduce shimmer from noisy normals.
+        b_arr = np.frombuffer(b.tobytes(), dtype=np.uint8).astype(np.float32)
+        b_stabilised = np.clip(b_arr * 0.92 + 255.0 * 0.08, 0.0, 255.0).astype(np.uint8)
+        b_new = Image.fromarray(b_stabilised.reshape(b.size[1], b.size[0]), mode="L")
+        stable_rgb = Image.merge("RGB", (r_smoothed, g_smoothed, b_new))
+        if has_alpha:
+            alpha = image.getchannel("A")
+            return Image.merge("RGBA", (*stable_rgb.split(), alpha))
+        return stable_rgb
+
+    if normalized_kind == "parallax":
+        if image.mode != "L":
+            return image
+        # Very light Gaussian smoothing to damp random noise spikes.
+        # Radius 0.4 at base resolution is nearly invisible at 1:1 but meaningfully
+        # stabilises mid-level GPU mipmaps and reduces POM stair-stepping artefacts.
+        return image.filter(ImageFilter.GaussianBlur(radius=0.4))
+
+    return image
+
+
 def _to_dds_compatible_image(image: Image.Image, *, pixel_format: str) -> Image.Image:
     if _dds_pixel_format_uses_alpha(pixel_format):
         if image.mode == "RGBA":
@@ -3600,6 +3946,7 @@ def _save_with_dds_fallback(
     output_path: Path,
     *,
     preferred_pixel_formats: tuple[str, ...] = ("DXT5",),
+    output_kind: str = "",
 ) -> Path:
     def _atomic_save(target: Path, image_to_save: Image.Image, **save_kwargs: object) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -3610,6 +3957,10 @@ def _save_with_dds_fallback(
         finally:
             if temp_path.exists():
                 temp_path.unlink(missing_ok=True)
+
+    # Apply mipmap-stability pre-filter for normal and parallax outputs.
+    # This reduces shimmer caused by GPU bilinear box-filter mip generation.
+    image = _prefilter_for_mipmap_stability(image, output_kind)
 
     normalized_formats = _normalise_preferred_dds_formats(preferred_pixel_formats)
     dds_target = output_path.with_suffix(DDS_EXTENSION)
@@ -3741,6 +4092,7 @@ def run_with_options(
                 normal,
                 normal_path,
                 preferred_pixel_formats=_preferred_dds_formats_for_output("normal", normal),
+                output_kind="normal",
             )
 
         if include_parallax:
@@ -3762,6 +4114,7 @@ def run_with_options(
                 parallax,
                 parallax_path,
                 preferred_pixel_formats=_preferred_dds_formats_for_output("parallax", parallax),
+                output_kind="parallax",
             )
 
         if include_glow:

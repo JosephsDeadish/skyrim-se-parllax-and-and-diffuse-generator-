@@ -76,6 +76,10 @@ from generate_textures import (
     should_apply_preview_recommendations,
     select_generation_context_source,
     get_output_folder_format_warnings,
+    generate_ambient_occlusion,
+    generate_roughness,
+    analyze_material_type_from_image,
+    _prefilter_for_mipmap_stability,
 )
 
 
@@ -494,6 +498,97 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(msn.split()[:3], expected_normal.split())
         self.assertEqual(msn.split()[3].tobytes(), expected_specular.tobytes())
 
+    def test_generate_ambient_occlusion_returns_l_mode_same_size(self) -> None:
+        source = _sample_image()
+        ao = generate_ambient_occlusion(source)
+        self.assertEqual(ao.mode, "L")
+        self.assertEqual(ao.size, source.size)
+
+    def test_generate_ambient_occlusion_has_no_pure_black_holes(self) -> None:
+        source = _sample_image()
+        ao = generate_ambient_occlusion(source, strength=1.0)
+        min_val = min(ao.getdata())
+        self.assertGreater(min_val, 0, "AO should have no pure-black pixels")
+
+    def test_generate_ambient_occlusion_higher_strength_increases_contrast(self) -> None:
+        source = _vertical_gradient_image()
+        ao_low = generate_ambient_occlusion(source, strength=0.5)
+        ao_high = generate_ambient_occlusion(source, strength=3.0)
+        import numpy as np
+        std_low = float(np.std(list(ao_low.getdata())))
+        std_high = float(np.std(list(ao_high.getdata())))
+        self.assertGreater(std_high, std_low)
+
+    def test_generate_roughness_returns_l_mode_same_size(self) -> None:
+        source = _sample_image()
+        roughness = generate_roughness(source)
+        self.assertEqual(roughness.mode, "L")
+        self.assertEqual(roughness.size, source.size)
+
+    def test_generate_roughness_has_no_pure_black_holes(self) -> None:
+        source = _sample_image()
+        roughness = generate_roughness(source, strength=1.0)
+        min_val = min(roughness.getdata())
+        self.assertGreater(min_val, 0, "Roughness should have no pure-black pixels")
+
+    def test_generate_roughness_metal_is_smoother_than_stone(self) -> None:
+        source = _vertical_gradient_image()
+        roughness_metal = generate_roughness(source, material_type="metal")
+        roughness_stone = generate_roughness(source, material_type="stone")
+        mean_metal = sum(roughness_metal.getdata()) / (source.width * source.height)
+        mean_stone = sum(roughness_stone.getdata()) / (source.width * source.height)
+        self.assertLess(mean_metal, mean_stone, "Metal should have lower roughness than stone")
+
+    def test_prefilter_mipmap_stability_normal_preserves_size_and_mode(self) -> None:
+        source = _sample_image().convert("RGB")
+        result = _prefilter_for_mipmap_stability(source, "normal")
+        self.assertEqual(result.size, source.size)
+        self.assertEqual(result.mode, "RGB")
+
+    def test_prefilter_mipmap_stability_normal_blue_channel_raised(self) -> None:
+        # Pre-filter blends blue toward 255 (flat normal) — mean should rise slightly.
+        source = _sample_image().convert("RGB")
+        original_b = list(source.getchannel("B").getdata())
+        result = _prefilter_for_mipmap_stability(source, "normal")
+        filtered_b = list(result.getchannel("B").getdata())
+        mean_orig = sum(original_b) / len(original_b)
+        mean_filtered = sum(filtered_b) / len(filtered_b)
+        self.assertGreaterEqual(mean_filtered, mean_orig - 1)  # should not darken blue
+
+    def test_prefilter_mipmap_stability_parallax_preserves_size_and_mode(self) -> None:
+        source = _sample_image().convert("L")
+        result = _prefilter_for_mipmap_stability(source, "parallax")
+        self.assertEqual(result.size, source.size)
+        self.assertEqual(result.mode, "L")
+
+    def test_prefilter_mipmap_stability_passthrough_for_diffuse(self) -> None:
+        source = _sample_image().convert("RGB")
+        result = _prefilter_for_mipmap_stability(source, "diffuse")
+        self.assertEqual(result.tobytes(), source.tobytes())
+
+    def test_prefilter_mipmap_stability_passthrough_for_unknown_kind(self) -> None:
+        source = _sample_image().convert("RGB")
+        result = _prefilter_for_mipmap_stability(source, "")
+        self.assertEqual(result.tobytes(), source.tobytes())
+
+    def test_analyze_material_type_from_image_returns_none_or_valid_type(self) -> None:
+        valid_types = {
+            "metal", "stone", "wood", "cloth", "glass", "skin",
+            "snow", "plants", "terrain", "sand", "architecture", "paper", "general", None,
+        }
+        result = analyze_material_type_from_image(_sample_image())
+        self.assertIn(result, valid_types)
+
+    def test_analyze_material_type_from_image_accepts_rgba_input(self) -> None:
+        source = _sample_image().convert("RGBA")
+        result = analyze_material_type_from_image(source)
+        # Should not raise; result is None or a valid type string
+        valid_types = {
+            "metal", "stone", "wood", "cloth", "glass", "skin",
+            "snow", "plants", "terrain", "sand", "architecture", "paper", "general", None,
+        }
+        self.assertIn(result, valid_types)
+
     def test_recommend_generation_settings_returns_valid_ranges(self) -> None:
         settings = recommend_generation_settings(_sample_image())
         self.assertIn("specular_strength", settings)
@@ -508,8 +603,13 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertGreaterEqual(int(settings["glow_threshold"]), 140)
         self.assertLessEqual(int(settings["glow_threshold"]), 235)
 
-    def test_classify_material_type_returns_stone_for_brick_path(self) -> None:
-        self.assertEqual(classify_material_type(Path("textures/architecture/brick_wall.dds")), "stone")
+    def test_classify_material_type_returns_architecture_for_brick_path(self) -> None:
+        # textures/architecture/ folder is now its own category; stone is the fallback
+        # when only the filename has stone tokens but no architecture folder token.
+        self.assertEqual(classify_material_type(Path("textures/architecture/brick_wall.dds")), "architecture")
+
+    def test_classify_material_type_returns_stone_for_non_architecture_brick_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/dungeons/brick_floor.dds")), "stone")
 
     def test_classify_material_type_returns_metal_for_iron_path(self) -> None:
         self.assertEqual(classify_material_type(Path("textures/armor/iron_helmet.dds")), "metal")
@@ -531,6 +631,21 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_classify_material_type_returns_paper_for_sign_path(self) -> None:
         self.assertEqual(classify_material_type(Path("textures/signs/inn_sign_painted.dds")), "paper")
+
+    def test_classify_material_type_returns_terrain_for_landscape_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/landscape/dirt01.dds")), "terrain")
+
+    def test_classify_material_type_returns_terrain_for_ground_token_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/ground/rocky_terrain.dds")), "terrain")
+
+    def test_classify_material_type_returns_architecture_for_whiterun_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/whiterun/wrbuildings01.dds")), "architecture")
+
+    def test_classify_material_type_returns_architecture_for_dwemer_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/dwemer/dwmplatform01.dds")), "architecture")
+
+    def test_classify_material_type_returns_architecture_for_nordic_ruin(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/nordic/norwall01.dds")), "architecture")
 
     def test_detect_workflow_profile_detects_interface_paths(self) -> None:
         self.assertEqual(
