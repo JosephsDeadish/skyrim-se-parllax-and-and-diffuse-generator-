@@ -87,6 +87,8 @@ from generate_textures import (
     build_wetness_mask_output_path,
     build_snow_mask_output_path,
     GENERATED_TEXTURE_SUFFIXES,
+    recommend_output_resolution,
+    write_rmaos_json_sidecar,
 )
 
 
@@ -4428,6 +4430,219 @@ class ParallaxOcclusionTests(unittest.TestCase):
         )
         warning_ids = [w[0] for w in warnings]
         self.assertNotIn("wetness_mask_on_reflective_material", warning_ids)
+
+
+# ---------------------------------------------------------------------------
+# Parallax warnings — glass and skin
+# ---------------------------------------------------------------------------
+
+
+class ParallaxGlassSkinWarningTests(unittest.TestCase):
+    """Tests for new parallax_flat_glass and parallax_character_skin warnings."""
+
+    def _base_kwargs(self) -> dict:
+        return dict(
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            include_complex=False,
+        )
+
+    def test_parallax_glass_raises_warning(self) -> None:
+        warnings = get_generation_warnings("glass", **self._base_kwargs())
+        warning_ids = [w[0] for w in warnings]
+        self.assertIn("parallax_flat_glass", warning_ids)
+
+    def test_parallax_glass_no_warning_when_parallax_off(self) -> None:
+        kwargs = self._base_kwargs()
+        kwargs["include_parallax"] = False
+        warnings = get_generation_warnings("glass", **kwargs)
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("parallax_flat_glass", warning_ids)
+
+    def test_parallax_skin_raises_warning(self) -> None:
+        warnings = get_generation_warnings("skin", **self._base_kwargs())
+        warning_ids = [w[0] for w in warnings]
+        self.assertIn("parallax_character_skin", warning_ids)
+
+    def test_parallax_skin_no_warning_when_parallax_off(self) -> None:
+        kwargs = self._base_kwargs()
+        kwargs["include_parallax"] = False
+        warnings = get_generation_warnings("skin", **kwargs)
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("parallax_character_skin", warning_ids)
+
+    def test_parallax_stone_raises_no_glass_or_skin_warning(self) -> None:
+        warnings = get_generation_warnings("stone", **self._base_kwargs())
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("parallax_flat_glass", warning_ids)
+        self.assertNotIn("parallax_character_skin", warning_ids)
+
+
+# ---------------------------------------------------------------------------
+# recommend_output_resolution
+# ---------------------------------------------------------------------------
+
+
+class RecommendOutputResolutionTests(unittest.TestCase):
+    """Tests for recommend_output_resolution(width, height, material_type)."""
+
+    def test_terrain_max_is_2048(self) -> None:
+        max_dim, _ = recommend_output_resolution(4096, 4096, "terrain")
+        self.assertEqual(max_dim, 2048)
+
+    def test_skin_max_is_2048(self) -> None:
+        max_dim, _ = recommend_output_resolution(4096, 4096, "skin")
+        self.assertEqual(max_dim, 2048)
+
+    def test_plants_max_is_1024(self) -> None:
+        max_dim, _ = recommend_output_resolution(2048, 2048, "plants")
+        self.assertEqual(max_dim, 1024)
+
+    def test_paper_max_is_1024(self) -> None:
+        max_dim, _ = recommend_output_resolution(2048, 2048, "paper")
+        self.assertEqual(max_dim, 1024)
+
+    def test_architecture_max_is_4096(self) -> None:
+        max_dim, _ = recommend_output_resolution(8192, 8192, "architecture")
+        self.assertEqual(max_dim, 4096)
+
+    def test_general_max_is_4096(self) -> None:
+        max_dim, _ = recommend_output_resolution(8192, 8192, "general")
+        self.assertEqual(max_dim, 4096)
+
+    def test_unknown_material_max_is_4096(self) -> None:
+        max_dim, _ = recommend_output_resolution(8192, 8192, "unknownmaterial")
+        self.assertEqual(max_dim, 4096)
+
+    def test_returns_reason_string(self) -> None:
+        _, reason = recommend_output_resolution(2048, 2048, "general")
+        self.assertIsInstance(reason, str)
+        self.assertTrue(len(reason) > 0)
+
+    def test_small_source_returns_max_dim_unchanged(self) -> None:
+        max_dim, _ = recommend_output_resolution(512, 512, "terrain")
+        self.assertEqual(max_dim, 2048)
+
+    def test_8k_source_reason_mentions_resolution(self) -> None:
+        _, reason = recommend_output_resolution(16384, 16384, "general")
+        self.assertIn("16384", reason)
+
+
+# ---------------------------------------------------------------------------
+# Source resolution warning in get_generation_warnings
+# ---------------------------------------------------------------------------
+
+
+class SourceResolutionWarningTests(unittest.TestCase):
+    """Tests that get_generation_warnings emits source_resolution_excessive when appropriate."""
+
+    def _base_kwargs(self) -> dict:
+        return dict(
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            include_complex=False,
+        )
+
+    def test_terrain_8k_source_raises_resolution_warning(self) -> None:
+        warnings = get_generation_warnings("terrain", source_size=(8192, 8192), **self._base_kwargs())
+        warning_ids = [w[0] for w in warnings]
+        self.assertIn("source_resolution_excessive", warning_ids)
+
+    def test_terrain_2k_source_no_resolution_warning(self) -> None:
+        warnings = get_generation_warnings("terrain", source_size=(2048, 2048), **self._base_kwargs())
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("source_resolution_excessive", warning_ids)
+
+    def test_general_4k_source_no_resolution_warning(self) -> None:
+        warnings = get_generation_warnings("general", source_size=(4096, 4096), **self._base_kwargs())
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("source_resolution_excessive", warning_ids)
+
+    def test_general_8k_source_raises_resolution_warning(self) -> None:
+        warnings = get_generation_warnings("general", source_size=(8192, 4096), **self._base_kwargs())
+        warning_ids = [w[0] for w in warnings]
+        self.assertIn("source_resolution_excessive", warning_ids)
+
+    def test_no_source_size_no_resolution_warning(self) -> None:
+        warnings = get_generation_warnings("terrain", source_size=None, **self._base_kwargs())
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("source_resolution_excessive", warning_ids)
+
+
+# ---------------------------------------------------------------------------
+# Material-aware write_rmaos_json_sidecar
+# ---------------------------------------------------------------------------
+
+
+class RmaosJsonMaterialTypeTests(unittest.TestCase):
+    """Tests that write_rmaos_json_sidecar applies per-material PBR overrides."""
+
+    def setUp(self) -> None:
+        import tempfile
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _write_and_read(self, material_type: str) -> dict:
+        import json
+        from pathlib import Path
+
+        rmaos_path = Path(self._tmpdir) / f"test_{material_type}_rmaos.dds"
+        write_rmaos_json_sidecar(rmaos_path, parallax_enabled=False, material_type=material_type)
+        # The function writes into a PBRNifPatcher sub-directory.
+        json_path = Path(self._tmpdir) / "PBRNifPatcher" / f"{rmaos_path.stem}.json"
+        with open(json_path) as f:
+            raw = json.load(f)
+        # Payload is a list; return the first (and only) entry for convenience.
+        return raw[0] if isinstance(raw, list) else raw
+
+    def test_general_uses_defaults(self) -> None:
+        data = self._write_and_read("general")
+        # General should not enable subsurface
+        self.assertFalse(data.get("subsurface", False))
+        self.assertFalse(data.get("subsurface_foliage", False))
+
+    def test_skin_enables_subsurface(self) -> None:
+        data = self._write_and_read("skin")
+        self.assertTrue(data.get("subsurface", False))
+        self.assertAlmostEqual(data["subsurface_color"][0], 1.0, places=3)
+        self.assertAlmostEqual(data["subsurface_color"][1], 0.85, places=3)
+        self.assertAlmostEqual(data["subsurface_color"][2], 0.7, places=3)
+        self.assertAlmostEqual(data["subsurface_opacity"], 0.65, places=3)
+        self.assertAlmostEqual(data["displacement_scale"], 0.0, places=3)
+
+    def test_plants_enables_foliage_subsurface(self) -> None:
+        data = self._write_and_read("plants")
+        self.assertTrue(data.get("subsurface_foliage", False))
+        self.assertAlmostEqual(data["displacement_scale"], 0.0, places=3)
+
+    def test_metal_has_high_specular(self) -> None:
+        data = self._write_and_read("metal")
+        self.assertAlmostEqual(data["specular_level"], 0.5, places=3)
+
+    def test_glass_has_low_roughness(self) -> None:
+        data = self._write_and_read("glass")
+        self.assertAlmostEqual(data["roughness_scale"], 0.35, places=3)
+
+    def test_terrain_has_shallow_displacement(self) -> None:
+        data = self._write_and_read("terrain")
+        self.assertAlmostEqual(data["displacement_scale"], 0.08, places=3)
+
+    def test_snow_roughness_set(self) -> None:
+        data = self._write_and_read("snow")
+        self.assertAlmostEqual(data["roughness_scale"], 0.75, places=3)
+
+    def test_cloth_low_specular(self) -> None:
+        data = self._write_and_read("cloth")
+        self.assertAlmostEqual(data["specular_level"], 0.016, places=4)
 
 
 if __name__ == "__main__":

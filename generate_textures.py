@@ -2392,6 +2392,119 @@ def recommend_generation_settings(source: Image.Image, input_path: Path | None =
     return final
 
 
+def recommend_output_resolution(
+    width: int,
+    height: int,
+    material_type: str = "general",
+) -> tuple[int, str]:
+    """Recommend a maximum texture dimension for Skyrim SE based on asset type.
+
+    Returns ``(max_dimension, reason)`` where ``max_dimension`` is the largest
+    side length that makes practical sense for the given material category and
+    ``reason`` is a short human-readable explanation.
+
+    Skyrim SE's renderer and VRAM budgets have well-established sweet spots:
+
+    * **Terrain / landscape** — 2048 px maximum.  Landscape textures tile across
+      large areas; going above 2 K delivers diminishing returns and eats VRAM on
+      every outdoor cell.
+    * **Characters / skin / faces** — 2048 px for body/clothing, 1024–2048 for
+      face textures.  Animated meshes already limit visible texel density.
+    * **Small clutter / paper / plants / fur** — 1024 px.  Items viewed from
+      close range rarely exceed 512 texels on-screen; 2 K is wasted here.
+    * **Architecture / stone / wood** — 4096 px acceptable for hero assets, 2048
+      for tiling surfaces.
+    * **All other materials** — 4096 px maximum.  8 K+ DDS is rarely beneficial
+      given Skyrim's mipmap chain, LOD distances, and typical GPU VRAM limits.
+
+    Parameters
+    ----------
+    width, height:
+        Source image dimensions in pixels.
+    material_type:
+        Skyrim material category (from :func:`classify_material_type`).
+
+    Returns
+    -------
+    tuple[int, str]
+        ``(max_dimension, reason)`` — caller decides whether to downscale.
+    """
+    _MATERIAL_MAX_DIM: dict[str, tuple[int, str]] = {
+        "terrain": (
+            2048,
+            "Terrain/landscape textures tile across large outdoor areas — 2048 px is the practical "
+            "Skyrim SE ceiling beyond which VRAM cost rises without visible quality gain.",
+        ),
+        "skin": (
+            2048,
+            "Character skin and face textures are applied to animated meshes that limit visible "
+            "texel density; 2048 px gives excellent results without excessive VRAM use.",
+        ),
+        "plants": (
+            1024,
+            "Foliage textures are applied to flat alpha-masked polygons typically viewed from "
+            "mid-range; 1024 px is the Skyrim SE sweet spot for these assets.",
+        ),
+        "fur": (
+            1024,
+            "Fur/pelt textures have high-frequency micro-variation that is already blurred by "
+            "mipmapping at typical viewing distances; 1024 px is sufficient.",
+        ),
+        "paper": (
+            1024,
+            "Book-art, card, and parchment textures are usually small on-screen and gain little "
+            "from resolutions above 1024 px.",
+        ),
+        "cloth": (
+            2048,
+            "Cloth and fabric textures benefit from up to 2048 px on hero armor/robe pieces; "
+            "generic tiling cloth looks best at 1024 px.",
+        ),
+        "dirt": (
+            2048,
+            "Ground-cover dirt/mud textures tile aggressively in Skyrim — 2048 px provides "
+            "detail without the tiling artefacts that high-resolution exaggerates.",
+        ),
+        "sand": (
+            2048,
+            "Sand and arid-ground textures tile over large surfaces; 2048 px balances detail "
+            "and VRAM cost for typical desert landscape use.",
+        ),
+        "architecture": (
+            4096,
+            "Hero architecture assets (unique buildings, major landmarks) can use up to 4096 px; "
+            "generic tiling walls and floors are best kept at 2048 px.",
+        ),
+    }
+
+    # Maximum dimension Skyrim SE ever meaningfully uses regardless of material type.
+    _ABSOLUTE_MAX = 4096
+
+    normalised = str(material_type or "general").lower().strip()
+    max_dim, reason = _MATERIAL_MAX_DIM.get(normalised, (
+        _ABSOLUTE_MAX,
+        "4096 px is the practical maximum for most Skyrim SE materials — 8 K+ DDS files "
+        "deliver no visible improvement given the engine's mipmap chain and typical VRAM budgets.",
+    ))
+
+    source_max = max(int(width), int(height))
+    if source_max <= max_dim:
+        return (max_dim, reason)
+
+    # Distinguish between "above sweet spot" and "unnecessarily 8 K+".
+    if source_max > 8192:
+        reason = (
+            f"Source resolution ({source_max} px) exceeds 8192 px — unusually large for "
+            f"Skyrim SE.  {reason}"
+        )
+    elif source_max > _ABSOLUTE_MAX:
+        reason = (
+            f"Source resolution ({source_max} px) exceeds the practical 4096 px ceiling for "
+            f"Skyrim SE.  {reason}"
+        )
+    return (max_dim, reason)
+
+
 def _resolve_batch_workers(batch_workers: int | None, total: int) -> int:
     if total <= 1:
         return 1
@@ -3511,8 +3624,29 @@ def _build_truepbr_texture_identifier(texture_path: Path, textures_root: Path | 
     return Path(*relative_parts).as_posix()
 
 
-def write_rmaos_json_sidecar(texture_path: Path, *, parallax_enabled: bool = True) -> Path:
-    """Write a TruePBR sidecar JSON for PBRNifPatcher."""
+def write_rmaos_json_sidecar(
+    texture_path: Path,
+    *,
+    parallax_enabled: bool = True,
+    material_type: str = "general",
+) -> Path:
+    """Write a TruePBR sidecar JSON for PBRNifPatcher.
+
+    The payload is adjusted based on ``material_type`` so that material-specific
+    PBR properties (subsurface scattering, specular level, roughness scale, and
+    displacement depth) are set to Skyrim-appropriate defaults for each category.
+
+    Parameters
+    ----------
+    texture_path:
+        Path to the generated ``_rmaos.dds`` file.
+    parallax_enabled:
+        Whether to enable parallax displacement in the sidecar.
+    material_type:
+        Skyrim material category string from :func:`classify_material_type`.
+        Adjusts subsurface, specular_level, roughness_scale, and displacement_scale
+        defaults in the output JSON.
+    """
     textures_root = _find_textures_root(texture_path)
     if textures_root is None:
         json_dir = texture_path.parent / "PBRNifPatcher"
@@ -3520,19 +3654,133 @@ def write_rmaos_json_sidecar(texture_path: Path, *, parallax_enabled: bool = Tru
         relative_parent = texture_path.parent.relative_to(textures_root)
         json_dir = textures_root.parent / "PBRNifPatcher" / relative_parent
     texture_identifier = _build_truepbr_texture_identifier(texture_path, textures_root)
-    payload = [
-        {
-            "texture": texture_identifier,
-            "emissive": False,
-            "parallax": bool(parallax_enabled),
+
+    # Material-type-specific PBR defaults.
+    # These follow the TruePBR/PBRNifPatcher schema and Skyrim material behaviour:
+    # - subsurface: True only for skin (translucent flesh).
+    # - subsurface_foliage: True only for plants/foliage (two-sided leaf scattering).
+    # - specular_level: mirrors real-world IOR — dielectrics ~0.02-0.06, metals/glass ~0.5.
+    # - roughness_scale: glass is very smooth (<0.5), stone/terrain are rough (>=1.0).
+    # - displacement_scale: terrain uses shallow depth to avoid horizon shimmer; skin disables it.
+    # - smooth_angle: softens silhouette normals; lower for hard surfaces, higher for organic.
+    _RMAOS_JSON_MATERIAL_OVERRIDES: dict[str, dict[str, object]] = {
+        "skin": {
+            "subsurface": True,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 0.85, 0.7],
+            "subsurface_opacity": 0.65,
+            "specular_level": 0.028,
+            "roughness_scale": 1.0,
+            "smooth_angle": 80,
+            "displacement_scale": 0.0,   # parallax on animated skin causes artefacts
+        },
+        "plants": {
+            "subsurface": False,
+            "subsurface_foliage": True,
+            "subsurface_color": [0.7, 1.0, 0.4],
+            "subsurface_opacity": 0.5,
+            "specular_level": 0.016,
+            "roughness_scale": 1.1,
+            "smooth_angle": 70,
+            "displacement_scale": 0.0,   # foliage uses flat alpha cards
+        },
+        "metal": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.5,       # metals have high Fresnel/specular
+            "roughness_scale": 0.9,
+            "smooth_angle": 60,
+            "displacement_scale": 0.15,
+        },
+        "glass": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.5,       # glass has high dielectric IOR
+            "roughness_scale": 0.35,     # glass is very smooth
+            "smooth_angle": 55,
+            "displacement_scale": 0.05,
+        },
+        "snow": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.06,
+            "roughness_scale": 0.75,     # packed snow/ice has moderate smoothness
+            "smooth_angle": 75,
+            "displacement_scale": 0.18,
+        },
+        "terrain": {
             "subsurface": False,
             "subsurface_foliage": False,
             "subsurface_color": [1.0, 1.0, 1.0],
             "subsurface_opacity": 1.0,
             "specular_level": 0.04,
-            "roughness_scale": 1.0,
+            "roughness_scale": 1.1,
+            "smooth_angle": 60,
+            "displacement_scale": 0.08,  # shallow depth avoids horizon shimmer
+        },
+        "cloth": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.016,     # cloth is nearly non-specular
+            "roughness_scale": 1.15,
             "smooth_angle": 75,
-            "displacement_scale": 0.2,
+            "displacement_scale": 0.12,
+        },
+        "leather": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.025,
+            "roughness_scale": 1.05,
+            "smooth_angle": 72,
+            "displacement_scale": 0.14,
+        },
+        "stone": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.04,
+            "roughness_scale": 1.1,
+            "smooth_angle": 65,
+            "displacement_scale": 0.22,
+        },
+        "wood": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.03,
+            "roughness_scale": 1.05,
+            "smooth_angle": 68,
+            "displacement_scale": 0.18,
+        },
+    }
+
+    overrides = _RMAOS_JSON_MATERIAL_OVERRIDES.get(str(material_type).lower(), {})
+
+    payload = [
+        {
+            "texture": texture_identifier,
+            "emissive": False,
+            "parallax": bool(parallax_enabled),
+            "subsurface": bool(overrides.get("subsurface", False)),
+            "subsurface_foliage": bool(overrides.get("subsurface_foliage", False)),
+            "subsurface_color": list(overrides.get("subsurface_color", [1.0, 1.0, 1.0])),
+            "subsurface_opacity": float(overrides.get("subsurface_opacity", 1.0)),
+            "specular_level": float(overrides.get("specular_level", 0.04)),
+            "roughness_scale": float(overrides.get("roughness_scale", 1.0)),
+            "smooth_angle": int(overrides.get("smooth_angle", 75)),
+            "displacement_scale": float(overrides.get("displacement_scale", 0.2)),
             "emissive_scale": 0.25,
             "vertex_color_lum_mult": 0.5,
         }
@@ -4282,6 +4530,7 @@ def get_generation_warnings(
     relief_mode: bool = False,
     include_wetness_mask: bool = False,
     include_snow_mask: bool = False,
+    source_size: tuple[int, int] | None = None,
 ) -> list[tuple[str, str]]:
     """Return a list of (warning_id, human-readable message) pairs for suspicious generation choices.
 
@@ -4364,6 +4613,27 @@ def get_generation_warnings(
             "Parallax enabled for a paper/card texture.\n\n"
             "Most cards, notes, and book-art surfaces are effectively flat and gain little from parallax.\n\n"
             "Tip: Disable parallax unless the source has clear embossed depth detail.",
+        ))
+
+    if include_parallax and material_type == "glass":
+        warnings.append((
+            "parallax_flat_glass",
+            "Parallax height map enabled for a glass/crystal texture.\n\n"
+            "Glass and crystal surfaces in Skyrim (windows, bottles, gems) are transparent flat polygons — "
+            "parallax depth maps have no visible effect on them and only increase file size.\n\n"
+            "Tip: Disable parallax for glass and crystal textures. Use environment mask "
+            "strength to control reflectivity instead.",
+        ))
+
+    if include_parallax and material_type == "skin":
+        warnings.append((
+            "parallax_character_skin",
+            "Parallax height map enabled for a skin/character texture.\n\n"
+            "Skin and character face textures are applied to animated meshes — parallax depth "
+            "maps can cause visible shading seams, lighting artefacts, and flickering at the "
+            "neck/wrist transition areas.\n\n"
+            "Tip: Disable parallax for skin and character textures. The Characters render "
+            "profile disables it automatically to avoid these issues.",
         ))
 
     resolved_parallax_strength = parallax_strength if parallax_strength is not None else 0.0
@@ -4599,6 +4869,21 @@ def get_generation_warnings(
             "A standard wetness mask on these materials may produce double-wet visual artefacts.\n\n"
             "Tip: Use environment mask strength instead of a wetness mask for glass and polished metal.",
         ))
+
+    # --- Source resolution warning ---
+    if source_size is not None:
+        src_w, src_h = int(source_size[0]), int(source_size[1])
+        if src_w > 0 and src_h > 0:
+            max_dim, res_reason = recommend_output_resolution(src_w, src_h, material_type)
+            if max(src_w, src_h) > max_dim:
+                warnings.append((
+                    "source_resolution_excessive",
+                    f"Source texture is {src_w}×{src_h} px — larger than the recommended "
+                    f"{max_dim}×{max_dim} px maximum for '{material_type}' assets in Skyrim SE.\n\n"
+                    f"{res_reason}\n\n"
+                    "Tip: Consider resizing the source to the recommended maximum before generation "
+                    "to reduce VRAM usage and file size without a visible quality loss.",
+                ))
 
     return warnings
 
@@ -4974,6 +5259,8 @@ def run_with_options(
             analysis_source.thumbnail((512, 512), Image.Resampling.NEAREST)
         recommended = recommend_generation_settings(analysis_source, input_path=input_file)
         del analysis_source
+        # Derive material type for material-aware outputs (e.g. TruePBR JSON sidecar).
+        resolved_material_type = classify_material_type(input_file)
         resolved_normal_strength = normal_strength if normal_strength is not None else float(recommended["normal_strength"])
         resolved_parallax_strength = parallax_strength if parallax_strength is not None else float(recommended["parallax_strength"])
         resolved_glow_threshold = glow_threshold if glow_threshold is not None else int(recommended["glow_threshold"])
@@ -5104,7 +5391,11 @@ def run_with_options(
                 rmaos_path,
                 preferred_pixel_formats=_preferred_dds_formats_for_output("rmaos", rmaos_map),
             )
-            outputs["rmaos_json"] = write_rmaos_json_sidecar(outputs["rmaos"], parallax_enabled=include_parallax)
+            outputs["rmaos_json"] = write_rmaos_json_sidecar(
+                outputs["rmaos"],
+                parallax_enabled=include_parallax,
+                material_type=resolved_material_type,
+            )
 
         if include_wetness_mask:
             wetness_map = enforce_skyrim_output_profile(
