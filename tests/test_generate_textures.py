@@ -1316,6 +1316,8 @@ class GenerateTexturesTests(unittest.TestCase):
         summary = describe_render_profile_files_to_create("truepbr")
         self.assertIn("<stem>_rmaos.dds", summary)
         self.assertIn("<stem>_n.dds", summary)
+        self.assertIn("<stem>_ao.dds", summary)
+        self.assertIn("<stem>_rough.dds", summary)
 
     def test_get_nif_patch_option_warnings_reports_glow_and_cubemap_clear_write_conflicts(self) -> None:
         warnings = get_nif_patch_option_warnings(

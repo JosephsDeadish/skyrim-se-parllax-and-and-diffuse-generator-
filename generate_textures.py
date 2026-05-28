@@ -1420,7 +1420,7 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     ),
     "truepbr": (
         "Community Shaders TruePBR workflow (JSON-driven material path).\n"
-        "Typical files: textures/pbr/<name>.dds + textures/pbr/<name>_n.dds + textures/pbr/<name>_rmaos.dds (or _ramos.dds alias) + matching JSON sidecar in PBRNifPatcher/ (and optional _p.dds depending on your mesh/material setup).\n"
+        "Typical files: textures/pbr/<name>.dds + textures/pbr/<name>_n.dds + textures/pbr/<name>_rmaos.dds (or _ramos.dds alias) + textures/pbr/<name>_ao.dds + textures/pbr/<name>_rough.dds + matching JSON sidecar in PBRNifPatcher/ (and optional _p.dds depending on your mesh/material setup).\n"
         "_rmaos/_ramos RGBA layout for this preset: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (config-driven).\n"
         "How files should look: _n stays purple/blue, _rmaos/_ramos should look like packed grayscale channels (not like a normal map).\n"
         "JSON sidecar should reference the generated base texture prefix (for example via 'texture'/'match_diffuse') and document channel mapping for your TruePBR setup.\n"
@@ -2017,6 +2017,8 @@ def describe_render_profile_files_to_create(profile: str) -> str:
         "include_wetness_mask": "<stem>_wt.dds",
         "include_snow_mask": "<stem>_sm.dds",
         "include_complex": "<stem>_msn.dds",
+        "include_ao": "<stem>_ao.dds",
+        "include_roughness": "<stem>_rough.dds",
     }
     if normalized == "community_shaders":
         suffix_map["include_environment_mask"] = "<stem>_cm.dds (or <stem>_c.dds)"
