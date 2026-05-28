@@ -63,6 +63,7 @@ from generate_textures import (
     recommend_generation_settings,
     recommend_render_profile,
     resolve_nif_patch_defaults_for_render_profile,
+    resolve_render_profile_guardrails,
     resolve_render_profile_mode_selection,
     resolve_render_profile_output_defaults,
     resolve_render_profile_options,
@@ -937,6 +938,33 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(auto["parallax_mode"], "standard")
         self.assertEqual(auto["complex_format"], "msn")
         self.assertEqual(auto["env_mask_mode"], "complex")
+
+    def test_resolve_render_profile_guardrails_enforces_locked_profile_modes(self) -> None:
+        guarded = resolve_render_profile_guardrails(
+            selected_profile="enb",
+            complex_format="cm",
+            env_mask_mode="standard",
+            parallax_mode="standard",
+        )
+        self.assertEqual(str(guarded["effective_profile"]), "enb")
+        self.assertEqual(str(guarded["complex_format"]), "msn")
+        self.assertEqual(str(guarded["env_mask_mode"]), "complex")
+        self.assertEqual(str(guarded["parallax_mode"]), "occlusion")
+        self.assertEqual(len(list(guarded["changes"])), 3)
+
+    def test_resolve_render_profile_guardrails_keeps_auto_modes_without_recommendation(self) -> None:
+        guarded = resolve_render_profile_guardrails(
+            selected_profile="auto",
+            recommended_profile=None,
+            complex_format="cm",
+            env_mask_mode="complex",
+            parallax_mode="occlusion",
+        )
+        self.assertEqual(str(guarded["effective_profile"]), "auto")
+        self.assertEqual(str(guarded["complex_format"]), "cm")
+        self.assertEqual(str(guarded["env_mask_mode"]), "complex")
+        self.assertEqual(str(guarded["parallax_mode"]), "occlusion")
+        self.assertEqual(list(guarded["changes"]), [])
 
     def test_resolve_render_profile_output_defaults_returns_expected_checkboxes(self) -> None:
         vanilla = resolve_render_profile_output_defaults("vanilla")
@@ -2598,6 +2626,9 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         run_with_options_mock.assert_called_once()
         self.assertEqual(str(run_with_options_mock.call_args.kwargs["render_profile"]), "enb")
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["complex_format"]), "msn")
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["env_mask_mode"]), "complex")
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["parallax_mode"]), "occlusion")
 
     def test_run_cli_handles_missing_gui_dependencies_without_traceback(self) -> None:
         with mock.patch("generate_textures.main", side_effect=RuntimeError("GUI dependencies are unavailable in this environment.")):

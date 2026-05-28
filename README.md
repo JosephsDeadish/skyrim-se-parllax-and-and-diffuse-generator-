@@ -53,6 +53,7 @@ This opens a desktop interface where you can:
 - tune normal/parallax/glow/environment mask/RMAOS/complex/specular strengths
 - choose the **Env mask mode**: `standard` (greyscale, vanilla Skyrim SE) or `complex` (RGBA packed, renderer-specific)
 - choose the **Target renderer** profile (**default: `custom`**) — includes `custom`, `auto`, `vanilla`, `performance`, `vr`, `terrain`, `architecture`, `characters`, `community_shaders`, `truepbr`, and `enb`
+- generation applies renderer guardrails before processing so locked/auto-detected profiles automatically realign complex format, env mask mode, and parallax mode when they conflict
 - toggle **Emboss depth** for edge-ridge normal generation on flat printed assets (books/cards/scrolls/posters)
 - choose **Parallax mode**: `standard` (vanilla / Community Shaders Extended Materials) or `occlusion (ENB/POM)` for smoother ENBSeries POM heightmaps
 - scroll through all controls in smaller windows
@@ -111,6 +112,8 @@ Optional arguments:
 - `--rmaos` / `--ramos` (include dedicated TruePBR `_rmaos`/`_ramos` output + JSON sidecar)
 - `--complex-material` (include complex material output)
 - `--pbr-material` (shortcut for the app's Community Shaders Extended Materials packed output: enables complex material, forces `--complex-format cm`, and keeps compatible standard env/parallax modes; not an ENB workflow)
+- `--render-profile` (`auto`, `custom`, `vanilla`, `performance`, `vr`, `terrain`, `architecture`, `characters`, `community_shaders`, `truepbr`, `enb`)
+  - locked profiles (and `auto` in single-file mode) now auto-correct conflicting `--complex-format`, `--environment-mask-mode`, and `--parallax-mode` values, then print the applied guardrail changes to stderr
 - `--batch-workers` (parallel workers for folder mode; `0` = automatic)
 - `--gui` (force GUI mode)
 

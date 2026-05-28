@@ -2094,6 +2094,69 @@ def resolve_render_profile_mode_selection(
     }
 
 
+def resolve_render_profile_guardrails(
+    *,
+    selected_profile: str,
+    recommended_profile: str | None = None,
+    complex_format: str,
+    env_mask_mode: str,
+    parallax_mode: str,
+) -> dict[str, object]:
+    """Resolve/guard core workflow modes when a renderer profile is selected."""
+    normalized_selected = _normalize_render_profile(selected_profile)
+    has_recommended_profile = bool(str(recommended_profile or "").strip())
+    normalized_recommended = _normalize_render_profile(recommended_profile) if has_recommended_profile else "auto"
+    current_complex_format = _normalize_complex_format(complex_format)
+    current_env_mask_mode = _normalize_env_mask_mode(env_mask_mode)
+    current_parallax_mode = _normalize_parallax_mode_key(parallax_mode)
+    if normalized_selected == "custom":
+        return {
+            "selected_profile": normalized_selected,
+            "effective_profile": "custom",
+            "complex_format": current_complex_format,
+            "env_mask_mode": current_env_mask_mode,
+            "parallax_mode": current_parallax_mode,
+            "changes": [],
+        }
+    if normalized_selected == "auto" and normalized_recommended in {"custom", "auto"} and has_recommended_profile:
+        normalized_recommended = "vanilla"
+    should_enforce = not (normalized_selected == "auto" and not has_recommended_profile)
+    if not should_enforce:
+        return {
+            "selected_profile": normalized_selected,
+            "effective_profile": normalized_recommended if normalized_recommended != "auto" else "auto",
+            "complex_format": current_complex_format,
+            "env_mask_mode": current_env_mask_mode,
+            "parallax_mode": current_parallax_mode,
+            "changes": [],
+        }
+    resolved = resolve_render_profile_options(
+        normalized_selected,
+        recommended_profile=normalized_recommended if normalized_recommended != "auto" else None,
+    )
+    changes: list[str] = []
+    if current_complex_format != resolved["complex_format"]:
+        changes.append(
+            f"complex format {current_complex_format} -> {resolved['complex_format']}"
+        )
+    if current_env_mask_mode != resolved["env_mask_mode"]:
+        changes.append(
+            f"env mask mode {current_env_mask_mode} -> {resolved['env_mask_mode']}"
+        )
+    if current_parallax_mode != resolved["parallax_mode"]:
+        changes.append(
+            f"parallax mode {current_parallax_mode} -> {resolved['parallax_mode']}"
+        )
+    return {
+        "selected_profile": resolved["selected_profile"],
+        "effective_profile": resolved["effective_profile"],
+        "complex_format": resolved["complex_format"],
+        "env_mask_mode": resolved["env_mask_mode"],
+        "parallax_mode": resolved["parallax_mode"],
+        "changes": changes,
+    }
+
+
 def _adjust_recommendations_for_workflow_profile(
     recommended: dict[str, float | int], workflow_profile: str | None
 ) -> dict[str, float | int]:
@@ -7130,6 +7193,28 @@ if GUI_AVAILABLE:
                 _source_role = _role_info["role"] if _role_info is not None else None
                 _source_hint = _role_info["hint"] if _role_info is not None else None
                 _source_suffix = _role_info["suffix"] if _role_info is not None else None
+                _recommended_profile = self._recommended_render_profile_for_preview(_context_source)
+                _guardrails = resolve_render_profile_guardrails(
+                    selected_profile=self.render_profile_var.get(),
+                    recommended_profile=_recommended_profile,
+                    complex_format=self.complex_format_var.get(),
+                    env_mask_mode=self.env_mask_mode_var.get(),
+                    parallax_mode=self.parallax_mode_var.get(),
+                )
+                _guardrail_changes = list(_guardrails["changes"])
+                if _guardrail_changes:
+                    self.complex_format_var.set(str(_guardrails["complex_format"]))
+                    self.env_mask_mode_var.set(str(_guardrails["env_mask_mode"]))
+                    self.parallax_mode_var.set(
+                        "occlusion (ENB/POM)" if str(_guardrails["parallax_mode"]) == "occlusion" else "standard"
+                    )
+                    _effective_label = _RENDER_PROFILE_LABELS.get(
+                        str(_guardrails["effective_profile"]),
+                        str(_guardrails["effective_profile"]).replace("_", " ").title(),
+                    )
+                    self.status_var.set(
+                        f"Renderer guardrails applied for {_effective_label}: " + "; ".join(_guardrail_changes) + "."
+                    )
                 if not self._check_and_show_generation_warnings(
                     _material_type,
                     source_role=_source_role,
@@ -8364,6 +8449,42 @@ def main() -> int:
                 ) from exc
             raise
         return 0
+
+    if getattr(args, "pbr_material", False):
+        cli_recommended_profile: str | None = None
+    elif args.input_file.is_dir():
+        cli_recommended_profile: str | None = None
+    else:
+        role_info = identify_skyrim_texture_role(args.input_file)
+        workflow_profile = detect_workflow_profile(args.input_file)
+        material_type = classify_material_type(args.input_file)
+        cli_recommended_profile = recommend_render_profile(
+            args.input_file,
+            detected_role=role_info["role"] if role_info is not None else None,
+            detected_suffix=role_info["suffix"] if role_info is not None else None,
+            material_type=material_type,
+            workflow_profile=workflow_profile,
+        )
+    cli_guardrails = resolve_render_profile_guardrails(
+        selected_profile=getattr(args, "render_profile", "auto"),
+        recommended_profile=cli_recommended_profile,
+        complex_format=args.complex_format,
+        env_mask_mode=args.environment_mask_mode,
+        parallax_mode=args.parallax_mode,
+    )
+    cli_guardrail_changes = list(cli_guardrails["changes"])
+    args.complex_format = str(cli_guardrails["complex_format"])
+    args.environment_mask_mode = str(cli_guardrails["env_mask_mode"])
+    args.parallax_mode = str(cli_guardrails["parallax_mode"])
+    if cli_guardrail_changes:
+        effective_label = _RENDER_PROFILE_LABELS.get(
+            str(cli_guardrails["effective_profile"]),
+            str(cli_guardrails["effective_profile"]).replace("_", " ").title(),
+        )
+        print(
+            f"[renderer guardrails] Applied {effective_label}: " + "; ".join(cli_guardrail_changes),
+            file=sys.stderr,
+        )
 
     if args.input_file.is_dir():
         failures: list[tuple[Path, str]] = []
