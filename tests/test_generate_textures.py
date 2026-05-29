@@ -1309,7 +1309,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("Community Shaders TruePBR:", message)
         self.assertIn("ENB:", message)
         self.assertIn("Auto-check:", message)
-        self.assertIn("_C.dds", message)
+        self.assertIn("_c.dds", message)
         self.assertIn("How files should look:", message)
 
     def test_build_render_profile_recommendation_message_avoids_experimental_inaccuracy_copy(self) -> None:

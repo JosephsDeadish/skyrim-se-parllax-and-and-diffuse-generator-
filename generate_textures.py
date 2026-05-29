@@ -1405,11 +1405,12 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     ),
     "vanilla": (
         "Vanilla Skyrim SE — no PBR, no ENB required.\n"
-        "Files: diffuse.dds + _n.dds (DirectX tangent-space normal).\n"
-        "Add _p.dds (greyscale height) only for meshes/NIFs configured for parallax in your runtime stack.\n"
-        "Add _m.dds (greyscale, Slot 5) for reflective metals/armour — brighter = more environment reflection.\n"
-        "Add _g.dds only for emissive/glowing assets.\n"
+        "Files: <stem>.dds (diffuse — no suffix; Skyrim SE vanilla diffuse is just stone.dds not stone_d.dds) + <stem>_n.dds (DirectX tangent-space normal).\n"
+        "Add <stem>_p.dds (greyscale height) only for meshes/NIFs configured for parallax in your runtime stack.\n"
+        "Add <stem>_m.dds (greyscale, Slot 5) for reflective metals/armour — brighter = more environment reflection.\n"
+        "Add <stem>_g.dds only for emissive/glowing assets.\n"
         "How files should look: _n stays purple/blue, _p is greyscale, _m is greyscale with brighter pixels on shinier areas.\n"
+        "Do NOT use Blender-style _d/_diffuse/_albedo/_roughness/_metallic/_ao suffixes — Skyrim SE ignores them.\n"
         "Do NOT generate _rmaos, _msn, _cm, or _c — those are ignored by the vanilla renderer."
     ),
     "performance": (
@@ -1444,41 +1445,44 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     ),
     "community_shaders": (
         "Community Shaders Extended Materials workflow (not ENB, not TruePBR JSON).\n"
-        "Files: diffuse.dds + _n.dds + _p.dds + _cm.dds (or _c.dds / _C.dds — identical channel layout).\n"
-        "Parallax in this workflow is provided by Community Shaders features, not ENB.\n"
-        "_cm/_c/_C RGBA channel layout: R=Environment reflection amount, "
+        "Files: <stem>.dds (diffuse, no suffix) + <stem>_n.dds + <stem>_p.dds + <stem>_cm.dds (or _c.dds — same channel layout).\n"
+        "Parallax in this workflow is driven by Community Shaders, not ENB.\n"
+        "_cm/_c RGBA channel layout: R=Environment reflection amount, "
         "G=Glossiness, B=Metallic, A=Height / mode-control alpha.\n"
-        "How files should look: _n stays purple/blue, _p stays greyscale, and _cm/_c/_C should NOT look like a normal map — "
+        "How files should look: _n stays purple/blue, _p stays greyscale, and _cm/_c should NOT look like a normal map — "
         "it should read as packed grayscale data with reflective areas bright in red, glossy areas bright in green, metallic areas bright in blue, and a non-white alpha height channel.\n"
         "Add _g.dds only for emissive assets.\n"
+        "Do NOT use Blender-style _d/_albedo/_roughness/_metallic suffix names; Skyrim SE/CS ignores them.\n"
         "Do NOT generate _msn for this preset. TruePBR-style _rmaos belongs to the dedicated TruePBR profile.\n"
         "Community Shaders and ENB can coexist in a modlist, but each mesh/material should follow one workflow at a time.\n"
-        "If you specifically need Community Shaders TruePBR _rmaos, that is a different JSON-driven workflow than this _cm/_c/_C preset."
+        "If you specifically need Community Shaders TruePBR _rmaos, that is a different JSON-driven workflow than this _cm/_c preset."
     ),
     "truepbr": (
         "Community Shaders TruePBR workflow (JSON-driven material path).\n"
-        "Typical files: textures/pbr/<name>.dds + textures/pbr/<name>_n.dds + textures/pbr/<name>_rmaos.dds (or _ramos.dds alias) + matching JSON sidecar in PBRNifPatcher/ (optional _p/_g and other feature textures by material).\n"
+        "Typical files: textures\\pbr\\<stem>.dds + textures\\pbr\\<stem>_n.dds + textures\\pbr\\<stem>_rmaos.dds (or _ramos.dds alias) + matching JSON sidecar in PBRNifPatcher/ (optional _p/_g and other feature textures by material).\n"
         "_rmaos/_ramos RGBA layout for this preset: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (config-driven).\n"
         "How files should look: _n stays purple/blue, _rmaos/_ramos should look like packed grayscale channels (not like a normal map).\n"
         "Mesh side must be TruePBR-enabled (BSLightingShaderProperty with SLSF2 Unused01/PBR flag, default shader type unless feature-specific overrides).\n"
         "Core mesh tuning usually comes from specular level / roughness scale / displacement scale (or equivalent JSON patch values).\n"
         "JSON sidecar should reference the generated base texture prefix (for example via 'texture'/'match_diffuse') and document channel mapping for your TruePBR setup.\n"
-        "PGPatcher best-practice: keep PBR textures under textures/pbr and place your patcher JSON files under a top-level PBRNifPatcher/ folder.\n"
-        "For landscape TruePBR, use PBRTextureSets/<TXST_EDID>.json (roughnessScale/displacementScale/specularLevel values).\n"
+        "PGPatcher best-practice: keep PBR textures under textures\\pbr and place your patcher JSON files under a top-level PBRNifPatcher\\ folder.\n"
+        "For landscape TruePBR, use PBRTextureSets\\<TXST_EDID>.json (roughnessScale/displacementScale/specularLevel values).\n"
+        "NOTE: Skyrim SE TruePBR diffuse is still just <stem>.dds — no Blender-style _d/_albedo/_color suffix.\n"
         "Remember: TruePBR textures require Community Shaders at runtime and do not render correctly in non-CS tool previews.\n"
-        "Do NOT treat this as Community Shaders Extended Materials _cm/_c/_C, and do NOT mix it with ENB _msn workflows."
+        "Do NOT treat this as Community Shaders Extended Materials _cm/_c, and do NOT mix it with ENB _msn workflows."
     ),
     "enb": (
-        "ENB-focused profile in this tool targets _msn plus complex env-mask mode by default.\n"
-        "Some ENB pipelines use classic _n + _m setups instead, so verify against your ENB preset and mesh setup.\n"
-        "Preset files here: diffuse.dds + _msn.dds + _p.dds + _m.dds.\n"
+        "ENB complex material workflow — uses _msn.dds (slot 1) instead of vanilla _n.dds.\n"
+        "MSN = Model Space Normal: the red/green channels encode XYZ world-space normals, NOT screen-space tangent.\n"
+        "Preset files here: <stem>.dds (diffuse, no suffix) + <stem>_msn.dds + <stem>_p.dds + <stem>_m.dds.\n"
         "_msn RGBA channel layout (Slot 1, replaces _n): R=Normal X, G=Normal Y, B=Normal Z, "
         "A=Specular intensity.\n"
         "_m RGBA channel layout in this ENB preset (Slot 5): R=Reflection/specular brightness, "
         "G=Glossiness, B=Metalness (cubemap tint), A=Parallax height.\n"
-        "How files should look: _msn should remain a purple/blue normal map with a useful alpha, while _m should look like packed grayscale data — "
-        "red = reflectivity, green = gloss, blue = metalness, alpha = height. It should not look like a second normal map.\n"
+        "How files should look: _msn is purple/blue like a normal map but with a non-white alpha (specular); "
+        "_m should look like packed grayscale data — it should NOT look like a second normal map.\n"
         "Add _g.dds only for emissive assets.\n"
+        "Do NOT use Blender-style _d/_albedo/_roughness/_metallic suffix names; Skyrim SE ignores them.\n"
         "This profile is separate from Community Shaders Extended Materials _cm/_c/_C. Use one workflow per mesh/material.\n"
         "Do NOT generate vanilla _n.dds (replaced by _msn), _cm/_c, or TruePBR-style _rmaos for this preset."
     ),
@@ -8844,7 +8848,7 @@ if GUI_AVAILABLE:
                 return
 
             win = tk.Toplevel(self.root)
-            win.title(f"NIF Editor [Experimental] — Skyrim Texture Generator v{APP_VERSION}")
+            win.title(f"NIF Editor — Skyrim Texture Generator v{APP_VERSION}")
             win.geometry("1200x900")
             win.minsize(960, 720)
             win.resizable(True, True)
@@ -8999,11 +9003,15 @@ if GUI_AVAILABLE:
                 guide_label = ttk.Label(
                     opt_frame,
                     text=(
-                        "Option guide: Slot 0=diffuse/albedo, 1=normal/_n or _msn, 2=glow/_g, "
-                        "3=parallax/_p, 4=cubemap, 5=environment mask/_m or _cm/_c or _rmaos. "
-                        "Enable standard parallax for vanilla/community shaders/truepbr workflows. Enable ENB POM only for ENB setups. "
-                        "Enable environment mapping only when using slot 5 (_m/_cm/_c/_rmaos). Enable glow-map when slot 2 points at an emissive texture. "
-                        "Force shader type 3 lets the tool write stronger parallax scale values."
+                        "Slot guide — Skyrim SE texture naming (NOT Blender defaults):\n"
+                        "  Slot 0: diffuse — vanilla Skyrim uses just <stem>.dds (no _d/_diffuse/_albedo suffix; those are Blender exports, not Skyrim).\n"
+                        "  Slot 1: normal — _n.dds for vanilla/CS/TruePBR, or _msn.dds for ENB complex material (MSN = Model Space Normal).\n"
+                        "  Slot 2: glow/emissive — _g.dds only. Skyrim SE ignores _em/_emit/_glow-style names.\n"
+                        "  Slot 3: parallax height — _p.dds (greyscale height map). Used by all parallax workflows.\n"
+                        "  Slot 4: cubemap/reflection — _e.dds, _env.dds, or _cube.dds.\n"
+                        "  Slot 5: env mask — _m.dds (vanilla greyscale or ENB RGBA), _cm.dds/_c.dds (CS Extended Materials RGBA), _rmaos.dds (TruePBR under textures\\pbr\\).\n"
+                        "Enable standard parallax for vanilla/community shaders/truepbr. Enable ENB POM only for ENB setups. "
+                        "Enable environment mapping only when slot 5 has a texture. Force shader type 3 to write stronger parallax scale."
                     ),
                     justify=tk.LEFT,
                     wraplength=860,
@@ -9609,6 +9617,36 @@ if GUI_AVAILABLE:
                 results_tree.bind("<<TreeviewSelect>>", _on_result_selected)
                 results_tree.bind("<Button-3>", _show_tree_context_menu)
 
+                # ---- Threading helpers -----------------------------------------------
+                # Scan/patch/restore operations run in daemon threads so the UI stays
+                # responsive.  All tkinter mutations are posted back via win.after(0, ...)
+                # rather than called directly from the worker thread.
+                _is_running = [False]
+                _action_buttons_ref: list[Any] = []  # populated after button creation
+
+                def _set_ops_active(active: bool) -> None:
+                    state = tk.NORMAL if active else tk.DISABLED
+                    for _btn in _action_buttons_ref:
+                        try:
+                            _btn.configure(state=state)
+                        except Exception:
+                            pass
+
+                def _finish_op() -> None:
+                    _is_running[0] = False
+                    _set_ops_active(True)
+
+                def _safe_add_row(status: str, file_name: str, details: str) -> None:
+                    win.after(0, lambda s=status, fn=file_name, d=details: _add_result_row(s, fn, d))
+
+                def _safe_status(msg: str) -> None:
+                    win.after(0, lambda m=msg: status_var.set(m))
+
+                def _safe_progress(val: float) -> None:
+                    win.after(0, lambda v=val: progress_var.set(v))
+
+                # ---- end threading helpers -------------------------------------------
+
                 def _resolve_nifs() -> list[Path]:
                     path_value = nif_path_var.get().strip()
                     if not path_value:
@@ -9626,39 +9664,38 @@ if GUI_AVAILABLE:
                     if not nifs:
                         _add_result_row("WARN", "—", "No NIF files found.")
                         return
+                    if _is_running[0]:
+                        status_var.set("Another operation is in progress. Please wait.")
+                        return
+                    _is_running[0] = True
+                    _set_ops_active(False)
                     status_var.set(f"Scanning {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
-                    win.update_idletasks()
-                    for index, nif in enumerate(nifs, start=1):
-                        try:
-                            validation = validate_nif_for_parallax(nif)
-                            combined_detail_lines = list(validation.issues[:4])
-                            if validation.suggestions:
-                                combined_detail_lines.extend(f"Suggestion: {text}" for text in validation.suggestions[:2])
-                            if validation.ready_count == validation.shader_count and validation.shader_count > 0:
-                                _add_result_row(
-                                    "OK",
-                                    nif.name,
-                                    f"{validation.ready_count}/{validation.shader_count} shader(s) already parallax-ready",
-                                )
-                            elif validation.shader_count == 0:
-                                if combined_detail_lines:
-                                    _add_result_row("SKIP", nif.name, "\n".join(combined_detail_lines))
+
+                    def _worker() -> None:
+                        for index, nif in enumerate(nifs, start=1):
+                            try:
+                                validation = validate_nif_for_parallax(nif)
+                                combined_detail_lines = list(validation.issues[:4])
+                                if validation.suggestions:
+                                    combined_detail_lines.extend(f"Suggestion: {text}" for text in validation.suggestions[:2])
+                                if validation.ready_count == validation.shader_count and validation.shader_count > 0:
+                                    row_args = ("OK", nif.name, f"{validation.ready_count}/{validation.shader_count} shader(s) already parallax-ready")
+                                elif validation.shader_count == 0:
+                                    detail = "\n".join(combined_detail_lines) if combined_detail_lines else "No BSLightingShaderProperty found."
+                                    row_args = ("SKIP", nif.name, detail)
                                 else:
-                                    _add_result_row("SKIP", nif.name, "No BSLightingShaderProperty found.")
-                            else:
-                                issue_text = "\n".join(combined_detail_lines[:6]) if combined_detail_lines else "Needs patching."
-                                _add_result_row(
-                                    "WARN",
-                                    nif.name,
-                                    f"{validation.ready_count}/{validation.shader_count} ready.\n{issue_text}",
-                                )
-                        except Exception as exc:
-                            _add_result_row("FAIL", nif.name, f"Scan failed: {exc}")
-                        progress_var.set(float(index))
-                        win.update_idletasks()
-                    status_var.set(f"Scan complete: {len(nifs)} file(s) reviewed.")
+                                    issue_text = "\n".join(combined_detail_lines[:6]) if combined_detail_lines else "Needs patching."
+                                    row_args = ("WARN", nif.name, f"{validation.ready_count}/{validation.shader_count} ready.\n{issue_text}")
+                            except Exception as exc:
+                                row_args = ("FAIL", nif.name, f"Scan failed: {exc}")
+                            _safe_add_row(*row_args)
+                            _safe_progress(float(index))
+                        _safe_status(f"Scan complete: {len(nifs)} file(s) reviewed.")
+                        win.after(0, _finish_op)
+
+                    threading.Thread(target=_worker, daemon=True).start()
 
                 def _run_patch() -> None:
                     nifs = _resolve_nifs()
@@ -9701,6 +9738,9 @@ if GUI_AVAILABLE:
                         if not proceed:
                             status_var.set("Patch cancelled so options can be adjusted.")
                             return
+                    if _is_running[0]:
+                        status_var.set("Another operation is in progress. Please wait.")
+                        return
                     options = NifPatchOptions(
                         enable_parallax=enable_parallax_var.get(),
                         enable_pom=enable_pom_var.get(),
@@ -9717,32 +9757,37 @@ if GUI_AVAILABLE:
                         backup=backup_var.get(),
                         dry_run=dry_run_var.get(),
                     )
+                    _is_running[0] = True
+                    _set_ops_active(False)
                     mode_label = "dry-run patching" if options.dry_run else "patching"
                     status_var.set(f"Starting {mode_label} for {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
-                    win.update_idletasks()
-                    ok = skip = fail = 0
-                    for index, nif in enumerate(nifs, start=1):
-                        try:
-                            result = patch_nif(nif, options)
-                            if result.already_up_to_date:
-                                skip += 1
-                                _add_result_row("SKIP", nif.name, "Already up-to-date.")
-                            elif result.success:
-                                ok += 1
-                                _add_result_row("OK", nif.name, result.message)
-                            else:
+
+                    def _patch_worker(nif_list=nifs, opts=options) -> None:
+                        ok = skip = fail = 0
+                        for index, nif in enumerate(nif_list, start=1):
+                            try:
+                                result = patch_nif(nif, opts)
+                                if result.already_up_to_date:
+                                    skip += 1
+                                    _safe_add_row("SKIP", nif.name, "Already up-to-date.")
+                                elif result.success:
+                                    ok += 1
+                                    _safe_add_row("OK", nif.name, result.message)
+                                else:
+                                    fail += 1
+                                    _safe_add_row("FAIL", nif.name, result.message)
+                                    for err in result.errors:
+                                        _safe_add_row("FAIL", nif.name, err)
+                            except Exception as exc:
                                 fail += 1
-                                _add_result_row("FAIL", nif.name, result.message)
-                                for err in result.errors:
-                                    _add_result_row("FAIL", nif.name, err)
-                        except Exception as exc:
-                            fail += 1
-                            _add_result_row("FAIL", nif.name, f"Patch failed: {exc}")
-                        progress_var.set(float(index))
-                        win.update_idletasks()
-                    status_var.set(f"Done — {ok} patched, {skip} skipped, {fail} failed.")
+                                _safe_add_row("FAIL", nif.name, f"Patch failed: {exc}")
+                            _safe_progress(float(index))
+                        _safe_status(f"Done — {ok} patched, {skip} skipped, {fail} failed.")
+                        win.after(0, _finish_op)
+
+                    threading.Thread(target=_patch_worker, daemon=True).start()
 
                 def _run_unpatch() -> None:
                     nifs = _resolve_nifs()
@@ -9765,6 +9810,9 @@ if GUI_AVAILABLE:
                     if not any(selected_unpatch_actions):
                         _add_result_row("WARN", "—", "Pick at least one Remove Features checkbox before unpatching.")
                         return
+                    if _is_running[0]:
+                        status_var.set("Another operation is in progress. Please wait.")
+                        return
                     options = NifPatchOptions(
                         disable_parallax=disable_parallax_var.get(),
                         disable_pom=disable_pom_var.get(),
@@ -9779,32 +9827,37 @@ if GUI_AVAILABLE:
                         backup=backup_var.get(),
                         dry_run=dry_run_var.get(),
                     )
+                    _is_running[0] = True
+                    _set_ops_active(False)
                     mode_label = "dry-run unpatching" if options.dry_run else "unpatching"
                     status_var.set(f"Starting {mode_label} for {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
-                    win.update_idletasks()
-                    ok = skip = fail = 0
-                    for index, nif in enumerate(nifs, start=1):
-                        try:
-                            result = patch_nif(nif, options)
-                            if result.already_up_to_date:
-                                skip += 1
-                                _add_result_row("SKIP", nif.name, "Already up-to-date.")
-                            elif result.success:
-                                ok += 1
-                                _add_result_row("OK", nif.name, result.message)
-                            else:
+
+                    def _unpatch_worker(nif_list=nifs, opts=options) -> None:
+                        ok = skip = fail = 0
+                        for index, nif in enumerate(nif_list, start=1):
+                            try:
+                                result = patch_nif(nif, opts)
+                                if result.already_up_to_date:
+                                    skip += 1
+                                    _safe_add_row("SKIP", nif.name, "Already up-to-date.")
+                                elif result.success:
+                                    ok += 1
+                                    _safe_add_row("OK", nif.name, result.message)
+                                else:
+                                    fail += 1
+                                    _safe_add_row("FAIL", nif.name, result.message)
+                                    for err in result.errors:
+                                        _safe_add_row("FAIL", nif.name, err)
+                            except Exception as exc:
                                 fail += 1
-                                _add_result_row("FAIL", nif.name, result.message)
-                                for err in result.errors:
-                                    _add_result_row("FAIL", nif.name, err)
-                        except Exception as exc:
-                            fail += 1
-                            _add_result_row("FAIL", nif.name, f"Unpatch failed: {exc}")
-                        progress_var.set(float(index))
-                        win.update_idletasks()
-                    status_var.set(f"Done — {ok} unpatched, {skip} skipped, {fail} failed.")
+                                _safe_add_row("FAIL", nif.name, f"Unpatch failed: {exc}")
+                            _safe_progress(float(index))
+                        _safe_status(f"Done — {ok} unpatched, {skip} skipped, {fail} failed.")
+                        win.after(0, _finish_op)
+
+                    threading.Thread(target=_unpatch_worker, daemon=True).start()
 
                 def _run_restore_backups() -> None:
                     nifs = _resolve_nifs()
@@ -9821,22 +9874,30 @@ if GUI_AVAILABLE:
                     if not proceed:
                         status_var.set("Restore cancelled.")
                         return
+                    if _is_running[0]:
+                        status_var.set("Another operation is in progress. Please wait.")
+                        return
+                    _is_running[0] = True
+                    _set_ops_active(False)
                     status_var.set(f"Restoring backups for {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
-                    win.update_idletasks()
-                    ok = skip = fail = 0
-                    for index, (row_status, file_name, details) in enumerate(restore_nif_backups(nifs), start=1):
-                        _add_result_row(row_status, file_name, details)
-                        if row_status == "OK":
-                            ok += 1
-                        elif row_status == "SKIP":
-                            skip += 1
-                        else:
-                            fail += 1
-                        progress_var.set(float(index))
-                        win.update_idletasks()
-                    status_var.set(f"Restore complete — {ok} restored, {skip} skipped, {fail} failed.")
+
+                    def _restore_worker(nif_list=nifs) -> None:
+                        ok = skip = fail = 0
+                        for index, (row_status, file_name, details) in enumerate(restore_nif_backups(nif_list), start=1):
+                            _safe_add_row(row_status, file_name, details)
+                            if row_status == "OK":
+                                ok += 1
+                            elif row_status == "SKIP":
+                                skip += 1
+                            else:
+                                fail += 1
+                            _safe_progress(float(index))
+                        _safe_status(f"Restore complete — {ok} restored, {skip} skipped, {fail} failed.")
+                        win.after(0, _finish_op)
+
+                    threading.Thread(target=_restore_worker, daemon=True).start()
 
                 scan_button = ttk.Button(btn_frame, text="Scan NIFs", command=_scan_nifs)
                 scan_button.pack(side="left", padx=(0, 6))
@@ -9854,6 +9915,8 @@ if GUI_AVAILABLE:
                 copy_all_button.pack(side="left", padx=(6, 0))
                 close_button = ttk.Button(btn_frame, text="Close", command=win.destroy)
                 close_button.pack(side="right")
+                # Register action buttons so _set_ops_active can disable them during ops
+                _action_buttons_ref.extend([scan_button, patch_button, unpatch_button, restore_button])
                 self._add_tooltip(scan_button, "🔍 Read-only analysis pass. No file changes, just receipts.")
                 self._add_tooltip(patch_button, "🛠 Actually writes patch changes. This is the button with consequences.")
                 self._add_tooltip(unpatch_button, "↩ Removes selected flags/slots so you can undo or simplify prior NIF patching.")

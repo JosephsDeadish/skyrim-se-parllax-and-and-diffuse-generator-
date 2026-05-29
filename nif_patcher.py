@@ -395,8 +395,11 @@ class NifPatchOptions:
         Relative path for slot 2 (glow/emissive map, ``_g.dds``).  Pair with
         *enable_glow_map* to activate the emissive effect on the mesh.
     diffuse_texture_path:
-        Relative path for slot 0 (diffuse/albedo, ``_d.dds`` or similar).
-        Useful for re-pointing a NIF's diffuse slot after a texture rename.
+        Relative path for slot 0 (diffuse/albedo).  In vanilla Skyrim SE the
+        diffuse texture has **no** suffix — it is just ``textures\\arch\\stone.dds``,
+        not ``stone_d.dds`` or ``stone_diffuse.dds``.  Blender exports ``_d`` /
+        ``_diffuse`` / ``_albedo`` by default but those names are not used by
+        Skyrim SE.  Useful for re-pointing a NIF's diffuse slot after a rename.
     env_mask_texture_path:
         Relative path for slot 5 (environment mask / ``_m.dds``).
     cubemap_texture_path:
