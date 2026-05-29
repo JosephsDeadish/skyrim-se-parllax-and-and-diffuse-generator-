@@ -4706,8 +4706,9 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
         "parallax",
         "Parallax Heightmap",
         "Greyscale height map for parallax occlusion mapping. Texture Slot 3 in the NIF. "
-        "Requires BSLightingShaderProperty with Parallax shader flag set plus the SKSE64 "
-        "memory patch (or ENBSeries) to work at runtime. Brighter = raised surface.",
+        "Requires BSLightingShaderProperty with the Parallax shader flag set plus a runtime "
+        "stack that supports the chosen workflow (vanilla-capable parallax setup, Community Shaders, or ENBSeries). "
+        "Brighter = raised surface.",
     ),
     "_em": (
         "glow",

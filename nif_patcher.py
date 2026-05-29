@@ -2162,7 +2162,7 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                 )
                 _append_unique(
                     result.suggestions,
-                    "Use slot 2 for emissive textures (_g.dds). Skyrim SE ignores _em/_emit/_glow-style aliases."
+                    "Use slot 2 for emissive textures and prefer _g.dds for new outputs. Legacy aliases such as _em/_emit/_glow should usually be normalized back to _g."
                 )
         if glow_path and not info.has_glow_map_flag:
             _append_unique(

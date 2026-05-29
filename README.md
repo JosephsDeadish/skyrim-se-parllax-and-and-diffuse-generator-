@@ -253,7 +253,7 @@ The tool recognises a mix of common Skyrim SE suffix conventions and workflow-sp
 |--------|------|-------|
 | *(none)* | Diffuse / Albedo | Texture Slot 0 |
 | `_n` | Normal Map | DirectX tangent-space, Slot 1 |
-| `_p` | Parallax Heightmap | Greyscale, Slot 3, requires SKSE64 memory patch |
+| `_p` | Parallax Heightmap | Greyscale, Slot 3, requires a parallax-capable runtime path (vanilla-compatible setup, Community Shaders, or ENB depending on workflow) |
 | `_g` | Glow / Emissive | Slot 2, requires `SLSF1_Own_Emit` flag |
 | `_m` | Environment Mask | Context-dependent Slot 5 map. Vanilla workflow uses greyscale reflection intensity; this app's ENB complex preset can also write channel-packed `_m` data. |
 | `_rmaos` | Complex Env Mask (TruePBR naming) | RGBA Slot 5 packed data map for Community Shaders TruePBR. Channels: R=Roughness, G=Metallic, B=AO, A=Other/smoothness/height (JSON-driven). |
@@ -278,7 +278,7 @@ Batch folder mode scans subfolders and automatically skips generated variants (`
 | **Community Shaders TruePBR** | diffuse + `_n` + `_rmaos` (+ optional `_p`) | JSON-driven workflow; channel interpretation can vary by TruePBR config |
 | **ENBSeries complex (this app preset)** | diffuse + `_msn` + `_p` + `_m` | `_msn`: R=Nx, G=Ny, B=Nz, A=Spec; `_m` (complex preset): R=Reflection, G=Glossiness, B=Metalness, A=Height |
 
-Community Shaders Extended Materials and ENB complex material are **mutually exclusive** workflows. Choose one target renderer for a given install/output set instead of trying to combine them.
+Community Shaders Extended Materials and ENB complex material are separate workflows. Pick one target renderer **per mesh/material**, instead of trying to mix `_cm/_c` and ENB `_msn/_m` on the same asset.
 
 ### NIF Editor — Experimental Feature
 
