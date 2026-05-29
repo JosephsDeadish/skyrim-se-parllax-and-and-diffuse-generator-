@@ -2561,7 +2561,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(options.enable_parallax)
         self.assertTrue(options.enable_pom)
         self.assertTrue(options.enable_env_mapping)
-        self.assertTrue(options.force_shader_type_3)
+        self.assertFalse(options.force_shader_type_3)
         self.assertEqual(options.normal_texture_path, "textures\\sign01_msn.dds")
         self.assertEqual(options.parallax_texture_path, "textures\\sign01_p.dds")
         self.assertEqual(options.env_mask_texture_path, "textures\\sign01_m.dds")
