@@ -1963,7 +1963,7 @@ def get_nif_patch_option_warnings(
         if is_diffuse_rule:
             if lowered.endswith(lowered_suffixes):
                 warnings.append(
-                    f"{label} path looks like a generated map type (_n/_msn/_p/_g/_m/_cm/_rmaos/_ramos/_ao/_rough/_wt/_sm); slot 0 should usually be diffuse/albedo."
+                    f"{label} path looks like a generated map type (_n/_msn/_p/_g/_m/_cm/_rmaos/_ramos); slot 0 should usually be diffuse/albedo."
                 )
             continue
         if not lowered.endswith(lowered_suffixes):
@@ -2168,7 +2168,7 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
         [
             "",
             "TruePBR essentials (Community Shaders):",
-            "- For players/users: TruePBR gives more realistic lighting than vanilla/complex material, can combine effects like parallax, glow, subsurface scattering, or dual-layer materials, and uses the same general PBR workflow seen in modern tools such as Blender and common texturing suites.",
+            "- For players/users: TruePBR gives more realistic lighting than vanilla/complex material, can combine effects like parallax, glow, subsurface scattering, or dual-layer materials, and follows the same physically-based workflow used across modern game rendering pipelines.",
             "- Runtime requirement: TruePBR texture packs need Community Shaders enabled in-game. They will not preview/render correctly in non-CS tool paths such as Creation Kit, Outfit Studio, or Bodyslide.",
             "- For texture artists/developers: ship both sides of the workflow — (1) meshes flagged for PBR or PGPatcher/PBRNifPatcher JSON rules, and (2) the actual TruePBR textures.",
             "- Core texture set: albedo/base colour, DirectX normal, roughness, metallic, ambient occlusion, and specular; optional maps include emission and displacement/parallax plus feature-specific textures.",
@@ -5087,7 +5087,7 @@ def get_generation_warnings(
             "diffuse_from_derived_source",
             f"The selected input appears to be a '{resolved_source_role}' texture, not a diffuse/albedo source.\n\n"
             "Generating a diffuse output from an already derived map usually produces incorrect colours/shading in-game.\n\n"
-            "Tip: Use an albedo/diffuse source texture (no _n/_msn/_p/_g/_m/_cm/_c/_rmaos/_ramos/_ao/_rough/_wt/_sm suffix) for best results.",
+            "Tip: Use an albedo/diffuse source texture (no _n/_msn/_p/_g/_m/_cm/_c/_rmaos/_ramos suffix) for best results.",
         ))
     if include_normal and resolved_source_role == "normal":
         warnings.append((

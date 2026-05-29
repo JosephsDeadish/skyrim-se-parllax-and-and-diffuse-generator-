@@ -2123,7 +2123,7 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                 )
                 _append_unique(
                     result.suggestions,
-                    "Use slot 5 for _m.dds aliases (_ao/_roughness/_metalness) or complex-material/TruePBR naming such as _cm/_c/_rmaos/_orm."
+                    "Use slot 5 for _m.dds (vanilla/ENB), _cm/_c (Community Shaders Extended Materials), or _rmaos (TruePBR)."
                 )
             if normalized_env_mask.endswith(_TRUEPBR_ENV_MASK_SUFFIXES) and not normalized_env_mask.startswith("textures\\pbr\\"):
                 _append_unique(

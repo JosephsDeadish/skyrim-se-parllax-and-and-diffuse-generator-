@@ -1667,7 +1667,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("diffuse_from_derived_source", ids)
         warning_lookup = dict(warnings)
         self.assertIn("_g", warning_lookup["diffuse_from_derived_source"])
-        self.assertIn("_ao", warning_lookup["diffuse_from_derived_source"])
+        self.assertIn("_rmaos", warning_lookup["diffuse_from_derived_source"])
         self.assertNotIn("_em", warning_lookup["diffuse_from_derived_source"])
 
     def test_get_generation_warnings_normal_from_normal_source(self) -> None:
