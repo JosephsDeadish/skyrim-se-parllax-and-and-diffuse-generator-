@@ -4726,15 +4726,14 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
     ),
     "_c": (
         "complex_material_cm",
-        "Complex Material Packed — Community Shaders Extended Materials (_c / _C naming alias)",
+        "Complex Material Packed — Community Shaders Extended Materials (_cm / _c naming)",
         "Alternative naming for the Community Shaders Extended Materials packed map (_cm). "
         "Identical RGBA channel layout to _cm: R=Environment reflection amount, "
         "G=Glossiness (0=matte, 255=glossy), "
         "B=Metallic proxy (0=dielectric, 255=full metal), "
         "A=Height / mode-control alpha. "
         "Texture Slot 5 in the NIF. Requires Community Shaders Extended Materials. "
-        "_C.dds (uppercase C) is treated identically on Windows (case-insensitive filesystem) and by this tool. "
-        "Prefer _cm.dds for new mods unless the target shader pack specifically expects _c naming. "
+        "Prefer _cm.dds for new mods; use _c.dds only when a specific shader setup expects it. "
         "Do not mix this format with ENB _msn/_m workflows.",
     ),
 }
@@ -5176,7 +5175,7 @@ def get_generation_warnings(
             "env_mask_with_complex_material",
             "Both 'Environment mask' and 'Complex material' outputs are enabled.\n\n"
             "This combination is often redundant outside ENB complex-material workflows and can produce double-specular artefacts.\n\n"
-            "Tip: For ENB-style complex workflows use the renderer-specific profile/settings; for Community Shaders use _cm/_c/_C or TruePBR JSON "
+            "Tip: For ENB-style complex workflows use the renderer-specific profile/settings; for Community Shaders use _cm/_c or TruePBR JSON "
             "workflows separately instead of mixing paths.",
         ))
 
@@ -5184,8 +5183,8 @@ def get_generation_warnings(
         warnings.append((
             "cm_with_complex_env_mode",
             "Complex material format is set to '_cm' while environment mask mode is set to 'complex'.\n\n"
-            "_cm/_c/_C is the Community Shaders Extended Materials packed map, while complex env mode is renderer-specific packed env-mask output.\n\n"
-            "Tip: Switch env mask mode to 'standard' for _cm/_c/_C, or switch complex format to '_msn' for ENB-style complex workflows. Community Shaders and ENB should not be mixed.",
+            "_cm/_c is the Community Shaders Extended Materials packed map, while complex env mode is renderer-specific packed env-mask output.\n\n"
+            "Tip: Switch env mask mode to 'standard' for _cm/_c, or switch complex format to '_msn' for ENB-style complex workflows. Community Shaders and ENB should not be mixed.",
         ))
 
     if include_complex and normalized_complex_format == "msn" and env_mask_mode == "standard":
@@ -5199,9 +5198,9 @@ def get_generation_warnings(
     if include_complex and normalized_complex_format == "cm" and not include_normal:
         warnings.append((
             "cm_without_normal_map",
-            "Community Shaders '_cm/_c/_C' output is enabled but normal-map output is disabled.\n\n"
+            "Community Shaders '_cm/_c' output is enabled but normal-map output is disabled.\n\n"
             "Community Shaders Extended Materials expects a standard '_n.dds' alongside the packed Slot 5 map.\n\n"
-            "Tip: Enable normal-map generation when using '_cm/_c/_C'.",
+            "Tip: Enable normal-map generation when using '_cm/_c'.",
         ))
 
     if include_rmaos and not include_normal:
@@ -5249,9 +5248,9 @@ def get_generation_warnings(
     if include_parallax and normalized_parallax_mode == "occlusion" and normalized_complex_format == "cm":
         warnings.append((
             "cm_with_enb_pom",
-            "Parallax mode is set to 'occlusion (ENB/POM)' while complex format is '_cm/_c/_C'.\n\n"
+            "Parallax mode is set to 'occlusion (ENB/POM)' while complex format is '_cm/_c'.\n\n"
             "ENB POM and Community Shaders Extended Materials are different workflows. This setup mixes ENB-only parallax with Community Shaders packed materials.\n\n"
-            "Tip: Use standard parallax mode for '_cm/_c/_C', or switch the complex format to '_msn' for an ENB workflow.",
+            "Tip: Use standard parallax mode for '_cm/_c', or switch the complex format to '_msn' for an ENB workflow.",
         ))
 
     # --- Wetness and snow mask warnings ---
@@ -6712,7 +6711,7 @@ if GUI_AVAILABLE:
                 "terrain = conservative terrain-friendly defaults.\n"
                 "architecture = wall/ruin-friendly defaults with slot-5 mask enabled.\n"
                 "characters = skin/character-safe defaults with parallax disabled.\n"
-                "community_shaders = Community Shaders Extended Materials _cm/_c/_C workflow.\n"
+                "community_shaders = Community Shaders Extended Materials _cm/_c workflow.\n"
                 "truepbr = Community Shaders TruePBR JSON-driven _rmaos/_ramos workflow.\n"
                 "enb = tool ENB preset (_msn + complex env-mask default + optional POM).\n"
                 "Presets keep format/mode/output defaults aligned to avoid conflicting combinations.\n"
@@ -6734,7 +6733,7 @@ if GUI_AVAILABLE:
                 "auto = pick the best renderer preset for the current texture, but only when you change this control.\n"
                 "vanilla = safest defaults; performance = lightweight defaults; vr = conservative VR defaults; "
                 "terrain = stable terrain defaults; architecture = structure-focused defaults; characters = skin-safe defaults; "
-                "community_shaders = _cm/_c/_C; truepbr = _n + _rmaos/_ramos + JSON path; enb = tool ENB preset _msn + complex env default + optional POM.\n"
+                "community_shaders = _cm/_c; truepbr = _n + _rmaos/_ramos + JSON path; enb = tool ENB preset _msn + complex env default + optional POM.\n"
                 "Presets keep format/mode/output defaults aligned to avoid conflicting combinations.\n"
                 "Community Shaders and ENB can coexist, but each mesh/material should follow one workflow at a time.",
             )

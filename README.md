@@ -13,7 +13,7 @@ Texture generator that supports both GUI and command-line usage. It can generate
 - a complex material output:
   - `_msn`: normal RGB with specular in alpha (ENBSeries complex material, Slot 1)
   - `_cm` / `_c`: packed Community Shaders **Extended Materials** map — RGBA: R=Environment reflection amount, G=Glossiness, B=Metallic, A=Height / mode-control alpha
-  - `_cm` / `_c` / `_C` is the tool's Community Shaders Extended Materials output path; `_c` and `_C.dds` are treated as aliases
+  - `_cm` / `_c` are the documented Community Shaders Extended Materials output paths (`_cm` recommended for new outputs)
 
 ## Requirements
 
@@ -67,7 +67,7 @@ This opens a desktop interface where you can:
 - batch-process folder inputs in the background so the UI stays responsive on larger files or larger sets
 - load oversized preview sources with automatic downscaling to keep the GUI responsive when opening very large textures
 - switch preview source images in folder mode, with automatic preview switching to the current file while batch processing
-- use the NIF Editor's resizable results log to review full untruncated scan/patch details while processing whole mesh folders — **NIF editing is an experimental feature; always keep backups of your NIF files**
+- use the NIF Editor's resizable results log to review full untruncated scan/patch details while processing whole mesh folders — always keep backups of your NIF files
 - when a folder is selected, only process original `.dds` source textures and skip generated `_n`, `_p`, `_g`/`_glow`/`_em`/`_emis`/`_emit`/`_emissive`, `_m` (plus `_ao`/`_roughness`/`_metalness` aliases), packed `_rmaos`/`_orm` variants, `_s`, `_sk`, `_msn`, `_cm`, `_wt`, and `_sm` variants
 - continue processing remaining files in folder mode even if one file is corrupt/unreadable
 - toggle **dark mode** for low-light modding sessions
