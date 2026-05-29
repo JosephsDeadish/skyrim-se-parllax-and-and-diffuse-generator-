@@ -8,7 +8,7 @@ Texture generator that supports both GUI and command-line usage. It can generate
 - a grayscale parallax texture
 - an ENBSeries POM-optimized parallax heightmap mode (**Parallax Occlusion**)
 - a glow map
-- an environment mask — **standard greyscale** (vanilla Skyrim SE, no ENB needed) or **complex RGBA** (`_m` for ENB-style packed env masks)
+- an environment mask — **standard greyscale** (`_m` for vanilla Skyrim SE slot 5) or **complex RGBA** (`_m` for ENB-style packed env masks)
 - a dedicated TruePBR packed map output — `_rmaos` (or `_ramos` alias) with generated JSON sidecar guidance
 - a complex material output:
   - `_msn`: normal RGB with specular in alpha (ENBSeries complex material, Slot 1)
@@ -68,7 +68,7 @@ This opens a desktop interface where you can:
 - load oversized preview sources with automatic downscaling to keep the GUI responsive when opening very large textures
 - switch preview source images in folder mode, with automatic preview switching to the current file while batch processing
 - use the NIF Editor's resizable results log to review full untruncated scan/patch details while processing whole mesh folders — always keep backups of your NIF files
-- when a folder is selected, only process original `.dds` source textures and skip generated `_n`, `_p`, `_g`/`_glow`/`_em`/`_emis`/`_emit`/`_emissive`, `_m` (plus `_ao`/`_roughness`/`_metalness` aliases), packed `_rmaos`/`_orm` variants, `_s`, `_sk`, `_msn`, `_cm`, `_wt`, and `_sm` variants
+- when a folder is selected, only process original `.dds` source textures and skip generated `_n`, `_p`, `_g`/legacy glow aliases, `_m`, packed `_rmaos`/`_orm` variants, `_s`, `_sk`, `_msn`, `_cm`, `_wt`, `_sm`, and common non-Skyrim authoring-suffix aliases such as `_ao`, `_roughness`, and `_metalness`
 - continue processing remaining files in folder mode even if one file is corrupt/unreadable
 - toggle **dark mode** for low-light modding sessions
 - get file-type sanity warnings (with per-warning “don’t show again”) for combinations that usually produce incorrect in-game results
@@ -81,7 +81,7 @@ python generate_textures.py /path/to/input.dds --output-dir ./output --complex-m
 
 Optional arguments:
 
-- positional input may also be a folder; folder mode scans subfolders, processes only original `.dds` source textures, and skips generated `_n`, `_p`, `_g`/`_glow`/`_em`/`_emis`/`_emit`/`_emissive`, `_m` (plus `_ao`/`_roughness`/`_metalness` aliases), packed `_rmaos`/`_orm` variants, `_s`, `_sk`, `_msn`, `_cm`, `_wt`, and `_sm` variants
+- positional input may also be a folder; folder mode scans subfolders, processes only original `.dds` source textures, and skips generated `_n`, `_p`, `_g`/legacy glow aliases, `_m`, packed `_rmaos`/`_orm` variants, `_s`, `_sk`, `_msn`, `_cm`, `_wt`, `_sm`, and common non-Skyrim authoring-suffix aliases such as `_ao`, `_roughness`, and `_metalness`
 
 - `--diffuse-name` (default: `<input_stem>`, e.g. `stonewall.dds`)
 - `--normal-name` (default: `<input_stem>_n`, e.g. `stonewall_n.dds`)
@@ -135,7 +135,7 @@ This app supports the **Community Shaders Extended Materials** packed workflow v
   - `python generate_textures.py /path/to/input.dds --pbr-material`
   - or explicitly: `python generate_textures.py /path/to/input.dds --complex-material --complex-format cm`
 
-``_cm` packs channels for Community Shaders Extended Materials: R=Environment reflection amount, G=Glossiness, B=Metallic, A=Height / mode-control alpha.  
+`_cm` packs channels for Community Shaders Extended Materials: R=Environment reflection amount, G=Glossiness, B=Metallic, A=Height / mode-control alpha.  
 Some packs use `_c.dds` (or `_C.dds` on Windows) for the same role — set `--complex-name <stem>_c` or `--complex-name <stem>_C` (or GUI custom naming) for that variant.
 
 > **Important:** Community Shaders and ENB are separate renderer paths. Do **not** mix `_cm/_c/_C` with ENB `_msn/_m` in the same setup.  
@@ -174,7 +174,7 @@ To ship a complete True PBR set, do both:
 1. **Mesh/config setup**  
    Enable PBR on target meshes (`BSLightingShaderProperty` with `SLSF2 Unused01/PBR` flag), or ship PBRNifPatcher/PGPatcher JSON rules for user-side patching.
 2. **Texture setup**  
-   Provide base color, normal (DirectX), roughness, metallic, ambient occlusion, and specular data — usually packed into `_rmaos` in this tool (R=Roughness, G=Metallic, B=AO, A=Specular/other depending on config) — plus optional emission/parallax/feature maps.
+   Provide `<stem>.dds` diffuse/base color, `<stem>_n.dds` DirectX normal, and packed `<stem>_rmaos.dds`/`<stem>_ramos.dds` data in this tool (R=Roughness, G=Metallic, B=AO, A=Specular/other depending on config) — plus optional emission/parallax/feature maps. Do not treat standalone Blender-style `_rough`, `_metallic`, or `_ao` exports as the primary Skyrim runtime names for this workflow.
 
 Key mesh-side tuning values (when authoring NIFs):
 
@@ -184,7 +184,7 @@ Key mesh-side tuning values (when authoring NIFs):
 
 Texture color space guidance:
 
-- Use **sRGB** for in-game colour textures (albedo/emissive/fuzz/coat/subsurface colour)
+- Use **sRGB** for in-game colour textures (Skyrim diffuse/base color, emissive/fuzz/coat/subsurface colour)
 - Use **linear** for data textures (normal/displacement/RMAOS)
 
 Landscape TruePBR:
@@ -212,12 +212,13 @@ Requires ENBSeries with `ComplexParallaxMaterial=true` in `enbseries.ini`.
   2. Enable **Complex/PBR material**, set format to `msn`
   3. Enable **Environment mask**, set mode to `complex`
   4. Enable **Parallax** (occlusion mode recommended)
-  5. Generate textures — you'll get `_msn.dds` (Slot 1 normal+spec) and `_m.dds` (Slot 5 RGBA env mask in ENB preset) by default
+  5. Generate textures — you'll get `_msn.dds` (Slot 1 model-space normal+spec) and `_m.dds` (Slot 5 RGBA env mask in ENB preset) by default
 - In CLI:
   - `python generate_textures.py /path/to/input.dds --complex-material --complex-format msn --environment-mask --environment-mask-mode complex --parallax-mode occlusion`
 
 `_msn` channel layout (Slot 1): R=Normal X, G=Normal Y, B=Normal Z, A=Specular intensity.  
 `_m` channel layout in this app's ENB preset (Slot 5): R=Reflection/specular brightness, G=Glossiness, B=Metalness (cubemap tint), A=Parallax height.
+For this ENB workflow, slot 1 uses `_msn.dds` instead of vanilla/CS `_n.dds`, and slot 5 uses `_m.dds` — not `_cm` and not TruePBR `_rmaos`.
 
 Generated outputs default to `.dds` filenames regardless of the input format. Export now prefers map-specific compression in line with modern Skyrim workflows: diffuse maps prefer BC7 (with DXT1 fallback for opaque diffuse), normal maps prefer BC5, grayscale parallax/standard `_m` masks prefer DXT1, and packed material maps (`_cm`, `_rmaos`, complex `_m`) prefer BC7 with legacy DXT fallbacks for compatibility. If DDS export is unavailable on the current Pillow build, the tool falls back to PNG output.
 
