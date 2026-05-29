@@ -280,6 +280,8 @@ Batch folder mode scans subfolders and automatically skips generated variants (`
 
 Community Shaders Extended Materials and ENB complex material are separate workflows. Pick one target renderer **per mesh/material**, instead of trying to mix `_cm/_c` and ENB `_msn/_m` on the same asset.
 
+When both Community Shaders and ENB markers are detected in mod-manager context, the app's auto renderer recommendation now prefers **ENB**. This mirrors Community Shaders compatibility guidance that CS disables itself when ENB is active, so ENB reflects the effective runtime path in mixed installs.
+
 ### NIF Editor — Experimental Feature
 
 The **NIF Editor** (accessible from the toolbar button) lets you patch BSLightingShaderProperty flags and texture slots in Skyrim SE mesh files.

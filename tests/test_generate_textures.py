@@ -851,19 +851,19 @@ class GenerateTexturesTests(unittest.TestCase):
             "truepbr",
         )
 
-    def test_detect_render_profile_from_mod_manager_context_prioritizes_truepbr(self) -> None:
+    def test_detect_render_profile_from_mod_manager_context_prefers_enb_when_truepbr_and_enb_are_both_detected(self) -> None:
         context = ModManagerContext(
             manager="MO2",
             loaded_mods=("Community Shaders", "PBRNifPatcher", "ENB Light"),
         )
-        self.assertEqual(detect_render_profile_from_mod_manager_context(context), "truepbr")
+        self.assertEqual(detect_render_profile_from_mod_manager_context(context), "enb")
 
-    def test_detect_render_profile_from_mod_manager_context_prefers_cs_when_enb_and_cs_both_detected(self) -> None:
+    def test_detect_render_profile_from_mod_manager_context_prefers_enb_when_enb_and_cs_both_detected(self) -> None:
         context = ModManagerContext(
             manager="Vortex",
             loaded_mods=("Community Shaders", "ENB Light"),
         )
-        self.assertEqual(detect_render_profile_from_mod_manager_context(context), "community_shaders")
+        self.assertEqual(detect_render_profile_from_mod_manager_context(context), "enb")
 
     def test_detect_render_profile_from_mod_manager_context_uses_plugin_and_load_order_hints(self) -> None:
         context = ModManagerContext(

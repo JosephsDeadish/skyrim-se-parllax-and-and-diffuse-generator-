@@ -2320,7 +2320,11 @@ def recommend_render_profile(
 
 
 def detect_render_profile_from_mod_manager_context(context: ModManagerContext | None) -> str | None:
-    """Infer installed renderer profile hints from detected MO2/Vortex context."""
+    """Infer installed renderer profile hints from detected MO2/Vortex context.
+
+    Community Shaders disables itself when ENB runtime binaries are present, so
+    ENB markers take precedence over CS/TruePBR hints for auto-selection.
+    """
     if context is None or context.manager is None:
         return None
     candidates: list[str] = []
@@ -2373,12 +2377,12 @@ def detect_render_profile_from_mod_manager_context(context: ModManagerContext | 
             if _path_exists_casefold(root, parts):
                 has_truepbr = True
                 break
+    if has_enb:
+        return "enb"
     if has_truepbr:
         return "truepbr"
     if has_cs:
         return "community_shaders"
-    if has_enb and not has_cs:
-        return "enb"
     if context.detected_body_profiles or context.detected_skeleton_profiles:
         return "characters"
     return None
