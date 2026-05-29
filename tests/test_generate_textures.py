@@ -25,6 +25,7 @@ from generate_textures import (
     auto_patch_related_nifs_for_texture,
     apply_recommendations_by_auto_flags,
     build_nif_patch_options_for_generated_outputs,
+    build_nif_patch_options_for_nif_editor,
     build_render_profile_recommendation_message,
     build_complex_preview_image,
     build_complex_output_path,
@@ -2729,6 +2730,54 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(options.disable_env_mapping)
         self.assertTrue(options.clear_env_mask_texture_path)
         self.assertFalse(options.enable_env_mapping)
+
+    def test_build_nif_patch_options_for_nif_editor_preserves_disable_and_clear_flags(self) -> None:
+        options = build_nif_patch_options_for_nif_editor(
+            enable_parallax=False,
+            enable_pom=False,
+            enable_env_mapping=False,
+            enable_glow_map=False,
+            parallax_scale=3.5,
+            force_shader_type_3=True,
+            diffuse_texture_path=" textures\\arch\\stone.dds ",
+            parallax_texture_path=" textures\\arch\\stone_p.dds ",
+            normal_texture_path="",
+            glow_texture_path=" ",
+            env_mask_texture_path="textures\\arch\\stone_m.dds",
+            cubemap_texture_path="textures\\cubemaps\\chrome_e.dds",
+            backup=False,
+            dry_run=True,
+            disable_parallax=True,
+            disable_pom=True,
+            disable_env_mapping=True,
+            disable_glow_map=True,
+            clear_parallax_texture_path=True,
+            clear_normal_texture_path=True,
+            clear_env_mask_texture_path=True,
+            clear_glow_texture_path=True,
+            clear_diffuse_texture_path=True,
+            clear_cubemap_texture_path=True,
+        )
+
+        self.assertIsNone(options.parallax_scale)
+        self.assertEqual(options.diffuse_texture_path, "textures\\arch\\stone.dds")
+        self.assertEqual(options.parallax_texture_path, "textures\\arch\\stone_p.dds")
+        self.assertIsNone(options.normal_texture_path)
+        self.assertIsNone(options.glow_texture_path)
+        self.assertEqual(options.env_mask_texture_path, "textures\\arch\\stone_m.dds")
+        self.assertEqual(options.cubemap_texture_path, "textures\\cubemaps\\chrome_e.dds")
+        self.assertTrue(options.disable_parallax)
+        self.assertTrue(options.disable_pom)
+        self.assertTrue(options.disable_env_mapping)
+        self.assertTrue(options.disable_glow_map)
+        self.assertTrue(options.clear_parallax_texture_path)
+        self.assertTrue(options.clear_normal_texture_path)
+        self.assertTrue(options.clear_env_mask_texture_path)
+        self.assertTrue(options.clear_glow_texture_path)
+        self.assertTrue(options.clear_diffuse_texture_path)
+        self.assertTrue(options.clear_cubemap_texture_path)
+        self.assertFalse(options.backup)
+        self.assertTrue(options.dry_run)
 
     def test_auto_patch_related_nifs_for_texture_patches_all_matches(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

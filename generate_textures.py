@@ -4549,6 +4549,65 @@ def build_nif_patch_options_for_generated_outputs(
     )
 
 
+def build_nif_patch_options_for_nif_editor(
+    *,
+    enable_parallax: bool,
+    enable_pom: bool,
+    enable_env_mapping: bool,
+    enable_glow_map: bool,
+    parallax_scale: float | None,
+    force_shader_type_3: bool,
+    diffuse_texture_path: str = "",
+    parallax_texture_path: str = "",
+    normal_texture_path: str = "",
+    glow_texture_path: str = "",
+    env_mask_texture_path: str = "",
+    cubemap_texture_path: str = "",
+    backup: bool = True,
+    dry_run: bool = False,
+    disable_parallax: bool = False,
+    disable_pom: bool = False,
+    disable_env_mapping: bool = False,
+    disable_glow_map: bool = False,
+    clear_parallax_texture_path: bool = False,
+    clear_normal_texture_path: bool = False,
+    clear_env_mask_texture_path: bool = False,
+    clear_glow_texture_path: bool = False,
+    clear_diffuse_texture_path: bool = False,
+    clear_cubemap_texture_path: bool = False,
+) -> NifPatchOptions:
+    def _clean_path(value: str) -> str | None:
+        cleaned = str(value or "").strip()
+        return cleaned or None
+
+    return NifPatchOptions(
+        enable_parallax=enable_parallax,
+        enable_pom=enable_pom,
+        enable_env_mapping=enable_env_mapping,
+        enable_glow_map=enable_glow_map,
+        parallax_scale=parallax_scale if (enable_parallax or enable_pom) else None,
+        force_shader_type_3=force_shader_type_3,
+        diffuse_texture_path=_clean_path(diffuse_texture_path),
+        parallax_texture_path=_clean_path(parallax_texture_path),
+        normal_texture_path=_clean_path(normal_texture_path),
+        glow_texture_path=_clean_path(glow_texture_path),
+        env_mask_texture_path=_clean_path(env_mask_texture_path),
+        cubemap_texture_path=_clean_path(cubemap_texture_path),
+        backup=backup,
+        dry_run=dry_run,
+        disable_parallax=disable_parallax,
+        disable_pom=disable_pom,
+        disable_env_mapping=disable_env_mapping,
+        disable_glow_map=disable_glow_map,
+        clear_parallax_texture_path=clear_parallax_texture_path,
+        clear_normal_texture_path=clear_normal_texture_path,
+        clear_env_mask_texture_path=clear_env_mask_texture_path,
+        clear_glow_texture_path=clear_glow_texture_path,
+        clear_diffuse_texture_path=clear_diffuse_texture_path,
+        clear_cubemap_texture_path=clear_cubemap_texture_path,
+    )
+
+
 def auto_patch_related_nifs_for_texture(
     source_texture: Path,
     outputs: Mapping[str, Path],
@@ -9336,7 +9395,7 @@ if GUI_AVAILABLE:
                     prefer_msn = bool(defaults.get("prefer_msn_normal"))
                     env_mask_suffix = _preferred_env_mask_suffix_for_profile()
                     selected_path = Path(path_value)
-                    nifs = list(selected_path.rglob("*.nif")) if selected_path.is_dir() else [selected_path]
+                    nifs = find_nif_files(selected_path) if selected_path.is_dir() else [selected_path]
                     guessed_from: Path | None = None
                     guessed_diffuse = ""
                     guessed_parallax = ""
@@ -9754,21 +9813,31 @@ if GUI_AVAILABLE:
                     if _is_running[0]:
                         status_var.set("Another operation is in progress. Please wait.")
                         return
-                    options = NifPatchOptions(
+                    options = build_nif_patch_options_for_nif_editor(
                         enable_parallax=enable_parallax_var.get(),
                         enable_pom=enable_pom_var.get(),
                         enable_env_mapping=enable_env_var.get(),
                         enable_glow_map=enable_glow_var.get(),
-                        parallax_scale=pscale_var.get() if (enable_parallax_var.get() or enable_pom_var.get()) else None,
+                        parallax_scale=pscale_var.get(),
                         force_shader_type_3=force_type3_var.get(),
-                        diffuse_texture_path=diffuse_tex_var.get().strip() or None,
-                        parallax_texture_path=parallax_tex_var.get().strip() or None,
-                        normal_texture_path=normal_tex_var.get().strip() or None,
-                        glow_texture_path=glow_tex_var.get().strip() or None,
-                        env_mask_texture_path=env_mask_tex_var.get().strip() or None,
-                        cubemap_texture_path=cubemap_tex_var.get().strip() or None,
+                        diffuse_texture_path=diffuse_tex_var.get(),
+                        parallax_texture_path=parallax_tex_var.get(),
+                        normal_texture_path=normal_tex_var.get(),
+                        glow_texture_path=glow_tex_var.get(),
+                        env_mask_texture_path=env_mask_tex_var.get(),
+                        cubemap_texture_path=cubemap_tex_var.get(),
                         backup=backup_var.get(),
                         dry_run=dry_run_var.get(),
+                        disable_parallax=disable_parallax_var.get(),
+                        disable_pom=disable_pom_var.get(),
+                        disable_env_mapping=disable_env_var.get(),
+                        disable_glow_map=disable_glow_var.get(),
+                        clear_parallax_texture_path=clear_parallax_var.get(),
+                        clear_normal_texture_path=clear_normal_var.get(),
+                        clear_env_mask_texture_path=clear_env_var.get(),
+                        clear_glow_texture_path=clear_glow_var.get(),
+                        clear_diffuse_texture_path=clear_diffuse_var.get(),
+                        clear_cubemap_texture_path=clear_cubemap_var.get(),
                     )
                     _is_running[0] = True
                     _set_ops_active(False)
