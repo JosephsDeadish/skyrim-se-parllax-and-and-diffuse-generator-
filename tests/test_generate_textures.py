@@ -1381,8 +1381,22 @@ class GenerateTexturesTests(unittest.TestCase):
         summary = describe_render_profile_files_to_create("truepbr")
         self.assertIn("<stem>_rmaos.dds", summary)
         self.assertIn("<stem>_n.dds", summary)
-        self.assertIn("<stem>_ao.dds", summary)
-        self.assertIn("<stem>_rough.dds", summary)
+        self.assertNotIn("<stem>_ao.dds", summary)
+        self.assertNotIn("<stem>_rough.dds", summary)
+
+    def test_get_nif_patch_option_warnings_truepbr_flags_legacy_orm_alias(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="truepbr",
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            enable_pbr=True,
+            force_shader_type_3=False,
+            env_mask_texture_path="textures\\pbr\\stone_orm.dds",
+        )
+        joined = "\n".join(warnings).lower()
+        self.assertIn("legacy generic alias", joined)
+        self.assertIn("_rmaos/_ramos", joined)
 
     def test_get_nif_patch_option_warnings_reports_glow_and_cubemap_clear_write_conflicts(self) -> None:
         warnings = get_nif_patch_option_warnings(

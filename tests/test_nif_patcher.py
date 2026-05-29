@@ -557,6 +557,8 @@ class TestValidateNifForParallax(unittest.TestCase):
         joined = "\n".join(v.issues + v.suggestions).lower()
         self.assertIn("textures\\pbr\\", joined)
         self.assertIn("pbrnifpatcher json", joined)
+        self.assertIn("legacy generic packed suffix", joined)
+        self.assertIn("_rmaos/_ramos", joined)
 
     def test_reports_blender_style_env_mask_suffix_in_slot_five(self) -> None:
         paths = [""] * 9

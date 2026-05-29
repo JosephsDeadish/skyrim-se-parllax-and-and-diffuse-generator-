@@ -92,6 +92,8 @@ GENERATED_TEXTURE_SUFFIXES = (
 TRUEPBR_ENV_MASK_SUFFIXES: frozenset[str] = frozenset({
     "_rmaos",
     "_ramos",
+})
+LEGACY_TRUEPBR_ENV_MASK_SUFFIXES: frozenset[str] = frozenset({
     "_orm",
     "_orms",
     "_mrao",
@@ -1688,8 +1690,8 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_wetness_mask": False,
         "include_snow_mask": False,
         "include_complex": False,
-        "include_ao": True,
-        "include_roughness": True,
+        "include_ao": False,
+        "include_roughness": False,
     },
     "enb": {
         "include_diffuse": True,
@@ -2009,12 +2011,17 @@ def get_nif_patch_option_warnings(
             warnings.append("TruePBR workflows usually use _n.dds normals, not _msn.dds.")
         if env_lower.endswith(("_cm.dds", "_c.dds")):
             warnings.append("TruePBR slot 5 usually uses _rmaos/_ramos, not _cm/_c.")
+        if env_lower.endswith(("_orm.dds", "_orms.dds", "_mrao.dds", "_mra.dds")):
+            warnings.append(
+                "TruePBR slot 5 path uses a legacy generic alias (_orm/_mrao). Prefer _rmaos/_ramos naming for Skyrim Community Shaders workflows."
+            )
         if not enable_pbr and not disable_pbr:
             warnings.append("TruePBR workflows need the Community Shaders PBR flag enabled on the NIF.")
     elif enable_pbr:
         warnings.append("PBR flag is usually only needed for Community Shaders TruePBR workflows.")
-    if env_uses_truepbr_suffix and not enable_pbr and not disable_pbr:
-        warnings.append("RMAOS/ORM slot 5 textures usually need the Community Shaders PBR flag enabled.")
+    if env_uses_truepbr_suffix or env_lower.endswith(("_orm.dds", "_orms.dds", "_mrao.dds", "_mra.dds")):
+        if not enable_pbr and not disable_pbr:
+            warnings.append("RMAOS/ORM slot 5 textures usually need the Community Shaders PBR flag enabled.")
 
     return warnings
 
@@ -2195,6 +2202,7 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
             "- Runtime requirement: TruePBR texture packs need Community Shaders enabled in-game. They will not preview/render correctly in non-CS tool paths such as Creation Kit, Outfit Studio, or Bodyslide.",
             "- For texture artists/developers: ship both sides of the workflow — (1) meshes flagged for PBR or PGPatcher/PBRNifPatcher JSON rules, and (2) the actual TruePBR textures.",
             "- Core texture set for this tool: <stem>.dds diffuse, <stem>_n.dds normal, and packed <stem>_rmaos.dds/<stem>_ramos.dds data. Do not swap in standalone Blender-style _rough/_metallic/_ao names as the main TruePBR slot-5 texture.",
+            "- Legacy alias note: if you imported older _orm/_orms/_mrao/_mra assets, normalize them to _rmaos/_ramos naming before shipping to keep workflows unambiguous.",
             "- Core mesh tuning: Specular Level controls non-metal reflectance, Roughness Scale controls surface smoothness, and Displacement Scale controls parallax/displacement depth.",
             "- Colour-space rule of thumb: save in-game colour textures as sRGB; save data textures like normal/displacement/RMAOS in linear space.",
             "- Landscape workflow: use Data/PBRTextureSets/<TXST_EDID>.json with roughnessScale, displacementScale, and specularLevel values.",
@@ -2244,6 +2252,8 @@ def recommend_render_profile(
     if normalized_suffix == "_msn":
         return "enb"
     if normalized_suffix in TRUEPBR_ENV_MASK_SUFFIXES:
+        return "truepbr"
+    if normalized_suffix in LEGACY_TRUEPBR_ENV_MASK_SUFFIXES:
         return "truepbr"
     if detected_role == "complex_material_cm":
         return "community_shaders"
@@ -5214,12 +5224,12 @@ def get_generation_warnings(
             "Regenerating complex material from packed complex inputs often damages channel meaning.\n\n"
             "Tip: Start from diffuse/albedo source when creating new complex materials.",
         ))
-    if normalized_source_suffix in TRUEPBR_ENV_MASK_SUFFIXES:
+    if normalized_source_suffix in TRUEPBR_ENV_MASK_SUFFIXES or normalized_source_suffix in LEGACY_TRUEPBR_ENV_MASK_SUFFIXES:
         warnings.append((
             "rmaos_source_requires_renderer_check",
-            "Input uses a TruePBR packed-map suffix (_rmaos/_ramos/_orm/_orms/_mrao/_mra).\n\n"
+            "Input uses a TruePBR packed-map suffix (_rmaos/_ramos, or legacy _orm/_orms/_mrao/_mra aliases).\n\n"
             "These suffixes are used for Community Shaders TruePBR JSON workflows and are NOT the same as Community Shaders _cm/_c Extended Materials.\n\n"
-            "Tip: Use the TruePBR renderer/profile path for these packed maps and avoid mixing them into ENB complex-material setups.",
+            "Tip: Use the TruePBR renderer/profile path for these packed maps, normalize legacy aliases to _rmaos/_ramos, and avoid mixing them into ENB complex-material setups.",
         ))
     hint_text = (source_hint or "").lower()
     if "ui/interface texture" in hint_text and (include_parallax or include_environment_mask or include_complex):
@@ -6830,6 +6840,7 @@ if GUI_AVAILABLE:
                 "vanilla = safest defaults; performance = lightweight defaults; vr = conservative VR defaults; "
                 "terrain = stable terrain defaults; architecture = structure-focused defaults; characters = skin-safe defaults; "
                 "community_shaders = _cm/_c; truepbr = _n + _rmaos/_ramos + JSON path; enb = tool ENB preset _msn + complex env default + optional POM.\n"
+                "Prefer canonical TruePBR names (_rmaos/_ramos), not generic _orm/_mrao aliases from Blender-style exports.\n"
                 "Presets keep format/mode/output defaults aligned to avoid conflicting combinations.\n"
                 "Community Shaders and ENB can coexist, but each mesh/material should follow one workflow at a time.",
             )
@@ -6883,7 +6894,7 @@ if GUI_AVAILABLE:
             )
             self.env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
             self.env_mask_mode_combo.bind("<<ComboboxSelected>>", self._on_env_mask_mode_changed)
-            self._add_tooltip(self.env_mask_mode_combo, "🌍 'standard' = vanilla Skyrim SE reflections.\n'complex' = packed RGBA for advanced workflows (ENB defaults in this tool; some CS materials may also use packed channels).\nTruePBR usually uses _rmaos/_ramos instead of _m.\nAlways match this with your selected Target renderer.")
+            self._add_tooltip(self.env_mask_mode_combo, "🌍 'standard' = vanilla Skyrim SE reflections.\n'complex' = packed RGBA for advanced workflows (ENB defaults in this tool; some CS materials may also use packed channels).\nTruePBR usually uses _rmaos/_ramos instead of _m, and avoids legacy generic aliases like _orm/_mrao.\nAlways match this with your selected Target renderer.")
             ttk.Label(
                 options_frame,
                 text="standard = vanilla Skyrim SE  |  complex = packed RGBA (renderer-specific channels)",

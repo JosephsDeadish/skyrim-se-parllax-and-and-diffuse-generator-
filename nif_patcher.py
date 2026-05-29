@@ -255,6 +255,8 @@ _ENV_MASK_SLOT_EXPECTED_SUFFIXES: tuple[str, ...] = (
 _TRUEPBR_ENV_MASK_SUFFIXES: tuple[str, ...] = (
     "_rmaos.dds",
     "_ramos.dds",
+)
+_LEGACY_TRUEPBR_ENV_MASK_SUFFIXES: tuple[str, ...] = (
     "_orm.dds",
     "_orms.dds",
     "_mrao.dds",
@@ -2123,10 +2125,15 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                     result.suggestions,
                     "Use slot 5 for _m.dds (vanilla/ENB), _cm/_c (Community Shaders Extended Materials), or _rmaos (TruePBR)."
                 )
-            if normalized_env_mask.endswith(_TRUEPBR_ENV_MASK_SUFFIXES) and not normalized_env_mask.startswith("textures\\pbr\\"):
+            if normalized_env_mask.endswith(_TRUEPBR_ENV_MASK_SUFFIXES + _LEGACY_TRUEPBR_ENV_MASK_SUFFIXES) and not normalized_env_mask.startswith("textures\\pbr\\"):
                 _append_unique(
                     result.suggestions,
                     "TruePBR _rmaos workflows are usually placed under textures\\pbr\\... and paired with a matching PBRNifPatcher JSON entry."
+                )
+            if normalized_env_mask.endswith(_LEGACY_TRUEPBR_ENV_MASK_SUFFIXES):
+                _append_unique(
+                    result.suggestions,
+                    "Slot 5 uses a legacy generic packed suffix (_orm/_mrao). Prefer canonical _rmaos/_ramos naming for Skyrim Community Shaders TruePBR workflows."
                 )
             if normalized_env_mask.endswith(("_cm.dds", "_c.dds")):
                 _append_unique(
