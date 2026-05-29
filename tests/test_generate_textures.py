@@ -5723,5 +5723,122 @@ class RecommendGenerationSettingsAoRoughnessTests(unittest.TestCase):
         self.assertLessEqual(roughness_strength, 8.0)
 
 
+# ---------------------------------------------------------------------------
+# Per-material parallax override (parallax vs displacement_scale distinction)
+# ---------------------------------------------------------------------------
+
+
+class RmaosJsonParallaxVsDisplacementTests(unittest.TestCase):
+    """Tests that parallax (POM flag) and displacement_scale are independent controls.
+
+    CS TruePBR distinguishes:
+    - parallax (bool): whether the POM shader feature is enabled on the mesh.
+    - displacement_scale (float): height/depth multiplier; has no effect unless parallax=True.
+
+    Materials whose geometry makes POM harmful or irrelevant force parallax=False regardless
+    of the parallax_enabled argument passed to write_rmaos_json_sidecar.
+    """
+
+    def setUp(self) -> None:
+        import tempfile
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _write_and_read(self, material_type: str, parallax_enabled: bool = True) -> dict:
+        import json
+        from pathlib import Path
+
+        rmaos_path = Path(self._tmpdir) / f"test_{material_type}_rmaos.dds"
+        write_rmaos_json_sidecar(rmaos_path, parallax_enabled=parallax_enabled, material_type=material_type)
+        json_path = Path(self._tmpdir) / "PBRNifPatcher" / f"{rmaos_path.stem}.json"
+        with open(json_path) as f:
+            raw = json.load(f)
+        return raw[0] if isinstance(raw, list) else raw
+
+    # --- materials that always disable parallax regardless of parallax_enabled ---
+
+    def test_skin_forces_parallax_false_even_when_requested(self) -> None:
+        data = self._write_and_read("skin", parallax_enabled=True)
+        self.assertFalse(bool(data["parallax"]))
+
+    def test_plants_forces_parallax_false_even_when_requested(self) -> None:
+        data = self._write_and_read("plants", parallax_enabled=True)
+        self.assertFalse(bool(data["parallax"]))
+
+    def test_hair_forces_parallax_false_even_when_requested(self) -> None:
+        data = self._write_and_read("hair", parallax_enabled=True)
+        self.assertFalse(bool(data["parallax"]))
+
+    def test_terrain_forces_parallax_false_even_when_requested(self) -> None:
+        """Terrain CS TruePBR parallax is driven by PBRTextureSets JSON, not PBRNifPatcher."""
+        data = self._write_and_read("terrain", parallax_enabled=True)
+        self.assertFalse(bool(data["parallax"]))
+
+    # --- displacement_scale is present and meaningful even when parallax is False ---
+
+    def test_terrain_has_displacement_scale_when_parallax_disabled(self) -> None:
+        data = self._write_and_read("terrain", parallax_enabled=True)
+        self.assertFalse(bool(data["parallax"]))
+        self.assertGreater(data["displacement_scale"], 0.0)
+
+    def test_skin_has_zero_displacement_and_parallax_false(self) -> None:
+        data = self._write_and_read("skin", parallax_enabled=True)
+        self.assertFalse(bool(data["parallax"]))
+        self.assertAlmostEqual(data["displacement_scale"], 0.0, places=3)
+
+    def test_hair_has_zero_displacement_and_parallax_false(self) -> None:
+        data = self._write_and_read("hair", parallax_enabled=True)
+        self.assertFalse(bool(data["parallax"]))
+        self.assertAlmostEqual(data["displacement_scale"], 0.0, places=3)
+
+    # --- materials without a parallax override honour the caller's flag ---
+
+    def test_stone_honours_parallax_enabled_true(self) -> None:
+        data = self._write_and_read("stone", parallax_enabled=True)
+        self.assertTrue(bool(data["parallax"]))
+
+    def test_stone_honours_parallax_enabled_false(self) -> None:
+        data = self._write_and_read("stone", parallax_enabled=False)
+        self.assertFalse(bool(data["parallax"]))
+
+    def test_metal_honours_parallax_enabled_true(self) -> None:
+        data = self._write_and_read("metal", parallax_enabled=True)
+        self.assertTrue(bool(data["parallax"]))
+
+    def test_general_honours_parallax_enabled_true(self) -> None:
+        data = self._write_and_read("general", parallax_enabled=True)
+        self.assertTrue(bool(data["parallax"]))
+
+    def test_general_honours_parallax_enabled_false(self) -> None:
+        data = self._write_and_read("general", parallax_enabled=False)
+        self.assertFalse(bool(data["parallax"]))
+
+    # --- parallax and displacement_scale are both always present in the JSON ---
+
+    def test_both_keys_present_for_all_materials(self) -> None:
+        for material_type in (
+            "skin", "plants", "metal", "glass", "snow", "terrain", "cloth",
+            "leather", "stone", "wood", "fur", "paper", "dirt", "sand",
+            "architecture", "hair", "general",
+        ):
+            with self.subTest(material_type=material_type):
+                data = self._write_and_read(material_type)
+                self.assertIn("parallax", data)
+                self.assertIn("displacement_scale", data)
+                self.assertIsInstance(data["parallax"], bool)
+                self.assertIsInstance(data["displacement_scale"], float)
+
+    # --- texture key is present and non-empty (identifier, not a type label) ---
+
+    def test_texture_key_is_present_and_non_empty(self) -> None:
+        data = self._write_and_read("stone")
+        self.assertIn("texture", data)
+        self.assertIsInstance(data["texture"], str)
+        self.assertTrue(len(data["texture"]) > 0)
+
+
 if __name__ == "__main__":
     unittest.main()

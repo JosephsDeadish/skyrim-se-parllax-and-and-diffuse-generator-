@@ -3997,16 +3997,35 @@ def write_rmaos_json_sidecar(
     PBR properties (subsurface scattering, specular level, roughness scale, and
     displacement depth) are set to Skyrim-appropriate defaults for each category.
 
+    **CS TruePBR key distinctions**
+
+    ``parallax`` (bool) and ``displacement_scale`` (float) are **independent** controls
+    in the Community Shaders TruePBR JSON schema and are not interchangeable:
+
+    * ``parallax``: Enables or disables the parallax occlusion mapping (POM) shader
+      feature on the mesh.  Setting this to ``False`` turns POM off entirely, regardless
+      of what ``displacement_scale`` is set to.
+    * ``displacement_scale``: Sets the height/depth multiplier for the height texture
+      channel when POM is active.  A non-zero value here has no visible effect unless
+      ``parallax`` is ``True``.
+
+    Some materials force ``parallax`` off regardless of the ``parallax_enabled``
+    argument because their geometry makes POM either harmful or irrelevant (e.g. skin
+    on animated meshes, flat foliage alpha-card plants, flat hair cards, and landscape
+    terrain which CS handles via a separate ``PBRTextureSets`` JSON rather than
+    ``PBRNifPatcher``).
+
     Parameters
     ----------
     texture_path:
         Path to the generated ``_rmaos.dds`` file.
     parallax_enabled:
-        Whether to enable parallax displacement in the sidecar.
+        Requested parallax enablement.  The effective value written to JSON may be
+        ``False`` even when this is ``True`` if the material type overrides it.
     material_type:
         Skyrim material category string from :func:`classify_material_type`.
-        Adjusts subsurface, specular_level, roughness_scale, and displacement_scale
-        defaults in the output JSON.
+        Adjusts subsurface, specular_level, roughness_scale, displacement_scale,
+        and the parallax enablement flag in the output JSON.
     glow_enabled:
         When ``True`` the ``emissive`` flag is set and ``emissive_scale`` is taken
         from the per-material override (or the global default of ``0.25``).  Pass
@@ -4022,16 +4041,22 @@ def write_rmaos_json_sidecar(
 
     # Material-type-specific PBR defaults.
     # These follow the TruePBR/PBRNifPatcher schema and Skyrim material behaviour:
+    # - parallax: whether POM is enabled for this material (bool, CS TruePBR shader flag).
+    #   Distinct from displacement_scale — setting parallax=False disables POM entirely.
+    #   Not present in the override dict means the caller's parallax_enabled arg is used.
     # - subsurface: True only for skin (translucent flesh).
     # - subsurface_foliage: True only for plants/foliage (two-sided leaf scattering).
     # - specular_level: mirrors real-world IOR — dielectrics ~0.02-0.06, metals/glass ~0.5.
     # - roughness_scale: glass is very smooth (<0.5), stone/terrain are rough (>=1.0).
-    # - displacement_scale: terrain uses shallow depth to avoid horizon shimmer; skin disables it.
+    # - displacement_scale: height/depth multiplier for the height texture channel; has no
+    #   visible effect unless parallax is True. Terrain uses shallow depth to avoid horizon
+    #   shimmer; skin/plants/hair use 0.0 because parallax is disabled for those materials.
     # - smooth_angle: softens silhouette normals; lower for hard surfaces, higher for organic.
     # - emissive_scale: multiplier applied when emissive/glow is active for this material.
     # - vertex_color_lum_mult: blend weight for vertex-colour luminance contribution.
     _RMAOS_JSON_MATERIAL_OVERRIDES: dict[str, dict[str, object]] = {
         "skin": {
+            "parallax": False,           # POM on animated skin causes mesh-deform artefacts
             "subsurface": True,
             "subsurface_foliage": False,
             "subsurface_color": [1.0, 0.85, 0.7],
@@ -4039,11 +4064,12 @@ def write_rmaos_json_sidecar(
             "specular_level": 0.028,
             "roughness_scale": 1.0,
             "smooth_angle": 80,
-            "displacement_scale": 0.0,   # parallax on animated skin causes artefacts
+            "displacement_scale": 0.0,
             "emissive_scale": 0.20,
             "vertex_color_lum_mult": 0.45,
         },
         "plants": {
+            "parallax": False,           # foliage uses flat alpha-card geometry, not height mesh
             "subsurface": False,
             "subsurface_foliage": True,
             "subsurface_color": [0.7, 1.0, 0.4],
@@ -4051,7 +4077,7 @@ def write_rmaos_json_sidecar(
             "specular_level": 0.016,
             "roughness_scale": 1.1,
             "smooth_angle": 70,
-            "displacement_scale": 0.0,   # foliage uses flat alpha cards
+            "displacement_scale": 0.0,
             "emissive_scale": 0.30,      # glowing fungi / enchanted flora
             "vertex_color_lum_mult": 0.55,
         },
@@ -4092,6 +4118,11 @@ def write_rmaos_json_sidecar(
             "vertex_color_lum_mult": 0.50,
         },
         "terrain": {
+            # CS TruePBR landscape parallax is driven via PBRTextureSets JSON, not
+            # PBRNifPatcher.  Disable the POM flag here so this object-level sidecar does
+            # not accidentally enable parallax on non-terrain meshes that share the texture.
+            # displacement_scale is still populated as a reference value.
+            "parallax": False,
             "subsurface": False,
             "subsurface_foliage": False,
             "subsurface_color": [1.0, 1.0, 1.0],
@@ -4212,6 +4243,7 @@ def write_rmaos_json_sidecar(
             "vertex_color_lum_mult": 0.45,
         },
         "hair": {
+            "parallax": False,           # hair uses flat alpha-card geometry, not height mesh
             "subsurface": False,
             "subsurface_foliage": False,
             "subsurface_color": [1.0, 1.0, 1.0],
@@ -4219,7 +4251,7 @@ def write_rmaos_json_sidecar(
             "specular_level": 0.055,     # hair has a notable anisotropic highlight
             "roughness_scale": 1.1,      # varying rough to smooth across strands
             "smooth_angle": 78,
-            "displacement_scale": 0.0,   # hair uses flat alpha-card geometry
+            "displacement_scale": 0.0,
             "emissive_scale": 0.15,
             "vertex_color_lum_mult": 0.50,
         },
@@ -4227,12 +4259,29 @@ def write_rmaos_json_sidecar(
 
     overrides = _RMAOS_JSON_MATERIAL_OVERRIDES.get(str(material_type).lower(), {})
 
+    # parallax (bool) and displacement_scale (float) are distinct CS TruePBR controls.
+    # parallax is the POM shader enablement flag; displacement_scale is the height depth
+    # multiplier.  The per-material override may force parallax off even when
+    # parallax_enabled=True (e.g. terrain, skin, plants, hair).
+    if "parallax" in overrides:
+        effective_parallax = bool(overrides["parallax"])
+    else:
+        effective_parallax = bool(parallax_enabled)
+
     payload = [
         {
+            # "texture": CS TruePBR / PBRNifPatcher texture-path identifier prefix used
+            # to match this JSON sidecar against mesh material entries.  This is the stem
+            # of the diffuse texture relative to the Data\textures root (forward-slash,
+            # no extension), not a generic "texture type" label.
             "texture": texture_identifier,
             "emissive": bool(glow_enabled),
             "emissive_scale": float(overrides.get("emissive_scale", 0.25)),
-            "parallax": bool(parallax_enabled),
+            # parallax: POM shader feature on/off (CS TruePBR boolean enablement flag).
+            # Independent of displacement_scale — disabling this turns off POM entirely.
+            "parallax": effective_parallax,
+            # displacement_scale: height/depth multiplier for the height texture channel.
+            # Has no visible effect unless parallax is True.
             "displacement_scale": float(overrides.get("displacement_scale", 0.2)),
             "specular_level": float(overrides.get("specular_level", 0.04)),
             "roughness_scale": float(overrides.get("roughness_scale", 1.0)),
@@ -7002,10 +7051,10 @@ if GUI_AVAILABLE:
 
             _parallax_label = ttk.Label(options_frame, text="Parallax strength")
             _parallax_label.grid(row=5, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_parallax_label, "🏔 Controls parallax depth contrast.\nToo high and your pebble becomes a canyon. Too low and your canyon becomes toast.")
+            self._add_tooltip(_parallax_label, "🏔 Controls height-map (parallax/_p) depth contrast.\nSets the height data written to the _p texture.\nFor CS TruePBR the depth of the in-game effect is controlled by 'displacement_scale' in the JSON sidecar — this slider sets the source height strength, not the TruePBR displacement scale directly.")
             self.parallax_scale = ttk.Scale(options_frame, from_=0.1, to=6.0, variable=self.parallax_strength_var, command=lambda _: self._on_slider_changed())
             self.parallax_scale.grid(row=5, column=1, columnspan=2, sticky=tk.EW)
-            self._add_tooltip(self.parallax_scale, "🏔 Slide right for deeper depth illusion, left for subtle relief.\nYes, this can absolutely make stones look dramatic.")
+            self._add_tooltip(self.parallax_scale, "🏔 Slide right for deeper height data in the _p file, left for subtle relief.\nFor TruePBR, tune displacement_scale in the generated JSON sidecar to control in-game POM depth.\nYes, this can absolutely make stones look dramatic.")
             self.parallax_strength_display_label = ttk.Label(options_frame, textvariable=self.parallax_strength_display_var)
             self.parallax_strength_display_label.grid(row=5, column=3, sticky=tk.W, padx=8)
             self.auto_parallax_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_parallax_suggestion_var, command=self._on_auto_slider_preference_changed)
@@ -7038,7 +7087,7 @@ if GUI_AVAILABLE:
 
             _rmaos_label = ttk.Label(options_frame, text="RMAOS strength")
             _rmaos_label.grid(row=8, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_rmaos_label, "🧩 Controls TruePBR _rmaos channel contrast/intensity packing.")
+            self._add_tooltip(_rmaos_label, "🧩 Controls TruePBR _rmaos channel contrast/intensity packing.\nNote: for CS TruePBR the 'parallax' flag (POM on/off) and 'displacement_scale' (POM depth) in the generated JSON sidecar are separate controls — see the JSON sidecar for material-specific defaults.")
             self.rmaos_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.rmaos_strength_var, command=lambda _: self._on_slider_changed())
             self.rmaos_scale.grid(row=8, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.rmaos_scale, "🧩 Higher values push stronger channel separation for _rmaos output.")
