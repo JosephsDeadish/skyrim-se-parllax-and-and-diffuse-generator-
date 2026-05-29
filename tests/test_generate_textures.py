@@ -5328,10 +5328,107 @@ class RmaosJsonMaterialTypeTests(unittest.TestCase):
         self.assertFalse(data.get("subsurface", False))
         self.assertFalse(data.get("subsurface_foliage", False))
 
+    def test_hair_has_notable_specular_and_no_displacement(self) -> None:
+        data = self._write_and_read("hair")
+        self.assertGreater(data["specular_level"], 0.04)
+        self.assertAlmostEqual(data["displacement_scale"], 0.0, places=3)
 
-# ---------------------------------------------------------------------------
-# Terrain parallax high-strength warning
-# ---------------------------------------------------------------------------
+    def test_hair_no_subsurface(self) -> None:
+        data = self._write_and_read("hair")
+        self.assertFalse(data.get("subsurface", False))
+        self.assertFalse(data.get("subsurface_foliage", False))
+
+    def test_glass_has_high_emissive_scale(self) -> None:
+        data = self._write_and_read("glass")
+        self.assertGreater(data["emissive_scale"], 0.4)
+
+    def test_metal_has_elevated_emissive_scale(self) -> None:
+        data = self._write_and_read("metal")
+        self.assertGreater(data["emissive_scale"], 0.25)
+
+    def test_emissive_scale_present_for_all_material_types(self) -> None:
+        for material_type in (
+            "skin", "plants", "metal", "glass", "snow", "terrain", "cloth",
+            "leather", "stone", "wood", "fur", "paper", "dirt", "sand",
+            "architecture", "hair", "general",
+        ):
+            with self.subTest(material_type=material_type):
+                data = self._write_and_read(material_type)
+                self.assertIn("emissive_scale", data)
+                self.assertIsInstance(data["emissive_scale"], float)
+
+    def test_vertex_color_lum_mult_present_for_all_material_types(self) -> None:
+        for material_type in (
+            "skin", "plants", "metal", "glass", "snow", "terrain", "cloth",
+            "leather", "stone", "wood", "fur", "paper", "dirt", "sand",
+            "architecture", "hair", "general",
+        ):
+            with self.subTest(material_type=material_type):
+                data = self._write_and_read(material_type)
+                self.assertIn("vertex_color_lum_mult", data)
+
+
+class RmaosJsonGlowEnabledTests(unittest.TestCase):
+    """Tests that write_rmaos_json_sidecar threads glow_enabled into the emissive flag."""
+
+    def setUp(self) -> None:
+        import tempfile
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _write_and_read(self, *, glow_enabled: bool, material_type: str = "general") -> dict:
+        import json
+        from pathlib import Path
+
+        rmaos_path = Path(self._tmpdir) / "test_rmaos.dds"
+        write_rmaos_json_sidecar(rmaos_path, parallax_enabled=False, material_type=material_type, glow_enabled=glow_enabled)
+        json_path = Path(self._tmpdir) / "PBRNifPatcher" / f"{rmaos_path.stem}.json"
+        with open(json_path) as f:
+            raw = json.load(f)
+        return raw[0] if isinstance(raw, list) else raw
+
+    def test_glow_disabled_sets_emissive_false(self) -> None:
+        data = self._write_and_read(glow_enabled=False)
+        self.assertFalse(bool(data["emissive"]))
+
+    def test_glow_enabled_sets_emissive_true(self) -> None:
+        data = self._write_and_read(glow_enabled=True)
+        self.assertTrue(bool(data["emissive"]))
+
+    def test_glow_enabled_emissive_scale_inherits_material_override(self) -> None:
+        glass_data = self._write_and_read(glow_enabled=True, material_type="glass")
+        general_data = self._write_and_read(glow_enabled=True, material_type="general")
+        self.assertGreater(glass_data["emissive_scale"], general_data["emissive_scale"])
+
+    def test_glow_disabled_emissive_scale_still_present(self) -> None:
+        data = self._write_and_read(glow_enabled=False)
+        self.assertIn("emissive_scale", data)
+
+
+class ClassifyHairMaterialTypeTests(unittest.TestCase):
+    """Tests that hair-related texture paths classify as 'hair'."""
+
+    def test_hair_token_classifies_as_hair(self) -> None:
+        result = classify_material_type(Path("textures/actors/character/hair/hairfemalenord.dds"))
+        self.assertEqual(result, "hair")
+
+    def test_eyebrow_classifies_as_hair(self) -> None:
+        result = classify_material_type(Path("textures/actors/character/eyebrow.dds"))
+        self.assertEqual(result, "hair")
+
+    def test_beard_classifies_as_hair(self) -> None:
+        result = classify_material_type(Path("textures/actors/character/beard.dds"))
+        self.assertEqual(result, "hair")
+
+    def test_lash_classifies_as_hair(self) -> None:
+        result = classify_material_type(Path("textures/actors/character/eyelash.dds"))
+        self.assertEqual(result, "hair")
+
+
+
 
 
 class TerrainParallaxStrengthWarningTests(unittest.TestCase):

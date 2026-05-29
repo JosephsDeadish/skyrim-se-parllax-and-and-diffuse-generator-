@@ -1095,6 +1095,7 @@ _MATERIAL_CATEGORY_TOKENS: dict[str, tuple[str, ...]] = {
         "bbr",
         "poster",
     ),
+    "hair": ("hair", "hairline", "eyebrow", "eyelash", "lash", "brow", "beard", "stubble"),
 }
 
 
@@ -1103,8 +1104,8 @@ def classify_material_type(path: Path) -> str:
 
     Returns one of: ``'architecture'``, ``'stone'``, ``'wood'``, ``'plants'``,
     ``'metal'``, ``'glass'``, ``'leather'``, ``'fur'``, ``'cloth'``, ``'skin'``,
-    ``'snow'``, ``'dirt'``, ``'terrain'``, ``'sand'``, ``'paper'``, or
-    ``'general'``.
+    ``'snow'``, ``'dirt'``, ``'terrain'``, ``'sand'``, ``'paper'``, ``'hair'``,
+    or ``'general'``.
 
     Priority order matches ``_MATERIAL_CATEGORY_TOKENS`` dictionary ordering so
     more specific categories (``'architecture'``) are checked before broader ones
@@ -1224,6 +1225,13 @@ def _adjust_recommendations_for_material_type(
         adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.45, 0.9, 1.3)
         adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.6, 0.9, 1.3)
         adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]) * 0.75, 1.0, 1.6)
+        adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]) * 1.1, 160, 235))
+    elif material_type == "hair":
+        # Hair cards are flat alpha geometry — no parallax, soft normals, low specular.
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.4, 0.8, 1.0)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.75, 1.1, 2.2)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.6, 0.9, 1.5)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.75, 0.9, 1.5)
         adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]) * 1.1, 160, 235))
     return adjusted
 
@@ -3981,6 +3989,7 @@ def write_rmaos_json_sidecar(
     *,
     parallax_enabled: bool = True,
     material_type: str = "general",
+    glow_enabled: bool = False,
 ) -> Path:
     """Write a TruePBR sidecar JSON for PBRNifPatcher.
 
@@ -3998,6 +4007,10 @@ def write_rmaos_json_sidecar(
         Skyrim material category string from :func:`classify_material_type`.
         Adjusts subsurface, specular_level, roughness_scale, and displacement_scale
         defaults in the output JSON.
+    glow_enabled:
+        When ``True`` the ``emissive`` flag is set and ``emissive_scale`` is taken
+        from the per-material override (or the global default of ``0.25``).  Pass
+        ``True`` whenever a glow map was also generated for the same texture.
     """
     textures_root = _find_textures_root(texture_path)
     if textures_root is None:
@@ -4015,6 +4028,8 @@ def write_rmaos_json_sidecar(
     # - roughness_scale: glass is very smooth (<0.5), stone/terrain are rough (>=1.0).
     # - displacement_scale: terrain uses shallow depth to avoid horizon shimmer; skin disables it.
     # - smooth_angle: softens silhouette normals; lower for hard surfaces, higher for organic.
+    # - emissive_scale: multiplier applied when emissive/glow is active for this material.
+    # - vertex_color_lum_mult: blend weight for vertex-colour luminance contribution.
     _RMAOS_JSON_MATERIAL_OVERRIDES: dict[str, dict[str, object]] = {
         "skin": {
             "subsurface": True,
@@ -4025,6 +4040,8 @@ def write_rmaos_json_sidecar(
             "roughness_scale": 1.0,
             "smooth_angle": 80,
             "displacement_scale": 0.0,   # parallax on animated skin causes artefacts
+            "emissive_scale": 0.20,
+            "vertex_color_lum_mult": 0.45,
         },
         "plants": {
             "subsurface": False,
@@ -4035,6 +4052,8 @@ def write_rmaos_json_sidecar(
             "roughness_scale": 1.1,
             "smooth_angle": 70,
             "displacement_scale": 0.0,   # foliage uses flat alpha cards
+            "emissive_scale": 0.30,      # glowing fungi / enchanted flora
+            "vertex_color_lum_mult": 0.55,
         },
         "metal": {
             "subsurface": False,
@@ -4045,6 +4064,8 @@ def write_rmaos_json_sidecar(
             "roughness_scale": 0.9,
             "smooth_angle": 60,
             "displacement_scale": 0.15,
+            "emissive_scale": 0.30,      # heated/enchanted metal glows brightly
+            "vertex_color_lum_mult": 0.40,
         },
         "glass": {
             "subsurface": False,
@@ -4055,6 +4076,8 @@ def write_rmaos_json_sidecar(
             "roughness_scale": 0.35,     # glass is very smooth
             "smooth_angle": 55,
             "displacement_scale": 0.05,
+            "emissive_scale": 0.50,      # crystals/gems emit strong light when glowing
+            "vertex_color_lum_mult": 0.60,
         },
         "snow": {
             "subsurface": False,
@@ -4065,6 +4088,8 @@ def write_rmaos_json_sidecar(
             "roughness_scale": 0.75,     # packed snow/ice has moderate smoothness
             "smooth_angle": 75,
             "displacement_scale": 0.18,
+            "emissive_scale": 0.15,
+            "vertex_color_lum_mult": 0.50,
         },
         "terrain": {
             "subsurface": False,
@@ -4075,6 +4100,8 @@ def write_rmaos_json_sidecar(
             "roughness_scale": 1.1,
             "smooth_angle": 60,
             "displacement_scale": 0.08,  # shallow depth avoids horizon shimmer
+            "emissive_scale": 0.15,
+            "vertex_color_lum_mult": 0.50,
         },
         "cloth": {
             "subsurface": False,
@@ -4085,6 +4112,8 @@ def write_rmaos_json_sidecar(
             "roughness_scale": 1.15,
             "smooth_angle": 75,
             "displacement_scale": 0.12,
+            "emissive_scale": 0.20,
+            "vertex_color_lum_mult": 0.50,
         },
         "leather": {
             "subsurface": False,
@@ -4095,6 +4124,8 @@ def write_rmaos_json_sidecar(
             "roughness_scale": 1.05,
             "smooth_angle": 72,
             "displacement_scale": 0.14,
+            "emissive_scale": 0.20,
+            "vertex_color_lum_mult": 0.50,
         },
         "stone": {
             "subsurface": False,
@@ -4105,6 +4136,8 @@ def write_rmaos_json_sidecar(
             "roughness_scale": 1.1,
             "smooth_angle": 65,
             "displacement_scale": 0.22,
+            "emissive_scale": 0.20,
+            "vertex_color_lum_mult": 0.45,
         },
         "wood": {
             "subsurface": False,
@@ -4115,6 +4148,8 @@ def write_rmaos_json_sidecar(
             "roughness_scale": 1.05,
             "smooth_angle": 68,
             "displacement_scale": 0.18,
+            "emissive_scale": 0.20,
+            "vertex_color_lum_mult": 0.50,
         },
         "fur": {
             "subsurface": False,
@@ -4125,6 +4160,8 @@ def write_rmaos_json_sidecar(
             "roughness_scale": 1.25,     # very rough, micro-fibres diffuse light strongly
             "smooth_angle": 80,
             "displacement_scale": 0.10,  # shallow depth; fur silhouette is geometry, not parallax
+            "emissive_scale": 0.15,
+            "vertex_color_lum_mult": 0.50,
         },
         "paper": {
             "subsurface": False,
@@ -4135,6 +4172,8 @@ def write_rmaos_json_sidecar(
             "roughness_scale": 1.08,     # moderately rough surface
             "smooth_angle": 75,
             "displacement_scale": 0.06,  # paper has little height variation
+            "emissive_scale": 0.20,
+            "vertex_color_lum_mult": 0.50,
         },
         "dirt": {
             "subsurface": False,
@@ -4145,6 +4184,8 @@ def write_rmaos_json_sidecar(
             "roughness_scale": 1.15,     # rough, granular surface
             "smooth_angle": 65,
             "displacement_scale": 0.14,
+            "emissive_scale": 0.15,
+            "vertex_color_lum_mult": 0.50,
         },
         "sand": {
             "subsurface": False,
@@ -4155,6 +4196,8 @@ def write_rmaos_json_sidecar(
             "roughness_scale": 1.12,     # rough, tiling ground material
             "smooth_angle": 65,
             "displacement_scale": 0.12,
+            "emissive_scale": 0.15,
+            "vertex_color_lum_mult": 0.50,
         },
         "architecture": {
             "subsurface": False,
@@ -4165,6 +4208,20 @@ def write_rmaos_json_sidecar(
             "roughness_scale": 1.08,     # architectural surfaces are moderately rough
             "smooth_angle": 60,
             "displacement_scale": 0.20,  # stonework has meaningful surface relief
+            "emissive_scale": 0.20,
+            "vertex_color_lum_mult": 0.45,
+        },
+        "hair": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.055,     # hair has a notable anisotropic highlight
+            "roughness_scale": 1.1,      # varying rough to smooth across strands
+            "smooth_angle": 78,
+            "displacement_scale": 0.0,   # hair uses flat alpha-card geometry
+            "emissive_scale": 0.15,
+            "vertex_color_lum_mult": 0.50,
         },
     }
 
@@ -4173,23 +4230,23 @@ def write_rmaos_json_sidecar(
     payload = [
         {
             "texture": texture_identifier,
-            "emissive": False,
+            "emissive": bool(glow_enabled),
+            "emissive_scale": float(overrides.get("emissive_scale", 0.25)),
             "parallax": bool(parallax_enabled),
+            "displacement_scale": float(overrides.get("displacement_scale", 0.2)),
+            "specular_level": float(overrides.get("specular_level", 0.04)),
+            "roughness_scale": float(overrides.get("roughness_scale", 1.0)),
+            "smooth_angle": int(overrides.get("smooth_angle", 75)),
             "subsurface": bool(overrides.get("subsurface", False)),
             "subsurface_foliage": bool(overrides.get("subsurface_foliage", False)),
             "subsurface_color": list(overrides.get("subsurface_color", [1.0, 1.0, 1.0])),
             "subsurface_opacity": float(overrides.get("subsurface_opacity", 1.0)),
-            "specular_level": float(overrides.get("specular_level", 0.04)),
-            "roughness_scale": float(overrides.get("roughness_scale", 1.0)),
-            "smooth_angle": int(overrides.get("smooth_angle", 75)),
-            "displacement_scale": float(overrides.get("displacement_scale", 0.2)),
-            "emissive_scale": 0.25,
-            "vertex_color_lum_mult": 0.5,
+            "vertex_color_lum_mult": float(overrides.get("vertex_color_lum_mult", 0.5)),
         }
     ]
     json_path = json_dir / f"{texture_path.stem}.json"
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return json_path
 
 
@@ -5977,6 +6034,7 @@ def run_with_options(
                 outputs["rmaos"],
                 parallax_enabled=include_parallax,
                 material_type=resolved_material_type,
+                glow_enabled=include_glow,
             )
 
         if include_wetness_mask:
