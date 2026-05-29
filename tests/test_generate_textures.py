@@ -1,4 +1,5 @@
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,7 +15,9 @@ from generate_textures import (
     _create_panda_icon_image,
     _map_parallax_strength_to_nif_scale,
     _compute_tooltip_position,
+    _candidate_nif_patcher_search_dirs,
     _format_nif_result_row_details,
+    _load_nif_patcher_exports,
     _normalize_nif_result_details,
     _preferred_dds_formats_for_output,
     _RENDER_PROFILE_GUI_VALUES,
@@ -102,6 +105,49 @@ from generate_textures import (
 
 def _sample_image() -> Image.Image:
     return Image.new("RGB", (8, 8), color=(60, 100, 140))
+
+
+class TestNifPatcherLoading(unittest.TestCase):
+    def test_candidate_nif_patcher_search_dirs_deduplicates(self) -> None:
+        base = Path("/tmp/skyrim-texture-generator")
+        self.assertEqual(
+            _candidate_nif_patcher_search_dirs(
+                script_path=base / "generate_textures.py",
+                executable_path=base / "generate_textures.exe",
+                meipass_path=base,
+            ),
+            (base,),
+        )
+
+    def test_load_nif_patcher_exports_from_explicit_search_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module_path = Path(temp_dir) / "nif_patcher.py"
+            module_path.write_text(
+                "\n".join(
+                    [
+                        "class NifPatchOptions: pass",
+                        "def find_nif_files(*args, **kwargs): return []",
+                        "def guess_cubemap_path_for_nif(*args, **kwargs): return None",
+                        "def guess_env_mask_path_for_nif(*args, **kwargs): return None",
+                        "def guess_glow_path_for_nif(*args, **kwargs): return None",
+                        "def guess_normal_path_for_nif(*args, **kwargs): return None",
+                        "def guess_parallax_path_for_nif(*args, **kwargs): return None",
+                        "def patch_nif(*args, **kwargs): return None",
+                        "def scan_nif(*args, **kwargs): return None",
+                        "def validate_nif_for_parallax(*args, **kwargs): return None",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            original_sys_path = list(sys.path)
+            try:
+                sys.modules.pop("nif_patcher", None)
+                exports = _load_nif_patcher_exports((Path(temp_dir),))
+            finally:
+                sys.modules.pop("nif_patcher", None)
+                sys.path[:] = original_sys_path
+            self.assertIn("patch_nif", exports)
+            self.assertTrue(callable(exports["patch_nif"]))
 
 
 def _flat_dark_image() -> Image.Image:

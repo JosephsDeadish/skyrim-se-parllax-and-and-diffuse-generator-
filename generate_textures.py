@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import gc
+import importlib
 import json
 import math
 import os
@@ -38,21 +39,81 @@ except Exception:
     GUI_AVAILABLE = False
 
 try:
-    from nif_patcher import (
-        NifPatchOptions,
-        find_nif_files,
-        guess_cubemap_path_for_nif,
-        guess_env_mask_path_for_nif,
-        guess_glow_path_for_nif,
-        guess_normal_path_for_nif,
-        guess_parallax_path_for_nif,
-        patch_nif,
-        scan_nif,
-        validate_nif_for_parallax,
-    )
+    def _candidate_nif_patcher_search_dirs(
+        *,
+        script_path: Path | None = None,
+        executable_path: Path | None = None,
+        meipass_path: str | os.PathLike[str] | None = None,
+    ) -> tuple[Path, ...]:
+        candidates: list[Path] = []
+        seen: set[Path] = set()
+        raw_paths = (
+            Path(script_path).resolve().parent if script_path is not None else Path(__file__).resolve().parent,
+            Path(executable_path).resolve().parent
+            if executable_path is not None
+            else Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else None,
+            Path(meipass_path).resolve()
+            if meipass_path is not None
+            else Path(sys._MEIPASS).resolve() if getattr(sys, "_MEIPASS", None) else None,
+        )
+        for path in raw_paths:
+            if path is None or path in seen:
+                continue
+            seen.add(path)
+            candidates.append(path)
+        return tuple(candidates)
+
+
+    def _load_nif_patcher_exports(search_dirs: tuple[Path, ...] | None = None) -> dict[str, object]:
+        required_exports = (
+            "NifPatchOptions",
+            "find_nif_files",
+            "guess_cubemap_path_for_nif",
+            "guess_env_mask_path_for_nif",
+            "guess_glow_path_for_nif",
+            "guess_normal_path_for_nif",
+            "guess_parallax_path_for_nif",
+            "patch_nif",
+            "scan_nif",
+            "validate_nif_for_parallax",
+        )
+        last_error: ImportError | None = None
+        resolved_search_dirs = search_dirs or _candidate_nif_patcher_search_dirs()
+        for directory in resolved_search_dirs:
+            if not (directory / "nif_patcher.py").exists():
+                continue
+            directory_str = str(directory)
+            if directory_str not in sys.path:
+                sys.path.insert(0, directory_str)
+            try:
+                module = importlib.import_module("nif_patcher")
+            except ImportError as exc:
+                last_error = exc
+                sys.modules.pop("nif_patcher", None)
+                continue
+            missing_exports = [name for name in required_exports if not hasattr(module, name)]
+            if missing_exports:
+                sys.modules.pop("nif_patcher", None)
+                last_error = ImportError(
+                    f"nif_patcher.py is missing required exports: {', '.join(sorted(missing_exports))}"
+                )
+                continue
+            return {name: getattr(module, name) for name in required_exports}
+        if last_error is not None:
+            raise last_error
+        searched_locations = ", ".join(str(path) for path in resolved_search_dirs)
+        raise ImportError(
+            "nif_patcher.py was not found in supported locations"
+            + (f" ({searched_locations})" if searched_locations else "")
+        )
+
+
+    globals().update(_load_nif_patcher_exports())
     NIF_PATCHER_AVAILABLE = True
-except ImportError:
+    NIF_PATCHER_IMPORT_ERROR = ""
+except ImportError as exc:
     NIF_PATCHER_AVAILABLE = False
+    NIF_PATCHER_IMPORT_ERROR = str(exc)
 
 
 DDS_EXTENSION = ".dds"
@@ -9094,8 +9155,9 @@ if GUI_AVAILABLE:
             if not NIF_PATCHER_AVAILABLE:
                 messagebox.showerror(
                     "NIF Editor unavailable",
-                    "nif_patcher.py was not found alongside generate_textures.py.\n"
-                    "Make sure nif_patcher.py is in the same folder.",
+                    "The NIF patcher could not be loaded from the bundled app or beside generate_textures.exe.\n"
+                    "Reinstall/update the package so nif_patcher.py is included, or use the source package.\n\n"
+                    f"Details: {NIF_PATCHER_IMPORT_ERROR}",
                 )
                 return
 
