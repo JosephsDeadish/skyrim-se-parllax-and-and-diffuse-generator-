@@ -1874,13 +1874,13 @@ class TestFlagManagement(unittest.TestCase):
         info = scan_nif(nif)[0]
         self.assertTrue(info.flags2 & SLSF2_VERTEX_COLORS, "SLSF2_VERTEX_COLORS not set")
 
-    def test_enabling_parallax_clears_env_mapping_flag(self) -> None:
-        """SLSF1_ENVIRONMENT_MAPPING must be cleared when enabling parallax."""
+    def test_enabling_parallax_preserves_existing_env_mapping_flag(self) -> None:
+        """Parallax patching should not strip environment mapping from mixed workflows."""
         nif = _write_nif(self.tmp, flags1=SLSF1_ENVIRONMENT_MAPPING)
         patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
         info = scan_nif(nif)[0]
-        self.assertFalse(info.flags1 & SLSF1_ENVIRONMENT_MAPPING,
-                         "SLSF1_ENVIRONMENT_MAPPING should be cleared by parallax")
+        self.assertTrue(info.flags1 & SLSF1_ENVIRONMENT_MAPPING,
+                        "SLSF1_ENVIRONMENT_MAPPING should remain set alongside parallax")
 
     def test_enabling_parallax_clears_multi_layer_flag(self) -> None:
         """SLSF2_MULTI_LAYER_PARALLAX must be cleared when enabling parallax."""
@@ -1890,29 +1890,29 @@ class TestFlagManagement(unittest.TestCase):
         self.assertFalse(info.flags2 & SLSF2_MULTI_LAYER_PARALLAX,
                          "SLSF2_MULTI_LAYER_PARALLAX should be cleared by parallax")
 
-    def test_enabling_parallax_clears_pbr_flag(self) -> None:
-        """SLSF2_UNUSED01 (PBR flag) must be cleared when enabling parallax."""
+    def test_enabling_parallax_preserves_existing_pbr_flag(self) -> None:
+        """Parallax patching should not strip the TruePBR flag from mixed workflows."""
         nif = _write_nif(self.tmp, flags2=SLSF2_UNUSED01)
         patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
         info = scan_nif(nif)[0]
-        self.assertFalse(info.flags2 & SLSF2_UNUSED01,
-                         "SLSF2_UNUSED01 (PBR) should be cleared by parallax")
+        self.assertTrue(info.flags2 & SLSF2_UNUSED01,
+                        "SLSF2_UNUSED01 (PBR) should remain set alongside parallax")
 
-    def test_enabling_env_mapping_clears_parallax_flag(self) -> None:
-        """SLSF1_PARALLAX must be cleared when enabling env mapping."""
+    def test_enabling_env_mapping_preserves_parallax_flag(self) -> None:
+        """Environment mapping patching should not strip parallax from mixed workflows."""
         nif = _write_nif(self.tmp, flags1=SLSF1_PARALLAX)
         patch_nif(nif, NifPatchOptions(enable_env_mapping=True, backup=False))
         info = scan_nif(nif)[0]
-        self.assertFalse(info.flags1 & SLSF1_PARALLAX,
-                         "SLSF1_PARALLAX should be cleared by env mapping")
+        self.assertTrue(info.flags1 & SLSF1_PARALLAX,
+                        "SLSF1_PARALLAX should remain set alongside environment mapping")
 
-    def test_enabling_env_mapping_clears_pom_flag(self) -> None:
-        """SLSF1_PARALLAX_OCCLUSION must be cleared when enabling env mapping."""
+    def test_enabling_env_mapping_preserves_pom_flag(self) -> None:
+        """Environment mapping patching should not strip ENB POM from mixed workflows."""
         nif = _write_nif(self.tmp, flags1=SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION)
         patch_nif(nif, NifPatchOptions(enable_env_mapping=True, backup=False))
         info = scan_nif(nif)[0]
-        self.assertFalse(info.flags1 & SLSF1_PARALLAX_OCCLUSION,
-                         "SLSF1_PARALLAX_OCCLUSION should be cleared by env mapping")
+        self.assertTrue(info.flags1 & SLSF1_PARALLAX_OCCLUSION,
+                        "SLSF1_PARALLAX_OCCLUSION should remain set alongside environment mapping")
 
     def test_enabling_env_mapping_clears_multi_layer_flag(self) -> None:
         """SLSF2_MULTI_LAYER_PARALLAX must be cleared when enabling env mapping."""
@@ -1921,6 +1921,12 @@ class TestFlagManagement(unittest.TestCase):
         info = scan_nif(nif)[0]
         self.assertFalse(info.flags2 & SLSF2_MULTI_LAYER_PARALLAX,
                          "SLSF2_MULTI_LAYER_PARALLAX should be cleared by env mapping")
+
+    def test_enabling_pbr_sets_truepbr_flag(self) -> None:
+        nif = _write_nif(self.tmp)
+        patch_nif(nif, NifPatchOptions(enable_pbr=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertTrue(info.flags2 & SLSF2_UNUSED01, "SLSF2_UNUSED01 (PBR) should be set")
 
 
 class TestSkipConditions(unittest.TestCase):

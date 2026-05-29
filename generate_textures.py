@@ -1464,6 +1464,7 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "How files should look: _n stays purple/blue, _rmaos/_ramos should look like packed grayscale channels (not like a normal map).\n"
         "Treat _rmaos/_ramos as the core packed data map for this preset — do NOT substitute separate Blender-style _rough/_metallic/_ao files into slot 5.\n"
         "Mesh side must be TruePBR-enabled (BSLightingShaderProperty with SLSF2 Unused01/PBR flag, default shader type unless feature-specific overrides).\n"
+        "The NIF Editor's TruePBR preset now enables that PBR flag instead of stripping it during parallax/env-mask patching.\n"
         "Core mesh tuning usually comes from specular level / roughness scale / displacement scale (or equivalent JSON patch values).\n"
         "JSON sidecar should reference the generated base texture prefix (for example via 'texture'/'match_diffuse') and document channel mapping for your TruePBR setup.\n"
         "PGPatcher best-practice: keep PBR textures under textures\\pbr and place your patcher JSON files under a top-level PBRNifPatcher\\ folder.\n"
@@ -1494,6 +1495,7 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "enable_parallax": True,
         "enable_pom": False,
         "enable_env_mapping": False,
+        "enable_pbr": False,
         "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
@@ -1501,6 +1503,7 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "enable_parallax": True,
         "enable_pom": False,
         "enable_env_mapping": False,
+        "enable_pbr": False,
         "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
@@ -1508,6 +1511,7 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "enable_parallax": False,
         "enable_pom": False,
         "enable_env_mapping": False,
+        "enable_pbr": False,
         "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
@@ -1515,6 +1519,7 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "enable_parallax": False,
         "enable_pom": False,
         "enable_env_mapping": False,
+        "enable_pbr": False,
         "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
@@ -1522,6 +1527,7 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "enable_parallax": True,
         "enable_pom": False,
         "enable_env_mapping": False,
+        "enable_pbr": False,
         "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
@@ -1529,6 +1535,7 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "enable_parallax": True,
         "enable_pom": False,
         "enable_env_mapping": True,
+        "enable_pbr": False,
         "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
@@ -1536,6 +1543,7 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "enable_parallax": False,
         "enable_pom": False,
         "enable_env_mapping": False,
+        "enable_pbr": False,
         "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
@@ -1543,6 +1551,7 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "enable_parallax": True,
         "enable_pom": False,
         "enable_env_mapping": True,
+        "enable_pbr": False,
         "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
@@ -1550,6 +1559,7 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "enable_parallax": True,
         "enable_pom": False,
         "enable_env_mapping": True,
+        "enable_pbr": True,
         "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
@@ -1557,6 +1567,7 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "enable_parallax": True,
         "enable_pom": True,
         "enable_env_mapping": True,
+        "enable_pbr": False,
         "force_shader_type_3": True,
         "prefer_msn_normal": True,
     },
@@ -1847,6 +1858,7 @@ def get_nif_patch_option_warnings(
     enable_parallax: bool,
     enable_pom: bool,
     enable_env_mapping: bool,
+    enable_pbr: bool = False,
     force_shader_type_3: bool,
     parallax_texture_path: str = "",
     normal_texture_path: str = "",
@@ -1858,6 +1870,7 @@ def get_nif_patch_option_warnings(
     disable_pom: bool = False,
     disable_env_mapping: bool = False,
     disable_glow_map: bool = False,
+    disable_pbr: bool = False,
     clear_parallax_texture_path: bool = False,
     clear_normal_texture_path: bool = False,
     clear_env_mask_texture_path: bool = False,
@@ -1897,6 +1910,8 @@ def get_nif_patch_option_warnings(
         warnings.append("Both enable and disable environment mapping are checked.")
     if disable_glow_map and glow_texture_path.strip():
         warnings.append("Glow map is set to both disable and write a slot 2 path.")
+    if disable_pbr and enable_pbr:
+        warnings.append("Both enable and disable TruePBR/PBR flag are checked.")
     if clear_parallax_texture_path and parallax_texture_path.strip():
         warnings.append("Parallax slot is set to both clear and write a path.")
     if clear_normal_texture_path and normal_texture_path.strip():
@@ -1978,6 +1993,7 @@ def get_nif_patch_option_warnings(
 
     normal_lower = normal_texture_path.strip().replace("/", "\\").lower()
     env_lower = env_mask_texture_path.strip().replace("/", "\\").lower()
+    env_uses_truepbr_suffix = env_lower.endswith(tuple(TRUEPBR_ENV_MASK_SUFFIXES))
     if effective_profile == "enb":
         if normal_lower.endswith("_n.dds"):
             warnings.append("ENB workflows usually use _msn.dds in slot 1 instead of _n.dds.")
@@ -1993,6 +2009,12 @@ def get_nif_patch_option_warnings(
             warnings.append("TruePBR workflows usually use _n.dds normals, not _msn.dds.")
         if env_lower.endswith(("_cm.dds", "_c.dds")):
             warnings.append("TruePBR slot 5 usually uses _rmaos/_ramos, not _cm/_c.")
+        if not enable_pbr and not disable_pbr:
+            warnings.append("TruePBR workflows need the Community Shaders PBR flag enabled on the NIF.")
+    elif enable_pbr:
+        warnings.append("PBR flag is usually only needed for Community Shaders TruePBR workflows.")
+    if env_uses_truepbr_suffix and not enable_pbr and not disable_pbr:
+        warnings.append("RMAOS/ORM slot 5 textures usually need the Community Shaders PBR flag enabled.")
 
     return warnings
 
@@ -4472,6 +4494,7 @@ def build_nif_patch_options_for_generated_outputs(
     normalized_complex_format = _normalize_complex_format(complex_format)
     normalized_env_mask_mode = _normalize_env_mask_mode(env_mask_mode)
     normalized_parallax_mode = _normalize_parallax_mode_key(parallax_mode)
+    normalized_render_profile = _normalize_render_profile(render_profile)
     complex_output = outputs.get("complex_material")
     normal_output = outputs.get("normal")
     parallax_output = outputs.get("parallax")
@@ -4508,6 +4531,9 @@ def build_nif_patch_options_for_generated_outputs(
     # consumed correctly, so limiting upgrades to renderer profiles that
     # genuinely need them reduces the blast radius.
     profile_nif_defaults = resolve_nif_patch_defaults_for_render_profile(render_profile)
+    enable_pbr = bool(profile_nif_defaults.get("enable_pbr", False))
+    if normalized_render_profile == "auto":
+        enable_pbr = rmaos_output is not None
     force_shader_type_3 = (
         bool(profile_nif_defaults.get("force_shader_type_3", False)) and parallax_output is not None
     )
@@ -4518,6 +4544,7 @@ def build_nif_patch_options_for_generated_outputs(
         force_shader_type_3=force_shader_type_3,
         enable_env_mapping=enable_env_mapping,
         enable_glow_map=enable_glow_map,
+        enable_pbr=enable_pbr,
         parallax_texture_path=(
             _resolve_generated_dds_resource_path(parallax_output, source_texture=source_texture)
             if parallax_output is not None else None
@@ -4554,6 +4581,7 @@ def build_nif_patch_options_for_nif_editor(
     enable_pom: bool,
     enable_env_mapping: bool,
     enable_glow_map: bool,
+    enable_pbr: bool,
     parallax_scale: float | None,
     force_shader_type_3: bool,
     diffuse_texture_path: str = "",
@@ -4568,6 +4596,7 @@ def build_nif_patch_options_for_nif_editor(
     disable_pom: bool = False,
     disable_env_mapping: bool = False,
     disable_glow_map: bool = False,
+    disable_pbr: bool = False,
     clear_parallax_texture_path: bool = False,
     clear_normal_texture_path: bool = False,
     clear_env_mask_texture_path: bool = False,
@@ -4584,6 +4613,7 @@ def build_nif_patch_options_for_nif_editor(
         enable_pom=enable_pom,
         enable_env_mapping=enable_env_mapping,
         enable_glow_map=enable_glow_map,
+        enable_pbr=enable_pbr,
         parallax_scale=parallax_scale if (enable_parallax or enable_pom) else None,
         force_shader_type_3=force_shader_type_3,
         diffuse_texture_path=_clean_path(diffuse_texture_path),
@@ -4598,6 +4628,7 @@ def build_nif_patch_options_for_nif_editor(
         disable_pom=disable_pom,
         disable_env_mapping=disable_env_mapping,
         disable_glow_map=disable_glow_map,
+        disable_pbr=disable_pbr,
         clear_parallax_texture_path=clear_parallax_texture_path,
         clear_normal_texture_path=clear_normal_texture_path,
         clear_env_mask_texture_path=clear_env_mask_texture_path,
@@ -4680,9 +4711,9 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
     ),
     "_em": (
         "glow",
-        "Unsupported Glow Alias (_em)",
-        "Exporter alias that Skyrim SE ignores. "
-        "Rename emissive textures to _g.dds and keep them in Texture Slot 2.",
+        "Glow / Emissive Map (_em legacy alias)",
+        "Legacy emissive alias sometimes found in modding toolchains. Texture Slot 2 in the NIF. "
+        "This app recognizes it as a glow/emissive map, but _g.dds remains the preferred Skyrim-facing name for new outputs.",
     ),
     "_emis": (
         "glow",
@@ -4698,15 +4729,15 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
     ),
     "_glow": (
         "glow",
-        "Unsupported Glow Alias (_glow)",
-        "Exporter alias that Skyrim SE ignores. "
-        "Rename emissive textures to _g.dds and keep them in Texture Slot 2.",
+        "Glow / Emissive Map (_glow legacy alias)",
+        "Legacy emissive alias sometimes found in authoring/export pipelines. Texture Slot 2 in the NIF. "
+        "This app treats it as glow/emissive content, but _g.dds is still the preferred output name.",
     ),
     "_emit": (
         "glow",
-        "Unsupported Glow Alias (_emit)",
-        "Exporter alias that Skyrim SE ignores. "
-        "Rename emissive textures to _g.dds and keep them in Texture Slot 2.",
+        "Glow / Emissive Map (_emit legacy alias)",
+        "Legacy emissive alias sometimes found in authoring/export pipelines. Texture Slot 2 in the NIF. "
+        "This app treats it as glow/emissive content, but _g.dds is still the preferred output name.",
     ),
     "_emissive": (
         "glow",
@@ -8991,11 +9022,13 @@ if GUI_AVAILABLE:
                 enable_pom_var = tk.BooleanVar(value=False)
                 enable_env_var = tk.BooleanVar(value=False)
                 enable_glow_var = tk.BooleanVar(value=False)
+                enable_pbr_var = tk.BooleanVar(value=False)
                 force_type3_var = tk.BooleanVar(value=False)
                 disable_parallax_var = tk.BooleanVar(value=False)
                 disable_pom_var = tk.BooleanVar(value=False)
                 disable_env_var = tk.BooleanVar(value=False)
                 disable_glow_var = tk.BooleanVar(value=False)
+                disable_pbr_var = tk.BooleanVar(value=False)
                 clear_parallax_var = tk.BooleanVar(value=False)
                 clear_normal_var = tk.BooleanVar(value=False)
                 clear_env_var = tk.BooleanVar(value=False)
@@ -9056,6 +9089,12 @@ if GUI_AVAILABLE:
                     variable=enable_glow_var,
                 )
                 enable_glow_check.pack(side="left")
+                enable_pbr_check = ttk.Checkbutton(
+                    flag_row3,
+                    text="Enable TruePBR / PBR flag (CS only)",
+                    variable=enable_pbr_var,
+                )
+                enable_pbr_check.pack(side="left", padx=(12, 0))
 
                 misc_row = ttk.Frame(opt_frame)
                 misc_row.pack(fill="x", pady=(4, 0))
@@ -9069,11 +9108,12 @@ if GUI_AVAILABLE:
                         "Slot guide — Skyrim SE texture naming (NOT Blender defaults):\n"
                         "  Slot 0: diffuse — vanilla Skyrim uses just <stem>.dds (no _d/_diffuse/_albedo suffix; those are Blender exports, not Skyrim).\n"
                         "  Slot 1: normal — _n.dds for vanilla/CS/TruePBR, or _msn.dds for ENB complex material (MSN = Model Space Normal).\n"
-                        "  Slot 2: glow/emissive — _g.dds only. Skyrim SE ignores _em/_emit/_glow-style names.\n"
+                        "  Slot 2: glow/emissive — prefer _g.dds. Legacy aliases such as _em/_emit/_glow may exist in older pipelines, but this tool normalizes guidance toward _g.\n"
                         "  Slot 3: parallax height — _p.dds (greyscale height map). Used by all parallax workflows.\n"
                         "  Slot 4: cubemap/reflection — _e.dds, _env.dds, or _cube.dds.\n"
-                        "  Slot 5: env mask — _m.dds (vanilla greyscale or ENB RGBA), _cm.dds (CS Extended Materials RGBA), _rmaos.dds (TruePBR under textures\\pbr\\); not standalone _rough/_metallic/_ao exports.\n"
+                        "  Slot 5: env mask / packed data — _m.dds (vanilla greyscale or ENB RGBA), _cm.dds (CS Extended Materials RGBA), _rmaos.dds (TruePBR under textures\\pbr\\); not standalone _rough/_metallic/_ao exports.\n"
                         "Enable standard parallax for vanilla/community shaders/truepbr. Enable ENB POM only for ENB setups. "
+                        "Enable the TruePBR/PBR flag when using Community Shaders TruePBR _rmaos + JSON workflows. "
                         "Enable environment mapping only when slot 5 has a texture. Force shader type 3 to write stronger parallax scale."
                     ),
                     justify=tk.LEFT,
@@ -9117,6 +9157,12 @@ if GUI_AVAILABLE:
                     variable=disable_glow_var,
                 )
                 disable_glow_check.pack(side="left", padx=(12, 0))
+                disable_pbr_check = ttk.Checkbutton(
+                    unpatch_row,
+                    text="Disable TruePBR / PBR flag",
+                    variable=disable_pbr_var,
+                )
+                disable_pbr_check.pack(side="left", padx=(12, 0))
                 unpatch_row2 = ttk.Frame(unpatch_frame)
                 unpatch_row2.pack(fill="x", pady=(2, 0))
                 clear_parallax_check = ttk.Checkbutton(unpatch_row2, text="Clear slot 3 (_p)", variable=clear_parallax_var)
@@ -9163,6 +9209,7 @@ if GUI_AVAILABLE:
                     enable_pom_var.set(bool(defaults["enable_pom"]))
                     enable_env_var.set(bool(defaults["enable_env_mapping"]))
                     enable_glow_var.set(False)
+                    enable_pbr_var.set(bool(defaults.get("enable_pbr", False)))
                     force_type3_var.set(bool(defaults["force_shader_type_3"]))
                     option_warning_var.set("")
 
@@ -9174,6 +9221,7 @@ if GUI_AVAILABLE:
                         enable_parallax=enable_parallax_var.get(),
                         enable_pom=enable_pom_var.get(),
                         enable_env_mapping=enable_env_var.get(),
+                        enable_pbr=enable_pbr_var.get(),
                         force_shader_type_3=force_type3_var.get(),
                         diffuse_texture_path=diffuse_tex_var.get(),
                         parallax_texture_path=parallax_tex_var.get(),
@@ -9185,6 +9233,7 @@ if GUI_AVAILABLE:
                         disable_pom=disable_pom_var.get(),
                         disable_env_mapping=disable_env_var.get(),
                         disable_glow_map=disable_glow_var.get(),
+                        disable_pbr=disable_pbr_var.get(),
                         clear_parallax_texture_path=clear_parallax_var.get(),
                         clear_normal_texture_path=clear_normal_var.get(),
                         clear_env_mask_texture_path=clear_env_var.get(),
@@ -9217,11 +9266,13 @@ if GUI_AVAILABLE:
                     enable_pom_var,
                     enable_env_var,
                     enable_glow_var,
+                    enable_pbr_var,
                     force_type3_var,
                     disable_parallax_var,
                     disable_pom_var,
                     disable_env_var,
                     disable_glow_var,
+                    disable_pbr_var,
                     clear_parallax_var,
                     clear_normal_var,
                     clear_env_var,
@@ -9242,6 +9293,7 @@ if GUI_AVAILABLE:
                 self._add_tooltip(enable_pom_check, "🌊 ENB-only parallax occlusion mode. Also auto-enables standard parallax (required). Leave off for vanilla workflows.")
                 self._add_tooltip(enable_env_check, "🪞 Enables environment-mapping shader flag for reflective materials.")
                 self._add_tooltip(enable_glow_check, "✨ Enables glow/emissive flag so slot 2 _g textures render in-game.")
+                self._add_tooltip(enable_pbr_check, "🧪 Enables the Community Shaders TruePBR flag on the mesh so _rmaos + JSON workflows can render.")
                 self._add_tooltip(force_type3_check, "💪 Upgrades shader type so stronger parallax scale can be written.")
                 self._add_tooltip(backup_check, "🧷 Writes .nif.bak safety copies before patching.")
                 self._add_tooltip(dry_run_check, "🧪 Scan and simulate changes without writing file edits.")
@@ -9251,6 +9303,7 @@ if GUI_AVAILABLE:
                 self._add_tooltip(disable_pom_check, "🚫 Removes only ENB POM flag while keeping standard parallax if desired.")
                 self._add_tooltip(disable_env_check, "🚫 Removes environment-mapping flag from BSLightingShaderProperty.")
                 self._add_tooltip(disable_glow_check, "🚫 Removes emissive/glow shader flag from BSLightingShaderProperty.")
+                self._add_tooltip(disable_pbr_check, "🚫 Removes the Community Shaders TruePBR/PBR flag from BSLightingShaderProperty.")
                 self._add_tooltip(clear_parallax_check, "🧹 Clears texture slot 3 path from BSShaderTextureSet.")
                 self._add_tooltip(clear_normal_check, "🧹 Clears texture slot 1 path from BSShaderTextureSet.")
                 self._add_tooltip(clear_env_check, "🧹 Clears texture slot 5 path from BSShaderTextureSet.")
@@ -9817,6 +9870,7 @@ if GUI_AVAILABLE:
                         enable_pom=enable_pom_var.get(),
                         enable_env_mapping=enable_env_var.get(),
                         enable_glow_map=enable_glow_var.get(),
+                        enable_pbr=enable_pbr_var.get(),
                         parallax_scale=pscale_var.get(),
                         force_shader_type_3=force_type3_var.get(),
                         diffuse_texture_path=diffuse_tex_var.get(),
@@ -9831,6 +9885,7 @@ if GUI_AVAILABLE:
                         disable_pom=disable_pom_var.get(),
                         disable_env_mapping=disable_env_var.get(),
                         disable_glow_map=disable_glow_var.get(),
+                        disable_pbr=disable_pbr_var.get(),
                         clear_parallax_texture_path=clear_parallax_var.get(),
                         clear_normal_texture_path=clear_normal_var.get(),
                         clear_env_mask_texture_path=clear_env_var.get(),
@@ -9881,6 +9936,7 @@ if GUI_AVAILABLE:
                         disable_pom_var.get(),
                         disable_env_var.get(),
                         disable_glow_var.get(),
+                        disable_pbr_var.get(),
                         clear_parallax_var.get(),
                         clear_normal_var.get(),
                         clear_env_var.get(),
@@ -9899,6 +9955,7 @@ if GUI_AVAILABLE:
                         disable_pom=disable_pom_var.get(),
                         disable_env_mapping=disable_env_var.get(),
                         disable_glow_map=disable_glow_var.get(),
+                        disable_pbr=disable_pbr_var.get(),
                         clear_parallax_texture_path=clear_parallax_var.get(),
                         clear_normal_texture_path=clear_normal_var.get(),
                         clear_env_mask_texture_path=clear_env_var.get(),

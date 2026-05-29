@@ -1139,6 +1139,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(vanilla["enable_parallax"]))
         self.assertFalse(bool(vanilla["enable_pom"]))
         self.assertFalse(bool(vanilla["enable_env_mapping"]))
+        self.assertFalse(bool(vanilla["enable_pbr"]))
         self.assertFalse(bool(vanilla["force_shader_type_3"]))
         self.assertFalse(bool(vanilla["prefer_msn_normal"]))
 
@@ -1146,6 +1147,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(bool(performance["enable_parallax"]))
         self.assertFalse(bool(performance["enable_pom"]))
         self.assertFalse(bool(performance["enable_env_mapping"]))
+        self.assertFalse(bool(performance["enable_pbr"]))
         self.assertFalse(bool(performance["force_shader_type_3"]))
         self.assertFalse(bool(performance["prefer_msn_normal"]))
 
@@ -1153,6 +1155,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(bool(vr["enable_parallax"]))
         self.assertFalse(bool(vr["enable_pom"]))
         self.assertFalse(bool(vr["enable_env_mapping"]))
+        self.assertFalse(bool(vr["enable_pbr"]))
         self.assertFalse(bool(vr["force_shader_type_3"]))
         self.assertFalse(bool(vr["prefer_msn_normal"]))
 
@@ -1160,21 +1163,25 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(terrain["enable_parallax"]))
         self.assertFalse(bool(terrain["enable_pom"]))
         self.assertFalse(bool(terrain["enable_env_mapping"]))
+        self.assertFalse(bool(terrain["enable_pbr"]))
 
         architecture = resolve_nif_patch_defaults_for_render_profile("architecture")
         self.assertTrue(bool(architecture["enable_parallax"]))
         self.assertFalse(bool(architecture["enable_pom"]))
         self.assertTrue(bool(architecture["enable_env_mapping"]))
+        self.assertFalse(bool(architecture["enable_pbr"]))
 
         characters = resolve_nif_patch_defaults_for_render_profile("characters")
         self.assertFalse(bool(characters["enable_parallax"]))
         self.assertFalse(bool(characters["enable_pom"]))
         self.assertFalse(bool(characters["enable_env_mapping"]))
+        self.assertFalse(bool(characters["enable_pbr"]))
 
         enb = resolve_nif_patch_defaults_for_render_profile("enb")
         self.assertTrue(bool(enb["enable_parallax"]))
         self.assertTrue(bool(enb["enable_pom"]))
         self.assertTrue(bool(enb["enable_env_mapping"]))
+        self.assertFalse(bool(enb["enable_pbr"]))
         self.assertTrue(bool(enb["force_shader_type_3"]))
         self.assertTrue(bool(enb["prefer_msn_normal"]))
 
@@ -1182,6 +1189,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(truepbr["enable_parallax"]))
         self.assertFalse(bool(truepbr["enable_pom"]))
         self.assertTrue(bool(truepbr["enable_env_mapping"]))
+        self.assertTrue(bool(truepbr["enable_pbr"]))
         self.assertFalse(bool(truepbr["force_shader_type_3"]))
         self.assertFalse(bool(truepbr["prefer_msn_normal"]))
 
@@ -1208,6 +1216,18 @@ class GenerateTexturesTests(unittest.TestCase):
             env_mask_texture_path="",
         )
         self.assertFalse(any("empty slot 5 path" in text.lower() for text in warnings))
+
+    def test_get_nif_patch_option_warnings_truepbr_requires_pbr_flag(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="truepbr",
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            enable_pbr=False,
+            force_shader_type_3=False,
+            env_mask_texture_path="textures\\pbr\\stone_rmaos.dds",
+        )
+        self.assertTrue(any("pbr flag" in text.lower() for text in warnings))
 
     def test_get_nif_patch_option_warnings_uses_recommended_profile_when_selected_is_auto(self) -> None:
         warnings = get_nif_patch_option_warnings(
@@ -2646,6 +2666,19 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         self.assertFalse(options.force_shader_type_3)
         self.assertTrue(options.enable_parallax)
+        self.assertTrue(options.enable_pbr)
+
+    def test_build_nif_patch_options_auto_enables_pbr_for_rmaos_output(self) -> None:
+        options = build_nif_patch_options_for_generated_outputs(
+            None,
+            {"rmaos": Path("/tmp/textures/brick_rmaos.dds")},
+            complex_format="cm",
+            env_mask_mode="complex",
+            parallax_mode="standard",
+            parallax_scale=None,
+            render_profile="auto",
+        )
+        self.assertTrue(options.enable_pbr)
 
     def test_build_nif_patch_options_for_generated_outputs_uses_cm_for_env_slot(self) -> None:
         outputs = {"complex_material": Path("/tmp/textures/stone_cm.dds")}
@@ -2755,6 +2788,7 @@ class GenerateTexturesTests(unittest.TestCase):
             enable_pom=False,
             enable_env_mapping=False,
             enable_glow_map=False,
+            enable_pbr=True,
             parallax_scale=3.5,
             force_shader_type_3=True,
             diffuse_texture_path=" textures\\arch\\stone.dds ",
@@ -2769,6 +2803,7 @@ class GenerateTexturesTests(unittest.TestCase):
             disable_pom=True,
             disable_env_mapping=True,
             disable_glow_map=True,
+            disable_pbr=True,
             clear_parallax_texture_path=True,
             clear_normal_texture_path=True,
             clear_env_mask_texture_path=True,
@@ -2784,10 +2819,12 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIsNone(options.glow_texture_path)
         self.assertEqual(options.env_mask_texture_path, "textures\\arch\\stone_m.dds")
         self.assertEqual(options.cubemap_texture_path, "textures\\cubemaps\\chrome_e.dds")
+        self.assertTrue(options.enable_pbr)
         self.assertTrue(options.disable_parallax)
         self.assertTrue(options.disable_pom)
         self.assertTrue(options.disable_env_mapping)
         self.assertTrue(options.disable_glow_map)
+        self.assertTrue(options.disable_pbr)
         self.assertTrue(options.clear_parallax_texture_path)
         self.assertTrue(options.clear_normal_texture_path)
         self.assertTrue(options.clear_env_mask_texture_path)

@@ -172,7 +172,7 @@ The generated sidecar uses pgen/PBRNifPatcher-style texture entries (for example
 To ship a complete True PBR set, do both:
 
 1. **Mesh/config setup**  
-   Enable PBR on target meshes (`BSLightingShaderProperty` with `SLSF2 Unused01/PBR` flag), or ship PBRNifPatcher/PGPatcher JSON rules for user-side patching.
+   Enable PBR on target meshes (`BSLightingShaderProperty` with `SLSF2 Unused01/PBR` flag), or ship PBRNifPatcher/PGPatcher JSON rules for user-side patching. The app's NIF Editor TruePBR preset now enables that flag instead of stripping it during parallax/env-mask patching.
 2. **Texture setup**  
    Provide `<stem>.dds` diffuse/base color, `<stem>_n.dds` DirectX normal, and packed `<stem>_rmaos.dds`/`<stem>_ramos.dds` data in this tool (R=Roughness, G=Metallic, B=AO, A=Specular/other depending on config) — plus optional emission/parallax/feature maps. Do not treat standalone Blender-style `_rough`, `_metallic`, or `_ao` exports as the primary Skyrim runtime names for this workflow.
 
@@ -265,7 +265,7 @@ The tool recognises a mix of common Skyrim SE suffix conventions and workflow-sp
 | `_wt` | Wetness Mask (Community Shaders) | Workflow-specific (non-vanilla) greyscale mask used by Community Shaders wet-surface support in compatible mods/shaders. |
 | `_sm` | Dynamic Snow Mask (Community Shaders) | Workflow-specific (non-vanilla) greyscale mask used by Community Shaders Dynamic Snow in compatible mods/shaders. |
 
-Skyrim SE workflows in this project treat `_em`, `_emit`, and `_glow` glow suffixes as exporter aliases to rename to `_g`.
+Skyrim SE workflows in this project treat `_em`, `_emit`, and `_glow` glow suffixes as legacy/emitter aliases. The tool recognises them, but `_g.dds` remains the preferred output name for new Skyrim-facing assets.
 
 Batch folder mode scans subfolders and automatically skips generated variants (`_n`, `_p`, `_g`, `_glow`, `_em`, `_emis`, `_emit`, `_emissive`, `_m`, `_ao`, `_ambientocclusion`, `_rough`, `_roughness`, `_metal`, `_metallic`, `_metalness`, `_rmaos`, `_ramos`, `_orm`, `_orms`, `_mrao`, `_mra`, `_s`, `_sk`, `_msn`, `_cm`, `_c`, `_C`, `_wt`, `_sm`) so it only processes original source textures.
 

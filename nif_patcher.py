@@ -377,6 +377,9 @@ class NifPatchOptions:
     enable_glow_map:
         Set ``SLSF2_Glow_Map`` in Shader_Flags_2.  Set this together with
         *glow_texture_path* to activate an emissive/glow map in-game.
+    enable_pbr:
+        Set ``SLSF2 Unused01`` / Community Shaders TruePBR flag on the
+        ``BSLightingShaderProperty`` so ``_rmaos`` + JSON workflows render.
     parallax_texture_path:
         Texture path for slot 3. Absolute ``Data\\Textures`` picks are normalized
         to Skyrim-relative form (e.g. ``textures\\arch\\stone_p.dds``).
@@ -408,6 +411,8 @@ class NifPatchOptions:
         Clear ``SLSF1_Environment_Mapping``.
     disable_glow_map:
         Clear ``SLSF2_Glow_Map`` in Shader_Flags_2.
+    disable_pbr:
+        Clear ``SLSF2 Unused01`` / Community Shaders TruePBR flag.
     clear_parallax_texture_path:
         Empty texture slot 3 (parallax map).
     clear_normal_texture_path:
@@ -428,6 +433,7 @@ class NifPatchOptions:
     force_shader_type_3: bool = False
     enable_env_mapping: bool = False
     enable_glow_map: bool = False
+    enable_pbr: bool = False
     parallax_texture_path: str | None = None
     normal_texture_path: str | None = None
     glow_texture_path: str | None = None
@@ -440,6 +446,7 @@ class NifPatchOptions:
     disable_pom: bool = False
     disable_env_mapping: bool = False
     disable_glow_map: bool = False
+    disable_pbr: bool = False
     clear_parallax_texture_path: bool = False
     clear_normal_texture_path: bool = False
     clear_glow_texture_path: bool = False
@@ -1561,23 +1568,18 @@ def _apply_patches(
         # ---- Apply flag changes ----
         if enabling_parallax:
             new_flags1 |= SLSF1_PARALLAX
-            # Clear flags that conflict with vanilla parallax
-            new_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
             new_flags2 &= ~SLSF2_MULTI_LAYER_PARALLAX
-            new_flags2 &= ~SLSF2_UNUSED01        # PBR flag — conflicts with parallax
             # Vertex colours must be set for parallax meshes to render correctly
             new_flags2 |= SLSF2_VERTEX_COLORS
         if opts.enable_pom:
             new_flags1 |= SLSF1_PARALLAX_OCCLUSION
         if opts.enable_env_mapping:
             new_flags1 |= SLSF1_ENVIRONMENT_MAPPING
-            # Clear parallax flags — env mapping and parallax are mutually exclusive
-            new_flags1 &= ~SLSF1_PARALLAX
-            new_flags1 &= ~SLSF1_PARALLAX_OCCLUSION
             new_flags2 &= ~SLSF2_MULTI_LAYER_PARALLAX
-            new_flags2 &= ~SLSF2_UNUSED01
         if opts.enable_glow_map:
             new_flags2 |= SLSF2_GLOW_MAP
+        if opts.enable_pbr:
+            new_flags2 |= SLSF2_UNUSED01
         if opts.disable_parallax:
             new_flags1 &= ~SLSF1_PARALLAX
             new_flags1 &= ~SLSF1_PARALLAX_OCCLUSION
@@ -1587,6 +1589,8 @@ def _apply_patches(
             new_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
         if opts.disable_glow_map:
             new_flags2 &= ~SLSF2_GLOW_MAP
+        if opts.disable_pbr:
+            new_flags2 &= ~SLSF2_UNUSED01
 
         flags_changed = (new_flags1 != sp.flags1) or (new_flags2 != sp.flags2)
         if flags_changed:
@@ -1783,6 +1787,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
             opts.parallax_scale is not None and opts.parallax_scale > 0,
             opts.enable_env_mapping,
             opts.enable_glow_map,
+            opts.enable_pbr,
             opts.normal_texture_path is not None,
             opts.parallax_texture_path is not None,
             opts.glow_texture_path is not None,
@@ -1793,6 +1798,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
             opts.disable_pom,
             opts.disable_env_mapping,
             opts.disable_glow_map,
+            opts.disable_pbr,
             opts.clear_parallax_texture_path,
             opts.clear_normal_texture_path,
             opts.clear_glow_texture_path,
