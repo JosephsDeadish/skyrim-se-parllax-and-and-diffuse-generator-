@@ -119,7 +119,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "complex_format": "msn",
     "env_mask_mode": "standard",
     "parallax_mode": "standard",
-    "render_profile": "custom",
+    "render_profile": "vanilla",
     "emboss_mode": False,
     "relief_mode": False,
     "include_diffuse": True,
@@ -341,15 +341,7 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         state["parallax_mode"] = str(_GUI_STATE_DEFAULTS["parallax_mode"])
     render_profile = str(raw.get("render_profile", state["render_profile"]) or state["render_profile"]).strip().lower()
     if render_profile in {
-        "auto",
-        "custom",
-        "experimental",
         "vanilla",
-        "performance",
-        "vr",
-        "terrain",
-        "architecture",
-        "characters",
         "community_shaders",
         "community shaders",
         "truepbr",
@@ -360,8 +352,6 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
             state["render_profile"] = "community_shaders"
         elif render_profile == "true pbr":
             state["render_profile"] = "truepbr"
-        elif render_profile == "experimental":
-            state["render_profile"] = "custom"
         else:
             state["render_profile"] = render_profile
     else:
@@ -1398,12 +1388,15 @@ _RENDER_PROFILE_LABELS: dict[str, str] = {
     "architecture": "Architecture",
     "characters": "Characters / Skin",
     "community_shaders": "Community Shaders",
-    "truepbr": "Community Shaders TruePBR",
+    "truepbr": "Community Shaders PBR",
     "enb": "ENB",
 }
 _RENDER_PROFILE_CLI_VALUES: tuple[str, ...] = tuple(_RENDER_PROFILE_LABELS.keys())
-_RENDER_PROFILE_GUI_VALUES: tuple[str, ...] = ("custom",) + tuple(
-    profile for profile in _RENDER_PROFILE_CLI_VALUES if profile != "custom"
+_RENDER_PROFILE_GUI_VALUES: tuple[str, ...] = (
+    "vanilla",
+    "community_shaders",
+    "truepbr",
+    "enb",
 )
 
 _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
@@ -6711,7 +6704,7 @@ if GUI_AVAILABLE:
             self.emboss_mode_manual_override = False
             self.relief_mode_manual_override = False
             self.parallax_mode_var = tk.StringVar(value="standard")
-            self.render_profile_var = tk.StringVar(value="custom")
+            self.render_profile_var = tk.StringVar(value="vanilla")
             self.render_profile_suggestion_var = tk.StringVar(
                 value=build_render_profile_brief_message("vanilla")
             )
@@ -6966,15 +6959,9 @@ if GUI_AVAILABLE:
             self._add_tooltip(
                 _render_profile_label,
                 "🎯 Select target renderer preset.\n"
-                "custom = blank manual mode (nothing auto-enforced).\n"
                 "vanilla = safest stock Skyrim SE setup.\n"
-                "performance = low-end focused profile (lightweight defaults).\n"
-                "vr = conservative VR-focused profile.\n"
-                "terrain = conservative terrain-friendly defaults.\n"
-                "architecture = wall/ruin-friendly defaults with slot-5 mask enabled.\n"
-                "characters = skin/character-safe defaults with parallax disabled.\n"
                 "community_shaders = Community Shaders Extended Materials _cm/_c workflow.\n"
-                "truepbr = Community Shaders TruePBR JSON-driven _rmaos/_ramos workflow.\n"
+                "truepbr = Community Shaders PBR JSON-driven _rmaos/_ramos workflow.\n"
                 "enb = tool ENB preset (_msn + complex env-mask default + optional POM).\n"
                 "Presets keep format/mode/output defaults aligned to avoid conflicting combinations.\n"
                 "Community Shaders and ENB can both be installed, but each mesh/material should use one workflow at a time.\n"
@@ -6991,10 +6978,8 @@ if GUI_AVAILABLE:
             _render_profile_combo.bind("<<ComboboxSelected>>", self._on_render_profile_changed)
             self._add_tooltip(
                 _render_profile_combo,
-                "🎯 custom = blank manual mode.\n"
-                "auto = pick the best renderer preset for the current texture, but only when you change this control.\n"
-                "vanilla = safest defaults; performance = lightweight defaults; vr = conservative VR defaults; "
-                "terrain = stable terrain defaults; architecture = structure-focused defaults; characters = skin-safe defaults; "
+                "🎯 Pick one renderer workflow for this texture set.\n"
+                "vanilla = safest defaults; "
                 "community_shaders = _cm/_c; truepbr = _n + _rmaos/_ramos + JSON path; enb = tool ENB preset _msn + complex env default + optional POM.\n"
                 "Prefer canonical TruePBR names (_rmaos/_ramos), not generic _orm/_mrao aliases from Blender-style exports.\n"
                 "Presets keep format/mode/output defaults aligned to avoid conflicting combinations.\n"
@@ -7596,7 +7581,10 @@ if GUI_AVAILABLE:
             self.complex_format_var.set(str(state["complex_format"]))
             self.env_mask_mode_var.set(str(state["env_mask_mode"]))
             self.parallax_mode_var.set(str(state["parallax_mode"]))
-            self.render_profile_var.set(str(state["render_profile"]))
+            persisted_profile = _normalize_render_profile(str(state["render_profile"]))
+            if persisted_profile not in _RENDER_PROFILE_GUI_VALUES:
+                persisted_profile = "vanilla"
+            self.render_profile_var.set(persisted_profile)
             self.emboss_mode_var.set(bool(state["emboss_mode"]))
             self.relief_mode_var.set(bool(state["relief_mode"]))
             self.include_diffuse_var.set(bool(state["include_diffuse"]))
@@ -9184,8 +9172,8 @@ if GUI_AVAILABLE:
                 opt_frame = ttk.LabelFrame(win, text="Patch Options (what to enable)", padding=6)
                 opt_frame.pack(fill="x", padx=10, pady=4)
                 renderer_profile_var = tk.StringVar(value=_normalize_render_profile(self.render_profile_var.get()))
-                if renderer_profile_var.get() not in _RENDER_PROFILE_LABELS:
-                    renderer_profile_var.set("auto")
+                if renderer_profile_var.get() not in _RENDER_PROFILE_GUI_VALUES:
+                    renderer_profile_var.set("vanilla")
                 enable_parallax_var = tk.BooleanVar(value=True)
                 enable_pom_var = tk.BooleanVar(value=False)
                 enable_env_var = tk.BooleanVar(value=False)

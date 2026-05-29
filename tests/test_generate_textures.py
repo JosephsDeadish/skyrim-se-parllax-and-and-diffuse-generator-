@@ -17,6 +17,7 @@ from generate_textures import (
     _format_nif_result_row_details,
     _normalize_nif_result_details,
     _preferred_dds_formats_for_output,
+    _RENDER_PROFILE_GUI_VALUES,
     _run_cli,
     _normalize_gui_state,
     _save_with_dds_fallback,
@@ -357,7 +358,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(normalized["complex_format"]), "msn")
         self.assertEqual(str(normalized["env_mask_mode"]), "standard")
         self.assertEqual(str(normalized["parallax_mode"]), "occlusion (ENB/POM)")
-        self.assertEqual(str(normalized["render_profile"]), "custom")
+        self.assertEqual(str(normalized["render_profile"]), "vanilla")
         self.assertAlmostEqual(float(normalized["normal_strength"]), 8.0)
         self.assertAlmostEqual(float(normalized["parallax_strength"]), 0.1)
         self.assertEqual(int(normalized["glow_threshold"]), 255)
@@ -369,23 +370,29 @@ class GenerateTexturesTests(unittest.TestCase):
         normalized = _normalize_gui_state({"render_profile": "true pbr"})
         self.assertEqual(str(normalized["render_profile"]), "truepbr")
 
-    def test_normalize_gui_state_maps_experimental_alias_to_custom(self) -> None:
+    def test_normalize_gui_state_maps_non_renderer_aliases_to_vanilla(self) -> None:
         normalized = _normalize_gui_state({"render_profile": "experimental"})
-        self.assertEqual(str(normalized["render_profile"]), "custom")
+        self.assertEqual(str(normalized["render_profile"]), "vanilla")
 
-    def test_normalize_gui_state_accepts_performance_and_vr_profiles(self) -> None:
+    def test_normalize_gui_state_maps_performance_and_vr_profiles_to_vanilla(self) -> None:
         performance = _normalize_gui_state({"render_profile": "performance"})
         vr = _normalize_gui_state({"render_profile": "vr"})
-        self.assertEqual(str(performance["render_profile"]), "performance")
-        self.assertEqual(str(vr["render_profile"]), "vr")
+        self.assertEqual(str(performance["render_profile"]), "vanilla")
+        self.assertEqual(str(vr["render_profile"]), "vanilla")
 
-    def test_normalize_gui_state_accepts_extended_render_profiles(self) -> None:
+    def test_normalize_gui_state_maps_extended_non_renderer_profiles_to_vanilla(self) -> None:
         terrain = _normalize_gui_state({"render_profile": "terrain"})
         architecture = _normalize_gui_state({"render_profile": "architecture"})
         characters = _normalize_gui_state({"render_profile": "characters"})
-        self.assertEqual(str(terrain["render_profile"]), "terrain")
-        self.assertEqual(str(architecture["render_profile"]), "architecture")
-        self.assertEqual(str(characters["render_profile"]), "characters")
+        self.assertEqual(str(terrain["render_profile"]), "vanilla")
+        self.assertEqual(str(architecture["render_profile"]), "vanilla")
+        self.assertEqual(str(characters["render_profile"]), "vanilla")
+
+    def test_gui_render_profile_values_only_include_renderer_choices(self) -> None:
+        self.assertEqual(
+            _RENDER_PROFILE_GUI_VALUES,
+            ("vanilla", "community_shaders", "truepbr", "enb"),
+        )
 
     def test_generate_diffuse_returns_rgb_same_size(self) -> None:
         diffuse = generate_diffuse(_sample_image())
@@ -1352,7 +1359,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("Terrain:", message)
         self.assertIn("Architecture:", message)
         self.assertIn("Characters / Skin:", message)
-        self.assertIn("Community Shaders TruePBR:", message)
+        self.assertIn("Community Shaders PBR:", message)
         self.assertIn("ENB:", message)
         self.assertIn("Auto-check:", message)
         self.assertIn("_c.dds", message)
