@@ -1145,6 +1145,16 @@ class TestHelpers(unittest.TestCase):
         self.assertIn("b.nif", names)
         self.assertNotIn("skip.txt", names)
 
+    def test_find_nif_files_recursive_case_insensitive_extension(self) -> None:
+        sub = self.tmp / "sub"
+        sub.mkdir()
+        (self.tmp / "upper.NIF").write_bytes(b"")
+        (sub / "mixed.NiF").write_bytes(b"")
+        found = find_nif_files(self.tmp)
+        names = [f.name for f in found]
+        self.assertIn("upper.NIF", names)
+        self.assertIn("mixed.NiF", names)
+
 
 # ---------------------------------------------------------------------------
 # Tests: glow / diffuse texture slot patching

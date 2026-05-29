@@ -2203,8 +2203,12 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
 
 
 def find_nif_files(root: Path) -> list[Path]:
-    """Return all ``.nif`` files under *root* (recursive, sorted)."""
-    return sorted(root.rglob("*.nif"))
+    """Return all ``.nif`` files under *root* (recursive, case-insensitive, sorted)."""
+    return sorted(
+        p
+        for p in root.rglob("*")
+        if p.is_file() and p.suffix.lower() == ".nif"
+    )
 
 
 def guess_parallax_path_for_nif(nif_path: Path) -> str | None:

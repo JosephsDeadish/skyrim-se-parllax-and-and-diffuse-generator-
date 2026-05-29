@@ -1938,9 +1938,9 @@ def get_nif_patch_option_warnings(
         ),
         ("Parallax slot", parallax_texture_path, ("_p.dds",)),
         ("Normal slot", normal_texture_path, ("_n.dds", "_msn.dds")),
-        ("Glow slot", glow_texture_path, ("_g.dds", "_sk.dds")),
+        ("Glow slot", glow_texture_path, ("_g.dds",)),
         ("Cubemap slot", cubemap_texture_path, ("_e.dds", "_cube.dds", "_env.dds", "_envmap.dds")),
-        ("Env mask slot", env_mask_texture_path, ("_m.dds", "_mask.dds", "_envmask.dds", "_cm.dds", "_c.dds", "_rmaos.dds", "_ramos.dds")),
+        ("Env mask slot", env_mask_texture_path, ("_m.dds", "_cm.dds", "_c.dds", "_rmaos.dds", "_ramos.dds")),
     )
     for rule in path_rules:
         label, raw_path, suffixes, *extra = rule
@@ -1963,11 +1963,17 @@ def get_nif_patch_option_warnings(
         if is_diffuse_rule:
             if lowered.endswith(lowered_suffixes):
                 warnings.append(
-                    f"{label} path looks like a generated map type (_n/_msn/_p/_g/_m/_cm/_c/_rmaos/_ramos/_ao/_rough/_wt/_sm); slot 0 should usually be diffuse/albedo."
+                    f"{label} path looks like a generated map type (_n/_msn/_p/_g/_m/_cm/_rmaos/_ramos/_ao/_rough/_wt/_sm); slot 0 should usually be diffuse/albedo."
                 )
             continue
         if not lowered.endswith(lowered_suffixes):
             warnings.append(f"{label} path should usually end with {', '.join(suffixes)}.")
+        if label == "Glow slot" and lowered.endswith("_sk.dds"):
+            warnings.append("Glow slot path uses legacy _sk suffix; Skyrim SE canonical emissive suffix is _g.dds.")
+        if label == "Env mask slot" and lowered.endswith(("_c.dds", "_mask.dds", "_envmask.dds")):
+            warnings.append(
+                "Env mask slot path uses a legacy alias; prefer _m.dds (vanilla/ENB), _cm.dds (Community Shaders), or _rmaos.dds (TruePBR)."
+            )
 
     normal_lower = normal_texture_path.strip().replace("/", "\\").lower()
     env_lower = env_mask_texture_path.strip().replace("/", "\\").lower()
@@ -9008,7 +9014,7 @@ if GUI_AVAILABLE:
                         "  Slot 2: glow/emissive — _g.dds only. Skyrim SE ignores _em/_emit/_glow-style names.\n"
                         "  Slot 3: parallax height — _p.dds (greyscale height map). Used by all parallax workflows.\n"
                         "  Slot 4: cubemap/reflection — _e.dds, _env.dds, or _cube.dds.\n"
-                        "  Slot 5: env mask — _m.dds (vanilla greyscale or ENB RGBA), _cm.dds/_c.dds (CS Extended Materials RGBA), _rmaos.dds (TruePBR under textures\\pbr\\).\n"
+                        "  Slot 5: env mask — _m.dds (vanilla greyscale or ENB RGBA), _cm.dds (CS Extended Materials RGBA), _rmaos.dds (TruePBR under textures\\pbr\\).\n"
                         "Enable standard parallax for vanilla/community shaders/truepbr. Enable ENB POM only for ENB setups. "
                         "Enable environment mapping only when slot 5 has a texture. Force shader type 3 to write stronger parallax scale."
                     ),
@@ -9314,7 +9320,7 @@ if GUI_AVAILABLE:
                     "Env mask / _m/_cm/_rmaos:",
                     env_mask_tex_var,
                     "Select environment mask texture",
-                    "🪞 Slot 5 environment mask path. Usually _m.dds (standard), _cm/_c.dds (CS complex), or _rmaos.dds (TruePBR; usually under textures\\pbr\\...).",
+                    "🪞 Slot 5 environment mask path. Usually _m.dds (standard), _cm.dds (CS complex), or _rmaos.dds (TruePBR; usually under textures\\pbr\\...).",
                 )
 
                 def _auto_fill_paths() -> None:
@@ -9635,14 +9641,22 @@ if GUI_AVAILABLE:
                     _is_running[0] = False
                     _set_ops_active(True)
 
+                def _queue_ui_update(callback: Callable[[], None]) -> None:
+                    try:
+                        if not win.winfo_exists():
+                            return
+                        win.after(0, callback)
+                    except Exception:
+                        return
+
                 def _safe_add_row(status: str, file_name: str, details: str) -> None:
-                    win.after(0, lambda s=status, fn=file_name, d=details: _add_result_row(s, fn, d))
+                    _queue_ui_update(lambda s=status, fn=file_name, d=details: _add_result_row(s, fn, d))
 
                 def _safe_status(msg: str) -> None:
-                    win.after(0, lambda m=msg: status_var.set(m))
+                    _queue_ui_update(lambda m=msg: status_var.set(m))
 
                 def _safe_progress(val: float) -> None:
-                    win.after(0, lambda v=val: progress_var.set(v))
+                    _queue_ui_update(lambda v=val: progress_var.set(v))
 
                 # ---- end threading helpers -------------------------------------------
 
@@ -9652,7 +9666,7 @@ if GUI_AVAILABLE:
                         return []
                     root_path = Path(path_value)
                     if root_path.is_dir():
-                        return list(root_path.rglob("*.nif"))
+                        return find_nif_files(root_path)
                     if root_path.suffix.lower() == ".nif":
                         return [root_path]
                     return []
