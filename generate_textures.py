@@ -10119,14 +10119,23 @@ if GUI_AVAILABLE:
                                 combined_detail_lines = list(validation.issues[:4])
                                 if validation.suggestions:
                                     combined_detail_lines.extend(f"Suggestion: {text}" for text in validation.suggestions[:2])
-                                if validation.ready_count == validation.shader_count and validation.shader_count > 0:
+                                if validation.skip_reasons:
+                                    combined_detail_lines.extend(f"Skip: {text}" for text in validation.skip_reasons[:2])
+                                if validation.has_havok:
+                                    combined_detail_lines.insert(0, "⚠ Havok animation graph — parallax will crash in-game")
+                                if validation.ready_count == validation.shader_count and validation.shader_count > 0 and validation.skip_count == 0:
                                     row_args = ("OK", nif.name, f"{validation.ready_count}/{validation.shader_count} shader(s) already parallax-ready")
                                 elif validation.shader_count == 0:
                                     detail = "\n".join(combined_detail_lines) if combined_detail_lines else "No BSLightingShaderProperty found."
                                     row_args = ("SKIP", nif.name, detail)
+                                elif validation.skip_count == validation.shader_count:
+                                    skip_summary = f"{validation.skip_count}/{validation.shader_count} shader(s) skipped (incompatible)."
+                                    detail = f"{skip_summary}\n" + "\n".join(combined_detail_lines[:4])
+                                    row_args = ("SKIP", nif.name, detail.strip())
                                 else:
+                                    skip_info = f" ({validation.skip_count} skipped)" if validation.skip_count else ""
                                     issue_text = "\n".join(combined_detail_lines[:6]) if combined_detail_lines else "Needs patching."
-                                    row_args = ("WARN", nif.name, f"{validation.ready_count}/{validation.shader_count} ready.\n{issue_text}")
+                                    row_args = ("WARN", nif.name, f"{validation.ready_count}/{validation.shader_count} ready{skip_info}.\n{issue_text}")
                             except Exception as exc:
                                 row_args = ("FAIL", nif.name, f"Scan failed: {exc}")
                             _safe_add_row(*row_args)
