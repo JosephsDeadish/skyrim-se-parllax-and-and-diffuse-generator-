@@ -1458,6 +1458,42 @@ def _upgrade_block_to_type3(
     return buf.to_bytes()
 
 
+def _should_enable_parallax_on_shader(
+    sp: _ShaderPropBlock,
+    *,
+    effective_parallax: bool,
+    opts: NifPatchOptions,
+    shader_to_shape: dict[int, _ShapeBlock],
+    has_havok: bool,
+) -> bool:
+    if not effective_parallax or opts.disable_parallax:
+        return False
+    if has_havok and opts.skip_if_havok:
+        return False
+    if opts.skip_incompatible_shader_types and sp.shader_type not in (
+        SHADER_TYPE_DEFAULT,
+        SHADER_TYPE_HEIGHTMAP,
+        SHADER_TYPE_ENVMAP,
+    ):
+        return False
+    if opts.skip_decal and ((sp.flags1 & SLSF1_DECAL) or (sp.flags1 & SLSF1_DYNAMIC_DECAL)):
+        return False
+    if opts.skip_lighting_effects and (
+        (sp.flags2 & SLSF2_SOFT_LIGHTING)
+        or (sp.flags2 & SLSF2_RIM_LIGHTING)
+        or (sp.flags2 & SLSF2_BACK_LIGHTING)
+    ):
+        return False
+    if opts.skip_anisotropic and (sp.flags2 & SLSF2_ANISOTROPIC_LIGHTING):
+        return False
+    shape = shader_to_shape.get(sp.block_index)
+    if opts.skip_if_skinned and shape is not None and shape.skin_instance_ref >= 0:
+        return False
+    if opts.skip_if_alpha and shape is not None and shape.alpha_property_ref >= 0:
+        return False
+    return True
+
+
 def _apply_patches(
     data: bytes,
     header: _NifHeader,
@@ -1469,6 +1505,16 @@ def _apply_patches(
     upgraded = 0
     effective_parallax = opts.enable_parallax or opts.enable_pom
     want_scale = opts.parallax_scale is not None and opts.parallax_scale > 0
+    shader_to_shape: dict[int, _ShapeBlock] = {}
+    has_havok = False
+    need_shape_map = (
+        opts.skip_if_havok
+        or opts.skip_if_skinned
+        or opts.skip_if_alpha
+        or (opts.force_shader_type_3 and effective_parallax and want_scale)
+    )
+    if need_shape_map:
+        shader_to_shape, has_havok = _build_shape_map(data, header)
 
     # --- Phase 1: block upgrades (type 0 → 3) ------------------------------
     if opts.force_shader_type_3 and effective_parallax and want_scale:
@@ -1483,7 +1529,18 @@ def _apply_patches(
                 raise RuntimeError("Header corrupted after type-3 upgrade.")
             fresh_props, _, _ = _build_block_map(data, chk_header)
             sp_to_upgrade = next(
-                (sp for sp in fresh_props if sp.shader_type == SHADER_TYPE_DEFAULT),
+                (
+                    sp
+                    for sp in fresh_props
+                    if sp.shader_type == SHADER_TYPE_DEFAULT
+                    and _should_enable_parallax_on_shader(
+                        sp,
+                        effective_parallax=effective_parallax,
+                        opts=opts,
+                        shader_to_shape=shader_to_shape,
+                        has_havok=has_havok,
+                    )
+                ),
                 None,
             )
             if sp_to_upgrade is None:
@@ -1507,15 +1564,6 @@ def _apply_patches(
     buf = _Buf(data)
     props_patched = 0
 
-    # Build shape map and check for Havok when any skip option is enabled
-    shader_to_shape: dict[int, _ShapeBlock] = {}
-    has_havok = False
-    need_shape_map = (
-        opts.skip_if_havok or opts.skip_if_skinned or opts.skip_if_alpha
-    )
-    if need_shape_map:
-        shader_to_shape, has_havok = _build_shape_map(data, header)
-
     # NIFs with Havok-animated skeletons must not receive parallax — doing so
     # causes an EXCEPTION_ACCESS_VIOLATION crash at runtime.
     if has_havok and opts.skip_if_havok and effective_parallax:
@@ -1528,44 +1576,13 @@ def _apply_patches(
         new_flags2 = sp.flags2
 
         # ---- Determine whether parallax is safe to enable on this block ----
-        enabling_parallax = effective_parallax and not opts.disable_parallax
-        if enabling_parallax:
-            # Skip incompatible shader types (not Default/Parallax/EnvMap)
-            if opts.skip_incompatible_shader_types and sp.shader_type not in (
-                SHADER_TYPE_DEFAULT, SHADER_TYPE_HEIGHTMAP, SHADER_TYPE_ENVMAP
-            ):
-                enabling_parallax = False
-
-            # Skip decal shaders — parallax+decal produces visual glitches
-            if enabling_parallax and opts.skip_decal:
-                if (new_flags1 & SLSF1_DECAL) or (new_flags1 & SLSF1_DYNAMIC_DECAL):
-                    enabling_parallax = False
-
-            # Skip shaders with lighting modes incompatible with parallax
-            if enabling_parallax and opts.skip_lighting_effects:
-                if (
-                    (new_flags2 & SLSF2_SOFT_LIGHTING)
-                    or (new_flags2 & SLSF2_RIM_LIGHTING)
-                    or (new_flags2 & SLSF2_BACK_LIGHTING)
-                ):
-                    enabling_parallax = False
-
-            # Skip anisotropic-lit shaders
-            if enabling_parallax and opts.skip_anisotropic:
-                if new_flags2 & SLSF2_ANISOTROPIC_LIGHTING:
-                    enabling_parallax = False
-
-            # Skip skinned shapes (NiSkinInstance / BSDismemberSkinInstance)
-            if enabling_parallax and opts.skip_if_skinned:
-                shape = shader_to_shape.get(sp.block_index)
-                if shape is not None and shape.skin_instance_ref >= 0:
-                    enabling_parallax = False
-
-            # Skip alpha-property shapes (NiAlphaProperty)
-            if enabling_parallax and opts.skip_if_alpha:
-                shape = shader_to_shape.get(sp.block_index)
-                if shape is not None and shape.alpha_property_ref >= 0:
-                    enabling_parallax = False
+        enabling_parallax = _should_enable_parallax_on_shader(
+            sp,
+            effective_parallax=effective_parallax,
+            opts=opts,
+            shader_to_shape=shader_to_shape,
+            has_havok=has_havok,
+        )
 
         # ---- Apply flag changes ----
         if enabling_parallax:
@@ -1573,7 +1590,7 @@ def _apply_patches(
             new_flags2 &= ~SLSF2_MULTI_LAYER_PARALLAX
             # Vertex colours must be set for parallax meshes to render correctly
             new_flags2 |= SLSF2_VERTEX_COLORS
-        if opts.enable_pom:
+        if opts.enable_pom and enabling_parallax:
             new_flags1 |= SLSF1_PARALLAX_OCCLUSION
         if opts.enable_env_mapping:
             new_flags1 |= SLSF1_ENVIRONMENT_MAPPING

@@ -1110,6 +1110,25 @@ class TestForceShaderType3(unittest.TestCase):
         self.assertEqual(len(infos), 1)
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
 
+    def test_skip_if_havok_does_not_upgrade_default_shader(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT, add_havok=True)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                enable_pom=True,
+                parallax_scale=5.0,
+                force_shader_type_3=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertEqual(result.blocks_upgraded_to_type3, 0)
+        info = scan_nif(nif)[0]
+        self.assertEqual(info.shader_type, SHADER_TYPE_DEFAULT)
+        self.assertFalse(info.has_parallax_flag)
+        self.assertFalse(info.has_pom_flag)
+
 
 
 # ---------------------------------------------------------------------------
@@ -2000,6 +2019,13 @@ class TestSkipConditions(unittest.TestCase):
         patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
         info = scan_nif(nif)[0]
         self.assertFalse(info.has_parallax_flag, "Havok NIF must not get parallax")
+
+    def test_skip_if_havok_blocks_pom_flag(self) -> None:
+        nif = self._write(add_havok=True)
+        patch_nif(nif, NifPatchOptions(enable_pom=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.has_parallax_flag, "Havok NIF must not get parallax when POM is requested")
+        self.assertFalse(info.has_pom_flag, "Havok NIF must not get POM when parallax is unsafe")
 
     def test_skip_if_skinned(self) -> None:
         """Shapes with a skin instance must not receive parallax."""

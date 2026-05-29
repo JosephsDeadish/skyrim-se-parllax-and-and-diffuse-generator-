@@ -17,6 +17,7 @@ from generate_textures import (
     _compute_tooltip_position,
     _candidate_nif_patcher_search_dirs,
     _format_nif_result_row_details,
+    _normalize_nif_editor_texture_input_path,
     _load_nif_patcher_exports,
     _normalize_nif_result_details,
     _preferred_dds_formats_for_output,
@@ -78,6 +79,7 @@ from generate_textures import (
     render_profile_has_locked_controls,
     restore_nif_backups,
     resolve_env_mask_complex_workflow,
+    resolve_nif_editor_patch_options_for_target,
     load_gui_state,
     main,
     parse_args,
@@ -3017,6 +3019,64 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(options.normal_texture_path, r"textures\meshes\shared\stone_n.dds")
         self.assertEqual(options.env_mask_texture_path, r"textures\architecture\stone\stone_m.dds")
         self.assertEqual(options.cubemap_texture_path, r"textures\cubemaps\chrome_e.dds")
+
+    def test_normalize_nif_editor_texture_input_path_returns_none_for_blank(self) -> None:
+        self.assertIsNone(_normalize_nif_editor_texture_input_path("   "))
+
+    def test_resolve_nif_editor_patch_options_for_target_autofills_missing_paths(self) -> None:
+        base_options = build_nif_patch_options_for_nif_editor(
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            enable_glow_map=True,
+            enable_pbr=True,
+            parallax_scale=2.0,
+            force_shader_type_3=False,
+            backup=False,
+        )
+
+        with mock.patch("generate_textures.guess_parallax_path_for_nif", return_value=r"textures\arch\stone_p.dds"), \
+             mock.patch("generate_textures.guess_normal_path_for_nif", return_value=r"textures\arch\stone_msn.dds"), \
+             mock.patch("generate_textures.guess_glow_path_for_nif", return_value=r"textures\arch\stone_g.dds"), \
+             mock.patch("generate_textures.guess_env_mask_path_for_nif", return_value=r"textures\arch\stone_rmaos.dds"), \
+             mock.patch("generate_textures.guess_cubemap_path_for_nif", return_value=r"textures\cubemaps\stone_e.dds"):
+            resolved, notes = resolve_nif_editor_patch_options_for_target(
+                Path("example.nif"),
+                base_options,
+                prefer_msn_normal=True,
+                preferred_env_mask_suffix="_rmaos.dds",
+            )
+
+        self.assertEqual(resolved.parallax_texture_path, r"textures\arch\stone_p.dds")
+        self.assertEqual(resolved.normal_texture_path, r"textures\arch\stone_msn.dds")
+        self.assertEqual(resolved.glow_texture_path, r"textures\arch\stone_g.dds")
+        self.assertEqual(resolved.env_mask_texture_path, r"textures\arch\stone_rmaos.dds")
+        self.assertEqual(resolved.cubemap_texture_path, r"textures\cubemaps\stone_e.dds")
+        self.assertTrue(any("slot 3 parallax path" in note for note in notes))
+
+    def test_resolve_nif_editor_patch_options_for_target_keeps_manual_paths(self) -> None:
+        base_options = build_nif_patch_options_for_nif_editor(
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=False,
+            enable_glow_map=False,
+            enable_pbr=False,
+            parallax_scale=2.0,
+            force_shader_type_3=False,
+            parallax_texture_path=r"textures\manual\stone_p.dds",
+            normal_texture_path=r"textures\manual\stone_n.dds",
+            backup=False,
+        )
+
+        with mock.patch("generate_textures.guess_parallax_path_for_nif") as guess_parallax, \
+             mock.patch("generate_textures.guess_normal_path_for_nif") as guess_normal:
+            resolved, notes = resolve_nif_editor_patch_options_for_target(Path("example.nif"), base_options)
+
+        self.assertEqual(resolved.parallax_texture_path, r"textures\manual\stone_p.dds")
+        self.assertEqual(resolved.normal_texture_path, r"textures\manual\stone_n.dds")
+        self.assertEqual(notes, ())
+        guess_parallax.assert_not_called()
+        guess_normal.assert_not_called()
 
     def test_auto_patch_related_nifs_for_texture_patches_all_matches(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

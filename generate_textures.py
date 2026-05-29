@@ -15,7 +15,7 @@ import tempfile
 import threading
 import uuid
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Mapping
 
@@ -4781,6 +4781,87 @@ def build_nif_patch_options_for_generated_outputs(
     )
 
 
+def _normalize_nif_editor_texture_input_path(value: str) -> str | None:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return None
+    normalized = cleaned.replace("/", "\\")
+    lowered = normalized.lower()
+    marker = "textures\\"
+    marker_index = lowered.rfind(marker)
+    if marker_index != -1:
+        normalized = "textures\\" + normalized[marker_index + len(marker):]
+    elif lowered.startswith("data\\textures\\"):
+        normalized = "textures\\" + normalized[len("data\\textures\\"):]
+    else:
+        normalized = "textures\\" + normalized.lstrip("\\")
+    return _coerce_generated_resource_path_to_dds(normalized)
+
+
+def resolve_nif_editor_patch_options_for_target(
+    nif_path: Path,
+    base_options: NifPatchOptions,
+    *,
+    prefer_msn_normal: bool = False,
+    preferred_env_mask_suffix: str = "_m.dds",
+) -> tuple[NifPatchOptions, tuple[str, ...]]:
+    resolved = replace(base_options)
+    notes: list[str] = []
+    effective_parallax = base_options.enable_parallax or base_options.enable_pom
+
+    def _fill_path(
+        attr_name: str,
+        *,
+        enabled: bool,
+        clear_requested: bool,
+        guesser: Callable[[], str | None],
+        note_label: str,
+    ) -> None:
+        if not enabled or clear_requested or getattr(resolved, attr_name):
+            return
+        guessed_path = _normalize_nif_editor_texture_input_path(guesser() or "")
+        if guessed_path:
+            setattr(resolved, attr_name, guessed_path)
+            notes.append(f"Auto-filled {note_label}: {guessed_path}")
+
+    _fill_path(
+        "parallax_texture_path",
+        enabled=effective_parallax or bool(base_options.parallax_scale),
+        clear_requested=base_options.clear_parallax_texture_path,
+        guesser=lambda: guess_parallax_path_for_nif(nif_path),
+        note_label="slot 3 parallax path",
+    )
+    _fill_path(
+        "normal_texture_path",
+        enabled=effective_parallax or base_options.enable_pbr,
+        clear_requested=base_options.clear_normal_texture_path,
+        guesser=lambda: guess_normal_path_for_nif(nif_path, msn=prefer_msn_normal),
+        note_label="slot 1 normal path",
+    )
+    _fill_path(
+        "glow_texture_path",
+        enabled=base_options.enable_glow_map,
+        clear_requested=base_options.clear_glow_texture_path,
+        guesser=lambda: guess_glow_path_for_nif(nif_path),
+        note_label="slot 2 glow path",
+    )
+    _fill_path(
+        "env_mask_texture_path",
+        enabled=base_options.enable_env_mapping,
+        clear_requested=base_options.clear_env_mask_texture_path,
+        guesser=lambda: guess_env_mask_path_for_nif(nif_path, preferred_suffix=preferred_env_mask_suffix),
+        note_label="slot 5 env mask path",
+    )
+    _fill_path(
+        "cubemap_texture_path",
+        enabled=base_options.enable_env_mapping,
+        clear_requested=base_options.clear_cubemap_texture_path,
+        guesser=lambda: guess_cubemap_path_for_nif(nif_path),
+        note_label="slot 4 cubemap path",
+    )
+    return resolved, tuple(notes)
+
+
 def build_nif_patch_options_for_nif_editor(
     *,
     enable_parallax: bool,
@@ -4810,22 +4891,6 @@ def build_nif_patch_options_for_nif_editor(
     clear_diffuse_texture_path: bool = False,
     clear_cubemap_texture_path: bool = False,
 ) -> NifPatchOptions:
-    def _clean_path(value: str) -> str | None:
-        cleaned = str(value or "").strip()
-        if not cleaned:
-            return None
-        normalized = cleaned.replace("/", "\\")
-        lowered = normalized.lower()
-        marker = "textures\\"
-        marker_index = lowered.rfind(marker)
-        if marker_index != -1:
-            normalized = "textures\\" + normalized[marker_index + len(marker):]
-        elif lowered.startswith("data\\textures\\"):
-            normalized = "textures\\" + normalized[len("data\\textures\\"):]
-        else:
-            normalized = "textures\\" + normalized.lstrip("\\")
-        return _coerce_generated_resource_path_to_dds(normalized)
-
     return NifPatchOptions(
         enable_parallax=enable_parallax,
         enable_pom=enable_pom,
@@ -4834,12 +4899,12 @@ def build_nif_patch_options_for_nif_editor(
         enable_pbr=enable_pbr,
         parallax_scale=parallax_scale if (enable_parallax or enable_pom) else None,
         force_shader_type_3=force_shader_type_3,
-        diffuse_texture_path=_clean_path(diffuse_texture_path),
-        parallax_texture_path=_clean_path(parallax_texture_path),
-        normal_texture_path=_clean_path(normal_texture_path),
-        glow_texture_path=_clean_path(glow_texture_path),
-        env_mask_texture_path=_clean_path(env_mask_texture_path),
-        cubemap_texture_path=_clean_path(cubemap_texture_path),
+        diffuse_texture_path=_normalize_nif_editor_texture_input_path(diffuse_texture_path),
+        parallax_texture_path=_normalize_nif_editor_texture_input_path(parallax_texture_path),
+        normal_texture_path=_normalize_nif_editor_texture_input_path(normal_texture_path),
+        glow_texture_path=_normalize_nif_editor_texture_input_path(glow_texture_path),
+        env_mask_texture_path=_normalize_nif_editor_texture_input_path(env_mask_texture_path),
+        cubemap_texture_path=_normalize_nif_editor_texture_input_path(cubemap_texture_path),
         backup=backup,
         dry_run=dry_run,
         disable_parallax=disable_parallax,
@@ -9163,8 +9228,8 @@ if GUI_AVAILABLE:
 
             win = tk.Toplevel(self.root)
             win.title(f"NIF Editor — Skyrim Texture Generator v{APP_VERSION}")
-            win.geometry("1200x900")
-            win.minsize(960, 720)
+            win.geometry("1120x820")
+            win.minsize(760, 620)
             win.resizable(True, True)
             win.grab_set()
             try:
@@ -9174,8 +9239,31 @@ if GUI_AVAILABLE:
                 entry_bg = _DARK_THEME["field_bg"] if dark else _LIGHT_THEME["field_bg"]
                 win.configure(bg=bg)
 
-                tk.Label(
-                    win,
+                outer = ttk.Frame(win)
+                outer.pack(fill="both", expand=True)
+                content_pane = ttk.Panedwindow(outer, orient="vertical")
+                content_pane.pack(fill="both", expand=True, padx=10, pady=(8, 0))
+                controls_container = ttk.Frame(content_pane)
+                controls_canvas = tk.Canvas(controls_container, highlightthickness=0, background=bg)
+                controls_scrollbar = ttk.Scrollbar(controls_container, orient="vertical", command=controls_canvas.yview)
+                controls_wrapper = ttk.Frame(controls_canvas, padding=(0, 0, 0, 8))
+                controls_canvas.configure(yscrollcommand=controls_scrollbar.set)
+                controls_canvas.pack(side="left", fill="both", expand=True)
+                controls_scrollbar.pack(side="right", fill="y")
+                controls_window = controls_canvas.create_window((0, 0), window=controls_wrapper, anchor="nw")
+
+                def _sync_controls_scroll_region(_: object | None = None) -> None:
+                    controls_canvas.configure(scrollregion=controls_canvas.bbox("all"))
+
+                def _resize_controls_window(event: tk.Event[tk.Misc]) -> None:
+                    controls_canvas.itemconfigure(controls_window, width=event.width)
+
+                controls_wrapper.bind("<Configure>", _sync_controls_scroll_region)
+                controls_canvas.bind("<Configure>", _resize_controls_window)
+                content_pane.add(controls_container, weight=3)
+
+                intro_label = tk.Label(
+                    controls_wrapper,
                     text=(
                         "⚠ Experimental feature — always keep backups of your NIF files before patching.\n\n"
                         "Patch Skyrim SE NIF files so generated textures work in-game.\n"
@@ -9189,10 +9277,12 @@ if GUI_AVAILABLE:
                     pady=8,
                     background=bg,
                     foreground=fg,
-                ).pack(fill="x")
+                )
+                intro_label.pack(fill="x")
+                self._bind_responsive_wrap(controls_wrapper, intro_label, horizontal_padding=60, min_wrap=280)
 
-                path_frame = ttk.LabelFrame(win, text="NIF Target", padding=6)
-                path_frame.pack(fill="x", padx=10, pady=(2, 4))
+                path_frame = ttk.LabelFrame(controls_wrapper, text="NIF Target", padding=6)
+                path_frame.pack(fill="x", pady=(2, 4))
 
                 nif_path_var = tk.StringVar()
                 nif_scan_mode = tk.StringVar(value="file")
@@ -9233,8 +9323,8 @@ if GUI_AVAILABLE:
                 self._add_tooltip(nif_path_entry, "⌨ Paste a full path here. Yes, even that scary MO2 path with 400 folders.")
                 self._add_tooltip(browse_nif_button, "🧭 Opens file/folder picker so your fingers don’t have to type all that.")
 
-                opt_frame = ttk.LabelFrame(win, text="Patch Options (what to enable)", padding=6)
-                opt_frame.pack(fill="x", padx=10, pady=4)
+                opt_frame = ttk.LabelFrame(controls_wrapper, text="Patch Options (what to enable)", padding=6)
+                opt_frame.pack(fill="x", pady=4)
                 renderer_profile_var = tk.StringVar(value=_normalize_render_profile(self.render_profile_var.get()))
                 if renderer_profile_var.get() not in _RENDER_PROFILE_GUI_VALUES:
                     renderer_profile_var.set("custom")
@@ -9340,6 +9430,7 @@ if GUI_AVAILABLE:
                     wraplength=860,
                 )
                 guide_label.pack(fill="x", pady=(4, 0))
+                self._bind_responsive_wrap(opt_frame, guide_label, horizontal_padding=40, min_wrap=260)
                 option_warning_label = ttk.Label(
                     opt_frame,
                     textvariable=option_warning_var,
@@ -9348,9 +9439,10 @@ if GUI_AVAILABLE:
                     foreground="#b44",
                 )
                 option_warning_label.pack(fill="x", pady=(2, 0))
+                self._bind_responsive_wrap(opt_frame, option_warning_label, horizontal_padding=40, min_wrap=220)
 
-                unpatch_frame = ttk.LabelFrame(win, text="Remove Features (what to disable)", padding=6)
-                unpatch_frame.pack(fill="x", padx=10, pady=(2, 4))
+                unpatch_frame = ttk.LabelFrame(controls_wrapper, text="Remove Features (what to disable)", padding=6)
+                unpatch_frame.pack(fill="x", pady=(2, 4))
                 unpatch_row = ttk.Frame(unpatch_frame)
                 unpatch_row.pack(fill="x")
                 disable_parallax_check = ttk.Checkbutton(
@@ -9532,11 +9624,11 @@ if GUI_AVAILABLE:
                 self._add_tooltip(clear_cubemap_check, "🧹 Clears texture slot 4 path from BSShaderTextureSet.")
 
                 scale_frame = ttk.LabelFrame(
-                    win,
+                    controls_wrapper,
                     text="Parallax Scale (0.1 – 10.0 · higher = deeper / more extreme)",
                     padding=6,
                 )
-                scale_frame.pack(fill="x", padx=10, pady=4)
+                scale_frame.pack(fill="x", pady=4)
                 pscale_var = tk.DoubleVar(value=1.5)
                 pscale_label_var = tk.StringVar(value="1.50")
 
@@ -9557,11 +9649,11 @@ if GUI_AVAILABLE:
                 )
 
                 tex_frame = ttk.LabelFrame(
-                    win,
+                    controls_wrapper,
                     text="Texture Paths (Skyrim-relative textures\\... ; blank keeps current NIF slot)",
                     padding=6,
                 )
-                tex_frame.pack(fill="x", padx=10, pady=4)
+                tex_frame.pack(fill="x", pady=4)
                 diffuse_tex_var = tk.StringVar()
                 parallax_tex_var = tk.StringVar()
                 normal_tex_var = tk.StringVar()
@@ -9576,15 +9668,7 @@ if GUI_AVAILABLE:
                 env_mask_tex_var.trace_add("write", _update_checkbox_warnings)
 
                 def _normalize_nif_texture_input_path(raw_path: str) -> str:
-                    normalized = raw_path.strip().replace("/", "\\")
-                    lowered = normalized.lower()
-                    marker = "\\textures\\"
-                    marker_index = lowered.rfind(marker)
-                    if marker_index != -1:
-                        normalized = "textures\\" + normalized[marker_index + len(marker):]
-                    elif lowered.startswith("data\\textures\\"):
-                        normalized = "textures\\" + normalized[len("data\\textures\\"):]
-                    return _coerce_generated_resource_path_to_dds(normalized)
+                    return _normalize_nif_editor_texture_input_path(raw_path) or ""
 
                 def _browse_texture_path(target_var: tk.StringVar, title: str) -> None:
                     selected = filedialog.askopenfilename(
@@ -9790,20 +9874,31 @@ if GUI_AVAILABLE:
                     "Use textures\\... paths for slots. Browsing a file auto-converts Data\\Textures picks into Skyrim-relative paths.",
                 )
 
-                btn_frame = ttk.Frame(win)
-                btn_frame.pack(fill="x", padx=10, pady=(4, 2))
+                footer_frame = ttk.Frame(outer)
+                footer_frame.pack(fill="x", padx=10, pady=(6, 8))
+                btn_frame = ttk.Frame(footer_frame)
+                btn_frame.pack(fill="x", pady=(0, 2))
                 status_var = tk.StringVar(value="Ready. Pick a NIF file/folder, then Scan or Patch.")
-                ttk.Label(win, textvariable=status_var, wraplength=860).pack(fill="x", padx=10, pady=(0, 4))
+                status_label = ttk.Label(footer_frame, textvariable=status_var, wraplength=860, justify=tk.LEFT)
+                status_label.pack(fill="x", pady=(0, 4))
                 progress_var = tk.DoubleVar(value=0.0)
-                progress_bar = ttk.Progressbar(win, orient="horizontal", mode="determinate", variable=progress_var, maximum=100)
-                progress_bar.pack(fill="x", padx=10, pady=(0, 6))
+                progress_bar = ttk.Progressbar(
+                    footer_frame,
+                    orient="horizontal",
+                    mode="determinate",
+                    variable=progress_var,
+                    maximum=100,
+                )
+                progress_bar.pack(fill="x")
+                self._bind_responsive_wrap(footer_frame, status_label, horizontal_padding=40, min_wrap=240)
 
                 res_frame = ttk.LabelFrame(
-                    win,
+                    content_pane,
                     text="Results Log (resizable; right-click rows to copy)",
                     padding=6,
                 )
-                res_frame.pack(fill="both", expand=True, padx=10, pady=(0, 8))
+                res_frame.configure(height=320)
+                content_pane.add(res_frame, weight=4)
                 results_pane = ttk.Panedwindow(res_frame, orient="vertical")
                 results_pane.pack(fill="both", expand=True)
                 results_list_frame = ttk.Frame(results_pane)
@@ -10087,6 +10182,12 @@ if GUI_AVAILABLE:
                     if _is_running[0]:
                         status_var.set("Another operation is in progress. Please wait.")
                         return
+                    recommended_profile = _recommended_nif_editor_profile()
+                    resolved_defaults = resolve_nif_patch_defaults_for_render_profile(
+                        renderer_profile_var.get(),
+                        recommended_profile=recommended_profile,
+                    )
+                    preferred_env_mask_suffix = _preferred_env_mask_suffix_for_profile()
                     options = build_nif_patch_options_for_nif_editor(
                         enable_parallax=enable_parallax_var.get(),
                         enable_pom=enable_pom_var.get(),
@@ -10126,16 +10227,26 @@ if GUI_AVAILABLE:
                         ok = skip = fail = 0
                         for index, nif in enumerate(nif_list, start=1):
                             try:
-                                result = patch_nif(nif, opts)
+                                resolved_options, autofill_notes = resolve_nif_editor_patch_options_for_target(
+                                    nif,
+                                    opts,
+                                    prefer_msn_normal=bool(resolved_defaults.get("prefer_msn_normal", False)),
+                                    preferred_env_mask_suffix=preferred_env_mask_suffix,
+                                )
+                                result = patch_nif(nif, resolved_options)
+                                detail_lines = [*autofill_notes, result.message]
+                                if result.warnings:
+                                    detail_lines.extend(f"Warning: {warning}" for warning in result.warnings[:3])
+                                detail_text = "\n".join(line for line in detail_lines if line)
                                 if result.already_up_to_date:
                                     skip += 1
-                                    _safe_add_row("SKIP", nif.name, "Already up-to-date.")
+                                    _safe_add_row("SKIP", nif.name, detail_text or "Already up-to-date.")
                                 elif result.success:
                                     ok += 1
-                                    _safe_add_row("OK", nif.name, result.message)
+                                    _safe_add_row("OK", nif.name, detail_text or "Patched.")
                                 else:
                                     fail += 1
-                                    _safe_add_row("FAIL", nif.name, result.message)
+                                    _safe_add_row("FAIL", nif.name, detail_text or "Patch failed.")
                                     for err in result.errors:
                                         _safe_add_row("FAIL", nif.name, err)
                             except Exception as exc:
@@ -10286,6 +10397,10 @@ if GUI_AVAILABLE:
                 self._add_tooltip(copy_all_button, "📦 Copies every row in one go for logs/changelists.")
                 self._add_tooltip(close_button, "🚪 Closes this window. Your NIFs will not feel abandoned.")
                 win.update_idletasks()
+                try:
+                    content_pane.sashpos(0, max(260, min(win.winfo_height() // 2, 420)))
+                except Exception:
+                    pass
             except Exception as exc:
                 try:
                     win.destroy()
