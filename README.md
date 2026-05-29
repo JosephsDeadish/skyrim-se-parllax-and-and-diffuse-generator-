@@ -53,7 +53,7 @@ This opens a desktop interface where you can:
 - preview the **Before** source image and the currently selected output types (diffuse/normal/parallax/glow/environment mask/RMAOS/complex)
 - tune normal/parallax/glow/environment mask/RMAOS/complex/specular strengths
 - choose the **Env mask mode**: `standard` (greyscale, vanilla Skyrim SE) or `complex` (RGBA packed, renderer-specific)
-- choose the **Target renderer** profile (**default: `vanilla`**) — includes `vanilla`, `community_shaders`, `truepbr`, and `enb`
+- choose the **Target renderer** profile (**default: `custom`**) — includes `custom`, `vanilla`, `community_shaders`, `truepbr`, and `enb`
 - generation applies renderer guardrails before processing so locked/auto-detected profiles automatically realign complex format, env mask mode, and parallax mode when they conflict
 - toggle **Emboss depth** for edge-ridge normal generation on flat printed assets (books/cards/scrolls/posters)
 - choose **Parallax mode**: `standard` (vanilla / Community Shaders Extended Materials) or `occlusion (ENB/POM)` for smoother ENBSeries POM heightmaps

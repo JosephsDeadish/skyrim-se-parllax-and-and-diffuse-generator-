@@ -358,7 +358,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(normalized["complex_format"]), "msn")
         self.assertEqual(str(normalized["env_mask_mode"]), "standard")
         self.assertEqual(str(normalized["parallax_mode"]), "occlusion (ENB/POM)")
-        self.assertEqual(str(normalized["render_profile"]), "vanilla")
+        self.assertEqual(str(normalized["render_profile"]), "custom")
         self.assertAlmostEqual(float(normalized["normal_strength"]), 8.0)
         self.assertAlmostEqual(float(normalized["parallax_strength"]), 0.1)
         self.assertEqual(int(normalized["glow_threshold"]), 255)
@@ -370,28 +370,28 @@ class GenerateTexturesTests(unittest.TestCase):
         normalized = _normalize_gui_state({"render_profile": "true pbr"})
         self.assertEqual(str(normalized["render_profile"]), "truepbr")
 
-    def test_normalize_gui_state_maps_non_renderer_aliases_to_vanilla(self) -> None:
+    def test_normalize_gui_state_maps_non_renderer_aliases_to_custom(self) -> None:
         normalized = _normalize_gui_state({"render_profile": "experimental"})
-        self.assertEqual(str(normalized["render_profile"]), "vanilla")
+        self.assertEqual(str(normalized["render_profile"]), "custom")
 
-    def test_normalize_gui_state_maps_performance_and_vr_profiles_to_vanilla(self) -> None:
+    def test_normalize_gui_state_maps_performance_and_vr_profiles_to_custom(self) -> None:
         performance = _normalize_gui_state({"render_profile": "performance"})
         vr = _normalize_gui_state({"render_profile": "vr"})
-        self.assertEqual(str(performance["render_profile"]), "vanilla")
-        self.assertEqual(str(vr["render_profile"]), "vanilla")
+        self.assertEqual(str(performance["render_profile"]), "custom")
+        self.assertEqual(str(vr["render_profile"]), "custom")
 
-    def test_normalize_gui_state_maps_extended_non_renderer_profiles_to_vanilla(self) -> None:
+    def test_normalize_gui_state_maps_extended_non_renderer_profiles_to_custom(self) -> None:
         terrain = _normalize_gui_state({"render_profile": "terrain"})
         architecture = _normalize_gui_state({"render_profile": "architecture"})
         characters = _normalize_gui_state({"render_profile": "characters"})
-        self.assertEqual(str(terrain["render_profile"]), "vanilla")
-        self.assertEqual(str(architecture["render_profile"]), "vanilla")
-        self.assertEqual(str(characters["render_profile"]), "vanilla")
+        self.assertEqual(str(terrain["render_profile"]), "custom")
+        self.assertEqual(str(architecture["render_profile"]), "custom")
+        self.assertEqual(str(characters["render_profile"]), "custom")
 
     def test_gui_render_profile_values_only_include_renderer_choices(self) -> None:
         self.assertEqual(
             _RENDER_PROFILE_GUI_VALUES,
-            ("vanilla", "community_shaders", "truepbr", "enb"),
+            ("custom", "vanilla", "community_shaders", "truepbr", "enb"),
         )
 
     def test_generate_diffuse_returns_rgb_same_size(self) -> None:

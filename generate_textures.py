@@ -119,7 +119,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "complex_format": "msn",
     "env_mask_mode": "standard",
     "parallax_mode": "standard",
-    "render_profile": "vanilla",
+    "render_profile": "custom",
     "emboss_mode": False,
     "relief_mode": False,
     "include_diffuse": True,
@@ -341,6 +341,7 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         state["parallax_mode"] = str(_GUI_STATE_DEFAULTS["parallax_mode"])
     render_profile = str(raw.get("render_profile", state["render_profile"]) or state["render_profile"]).strip().lower()
     if render_profile in {
+        "custom",
         "vanilla",
         "community_shaders",
         "community shaders",
@@ -1393,6 +1394,7 @@ _RENDER_PROFILE_LABELS: dict[str, str] = {
 }
 _RENDER_PROFILE_CLI_VALUES: tuple[str, ...] = tuple(_RENDER_PROFILE_LABELS.keys())
 _RENDER_PROFILE_GUI_VALUES: tuple[str, ...] = (
+    "custom",
     "vanilla",
     "community_shaders",
     "truepbr",
@@ -6704,9 +6706,9 @@ if GUI_AVAILABLE:
             self.emboss_mode_manual_override = False
             self.relief_mode_manual_override = False
             self.parallax_mode_var = tk.StringVar(value="standard")
-            self.render_profile_var = tk.StringVar(value="vanilla")
+            self.render_profile_var = tk.StringVar(value="custom")
             self.render_profile_suggestion_var = tk.StringVar(
-                value=build_render_profile_brief_message("vanilla")
+                value=build_render_profile_brief_message("custom")
             )
             self.mode_controls_hint_var = tk.StringVar(value="")
             self.render_profile_help_window: tk.Toplevel | None = None
@@ -7583,7 +7585,7 @@ if GUI_AVAILABLE:
             self.parallax_mode_var.set(str(state["parallax_mode"]))
             persisted_profile = _normalize_render_profile(str(state["render_profile"]))
             if persisted_profile not in _RENDER_PROFILE_GUI_VALUES:
-                persisted_profile = "vanilla"
+                persisted_profile = "custom"
             self.render_profile_var.set(persisted_profile)
             self.emboss_mode_var.set(bool(state["emboss_mode"]))
             self.relief_mode_var.set(bool(state["relief_mode"]))
@@ -9173,7 +9175,7 @@ if GUI_AVAILABLE:
                 opt_frame.pack(fill="x", padx=10, pady=4)
                 renderer_profile_var = tk.StringVar(value=_normalize_render_profile(self.render_profile_var.get()))
                 if renderer_profile_var.get() not in _RENDER_PROFILE_GUI_VALUES:
-                    renderer_profile_var.set("vanilla")
+                    renderer_profile_var.set("custom")
                 enable_parallax_var = tk.BooleanVar(value=True)
                 enable_pom_var = tk.BooleanVar(value=False)
                 enable_env_var = tk.BooleanVar(value=False)
