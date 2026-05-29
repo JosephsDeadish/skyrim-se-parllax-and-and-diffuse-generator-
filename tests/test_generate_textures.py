@@ -1983,6 +1983,23 @@ class GenerateTexturesTests(unittest.TestCase):
             "truepbr",
         )
 
+    def test_resolve_env_mask_complex_workflow_community_shaders_returns_enb(self) -> None:
+        # Community Shaders Extended Materials uses ENB-compatible RGBA channel packing
+        # (R=env reflection, G=glossiness, B=metallic, A=height) — confirmed from CS Lighting.hlsl.
+        # Must NOT fall through to "truepbr" (R=roughness, G=metallic, B=AO — different layout).
+        self.assertEqual(
+            resolve_env_mask_complex_workflow(env_mask_mode="complex", complex_format="cm", render_profile="community_shaders"),
+            "enb",
+        )
+        self.assertEqual(
+            resolve_env_mask_complex_workflow(env_mask_mode="complex", complex_format="msn", render_profile="community_shaders"),
+            "enb",
+        )
+        self.assertEqual(
+            resolve_env_mask_complex_workflow(env_mask_mode="complex", render_profile="cs"),
+            "enb",
+        )
+
     def test_resolve_env_mask_complex_workflow_falls_back_to_complex_format(self) -> None:
         self.assertEqual(
             resolve_env_mask_complex_workflow(env_mask_mode="complex", complex_format="msn", render_profile="auto"),

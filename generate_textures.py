@@ -1455,16 +1455,19 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     ),
     "community_shaders": (
         "Community Shaders Extended Materials workflow (not ENB, not TruePBR JSON).\n"
-        "Files: <stem>.dds (diffuse, no suffix) + <stem>_n.dds + <stem>_p.dds + <stem>_cm.dds (or _c.dds — same channel layout).\n"
+        "Files: <stem>.dds (diffuse, no suffix) + <stem>_n.dds + <stem>_cm.dds (or _c.dds — same channel layout). "
+        "<stem>_p.dds is optional: for complex-material meshes the parallax height is embedded in the _cm alpha channel "
+        "and a separate _p.dds is not required; retain _p.dds only if non-complex-material meshes also reference it.\n"
         "Parallax in this workflow is driven by Community Shaders, not ENB.\n"
         "_cm/_c RGBA channel layout: R=Environment reflection amount, "
-        "G=Glossiness, B=Metallic, A=Height / mode-control alpha.\n"
+        "G=Glossiness (must be above ~2% / 4/255 or the CS shader disables complex material entirely), "
+        "B=Metallic, A=Height / mode-control alpha (all-white alpha disables complex material mode).\n"
         "How files should look: _n stays purple/blue, _p stays greyscale, and _cm/_c should NOT look like a normal map — "
         "it should read as packed grayscale data with reflective areas bright in red, glossy areas bright in green, metallic areas bright in blue, and a non-white alpha height channel.\n"
         "Add _g.dds only for emissive assets.\n"
         "Do NOT use Blender-style _d/_albedo/_roughness/_metallic suffix names; Skyrim SE/CS ignores them.\n"
         "Do NOT generate _msn for this preset. TruePBR-style _rmaos belongs to the dedicated TruePBR profile.\n"
-        "Community Shaders and ENB can coexist in a modlist, but each mesh/material should follow one workflow at a time.\n"
+        "Community Shaders and ENB are mutually exclusive at runtime — the CS Nexus page states 'Not compatible with ENB: this mod disables all features if ENB is present, otherwise the game will crash.' You cannot have both active simultaneously. Texture asset packs for each workflow can coexist in your modlist, but you must choose one renderer.\n"
         "If you specifically need Community Shaders TruePBR _rmaos, that is a different JSON-driven workflow than this _cm/_c preset."
     ),
     "truepbr": (
@@ -1725,7 +1728,7 @@ _RENDER_PROFILE_OUTPUT_LABELS: dict[str, str] = {
     "include_rmaos": "community shaders pbr/_rmaos/_ramos",
     "include_wetness_mask": "community shaders wetness/_wt",
     "include_snow_mask": "community shaders snow/_sm",
-    "include_complex": "enb complex material",
+    "include_complex": "complex material (_msn/_cm)",
     "include_ao": "standalone ao/_ao (optional)",
     "include_roughness": "roughness/_rough",
 }
@@ -1825,7 +1828,13 @@ def resolve_env_mask_complex_workflow(
     render_profile: str = "auto",
     include_complex: bool | None = None,
 ) -> str:
-    """Resolve how complex env-mask channels should be packed."""
+    """Resolve how complex env-mask channels should be packed.
+
+    Community Shaders Extended Materials uses the same RGBA channel layout as
+    ENB complex material (R=env reflection, G=glossiness, B=metallic,
+    A=height).  All CS-family profiles must return "enb" here, not "truepbr"
+    (which uses R=roughness, G=metallic, B=AO — a completely different layout).
+    """
     if _normalize_env_mask_mode(env_mask_mode) != "complex":
         return "standard"
     normalized_profile = _normalize_render_profile(render_profile)
@@ -1833,6 +1842,10 @@ def resolve_env_mask_complex_workflow(
         return "enb"
     if normalized_profile == "truepbr":
         return "truepbr"
+    # Community Shaders Extended Materials uses ENB-compatible RGBA packing
+    # (R=env, G=gloss, B=metal, A=height) — confirmed from Lighting.hlsl.
+    if normalized_profile == "community_shaders":
+        return "enb"
     if include_complex is False:
         return "enb"
     if include_complex is True:
@@ -4957,11 +4970,13 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
         "NOT a vanilla Skyrim SE texture. Channel-packed complex material output for Community Shaders Extended Materials. "
         "Texture Slot 5 in the NIF. "
         "RGBA channel layout: R=Environment reflection amount, "
-        "G=Glossiness (0=matte, 255=glossy), "
+        "G=Glossiness (0=matte, 255=glossy; must be above ~2% or the shader disables complex material entirely), "
         "B=Metallic proxy (0=dielectric, 255=full metal), "
-        "A=Height / mode-control alpha. "
+        "A=Height / mode-control alpha (127=flat, >127=raised, <127=depressed; "
+        "all-white alpha disables complex material mode so the texture behaves as a vanilla greyscale _m). "
         "Requires Community Shaders Extended Materials. "
-        "Typically paired with a standard _n.dds (normal map, Slot 1) and optional _p.dds (parallax, Slot 3). "
+        "Typically paired with a standard _n.dds (normal map, Slot 1); a separate _p.dds is optional "
+        "since parallax is already encoded in the alpha channel. "
         "_c.dds is a naming alias with the identical channel layout — use _cm for new mods unless the pack explicitly uses _c. "
         "Do not mix this format with ENB _msn/_m workflows.",
     ),
@@ -4970,9 +4985,10 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
         "Complex Material Packed — Community Shaders Extended Materials (_cm / _c naming)",
         "Alternative naming for the Community Shaders Extended Materials packed map (_cm). "
         "Identical RGBA channel layout to _cm: R=Environment reflection amount, "
-        "G=Glossiness (0=matte, 255=glossy), "
+        "G=Glossiness (0=matte, 255=glossy; must be above ~2% or the shader disables complex material entirely), "
         "B=Metallic proxy (0=dielectric, 255=full metal), "
-        "A=Height / mode-control alpha. "
+        "A=Height / mode-control alpha (127=flat, >127=raised, <127=depressed; "
+        "all-white alpha disables complex material mode so the texture behaves as a vanilla greyscale _m). "
         "Texture Slot 5 in the NIF. Requires Community Shaders Extended Materials. "
         "Prefer _cm.dds for new mods; use _c.dds only when a specific shader setup expects it. "
         "Do not mix this format with ENB _msn/_m workflows.",
