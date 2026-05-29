@@ -558,6 +558,20 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertIn("textures\\pbr\\", joined)
         self.assertIn("pbrnifpatcher json", joined)
 
+    def test_reports_blender_style_env_mask_suffix_in_slot_five(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\architecture\\stone_rough.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            shader_type=SHADER_TYPE_ENVMAP,
+        )
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 5 environment-mask path", joined)
+        self.assertIn("use slot 5 for _m.dds", joined)
+
     def test_reports_non_diffuse_texture_in_diffuse_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_DIFFUSE] = "textures\\arch\\stone_p.dds"

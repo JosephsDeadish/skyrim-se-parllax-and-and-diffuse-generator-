@@ -1462,6 +1462,7 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "Typical files: textures\\pbr\\<stem>.dds + textures\\pbr\\<stem>_n.dds + textures\\pbr\\<stem>_rmaos.dds (or _ramos.dds alias) + matching JSON sidecar in PBRNifPatcher/ (optional _p/_g and other feature textures by material).\n"
         "_rmaos/_ramos RGBA layout for this preset: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (config-driven).\n"
         "How files should look: _n stays purple/blue, _rmaos/_ramos should look like packed grayscale channels (not like a normal map).\n"
+        "Treat _rmaos/_ramos as the core packed data map for this preset — do NOT substitute separate Blender-style _rough/_metallic/_ao files into slot 5.\n"
         "Mesh side must be TruePBR-enabled (BSLightingShaderProperty with SLSF2 Unused01/PBR flag, default shader type unless feature-specific overrides).\n"
         "Core mesh tuning usually comes from specular level / roughness scale / displacement scale (or equivalent JSON patch values).\n"
         "JSON sidecar should reference the generated base texture prefix (for example via 'texture'/'match_diffuse') and document channel mapping for your TruePBR setup.\n"
@@ -2171,7 +2172,7 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
             "- For players/users: TruePBR gives more realistic lighting than vanilla/complex material, can combine effects like parallax, glow, subsurface scattering, or dual-layer materials, and follows the same physically-based workflow used across modern game rendering pipelines.",
             "- Runtime requirement: TruePBR texture packs need Community Shaders enabled in-game. They will not preview/render correctly in non-CS tool paths such as Creation Kit, Outfit Studio, or Bodyslide.",
             "- For texture artists/developers: ship both sides of the workflow — (1) meshes flagged for PBR or PGPatcher/PBRNifPatcher JSON rules, and (2) the actual TruePBR textures.",
-            "- Core texture set: albedo/base colour, DirectX normal, roughness, metallic, ambient occlusion, and specular; optional maps include emission and displacement/parallax plus feature-specific textures.",
+            "- Core texture set for this tool: <stem>.dds diffuse, <stem>_n.dds normal, and packed <stem>_rmaos.dds/<stem>_ramos.dds data. Do not swap in standalone Blender-style _rough/_metallic/_ao names as the main TruePBR slot-5 texture.",
             "- Core mesh tuning: Specular Level controls non-metal reflectance, Roughness Scale controls surface smoothness, and Displacement Scale controls parallax/displacement depth.",
             "- Colour-space rule of thumb: save in-game colour textures as sRGB; save data textures like normal/displacement/RMAOS in linear space.",
             "- Landscape workflow: use Data/PBRTextureSets/<TXST_EDID>.json with roughnessScale, displacementScale, and specularLevel values.",
@@ -4470,9 +4471,7 @@ def build_nif_patch_options_for_generated_outputs(
 ) -> NifPatchOptions:
     normalized_complex_format = _normalize_complex_format(complex_format)
     normalized_env_mask_mode = _normalize_env_mask_mode(env_mask_mode)
-    normalized_parallax_mode = (
-        "occlusion" if str(parallax_mode or "standard").strip().lower() == "occlusion" else "standard"
-    )
+    normalized_parallax_mode = _normalize_parallax_mode_key(parallax_mode)
     complex_output = outputs.get("complex_material")
     normal_output = outputs.get("normal")
     parallax_output = outputs.get("parallax")
@@ -9073,7 +9072,7 @@ if GUI_AVAILABLE:
                         "  Slot 2: glow/emissive — _g.dds only. Skyrim SE ignores _em/_emit/_glow-style names.\n"
                         "  Slot 3: parallax height — _p.dds (greyscale height map). Used by all parallax workflows.\n"
                         "  Slot 4: cubemap/reflection — _e.dds, _env.dds, or _cube.dds.\n"
-                        "  Slot 5: env mask — _m.dds (vanilla greyscale or ENB RGBA), _cm.dds (CS Extended Materials RGBA), _rmaos.dds (TruePBR under textures\\pbr\\).\n"
+                        "  Slot 5: env mask — _m.dds (vanilla greyscale or ENB RGBA), _cm.dds (CS Extended Materials RGBA), _rmaos.dds (TruePBR under textures\\pbr\\); not standalone _rough/_metallic/_ao exports.\n"
                         "Enable standard parallax for vanilla/community shaders/truepbr. Enable ENB POM only for ENB setups. "
                         "Enable environment mapping only when slot 5 has a texture. Force shader type 3 to write stronger parallax scale."
                     ),

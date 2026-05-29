@@ -1325,6 +1325,8 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("For players/users", message)
         self.assertIn("Landscape workflow:", message)
         self.assertIn("Feature compatibility:", message)
+        self.assertIn("<stem>_rmaos.dds", message)
+        self.assertIn("do not swap in standalone blender-style _rough/_metallic/_ao names", message.lower())
         self.assertIn(MODDING_WIKI_SKYRIM_URL, message)
 
     def test_describe_render_profile_default_outputs_mentions_auto_checked_outputs(self) -> None:
@@ -2567,6 +2569,22 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(options.parallax_texture_path, "textures\\sign01_p.dds")
         self.assertEqual(options.env_mask_texture_path, "textures\\sign01_m.dds")
         self.assertEqual(options.parallax_scale, 4.0)
+
+    def test_build_nif_patch_options_for_generated_outputs_accepts_gui_occlusion_label(self) -> None:
+        outputs = {"parallax": Path("/tmp/textures/sign01_p.dds")}
+
+        options = build_nif_patch_options_for_generated_outputs(
+            None,
+            outputs,
+            complex_format="msn",
+            env_mask_mode="standard",
+            parallax_mode="occlusion (ENB/POM)",
+            parallax_scale=4.0,
+            render_profile="enb",
+        )
+
+        self.assertTrue(options.enable_parallax)
+        self.assertTrue(options.enable_pom)
 
     def test_build_nif_patch_options_render_profile_vanilla_no_type3_upgrade(self) -> None:
         outputs = {"parallax": Path("/tmp/textures/brick_p.dds")}
