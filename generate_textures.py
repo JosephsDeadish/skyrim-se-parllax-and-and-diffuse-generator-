@@ -1985,6 +1985,10 @@ def get_nif_patch_option_warnings(
                 warnings.append(
                     f"{label} path looks like a generated map type (_n/_msn/_p/_g/_m/_cm/_rmaos/_ramos); slot 0 should usually be diffuse/albedo."
                 )
+            if lowered.endswith(("_d.dds", "_diff.dds", "_diffuse.dds", "_albedo.dds", "_basecolor.dds", "_base_color.dds")):
+                warnings.append(
+                    f"{label} path uses Blender/authoring suffix naming (_d/_diffuse/_albedo). Skyrim runtime diffuse is usually just <stem>.dds."
+                )
             continue
         if not lowered.endswith(lowered_suffixes):
             warnings.append(f"{label} path should usually end with {', '.join(suffixes)}.")
@@ -1995,6 +1999,12 @@ def get_nif_patch_option_warnings(
         ):
             warnings.append(
                 "Env mask slot path uses a legacy/generic alias; prefer _m.dds (vanilla/ENB), _cm.dds (Community Shaders), or _rmaos.dds (TruePBR)."
+            )
+        if label == "Env mask slot" and lowered.endswith(
+            ("_rough.dds", "_roughness.dds", "_metal.dds", "_metallic.dds", "_metalness.dds", "_ao.dds")
+        ):
+            warnings.append(
+                "Env mask slot path looks like standalone Blender authoring outputs (_rough/_metallic/_ao). Use Skyrim runtime packed naming (_m/_cm/_rmaos) instead."
             )
 
     normal_lower = normal_texture_path.strip().replace("/", "\\").lower()
@@ -4401,7 +4411,10 @@ def _resolve_generated_skyrim_resource_path(generated_path: Path, *, source_text
             if relative_parts:
                 return "\\".join(("textures", *relative_parts, generated_path.name))
             return "\\".join(("textures", generated_path.name))
-    return direct_resource_path
+    normalized = direct_resource_path.replace("/", "\\").lstrip("\\")
+    if not normalized:
+        return "textures"
+    return "\\".join(("textures", normalized))
 
 
 def _coerce_generated_resource_path_to_dds(resource_path: str) -> str:
@@ -4624,12 +4637,14 @@ def build_nif_patch_options_for_nif_editor(
             return None
         normalized = cleaned.replace("/", "\\")
         lowered = normalized.lower()
-        marker = "\\textures\\"
+        marker = "textures\\"
         marker_index = lowered.rfind(marker)
         if marker_index != -1:
             normalized = "textures\\" + normalized[marker_index + len(marker):]
         elif lowered.startswith("data\\textures\\"):
             normalized = "textures\\" + normalized[len("data\\textures\\"):]
+        else:
+            normalized = "textures\\" + normalized.lstrip("\\")
         return _coerce_generated_resource_path_to_dds(normalized)
 
     return NifPatchOptions(
@@ -6898,7 +6913,7 @@ if GUI_AVAILABLE:
             _env_mode_row.grid(row=3, column=2, columnspan=2, sticky=tk.W, padx=(20, 4), pady=8)
             _env_mode_label = ttk.Label(_env_mode_row, text="Env mask mode")
             _env_mode_label.pack(side=tk.LEFT)
-            self._add_tooltip(_env_mode_label, "🌍 How to encode the environment mask.\n'standard' = vanilla Skyrim style.\n'complex' = packed RGBA for advanced workflows (ENB preset defaults in this tool; some CS setups also use packed channels).\nFor TruePBR, use the dedicated _rmaos/_ramos output path.\nUse Target renderer + Help for channel mapping.")
+            self._add_tooltip(_env_mode_label, "🌍 How to encode slot 5 data.\n'standard' = vanilla/ENB-style _m greyscale reflection mask.\n'complex' = packed RGBA data map (ENB _m RGBA, or renderer-specific packed workflows).\nCommunity Shaders Extended Materials usually uses _cm/_c, and TruePBR uses _rmaos/_ramos + JSON.\nUse Target renderer + Help for exact channel mapping.")
             self.env_mask_mode_combo = ttk.Combobox(
                 _env_mode_row,
                 textvariable=self.env_mask_mode_var,
@@ -6908,7 +6923,7 @@ if GUI_AVAILABLE:
             )
             self.env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
             self.env_mask_mode_combo.bind("<<ComboboxSelected>>", self._on_env_mask_mode_changed)
-            self._add_tooltip(self.env_mask_mode_combo, "🌍 'standard' = vanilla Skyrim SE reflections.\n'complex' = packed RGBA for advanced workflows (ENB defaults in this tool; some CS materials may also use packed channels).\nTruePBR usually uses _rmaos/_ramos instead of _m, and avoids legacy generic aliases like _orm/_mrao.\nAlways match this with your selected Target renderer.")
+            self._add_tooltip(self.env_mask_mode_combo, "🌍 'standard' = greyscale _m for vanilla-style reflection masks.\n'complex' = packed RGBA map data (ENB _m RGBA or renderer-specific packed paths).\nCS Extended Materials usually uses _cm/_c; TruePBR usually uses _rmaos/_ramos (+ JSON), not generic _orm/_mrao aliases.\nAlways match this with your selected Target renderer.")
             ttk.Label(
                 options_frame,
                 text="standard = vanilla Skyrim SE  |  complex = packed RGBA (renderer-specific channels)",
@@ -9137,7 +9152,7 @@ if GUI_AVAILABLE:
                         "  Slot 2: glow/emissive — prefer _g.dds. Legacy aliases such as _em/_emit/_glow may exist in older pipelines, but this tool normalizes guidance toward _g.\n"
                         "  Slot 3: parallax height — _p.dds (greyscale height map). Used by all parallax workflows.\n"
                         "  Slot 4: cubemap/reflection — _e.dds, _env.dds, or _cube.dds.\n"
-                        "  Slot 5: env mask / packed data — _m.dds (vanilla greyscale or ENB RGBA), _cm.dds (CS Extended Materials RGBA), _rmaos.dds (TruePBR under textures\\pbr\\); not standalone _rough/_metallic/_ao exports.\n"
+                        "  Slot 5: env mask / packed data — _m.dds (vanilla greyscale or ENB RGBA), _cm/_c.dds (CS Extended Materials), _rmaos/_ramos.dds (TruePBR under textures\\pbr\\); not standalone _rough/_metallic/_ao exports.\n"
                         "Enable standard parallax for vanilla/community shaders/truepbr. Enable ENB POM only for ENB setups. "
                         "Enable the TruePBR/PBR flag when using Community Shaders TruePBR _rmaos + JSON workflows. "
                         "Enable environment mapping only when slot 5 has a texture. Force shader type 3 to write stronger parallax scale."

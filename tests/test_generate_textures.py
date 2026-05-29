@@ -1305,6 +1305,20 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(any("slot 0" in text.lower() or "diffuse slot" in text.lower() for text in warnings))
         self.assertTrue(any("_g" in text.lower() for text in warnings))
 
+    def test_get_nif_patch_option_warnings_reports_blender_authoring_suffixes(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="truepbr",
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            enable_pbr=True,
+            force_shader_type_3=False,
+            diffuse_texture_path="textures\\architecture\\stone\\stone_albedo.dds",
+            env_mask_texture_path="textures\\architecture\\stone\\stone_roughness.dds",
+        )
+        self.assertTrue(any("blender/authoring suffix naming" in text.lower() for text in warnings))
+        self.assertTrue(any("standalone blender authoring outputs" in text.lower() for text in warnings))
+
     def test_get_nif_patch_option_warnings_reports_renderer_specific_suffix_mismatch(self) -> None:
         enb_warnings = get_nif_patch_option_warnings(
             selected_profile="enb",
@@ -2770,6 +2784,22 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(options.parallax_texture_path, "textures\\architecture\\stone\\brick_p.dds")
         self.assertEqual(options.normal_texture_path, "textures\\architecture\\stone\\brick_n.dds")
 
+    def test_build_nif_patch_options_for_generated_outputs_defaults_to_textures_prefix_without_source_context(self) -> None:
+        outputs = {
+            "parallax": Path("/tmp/generated/brick_p.dds"),
+            "normal": Path("/tmp/generated/brick_n.dds"),
+        }
+        options = build_nif_patch_options_for_generated_outputs(
+            None,
+            outputs,
+            complex_format="msn",
+            env_mask_mode="standard",
+            parallax_mode="standard",
+            parallax_scale=2.0,
+        )
+        self.assertEqual(options.parallax_texture_path, "textures\\brick_p.dds")
+        self.assertEqual(options.normal_texture_path, "textures\\brick_n.dds")
+
     def test_build_nif_patch_options_for_generated_outputs_coerces_non_dds_slots_to_dds(self) -> None:
         source_texture = Path("/tmp/mod/textures/architecture/stone/brick.dds")
         outputs = {
@@ -2895,6 +2925,27 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(options.parallax_texture_path, r"textures\architecture\stone\stone_p.dds")
         self.assertEqual(options.normal_texture_path, r"textures\architecture\stone\stone_n.dds")
         self.assertEqual(options.env_mask_texture_path, r"textures\architecture\stone\stone_cm.dds")
+        self.assertEqual(options.cubemap_texture_path, r"textures\cubemaps\chrome_e.dds")
+
+    def test_build_nif_patch_options_for_nif_editor_prefixes_relative_paths_with_textures(self) -> None:
+        options = build_nif_patch_options_for_nif_editor(
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            enable_glow_map=False,
+            enable_pbr=False,
+            parallax_scale=2.0,
+            force_shader_type_3=False,
+            diffuse_texture_path=r"architecture\stone\stone.dds",
+            parallax_texture_path=r"stone_p.dds",
+            normal_texture_path=r"meshes\shared\stone_n.dds",
+            env_mask_texture_path=r"architecture\stone\stone_m.dds",
+            cubemap_texture_path=r"cubemaps\chrome_e.dds",
+        )
+        self.assertEqual(options.diffuse_texture_path, r"textures\architecture\stone\stone.dds")
+        self.assertEqual(options.parallax_texture_path, r"textures\stone_p.dds")
+        self.assertEqual(options.normal_texture_path, r"textures\meshes\shared\stone_n.dds")
+        self.assertEqual(options.env_mask_texture_path, r"textures\architecture\stone\stone_m.dds")
         self.assertEqual(options.cubemap_texture_path, r"textures\cubemaps\chrome_e.dds")
 
     def test_auto_patch_related_nifs_for_texture_patches_all_matches(self) -> None:
