@@ -1258,6 +1258,17 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(any("_p.dds" in text for text in warnings))
         self.assertTrue(any("env mask slot" in text.lower() for text in warnings))
 
+    def test_get_nif_patch_option_warnings_reports_non_dds_paths(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="community_shaders",
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            force_shader_type_3=False,
+            parallax_texture_path="textures\\architecture\\stone\\stone_p.png",
+        )
+        self.assertTrue(any(".dds filename" in text.lower() for text in warnings))
+
     def test_get_nif_patch_option_warnings_accepts_c_env_mask_suffix(self) -> None:
         warnings = get_nif_patch_option_warnings(
             selected_profile="community_shaders",
@@ -1397,6 +1408,21 @@ class GenerateTexturesTests(unittest.TestCase):
         joined = "\n".join(warnings).lower()
         self.assertIn("legacy generic alias", joined)
         self.assertIn("_rmaos/_ramos", joined)
+
+    def test_get_nif_patch_option_warnings_flags_legacy_env_mask_alias_for_non_truepbr(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="community_shaders",
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            force_shader_type_3=False,
+            env_mask_texture_path="textures\\architecture\\stone_orm.dds",
+        )
+        joined = "\n".join(warnings).lower()
+        self.assertIn("legacy/generic alias", joined)
+        self.assertIn("_m.dds", joined)
+        self.assertIn("_cm.dds", joined)
+        self.assertIn("_rmaos.dds", joined)
 
     def test_get_nif_patch_option_warnings_reports_glow_and_cubemap_clear_write_conflicts(self) -> None:
         warnings = get_nif_patch_option_warnings(
@@ -2847,6 +2873,29 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(options.clear_cubemap_texture_path)
         self.assertFalse(options.backup)
         self.assertTrue(options.dry_run)
+
+    def test_build_nif_patch_options_for_nif_editor_normalizes_manual_paths_to_dds(self) -> None:
+        options = build_nif_patch_options_for_nif_editor(
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            enable_glow_map=False,
+            enable_pbr=False,
+            parallax_scale=2.0,
+            force_shader_type_3=False,
+            diffuse_texture_path=r"Data\Textures\architecture\stone\stone.png",
+            parallax_texture_path=r"C:\Mod\Data\Textures\architecture\stone\stone_p.tga",
+            normal_texture_path=r"textures\architecture\stone\stone_n.jpeg",
+            glow_texture_path="",
+            env_mask_texture_path=r"textures\architecture\stone\stone_cm.bmp",
+            cubemap_texture_path=r"textures\cubemaps\chrome_e.PNG",
+        )
+
+        self.assertEqual(options.diffuse_texture_path, r"textures\architecture\stone\stone.dds")
+        self.assertEqual(options.parallax_texture_path, r"textures\architecture\stone\stone_p.dds")
+        self.assertEqual(options.normal_texture_path, r"textures\architecture\stone\stone_n.dds")
+        self.assertEqual(options.env_mask_texture_path, r"textures\architecture\stone\stone_cm.dds")
+        self.assertEqual(options.cubemap_texture_path, r"textures\cubemaps\chrome_e.dds")
 
     def test_auto_patch_related_nifs_for_texture_patches_all_matches(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

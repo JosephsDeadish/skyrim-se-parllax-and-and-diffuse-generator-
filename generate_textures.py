@@ -1967,6 +1967,8 @@ def get_nif_patch_option_warnings(
         if not normalized:
             continue
         lowered = normalized.lower()
+        if not lowered.endswith(".dds"):
+            warnings.append(f"{label} path should use a .dds filename for Skyrim runtime lookups.")
         if re.match(r"^[a-z]:\\", lowered):
             warnings.append(
                 f"{label} path is absolute; use Skyrim-relative textures\\... paths to avoid broken in-game lookups."
@@ -1988,9 +1990,11 @@ def get_nif_patch_option_warnings(
             warnings.append(f"{label} path should usually end with {', '.join(suffixes)}.")
         if label == "Glow slot" and lowered.endswith("_sk.dds"):
             warnings.append("Glow slot path uses legacy _sk suffix; Skyrim SE canonical emissive suffix is _g.dds.")
-        if label == "Env mask slot" and lowered.endswith(("_c.dds", "_mask.dds", "_envmask.dds")):
+        if label == "Env mask slot" and lowered.endswith(
+            ("_c.dds", "_mask.dds", "_envmask.dds", "_orm.dds", "_orms.dds", "_mrao.dds", "_mra.dds")
+        ):
             warnings.append(
-                "Env mask slot path uses a legacy alias; prefer _m.dds (vanilla/ENB), _cm.dds (Community Shaders), or _rmaos.dds (TruePBR)."
+                "Env mask slot path uses a legacy/generic alias; prefer _m.dds (vanilla/ENB), _cm.dds (Community Shaders), or _rmaos.dds (TruePBR)."
             )
 
     normal_lower = normal_texture_path.strip().replace("/", "\\").lower()
@@ -4616,7 +4620,17 @@ def build_nif_patch_options_for_nif_editor(
 ) -> NifPatchOptions:
     def _clean_path(value: str) -> str | None:
         cleaned = str(value or "").strip()
-        return cleaned or None
+        if not cleaned:
+            return None
+        normalized = cleaned.replace("/", "\\")
+        lowered = normalized.lower()
+        marker = "\\textures\\"
+        marker_index = lowered.rfind(marker)
+        if marker_index != -1:
+            normalized = "textures\\" + normalized[marker_index + len(marker):]
+        elif lowered.startswith("data\\textures\\"):
+            normalized = "textures\\" + normalized[len("data\\textures\\"):]
+        return _coerce_generated_resource_path_to_dds(normalized)
 
     return NifPatchOptions(
         enable_parallax=enable_parallax,
@@ -9845,6 +9859,7 @@ if GUI_AVAILABLE:
                         enable_parallax=enable_parallax_var.get(),
                         enable_pom=enable_pom_var.get(),
                         enable_env_mapping=enable_env_var.get(),
+                        enable_pbr=enable_pbr_var.get(),
                         force_shader_type_3=force_type3_var.get(),
                         diffuse_texture_path=diffuse_tex_var.get(),
                         parallax_texture_path=parallax_tex_var.get(),
@@ -9856,6 +9871,7 @@ if GUI_AVAILABLE:
                         disable_pom=disable_pom_var.get(),
                         disable_env_mapping=disable_env_var.get(),
                         disable_glow_map=disable_glow_var.get(),
+                        disable_pbr=disable_pbr_var.get(),
                         clear_parallax_texture_path=clear_parallax_var.get(),
                         clear_normal_texture_path=clear_normal_var.get(),
                         clear_env_mask_texture_path=clear_env_var.get(),
