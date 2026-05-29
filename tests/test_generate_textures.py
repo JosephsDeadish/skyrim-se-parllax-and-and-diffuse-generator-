@@ -2522,6 +2522,25 @@ class GenerateTexturesTests(unittest.TestCase):
 
             self.assertEqual(related, ())
 
+    def test_find_related_nif_files_for_texture_searches_source_parent_when_not_under_textures(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_dir = temp_path / "custom_assets"
+            source_dir.mkdir(parents=True)
+
+            source = source_dir / "sign01_d.dds"
+            source.write_bytes(b"")
+
+            nif_path = source_dir / "sign01.nif"
+            nif_path.write_bytes(b"")
+
+            related = find_related_nif_files_for_texture(
+                source,
+                nif_info_provider=lambda _: (_ for _ in ()).throw(ValueError("parse failed")),
+            )
+
+            self.assertEqual(related, (nif_path.resolve(),))
+
     def test_build_nif_patch_options_for_generated_outputs_prefers_msn_for_complex_parallax(self) -> None:
         outputs = {
             "parallax": Path("/tmp/textures/sign01_p.dds"),

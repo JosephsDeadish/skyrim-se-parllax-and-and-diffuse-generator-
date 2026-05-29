@@ -1370,7 +1370,7 @@ _RENDER_PROFILE_PRESETS: dict[str, dict[str, str]] = {
         "env_mask_mode": "complex",
         "parallax_mode": "standard",
     },
-    # ENB profile favors complex env mask and POM height maps.
+    # ENB profile keeps the tool's ENB-oriented defaults while allowing overrides.
     "enb": {
         "complex_format": "msn",
         "env_mask_mode": "complex",
@@ -1450,7 +1450,8 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "How files should look: _n stays purple/blue, _p stays greyscale, and _cm/_c/_C should NOT look like a normal map — "
         "it should read as packed grayscale data with reflective areas bright in red, glossy areas bright in green, metallic areas bright in blue, and a non-white alpha height channel.\n"
         "Add _g.dds only for emissive assets.\n"
-        "Do NOT generate _msn or TruePBR-style _rmaos for this preset. Community Shaders and ENB are separate renderer paths and should not be mixed.\n"
+        "Do NOT generate _msn for this preset. TruePBR-style _rmaos belongs to the dedicated TruePBR profile.\n"
+        "Community Shaders and ENB can coexist in a modlist, but each mesh/material should follow one workflow at a time.\n"
         "If you specifically need Community Shaders TruePBR _rmaos, that is a different JSON-driven workflow than this _cm/_c/_C preset."
     ),
     "truepbr": (
@@ -1467,8 +1468,8 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "Do NOT treat this as Community Shaders Extended Materials _cm/_c/_C, and do NOT mix it with ENB _msn workflows."
     ),
     "enb": (
-        "ENBSeries workflow presets in this tool target _msn plus complex env-mask mode.\n"
-        "Some ENB material pipelines in the wild use different channel packing/naming, so verify against your ENB setup.\n"
+        "ENB-focused profile in this tool targets _msn plus complex env-mask mode by default.\n"
+        "Some ENB pipelines use classic _n + _m setups instead, so verify against your ENB preset and mesh setup.\n"
         "Preset files here: diffuse.dds + _msn.dds + _p.dds + _m.dds.\n"
         "_msn RGBA channel layout (Slot 1, replaces _n): R=Normal X, G=Normal Y, B=Normal Z, "
         "A=Specular intensity.\n"
@@ -1477,7 +1478,7 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
         "How files should look: _msn should remain a purple/blue normal map with a useful alpha, while _m should look like packed grayscale data — "
         "red = reflectivity, green = gloss, blue = metalness, alpha = height. It should not look like a second normal map.\n"
         "Add _g.dds only for emissive assets.\n"
-        "This is not Community Shaders and not 'ENB PBR' — it is ENB complex material. Do not mix it with _cm/_c/_C workflows.\n"
+        "This profile is separate from Community Shaders Extended Materials _cm/_c/_C. Use one workflow per mesh/material.\n"
         "Do NOT generate vanilla _n.dds (replaced by _msn), _cm/_c, or TruePBR-style _rmaos for this preset."
     ),
 }
@@ -2121,7 +2122,7 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
         "characters": "best for skin/character assets with safer non-parallax defaults",
         "community_shaders": "best for Community Shaders packed-material workflows",
         "truepbr": "best for Community Shaders TruePBR JSON-driven workflows",
-        "enb": "best for ENB complex material + POM workflows",
+        "enb": "best for ENB-focused setups using this tool's ENB defaults",
     }.get(normalized, "recommended workflow")
     tuple_hint = (
         f"{resolved['complex_format']} / env {resolved['env_mask_mode']} / "
@@ -4380,6 +4381,7 @@ def _candidate_nif_search_roots(
     if manager_context is not None:
         candidates.extend(manager_context.loaded_mesh_dirs)
     for base in filter(None, [output_dir, source_texture.parent]):
+        candidates.append(base)
         current = base
         while True:
             if current.name.lower() == "textures":
@@ -6699,9 +6701,9 @@ if GUI_AVAILABLE:
                 "characters = skin/character-safe defaults with parallax disabled.\n"
                 "community_shaders = Community Shaders Extended Materials _cm/_c/_C workflow.\n"
                 "truepbr = Community Shaders TruePBR JSON-driven _rmaos/_ramos workflow.\n"
-                "enb = tool ENB preset (_msn + complex env-mask mode + optional POM).\n"
+                "enb = tool ENB preset (_msn + complex env-mask default + optional POM).\n"
                 "Presets keep format/mode/output defaults aligned to avoid conflicting combinations.\n"
-                "Community Shaders and ENB are separate workflows and should not be combined in one output set.\n"
+                "Community Shaders and ENB can both be installed, but each mesh/material should use one workflow at a time.\n"
                 "Changing this is the only thing that should auto-switch the mode combos.",
             )
             _render_profile_combo = ttk.Combobox(
@@ -6719,9 +6721,9 @@ if GUI_AVAILABLE:
                 "auto = pick the best renderer preset for the current texture, but only when you change this control.\n"
                 "vanilla = safest defaults; performance = lightweight defaults; vr = conservative VR defaults; "
                 "terrain = stable terrain defaults; architecture = structure-focused defaults; characters = skin-safe defaults; "
-                "community_shaders = _cm/_c/_C; truepbr = _n + _rmaos/_ramos + JSON path; enb = tool ENB preset _msn + complex env + optional POM.\n"
+                "community_shaders = _cm/_c/_C; truepbr = _n + _rmaos/_ramos + JSON path; enb = tool ENB preset _msn + complex env default + optional POM.\n"
                 "Presets keep format/mode/output defaults aligned to avoid conflicting combinations.\n"
-                "Community Shaders and ENB are separate workflows and should not be mixed.",
+                "Community Shaders and ENB can coexist, but each mesh/material should follow one workflow at a time.",
             )
             self.render_profile_hint_label = ttk.Label(
                 options_frame,
@@ -6763,7 +6765,7 @@ if GUI_AVAILABLE:
             _env_mode_row.grid(row=3, column=2, columnspan=2, sticky=tk.W, padx=(20, 4), pady=8)
             _env_mode_label = ttk.Label(_env_mode_row, text="Env mask mode")
             _env_mode_label.pack(side=tk.LEFT)
-            self._add_tooltip(_env_mode_label, "🌍 How to encode the environment mask.\n'standard' = vanilla Skyrim.\n'complex' = packed RGBA for renderer-specific workflows (primarily ENB preset output in this tool).\nFor TruePBR, use the dedicated _rmaos/_ramos output path.\nUse Target renderer + Help for channel mapping.")
+            self._add_tooltip(_env_mode_label, "🌍 How to encode the environment mask.\n'standard' = vanilla Skyrim style.\n'complex' = packed RGBA for advanced workflows (ENB preset defaults in this tool; some CS setups also use packed channels).\nFor TruePBR, use the dedicated _rmaos/_ramos output path.\nUse Target renderer + Help for channel mapping.")
             self.env_mask_mode_combo = ttk.Combobox(
                 _env_mode_row,
                 textvariable=self.env_mask_mode_var,
@@ -6773,7 +6775,7 @@ if GUI_AVAILABLE:
             )
             self.env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
             self.env_mask_mode_combo.bind("<<ComboboxSelected>>", self._on_env_mask_mode_changed)
-            self._add_tooltip(self.env_mask_mode_combo, "🌍 'standard' = vanilla Skyrim SE reflections.\n'complex' = packed RGBA for renderer-specific workflows (ENB preset in this tool).\nTruePBR usually uses _rmaos/_ramos instead of _m.\nAlways match this with your selected Target renderer.")
+            self._add_tooltip(self.env_mask_mode_combo, "🌍 'standard' = vanilla Skyrim SE reflections.\n'complex' = packed RGBA for advanced workflows (ENB defaults in this tool; some CS materials may also use packed channels).\nTruePBR usually uses _rmaos/_ramos instead of _m.\nAlways match this with your selected Target renderer.")
             ttk.Label(
                 options_frame,
                 text="standard = vanilla Skyrim SE  |  complex = packed RGBA (renderer-specific channels)",
