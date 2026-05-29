@@ -1181,7 +1181,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(truepbr["enable_parallax"]))
         self.assertFalse(bool(truepbr["enable_pom"]))
         self.assertTrue(bool(truepbr["enable_env_mapping"]))
-        self.assertTrue(bool(truepbr["force_shader_type_3"]))
+        self.assertFalse(bool(truepbr["force_shader_type_3"]))
         self.assertFalse(bool(truepbr["prefer_msn_normal"]))
 
     def test_get_nif_patch_option_warnings_reports_disabled_feature_path_combos(self) -> None:
@@ -2597,7 +2597,7 @@ class GenerateTexturesTests(unittest.TestCase):
             parallax_scale=2.0,
             render_profile="community_shaders",
         )
-        self.assertTrue(options.force_shader_type_3)
+        self.assertFalse(options.force_shader_type_3)
         self.assertTrue(options.enable_parallax)
 
     def test_build_nif_patch_options_render_profile_enb_enables_type3(self) -> None:
@@ -2625,8 +2625,22 @@ class GenerateTexturesTests(unittest.TestCase):
             parallax_scale=2.0,
             render_profile="truepbr",
         )
-        self.assertTrue(options.force_shader_type_3)
+        self.assertFalse(options.force_shader_type_3)
         self.assertTrue(options.enable_parallax)
+
+    def test_build_nif_patch_options_for_generated_outputs_uses_cm_for_env_slot(self) -> None:
+        outputs = {"complex_material": Path("/tmp/textures/stone_cm.dds")}
+        options = build_nif_patch_options_for_generated_outputs(
+            None,
+            outputs,
+            complex_format="cm",
+            env_mask_mode="standard",
+            parallax_mode="standard",
+            parallax_scale=None,
+            render_profile="community_shaders",
+        )
+        self.assertTrue(options.enable_env_mapping)
+        self.assertEqual(options.env_mask_texture_path, "textures\\stone_cm.dds")
 
     def test_build_nif_patch_options_no_parallax_never_forces_type3(self) -> None:
         for profile in ("vanilla", "community_shaders", "truepbr", "enb", "auto"):

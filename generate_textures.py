@@ -1406,7 +1406,7 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     "vanilla": (
         "Vanilla Skyrim SE — no PBR, no ENB required.\n"
         "Files: diffuse.dds + _n.dds (DirectX tangent-space normal).\n"
-        "Add _p.dds (greyscale height) only for meshes patched for parallax (requires SKSE64 memory patch).\n"
+        "Add _p.dds (greyscale height) only for meshes/NIFs configured for parallax in your runtime stack.\n"
         "Add _m.dds (greyscale, Slot 5) for reflective metals/armour — brighter = more environment reflection.\n"
         "Add _g.dds only for emissive/glowing assets.\n"
         "How files should look: _n stays purple/blue, _p is greyscale, _m is greyscale with brighter pixels on shinier areas.\n"
@@ -1445,6 +1445,7 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     "community_shaders": (
         "Community Shaders Extended Materials workflow (not ENB, not TruePBR JSON).\n"
         "Files: diffuse.dds + _n.dds + _p.dds + _cm.dds (or _c.dds / _C.dds — identical channel layout).\n"
+        "Parallax in this workflow is provided by Community Shaders features, not ENB.\n"
         "_cm/_c/_C RGBA channel layout: R=Environment reflection amount, "
         "G=Glossiness, B=Metallic, A=Height / mode-control alpha.\n"
         "How files should look: _n stays purple/blue, _p stays greyscale, and _cm/_c/_C should NOT look like a normal map — "
@@ -1537,14 +1538,14 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "enable_parallax": True,
         "enable_pom": False,
         "enable_env_mapping": True,
-        "force_shader_type_3": True,
+        "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
     "truepbr": {
         "enable_parallax": True,
         "enable_pom": False,
         "enable_env_mapping": True,
-        "force_shader_type_3": True,
+        "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
     "enb": {
@@ -4468,22 +4469,30 @@ def build_nif_patch_options_for_generated_outputs(
     env_mask_output = outputs.get("environment_mask")
     rmaos_output = outputs.get("rmaos")
     glow_output = outputs.get("glow")
+    cm_complex_output = complex_output if complex_output is not None and normalized_complex_format == "cm" else None
     normal_path = complex_output if complex_output is not None and normalized_complex_format == "msn" else normal_output
     parallax_disabled_by_options = include_parallax is False
     env_mask_disabled_by_options = include_environment_mask is False
     glow_disabled_by_options = include_glow is False
-    enable_env_mapping = env_mask_output is not None
-    if rmaos_output is not None:
+    env_mask_path_source = env_mask_output if env_mask_output is not None else rmaos_output
+    if env_mask_path_source is None and cm_complex_output is not None and not env_mask_disabled_by_options:
+        env_mask_path_source = cm_complex_output
+    enable_env_mapping = env_mask_path_source is not None
+    if (
+        normalized_env_mask_mode == "complex"
+        and env_mask_path_source is None
+        and not env_mask_disabled_by_options
+        and complex_output is not None
+        and normalized_complex_format == "msn"
+    ):
         enable_env_mapping = True
-    if normalized_env_mask_mode == "complex" and env_mask_output is None and not env_mask_disabled_by_options:
-        enable_env_mapping = complex_output is not None and normalized_complex_format == "msn"
     enable_glow_map = glow_output is not None and not glow_disabled_by_options
     # Consult the render-profile NIF-patch defaults to decide whether
     # upgrading shader blocks to type-3 (HEIGHTMAP / parallax-scale) is
     # appropriate.  Vanilla Skyrim SE supports parallax via the flag +
     # texture slot 3 alone (no type-3 block upgrade required), while
-    # Community Shaders and ENB workflows benefit from the explicit scale
-    # field that type-3 provides.  Unconditionally upgrading to type-3
+    # Some workflows can use the explicit scale field that type-3 provides.
+    # Unconditionally upgrading to type-3
     # regardless of the selected renderer was the primary cause of the
     # EXCEPTION_ACCESS_VIOLATION crashes: the upgrade can corrupt the
     # block layout when the NIF header num_groups field was not yet
@@ -4510,10 +4519,10 @@ def build_nif_patch_options_for_generated_outputs(
         ),
         env_mask_texture_path=(
             _resolve_generated_dds_resource_path(
-                env_mask_output if env_mask_output is not None else rmaos_output,
+                env_mask_path_source,
                 source_texture=source_texture,
             )
-            if env_mask_output is not None or rmaos_output is not None else None
+            if env_mask_path_source is not None else None
         ),
         glow_texture_path=(
             _resolve_generated_dds_resource_path(glow_output, source_texture=source_texture)
@@ -8080,7 +8089,7 @@ if GUI_AVAILABLE:
             container.pack(fill=tk.BOTH, expand=True)
             ttk.Label(
                 container,
-                text="Renderer/channel guidance (ENB vs Community Shaders)",
+                text="Renderer/channel guidance (Vanilla vs Community Shaders vs ENB)",
                 justify=tk.LEFT,
                 anchor=tk.W,
             ).pack(fill=tk.X, pady=(0, 8))
