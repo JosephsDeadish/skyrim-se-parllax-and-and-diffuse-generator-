@@ -1111,7 +1111,8 @@ class TestForceShaderType3(unittest.TestCase):
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
 
     def test_skip_if_havok_does_not_upgrade_default_shader(self) -> None:
-        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT, add_havok=True)
+        nif = self.tmp / "havok_default.nif"
+        nif.write_bytes(_build_nif_with_shapes(shader_type=SHADER_TYPE_DEFAULT, add_havok=True))
         result = patch_nif(
             nif,
             NifPatchOptions(
