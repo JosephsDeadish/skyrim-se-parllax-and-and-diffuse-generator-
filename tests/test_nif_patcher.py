@@ -221,16 +221,17 @@ def _build_minimal_nif(
     endian = struct.pack("B", 1)
     user_ver = struct.pack("<I", 12)
     num_blocks_bytes = struct.pack("<I", num_blks)
-    user_ver2 = struct.pack("<I", user_ver2)
+    bs_version = user_ver2
+    user_ver2 = struct.pack("<I", bs_version)
     # BSStreamHeader export strings depend on BS version (user_ver2 field).
     # Skyrim SE commonly uses 83/100; CK-style exports can use 130.
     export = _sstring_u8("")  # author
-    if user_ver2 > 130:
+    if bs_version > 130:
         export += struct.pack("<I", 0)  # unknown int (FO4+ style)
-    if user_ver2 < 131:
+    if bs_version < 131:
         export += _sstring_u8("")  # process script
     export += _sstring_u8("")  # export script
-    if user_ver2 >= 103:
+    if bs_version >= 103:
         export += _sstring_u8("")  # max filepath
     num_block_types = struct.pack("<H", len(block_type_names))
     btypes = b"".join(_sstring_u32(t) for t in block_type_names)
