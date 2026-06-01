@@ -16,6 +16,8 @@ from generate_textures import (
     _map_parallax_strength_to_nif_scale,
     _compute_tooltip_position,
     _candidate_nif_patcher_search_dirs,
+    _compute_nif_editor_controls_pane_height,
+    _compute_nif_editor_result_details_height,
     _format_nif_result_row_details,
     _normalize_nif_editor_texture_input_path,
     _load_nif_patcher_exports,
@@ -150,6 +152,37 @@ class TestNifPatcherLoading(unittest.TestCase):
                 sys.path[:] = original_sys_path
             self.assertIn("patch_nif", exports)
             self.assertTrue(callable(exports["patch_nif"]))
+
+
+class TestNifEditorLayoutSizing(unittest.TestCase):
+    def test_controls_pane_preserves_large_controls_area(self) -> None:
+        self.assertEqual(
+            _compute_nif_editor_controls_pane_height(
+                window_height=820,
+                controls_requested_height=960,
+                footer_height=72,
+            ),
+            508,
+        )
+
+    def test_controls_pane_keeps_minimum_height_when_window_is_tight(self) -> None:
+        self.assertEqual(
+            _compute_nif_editor_controls_pane_height(
+                window_height=560,
+                controls_requested_height=120,
+                footer_height=80,
+            ),
+            340,
+        )
+
+    def test_result_details_height_leaves_room_for_results_list(self) -> None:
+        self.assertEqual(
+            _compute_nif_editor_result_details_height(
+                results_height=300,
+                details_requested_height=220,
+            ),
+            160,
+        )
 
 
 def _flat_dark_image() -> Image.Image:

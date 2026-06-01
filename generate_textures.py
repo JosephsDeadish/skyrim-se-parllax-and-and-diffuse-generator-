@@ -279,6 +279,33 @@ def _format_nif_result_row_details(details: str) -> str:
     return _normalize_nif_result_details(details).replace("\n", " ↩ ")
 
 
+def _compute_nif_editor_controls_pane_height(
+    *,
+    window_height: int,
+    controls_requested_height: int,
+    footer_height: int = 0,
+    min_controls_height: int = 340,
+    min_results_height: int = 240,
+) -> int:
+    available_height = max(min_controls_height, window_height - max(0, footer_height))
+    max_controls_height = max(min_controls_height, available_height - min_results_height)
+    requested_height = max(min_controls_height, controls_requested_height)
+    return min(requested_height, max_controls_height)
+
+
+def _compute_nif_editor_result_details_height(
+    *,
+    results_height: int,
+    details_requested_height: int,
+    min_results_list_height: int = 140,
+    min_details_height: int = 120,
+) -> int:
+    available_height = max(min_details_height, results_height)
+    max_details_height = max(min_details_height, available_height - min_results_list_height)
+    requested_height = max(min_details_height, details_requested_height)
+    return min(requested_height, max_details_height)
+
+
 def restore_nif_backups(nif_paths: list[Path]) -> list[tuple[str, str, str]]:
     """Restore ``.nif`` files from sibling ``.nif.bak`` backups."""
     results: list[tuple[str, str, str]] = []
@@ -10433,11 +10460,29 @@ if GUI_AVAILABLE:
                 self._add_tooltip(copy_selected_button, "📎 Copies only the selected row — ideal for Discord bragging or bug reports.")
                 self._add_tooltip(copy_all_button, "📦 Copies every row in one go for logs/changelists.")
                 self._add_tooltip(close_button, "🚪 Closes this window. Your NIFs will not feel abandoned.")
-                win.update_idletasks()
-                try:
-                    content_pane.sashpos(0, max(260, min(win.winfo_height() // 2, 420)))
-                except Exception:
-                    pass
+
+                def _apply_nif_editor_initial_pane_layout() -> None:
+                    try:
+                        if not win.winfo_exists():
+                            return
+                        win.update_idletasks()
+                        controls_height = _compute_nif_editor_controls_pane_height(
+                            window_height=max(content_pane.winfo_height(), win.winfo_height()),
+                            controls_requested_height=controls_wrapper.winfo_reqheight() + 24,
+                            footer_height=footer_frame.winfo_reqheight(),
+                        )
+                        content_pane.sashpos(0, controls_height)
+                        results_height = max(results_pane.winfo_height(), res_frame.winfo_height())
+                        if results_height > 0:
+                            details_height = _compute_nif_editor_result_details_height(
+                                results_height=results_height,
+                                details_requested_height=result_details_text.winfo_reqheight() + 36,
+                            )
+                            results_pane.sashpos(0, max(140, results_height - details_height))
+                    except Exception:
+                        pass
+
+                win.after_idle(_apply_nif_editor_initial_pane_layout)
             except Exception as exc:
                 try:
                     win.destroy()
