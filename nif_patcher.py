@@ -354,10 +354,10 @@ _DEFAULT_PARALLAX_SCALE: float = 1.0
 # type-specific fields, measured from the start of the block and assuming
 # zero extra-data entries.  For each extra-data entry, add 4 bytes.
 #
-# Breakdown:
-#   NiObjectNET : name_ref(4) + num_extra(4) + controller_ref(4) = 12
+# Breakdown (Skyrim/SE BSLightingShaderProperty per nifxml):
+#   NiObjectNET : shader_type(4) + name_ref(4) + num_extra(4)
+#                 + controller_ref(4)                            = 16
 #   BSShaderProp: flags1(4) + flags2(4)                          =  8
-#   shader_type : (4)                                            =  4
 #   uv_offset   : (8)  uv_scale: (8)                            = 16
 #   texture_set : (4)                                            =  4
 #   emissive_col: (12) emissive_mul: (4)                        = 16
@@ -369,9 +369,11 @@ _DEFAULT_PARALLAX_SCALE: float = 1.0
 _COMMON_FIELDS_SIZE: int = 100
 
 # Offsets within the common section (from block_start, 0 extra-data)
-_OFFSET_FLAGS1: int = 12        # block_start + 12 + 4*num_extra
-_OFFSET_FLAGS2: int = 16
-_OFFSET_SHADER_TYPE: int = 20
+_OFFSET_SHADER_TYPE: int = 0
+_OFFSET_NUM_EXTRA: int = 8
+_OFFSET_CONTROLLER: int = 12
+_OFFSET_FLAGS1: int = 16        # block_start + 16 + 4*num_extra
+_OFFSET_FLAGS2: int = 20
 _OFFSET_TEXTURE_SET: int = 40   # after shader_type + uv_offset + uv_scale
 _OFFSET_GLOSSINESS: int = 72    # clamp_mode(4)+alpha(4)+refraction(4)+glossiness(4)
 _OFFSET_SPEC_COLOR: int = 76    # 3 × float32 = 12 bytes (R,G,B)
@@ -1082,10 +1084,9 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
                        block_size: int, num_blocks: int) -> _ShaderPropBlock | None:
     """Parse a BSLightingShaderProperty block.
 
-    Layout for NIF 20.2.0.7 / user_version=12 (zero extra-data):
-      NiObjectNET  12 B   name_ref + num_extra + controller_ref
+    Layout for Skyrim/SE BSLightingShaderProperty (NIF 20.2.0.7 / user_version=12):
+      NiObjectNET  16 B   shader_type + name_ref + num_extra + controller_ref
       flags1/2      8 B
-      shader_type   4 B
       uv_offset/scale 16 B
       texture_set   4 B   (Ref — block index, i32)
       emissive_col 12 B + emissive_mul 4 B
@@ -1096,24 +1097,22 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
       [type-3 only] parallax_max_passes 4 B + parallax_scale 4 B
     """
     block_end = block_start + block_size
-    if block_size < 16 or block_end > len(buf._b):
+    if block_size < _COMMON_FIELDS_SIZE or block_end > len(buf._b):
         return None
-    if block_start + 12 > block_end:
+    if block_start + _OFFSET_CONTROLLER + 4 > block_end:
         return None
 
-    buf.seek(block_start)
-    _name_ref = buf.read_u32()
-    num_extra = buf.read_u32()
-    max_extra_refs = max((block_size - 12) // 4, 0)
+    raw_shader_type = buf.read_u32_at(block_start + _OFFSET_SHADER_TYPE)
+    num_extra = buf.read_u32_at(block_start + _OFFSET_NUM_EXTRA)
+    max_extra_refs = max((block_size - (_OFFSET_FLAGS1 + 4)) // 4, 0)
     if num_extra > max_extra_refs:
         return None
-    if block_start + 12 + num_extra * 4 > block_end:
+    controller_offset = block_start + _OFFSET_CONTROLLER + num_extra * 4
+    if controller_offset + 4 > block_end:
         return None
-    for _ in range(num_extra):
-        buf.read_u32()
-    if buf.pos + 4 > block_end:
+    controller_ref = struct.unpack_from("<i", buf._b, controller_offset)[0]
+    if controller_ref != -1 and not (0 <= controller_ref < num_blocks):
         return None
-    _controller = buf.read_i32()
 
     extra_shift = num_extra * 4
 
@@ -1149,9 +1148,12 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         return None
     flags1 = buf.read_u32_at(flags1_offset)
     flags2 = buf.read_u32_at(flags2_offset)
-    raw_shader_type = buf.read_u32_at(shader_type_offset)
     shader_type = _decode_shader_type(raw_shader_type)
     texture_set_ref = struct.unpack_from("<i", buf._b, texture_set_ref_offset)[0]
+    if shader_type not in _KNOWN_SHADER_TYPES:
+        return None
+    if texture_set_ref != -1 and not (0 <= texture_set_ref < num_blocks):
+        return None
 
     # Type-specific parallax fields (only when shader_type == 3)
     common_end = block_start + _COMMON_FIELDS_SIZE + extra_shift + layout_shift

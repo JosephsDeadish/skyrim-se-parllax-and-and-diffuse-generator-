@@ -285,7 +285,7 @@ def _compute_nif_editor_controls_pane_height(
     controls_requested_height: int,
     footer_height: int = 0,
     min_controls_height: int = 340,
-    min_results_height: int = 240,
+    min_results_height: int = 180,
 ) -> int:
     available_height = max(min_controls_height, window_height - max(0, footer_height))
     max_controls_height = max(min_controls_height, available_height - min_results_height)
@@ -9304,7 +9304,7 @@ if GUI_AVAILABLE:
 
                 controls_wrapper.bind("<Configure>", _sync_controls_scroll_region)
                 controls_canvas.bind("<Configure>", _resize_controls_window)
-                content_pane.add(controls_container, weight=3)
+                content_pane.add(controls_container, weight=5)
 
                 intro_label = tk.Label(
                     controls_wrapper,
@@ -9938,11 +9938,18 @@ if GUI_AVAILABLE:
 
                 res_frame = ttk.LabelFrame(
                     content_pane,
-                    text="Results (single log view; right-click rows to copy)",
+                    text="Results / log",
                     padding=6,
                 )
-                res_frame.configure(height=320)
-                content_pane.add(res_frame, weight=4)
+                res_frame.configure(height=220)
+                content_pane.add(res_frame, weight=2)
+                results_hint_label = ttk.Label(
+                    res_frame,
+                    text="⇳ Drag the divider above to resize this log. Right-click rows or use the copy buttons for full text.",
+                    justify=tk.LEFT,
+                    wraplength=860,
+                )
+                results_hint_label.pack(fill="x", pady=(0, 6))
                 results_list_frame = ttk.Frame(res_frame)
                 results_list_frame.pack(fill="both", expand=True)
                 style = ttk.Style(win)
@@ -9983,6 +9990,10 @@ if GUI_AVAILABLE:
                 self._add_tooltip(
                     results_tree,
                     "Single results log for scan/patch/restore actions. Use the Details column or copy actions for the full text.",
+                )
+                self._add_tooltip(
+                    results_hint_label,
+                    "⇳ The divider above this panel is draggable, so the log does not have to take over the whole window.",
                 )
 
                 full_row_details: dict[str, str] = {}

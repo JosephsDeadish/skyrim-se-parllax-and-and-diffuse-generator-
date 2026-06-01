@@ -162,7 +162,7 @@ class TestNifEditorLayoutSizing(unittest.TestCase):
                 controls_requested_height=960,
                 footer_height=72,
             ),
-            508,
+            568,
         )
 
     def test_controls_pane_keeps_minimum_height_when_window_is_tight(self) -> None:
