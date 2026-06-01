@@ -639,20 +639,6 @@ class NifShaderInfo:
     def has_env_mapping_flag(self) -> bool:
         return bool(self.flags1 & SLSF1_ENVIRONMENT_MAPPING)
 
-
-RESOLUTION_RESOLVED: str = "RESOLVED"
-RESOLUTION_WEAK: str = "WEAK_RESOLUTION"
-RESOLUTION_UNRESOLVED: str = "UNRESOLVED"
-
-
-@dataclass(frozen=True)
-class ShaderTypeResolutionResult:
-    """Normalized confidence metadata for shader-type resolution paths."""
-
-    type: str
-    confidence: float
-    method: str
-
     @property
     def has_glow_map_flag(self) -> bool:
         return bool(self.flags2 & SLSF2_GLOW_MAP)
@@ -733,6 +719,20 @@ class ShaderTypeResolutionResult:
     def shader_type_name(self) -> str:
         """Human-readable name of the shader type (e.g. ``'Heightmap (Parallax)'``)."""
         return SHADER_TYPE_NAMES.get(self.shader_type, f"Unknown ({self.shader_type})")
+
+
+RESOLUTION_RESOLVED: str = "RESOLVED"
+RESOLUTION_WEAK: str = "WEAK_RESOLUTION"
+RESOLUTION_UNRESOLVED: str = "UNRESOLVED"
+
+
+@dataclass(frozen=True)
+class ShaderTypeResolutionResult:
+    """Normalized confidence metadata for shader-type resolution paths."""
+
+    type: str
+    confidence: float
+    method: str
 
 
 @dataclass
