@@ -93,6 +93,35 @@ def _build_shader_block(
     return body
 
 
+def _build_real_shader_block(
+    *,
+    shader_type: int = SHADER_TYPE_DEFAULT,
+    flags1: int = 0,
+    flags2: int = 0,
+    parallax_scale: float | None = None,
+    env_map_scale: float | None = None,
+    texture_set_ref: int = 0,
+) -> bytes:
+    """Build a Skyrim-style BSLightingShaderProperty without a standalone shader_type field."""
+    nio = struct.pack("<IIi", 0, 0, -1)
+    flags = struct.pack("<II", flags1, flags2)
+    uv = struct.pack("<ffff", 0.0, 0.0, 1.0, 1.0)
+    tsref = struct.pack("<i", texture_set_ref)
+    emit = struct.pack("<ffff", 0.0, 0.0, 0.0, 1.0)
+    misc = struct.pack("<Ifff", 3, 1.0, 0.0, 80.0)
+    spec = struct.pack("<ffff", 1.0, 1.0, 1.0, 1.0)
+    light = struct.pack("<ff", 0.3, 2.0)
+
+    body = nio + flags + uv + tsref + emit + misc + spec + light
+    if shader_type == SHADER_TYPE_HEIGHTMAP:
+        scale = parallax_scale if parallax_scale is not None else 1.0
+        body += struct.pack("<ff", 4.0, scale)
+    elif shader_type == SHADER_TYPE_ENVMAP:
+        scale = env_map_scale if env_map_scale is not None else 1.0
+        body += struct.pack("<f", scale)
+    return body
+
+
 def _build_texture_set_block(
     *,
     texture_paths: list[str] | None = None,
@@ -120,6 +149,7 @@ def _build_minimal_nif(
     flags1: int = 0,
     flags2: int = 0,
     parallax_scale: float | None = None,
+    env_map_scale: float | None = None,
     texture_paths: list[str] | None = None,
     shader_block_type: str = "BSLightingShaderProperty",
     user_ver2: int = 83,
@@ -127,6 +157,7 @@ def _build_minimal_nif(
     texture_set_layout_shift: int = 0,
     texture_set_count_u16: bool = False,
     extra_shader_blocks: list[dict] | None = None,
+    shader_layout: str = "legacy",
 ) -> bytes:
     """Build a minimal but structurally valid Skyrim SE NIF in memory.
 
@@ -151,11 +182,13 @@ def _build_minimal_nif(
         texture_set_layout_shift=texture_set_layout_shift,
         texture_set_count_u16=texture_set_count_u16,
     )
-    sp0_body = _build_shader_block(
+    shader_builder = _build_shader_block if shader_layout == "legacy" else _build_real_shader_block
+    sp0_body = shader_builder(
         shader_type=shader_type,
         flags1=flags1,
         flags2=flags2,
         parallax_scale=parallax_scale,
+        env_map_scale=env_map_scale,
         texture_set_ref=0,
     )
 
@@ -164,7 +197,7 @@ def _build_minimal_nif(
     for extra in (extra_shader_blocks or []):
         ts_idx = 2 + len(extra_bodies) * 2
         ts_body = _build_texture_set_block()
-        sp_body = _build_shader_block(texture_set_ref=ts_idx, **extra)
+        sp_body = shader_builder(texture_set_ref=ts_idx, **extra)
         extra_bodies.append((ts_body, sp_body))
 
     # --- Assemble block list --------------------------------------------
@@ -269,6 +302,29 @@ class TestScanNif(unittest.TestCase):
         infos = scan_nif(nif)
         self.assertEqual(len(infos), 1)
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
+
+    def test_scan_prefers_real_skyrim_shader_layout(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            flags1=0x82400301,
+        )
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
+
+    def test_scan_reads_env_map_scale_from_real_skyrim_layout(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=0x82400301,
+            env_map_scale=2.5,
+        )
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
+        self.assertAlmostEqual(infos[0].env_map_scale or 0.0, 2.5, places=3)
 
     def test_scan_reads_texture_paths(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8

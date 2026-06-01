@@ -367,6 +367,7 @@ _DEFAULT_PARALLAX_SCALE: float = 1.0
 #
 #   Total common = 100  (no extra-data; add 4 × num_extra)
 _COMMON_FIELDS_SIZE: int = 100
+_REAL_COMMON_FIELDS_SIZE: int = 96
 
 # Offsets within the common section (from block_start, 0 extra-data)
 _OFFSET_NUM_EXTRA: int = 4
@@ -380,6 +381,19 @@ _OFFSET_SPEC_COLOR: int = 76    # 3 × float32 = 12 bytes (R,G,B)
 _OFFSET_SPEC_STRENGTH: int = 88 # immediately after spec_color
 _OFFSET_LIGHT_EFF1: int = 92    # lighting effect 1 (soft lighting)
 _OFFSET_LIGHT_EFF2: int = 96    # lighting effect 2
+
+# Real Skyrim/SE BSLightingShaderProperty layout used by actual meshes:
+# there is no standalone on-disk shader_type field before flags1/flags2.
+# The block starts with the NiObjectNET prefix and then BSShaderProperty's
+# packed flags/UV data, so texture_set_ref sits 4 bytes earlier than in the
+# older simplified layout above.
+_REAL_OFFSET_FLAGS1: int = 12
+_REAL_OFFSET_FLAGS2: int = 16
+_REAL_OFFSET_TEXTURE_SET: int = 36
+_REAL_OFFSET_SPEC_COLOR: int = 72
+_REAL_OFFSET_SPEC_STRENGTH: int = 84
+_REAL_OFFSET_LIGHT_EFF1: int = 88
+_REAL_OFFSET_LIGHT_EFF2: int = 92
 
 # For SHADER_TYPE_ENVMAP (1) blocks, env_map_scale is the first type-specific
 # float immediately after the 100-byte common section.
@@ -1039,7 +1053,7 @@ class _ShaderPropBlock:
 
     flags1_offset: int
     flags2_offset: int
-    shader_type_offset: int
+    shader_type_offset: int | None
     texture_set_ref_offset: int
 
     flags1: int
@@ -1098,13 +1112,13 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
       [type-3 only] parallax_max_passes 4 B + parallax_scale 4 B
     """
     block_end = block_start + block_size
-    if block_size < _COMMON_FIELDS_SIZE or block_end > len(buf._b):
+    if block_size < _REAL_COMMON_FIELDS_SIZE or block_end > len(buf._b):
         return None
     if block_start + _OFFSET_CONTROLLER + 4 > block_end:
         return None
 
     num_extra = buf.read_u32_at(block_start + _OFFSET_NUM_EXTRA)
-    max_extra_refs = max((block_size - (_OFFSET_FLAGS1 + 4)) // 4, 0)
+    max_extra_refs = max((block_size - (_REAL_OFFSET_FLAGS1 + 4)) // 4, 0)
     if num_extra > max_extra_refs:
         return None
     controller_offset = block_start + _OFFSET_CONTROLLER + num_extra * 4
@@ -1128,102 +1142,174 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
             return low16
         return raw_value
 
-    # Always use layout_shift=0 for Skyrim SE NIFs (user_version_2=83/100).
-    # A speculative layout_shift=4 heuristic was previously attempted but
-    # its scoring was unreliable: on standard NIFs it could mis-select the
-    # shifted layout, causing _upgrade_block_to_type3 to insert type-3 float
-    # fields at the wrong offset and corrupt the adjacent block — which
-    # manifested as an EXCEPTION_ACCESS_VIOLATION in-game when Skyrim read
-    # the garbled BSLightingShaderMaterial.
-    layout_shift = 0
-    flags1_offset = block_start + _OFFSET_FLAGS1 + extra_shift + layout_shift
-    flags2_offset = block_start + _OFFSET_FLAGS2 + extra_shift + layout_shift
-    shader_type_offset = block_start + _OFFSET_SHADER_TYPE + extra_shift + layout_shift
-    texture_set_ref_offset = block_start + _OFFSET_TEXTURE_SET + extra_shift + layout_shift
-    if (
-        flags1_offset + 4 > block_end
-        or flags2_offset + 4 > block_end
-        or shader_type_offset + 4 > block_end
-        or texture_set_ref_offset + 4 > block_end
-    ):
-        return None
-    flags1 = buf.read_u32_at(flags1_offset)
-    flags2 = buf.read_u32_at(flags2_offset)
-    shader_type = _decode_shader_type(raw_shader_type)
-    texture_set_ref = struct.unpack_from("<i", buf._b, texture_set_ref_offset)[0]
-    if shader_type not in _KNOWN_SHADER_TYPES:
-        return None
-    if texture_set_ref != -1 and not (0 <= texture_set_ref < num_blocks):
+    def _infer_real_shader_type(flags1: int, payload_size: int) -> int | None:
+        if payload_size < 0:
+            return None
+        if payload_size == 0:
+            return SHADER_TYPE_DEFAULT
+        if payload_size == 4:
+            return SHADER_TYPE_ENVMAP
+        if payload_size == 8:
+            return SHADER_TYPE_HEIGHTMAP
+        if payload_size == 24:
+            return SHADER_TYPE_MULTILAYER
+        if (flags1 & SLSF1_GLOW_MAP) and payload_size == 0:
+            return SHADER_TYPE_GLOW
         return None
 
-    # Type-specific parallax fields (only when shader_type == 3)
-    common_end = block_start + _COMMON_FIELDS_SIZE + extra_shift + layout_shift
-    pmx_offset: int | None = None
-    psc_offset: int | None = None
-    pmx_val: float | None = None
-    psc_val: float | None = None
+    def _build_candidate(
+        *,
+        layout_name: str,
+        flags1_base: int,
+        flags2_base: int,
+        texture_set_base: int,
+        spec_color_base: int,
+        spec_strength_base: int,
+        light_eff1_base: int,
+        common_size: int,
+        shader_type_offset: int | None,
+        shader_type_value: int | None,
+    ) -> tuple[int, _ShaderPropBlock] | None:
+        flags1_offset = block_start + flags1_base + extra_shift
+        flags2_offset = block_start + flags2_base + extra_shift
+        texture_set_ref_offset = block_start + texture_set_base + extra_shift
+        if (
+            flags1_offset + 4 > block_end
+            or flags2_offset + 4 > block_end
+            or texture_set_ref_offset + 4 > block_end
+        ):
+            return None
+        flags1 = buf.read_u32_at(flags1_offset)
+        flags2 = buf.read_u32_at(flags2_offset)
+        texture_set_ref = struct.unpack_from("<i", buf._b, texture_set_ref_offset)[0]
+        if texture_set_ref != -1 and not (0 <= texture_set_ref < num_blocks):
+            return None
 
-    if shader_type == SHADER_TYPE_HEIGHTMAP and block_size >= _COMMON_FIELDS_SIZE + extra_shift + 8:
-        pmx_offset = common_end
-        psc_offset = common_end + 4
-        buf.seek(pmx_offset)
-        pmx_val = buf.read_float()
-        psc_val = buf.read_float()
+        shader_type = shader_type_value
+        if shader_type is None or shader_type not in _KNOWN_SHADER_TYPES:
+            return None
 
-    # Additional always-present fields (spec_color, spec_strength, light_eff1)
-    spec_color_off = block_start + _OFFSET_SPEC_COLOR + extra_shift + layout_shift
-    spec_strength_off = block_start + _OFFSET_SPEC_STRENGTH + extra_shift + layout_shift
-    light_eff1_off = block_start + _OFFSET_LIGHT_EFF1 + extra_shift + layout_shift
+        common_end = block_start + common_size + extra_shift
+        payload_size = block_size - (common_size + extra_shift)
+        pmx_offset: int | None = None
+        psc_offset: int | None = None
+        pmx_val: float | None = None
+        psc_val: float | None = None
+        if shader_type == SHADER_TYPE_HEIGHTMAP and payload_size >= 8:
+            pmx_offset = common_end
+            psc_offset = common_end + 4
+            pmx_val = struct.unpack_from("<f", buf._b, pmx_offset)[0]
+            psc_val = struct.unpack_from("<f", buf._b, psc_offset)[0]
 
-    spec_r, spec_g, spec_b = 1.0, 1.0, 1.0
-    spec_strength_val: float = 1.0
-    light_eff1_val: float = 0.3
+        spec_color_off = block_start + spec_color_base + extra_shift
+        spec_strength_off = block_start + spec_strength_base + extra_shift
+        light_eff1_off = block_start + light_eff1_base + extra_shift
+        spec_r, spec_g, spec_b = 1.0, 1.0, 1.0
+        spec_strength_val: float = 1.0
+        light_eff1_val: float = 0.3
+        if spec_color_off + 12 <= block_end:
+            spec_r = struct.unpack_from("<f", buf._b, spec_color_off)[0]
+            spec_g = struct.unpack_from("<f", buf._b, spec_color_off + 4)[0]
+            spec_b = struct.unpack_from("<f", buf._b, spec_color_off + 8)[0]
+        if spec_strength_off + 4 <= block_end:
+            spec_strength_val = struct.unpack_from("<f", buf._b, spec_strength_off)[0]
+        if light_eff1_off + 4 <= block_end:
+            light_eff1_val = struct.unpack_from("<f", buf._b, light_eff1_off)[0]
 
-    if spec_color_off + 12 <= block_end:
-        spec_r = struct.unpack_from("<f", buf._b, spec_color_off)[0]
-        spec_g = struct.unpack_from("<f", buf._b, spec_color_off + 4)[0]
-        spec_b = struct.unpack_from("<f", buf._b, spec_color_off + 8)[0]
-    if spec_strength_off + 4 <= block_end:
-        spec_strength_val = struct.unpack_from("<f", buf._b, spec_strength_off)[0]
-    if light_eff1_off + 4 <= block_end:
-        light_eff1_val = struct.unpack_from("<f", buf._b, light_eff1_off)[0]
+        envmap_scale_off: int | None = None
+        envmap_scale_val: float | None = None
+        if shader_type == SHADER_TYPE_ENVMAP:
+            esc_off = common_end + _ENVMAP_SCALE_OFFSET_FROM_COMMON
+            if esc_off + 4 <= block_end:
+                envmap_scale_off = esc_off
+                envmap_scale_val = struct.unpack_from("<f", buf._b, esc_off)[0]
 
-    # Env map scale: only for SHADER_TYPE_ENVMAP (1), first field after common
-    envmap_scale_off: int | None = None
-    envmap_scale_val: float | None = None
-    if shader_type == SHADER_TYPE_ENVMAP:
-        esc_off = common_end + _ENVMAP_SCALE_OFFSET_FROM_COMMON
-        if esc_off + 4 <= block_end:
-            envmap_scale_off = esc_off
-            envmap_scale_val = struct.unpack_from("<f", buf._b, esc_off)[0]
+        score = 0
+        if layout_name == "real":
+            score += 20
+            if raw_shader_type not in _KNOWN_SHADER_TYPES:
+                score += 8
+            if payload_size in (0, 4, 8, 24):
+                score += 4
+        else:
+            if raw_shader_type in _KNOWN_SHADER_TYPES:
+                score += 20
+            elif _decode_shader_type(raw_shader_type) in _KNOWN_SHADER_TYPES:
+                score += 8
+            if payload_size in (0, 4, 8):
+                score += 2
 
-    return _ShaderPropBlock(
-        block_index=block_index,
-        block_start=block_start,
-        num_extra=num_extra,
-        flags1_offset=flags1_offset,
-        flags2_offset=flags2_offset,
-        shader_type_offset=shader_type_offset,
-        texture_set_ref_offset=texture_set_ref_offset,
-        flags1=flags1,
-        flags2=flags2,
-        shader_type=shader_type,
-        texture_set_ref=texture_set_ref,
-        layout_shift=layout_shift,
-        common_end_offset=common_end,
-        parallax_max_passes_offset=pmx_offset,
-        parallax_scale_offset=psc_offset,
-        parallax_max_passes=pmx_val,
-        parallax_scale=psc_val,
-        spec_color_offset=spec_color_off,
-        spec_strength_offset=spec_strength_off,
-        light_eff1_offset=light_eff1_off,
-        spec_color=(spec_r, spec_g, spec_b),
-        spec_strength=spec_strength_val,
-        light_eff1=light_eff1_val,
-        env_map_scale_offset=envmap_scale_off,
-        env_map_scale=envmap_scale_val,
+        return score, _ShaderPropBlock(
+            block_index=block_index,
+            block_start=block_start,
+            num_extra=num_extra,
+            flags1_offset=flags1_offset,
+            flags2_offset=flags2_offset,
+            shader_type_offset=shader_type_offset,
+            texture_set_ref_offset=texture_set_ref_offset,
+            flags1=flags1,
+            flags2=flags2,
+            shader_type=shader_type,
+            texture_set_ref=texture_set_ref,
+            layout_shift=0,
+            common_end_offset=common_end,
+            parallax_max_passes_offset=pmx_offset,
+            parallax_scale_offset=psc_offset,
+            parallax_max_passes=pmx_val,
+            parallax_scale=psc_val,
+            spec_color_offset=spec_color_off,
+            spec_strength_offset=spec_strength_off,
+            light_eff1_offset=light_eff1_off,
+            spec_color=(spec_r, spec_g, spec_b),
+            spec_strength=spec_strength_val,
+            light_eff1=light_eff1_val,
+            env_map_scale_offset=envmap_scale_off,
+            env_map_scale=envmap_scale_val,
+        )
+
+    candidates: list[tuple[int, _ShaderPropBlock]] = []
+    real_payload_size = block_size - (_REAL_COMMON_FIELDS_SIZE + extra_shift)
+    real_shader_type = _infer_real_shader_type(
+        buf.read_u32_at(block_start + _REAL_OFFSET_FLAGS1 + extra_shift),
+        real_payload_size,
     )
+    real_candidate = _build_candidate(
+        layout_name="real",
+        flags1_base=_REAL_OFFSET_FLAGS1,
+        flags2_base=_REAL_OFFSET_FLAGS2,
+        texture_set_base=_REAL_OFFSET_TEXTURE_SET,
+        spec_color_base=_REAL_OFFSET_SPEC_COLOR,
+        spec_strength_base=_REAL_OFFSET_SPEC_STRENGTH,
+        light_eff1_base=_REAL_OFFSET_LIGHT_EFF1,
+        common_size=_REAL_COMMON_FIELDS_SIZE,
+        shader_type_offset=None,
+        shader_type_value=real_shader_type,
+    )
+    if real_candidate is not None:
+        candidates.append(real_candidate)
+
+    legacy_candidate = _build_candidate(
+        layout_name="legacy",
+        flags1_base=_OFFSET_FLAGS1,
+        flags2_base=_OFFSET_FLAGS2,
+        texture_set_base=_OFFSET_TEXTURE_SET,
+        spec_color_base=_OFFSET_SPEC_COLOR,
+        spec_strength_base=_OFFSET_SPEC_STRENGTH,
+        light_eff1_base=_OFFSET_LIGHT_EFF1,
+        common_size=_COMMON_FIELDS_SIZE,
+        shader_type_offset=block_start + _OFFSET_SHADER_TYPE + extra_shift,
+        shader_type_value=_decode_shader_type(raw_shader_type),
+    )
+    if legacy_candidate is not None:
+        candidates.append(legacy_candidate)
+
+    if not candidates:
+        raise ValueError(
+            "unsupported BSLightingShaderProperty layout "
+            f"(block_size={block_size}, raw_field=0x{raw_shader_type:08X})"
+        )
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
 
 
 def _parse_texture_set(buf: _Buf, block_index: int,
@@ -1763,6 +1849,12 @@ def _upgrade_block_to_type3(
             f"Block {block_index}: recorded block size {recorded_size} does not match "
             f"expected type-0 size {expected_type0_size}; refusing to insert type-3 "
             f"fields to avoid corrupting the NIF."
+        )
+
+    if sp.shader_type_offset is None:
+        raise ValueError(
+            f"Block {block_index}: cannot force shader type 3 on a real-layout "
+            "Skyrim shader block without an explicit on-disk shader_type field."
         )
 
     # 1. Write new shader_type = 3
