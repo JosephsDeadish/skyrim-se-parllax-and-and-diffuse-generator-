@@ -1,7 +1,8 @@
-"""Skyrim SE NIF file patcher (v0.8).
+"""Skyrim NIF file patcher (v0.8).
 
-Reads Skyrim SE NIF files (format 20.2.0.7, user_version=12,
-user_version_2=83/100) and patches ``BSLightingShaderProperty`` shader flags and
+Reads Skyrim NIF files (format 20.2.0.7, user_version=12,
+covering LE/SE/AE/VR/CK ``user_version_2`` variants) and patches
+``BSLightingShaderProperty`` shader flags and
 ``BSShaderTextureSet`` texture paths to enable parallax, environment
 mapping, and ENB complex-material effects on meshes that shipped without
 those flags.
@@ -56,12 +57,14 @@ _SKYRIM_SE_USER_VERSION_2: int = 83
 _SKYRIM_SE_USER_VERSION_2_ALT: int = 100
 _SKYRIM_SE_USER_VERSION_2_CK: int = 130
 _SKYRIM_LE_USER_VERSION_2: int = 34
-_SUPPORTED_USER_VERSION_2: tuple[int, ...] = (
+_KNOWN_SKYRIM_USER_VERSION_2: tuple[int, ...] = (
     _SKYRIM_SE_USER_VERSION_2,
     _SKYRIM_SE_USER_VERSION_2_ALT,
     _SKYRIM_SE_USER_VERSION_2_CK,
     _SKYRIM_LE_USER_VERSION_2,
 )
+_SKYRIM_USER_VERSION_2_MIN: int = _SKYRIM_LE_USER_VERSION_2
+_SKYRIM_USER_VERSION_2_MAX: int = 255
 
 _HEADER_PREFIXES: tuple[bytes, ...] = (
     b"Gamebryo File Format, Version 20.2.0.7",
@@ -913,9 +916,7 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
             return diagnostics
         user_version = struct.unpack_from("<I", data, version_offset + 5)[0]
         user_version_2 = struct.unpack_from("<I", data, version_offset + 13)[0]
-        if user_version_2 == _SKYRIM_LE_USER_VERSION_2:
-            diagnostics.append("This looks like a Skyrim Legendary Edition / Oldrim NIF. Convert it to SSE before patching.")
-        elif user_version != _SKYRIM_USER_VERSION or user_version_2 not in _SUPPORTED_USER_VERSION_2:
+        if user_version != _SKYRIM_USER_VERSION or not _is_supported_skyrim_user_version_2(user_version_2):
             diagnostics.append(
                 f"Unexpected user version values ({user_version}, {user_version_2}). The file may use a different game/export format."
             )
@@ -939,6 +940,13 @@ def _has_supported_header_prefix(header_line: bytes) -> bool:
     """Return True when the header line starts with a known Skyrim NIF prefix."""
     normalized = header_line.rstrip(b"\r\n\x00 ")
     return any(normalized.startswith(prefix) for prefix in _HEADER_PREFIXES)
+
+
+def _is_supported_skyrim_user_version_2(user_version_2: int) -> bool:
+    """Return True when *user_version_2* matches Skyrim LE/SE/AE/VR/CK exports."""
+    if user_version_2 in _KNOWN_SKYRIM_USER_VERSION_2:
+        return True
+    return _SKYRIM_USER_VERSION_2_MIN <= user_version_2 <= _SKYRIM_USER_VERSION_2_MAX
 
 
 def _summarize_non_patchable_block_types(header: _NifHeader) -> list[str]:
@@ -973,7 +981,7 @@ def _summarize_non_patchable_block_types(header: _NifHeader) -> list[str]:
 
 
 def _read_header(buf: _Buf) -> _NifHeader | None:
-    """Parse the NIF header; return ``None`` if not a supported Skyrim SE NIF."""
+    """Parse the NIF header; return ``None`` if not a supported Skyrim NIF."""
     header_line: bytearray = bytearray()
     while buf.remaining() > 0:
         b = buf.read_u8()
@@ -1012,7 +1020,7 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
     # (notably CK-style 130 headers), causing real blocks to be misread and
     # skipped during patching.
     user_version_2 = buf.read_u32()
-    if user_version_2 not in _SUPPORTED_USER_VERSION_2:
+    if not _is_supported_skyrim_user_version_2(user_version_2):
         return None
     buf.read_sstring_u8()  # author
     if user_version_2 > 130:

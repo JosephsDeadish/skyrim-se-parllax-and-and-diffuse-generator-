@@ -294,6 +294,11 @@ class TestScanNif(unittest.TestCase):
         infos = scan_nif(nif)
         self.assertEqual(len(infos), 1)
 
+    def test_scan_accepts_user_version_2_155(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=155)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+
     def test_scan_accepts_crlf_header_line(self) -> None:
         nif = _write_nif(self.tmp, header_line_ending=b"\r\n")
         infos = scan_nif(nif)
