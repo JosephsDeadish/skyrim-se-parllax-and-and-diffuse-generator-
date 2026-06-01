@@ -341,6 +341,34 @@ class TestScanNif(unittest.TestCase):
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
         self.assertAlmostEqual(infos[0].env_map_scale or 0.0, 2.5, places=3)
 
+    def test_scan_real_layout_tolerates_extended_shader_payload(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            flags1=SLSF1_PARALLAX,
+        )
+        raw = bytearray(nif.read_bytes())
+        header = _read_header(_Buf(bytes(raw)))
+        self.assertIsNotNone(header)
+        assert header is not None
+        block_starts = [header.blocks_start]
+        for size in header.block_sizes[:-1]:
+            block_starts.append(block_starts[-1] + size)
+        shader_block_index = 1
+        shader_start = block_starts[shader_block_index]
+        shader_end = shader_start + header.block_sizes[shader_block_index]
+        raw[shader_end:shader_end] = struct.pack("<III", 1, 2, 3)
+        shader_size_offset = header.block_sizes_offset + shader_block_index * 4
+        struct.pack_into("<I", raw, shader_size_offset, header.block_sizes[shader_block_index] + 12)
+        nif.write_bytes(bytes(raw))
+
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertFalse(
+            any("failed to parse BSLightingShaderProperty" in line for line in diagnostics),
+            diagnostics,
+        )
+
     def test_scan_reads_texture_paths(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8
         nif = _write_nif(self.tmp, texture_paths=paths)

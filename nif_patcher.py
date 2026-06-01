@@ -1172,6 +1172,16 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
             return SHADER_TYPE_HEIGHTMAP
         if payload_size == 24:
             return SHADER_TYPE_MULTILAYER
+        if payload_size >= 8:
+            if flags1 & SLSF1_PARALLAX_OCCLUSION:
+                return SHADER_TYPE_PARALLAX_OCC
+            if flags1 & SLSF1_PARALLAX:
+                return SHADER_TYPE_HEIGHTMAP
+        if payload_size % 4 == 0 and payload_size <= 64:
+            # Real-world Skyrim SE meshes sometimes carry additional shader
+            # payload bytes we do not decode yet. Keep the block parseable so
+            # scan/patch flows can still operate on flags and texture slots.
+            return SHADER_TYPE_DEFAULT
         return None
 
     def _build_candidate(
@@ -1204,7 +1214,10 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
 
         shader_type = shader_type_value
         if shader_type is None or shader_type not in _KNOWN_SHADER_TYPES:
-            return None
+            if layout_name == "real":
+                shader_type = SHADER_TYPE_DEFAULT
+            else:
+                return None
 
         common_end = block_start + common_size + extra_shift
         payload_size = block_size - (common_size + extra_shift)
