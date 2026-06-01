@@ -1020,6 +1020,34 @@ class TestPatchNifFlags(unittest.TestCase):
         )
         self.assertTrue(result.success, result.errors)
 
+    def test_strict_unknown_shader_weak_texture_guess_warns_but_passes(self) -> None:
+        # Slot-4-only cubemap inference is intentionally weak; strict mode should
+        # still pass while surfacing WEAK_RESOLUTION in diagnostics.
+        nif = _write_nif(
+            self.tmp,
+            shader_type=0x12345678,
+            texture_paths=[
+                "textures\\dungeons\\barrels\\barrel01.dds",
+                "",
+                "",
+                "",
+                "textures\\cubemaps\\custom_cube.dds",
+            ] + [""] * 4,
+        )
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertTrue(
+            any("WEAK_RESOLUTION" in warning and "texture_slot_cubemap" in warning for warning in result.warnings),
+            result.warnings,
+        )
+
 
 # ---------------------------------------------------------------------------
 # Tests: texture path patching

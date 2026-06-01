@@ -584,11 +584,11 @@ class NifPatchOptions:
 
     strict_unknown_shader_types: bool = False
     """When True, require every unknown raw shader-type value to be explicitly
-    resolved via the mapping table, semantic-flag inference, or texture-slot
-    inference.  A block that falls through all resolution strategies to the bare
-    ``"default_fallback"`` path is an error.  Blocks that *are* resolved by any
-    of those strategies (including the user-supplied ``unknown_shader_type_map``)
-    are accepted — unknown does not mean invalid in Skyrim SE data."""
+    classified via a confidence model:
+    ``RESOLVED`` (mapping table / semantic flags / validated texture signature),
+    ``WEAK_RESOLUTION`` (ambiguous fallback heuristics), or ``UNRESOLVED``.
+    Strict mode rejects only ``UNRESOLVED`` blocks and keeps weak resolutions as
+    warnings so legacy meshes can still be patched with visibility."""
 
     unknown_shader_type_map: dict[int, int] | None = None
     """Optional mapping from raw (unknown) shader-type integer values to known
@@ -638,6 +638,20 @@ class NifShaderInfo:
     @property
     def has_env_mapping_flag(self) -> bool:
         return bool(self.flags1 & SLSF1_ENVIRONMENT_MAPPING)
+
+
+RESOLUTION_RESOLVED: str = "RESOLVED"
+RESOLUTION_WEAK: str = "WEAK_RESOLUTION"
+RESOLUTION_UNRESOLVED: str = "UNRESOLVED"
+
+
+@dataclass(frozen=True)
+class ShaderTypeResolutionResult:
+    """Normalized confidence metadata for shader-type resolution paths."""
+
+    type: str
+    confidence: float
+    method: str
 
     @property
     def has_glow_map_flag(self) -> bool:
@@ -1922,6 +1936,31 @@ def _infer_shader_type_from_textures(slot_paths: dict[int, str]) -> tuple[int | 
     return None, "unknown"
 
 
+def _classify_shader_type_resolution(resolution: str) -> ShaderTypeResolutionResult:
+    """Classify a resolution path as resolved/weak/unresolved with confidence."""
+    if resolution == "mapping_table":
+        return ShaderTypeResolutionResult(RESOLUTION_RESOLVED, 1.0, "mapping")
+    if resolution.startswith("semantic_flag_"):
+        return ShaderTypeResolutionResult(RESOLUTION_RESOLVED, 0.95, "semantic")
+    if resolution in {
+        "texture_suffix_glow",
+        "texture_suffix_parallax",
+        "texture_suffix_envmask",
+        "texture_suffix_normal",
+    }:
+        return ShaderTypeResolutionResult(RESOLUTION_RESOLVED, 0.9, "texture")
+    if resolution in {
+        "masked_low8",
+        "masked_low16",
+        "texture_slot_cubemap",
+        "real_payload_default",
+    }:
+        return ShaderTypeResolutionResult(RESOLUTION_WEAK, 0.6, "fallback")
+    if resolution in {"fallback_default", "default_fallback", "unknown", "real_payload_default_fallback"}:
+        return ShaderTypeResolutionResult(RESOLUTION_UNRESOLVED, 0.0, "fallback")
+    return ShaderTypeResolutionResult(RESOLUTION_RESOLVED, 0.85, "fallback")
+
+
 def _resolve_unknown_shader_types(
     shader_props: list[_ShaderPropBlock],
     texture_sets: dict[int, _TextureSetBlock],
@@ -1975,10 +2014,12 @@ def _shader_resolution_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
     for sp in shader_props:
         if sp.raw_shader_type in _KNOWN_SHADER_TYPES:
             continue
+        resolution = _classify_shader_type_resolution(sp.shader_type_resolution)
         note = (
             f"Block {sp.block_index}: raw shader_type 0x{sp.raw_shader_type:08X} "
             f"resolved to {SHADER_TYPE_NAMES.get(sp.shader_type, sp.shader_type)} "
-            f"via {sp.shader_type_resolution}."
+            f"via {sp.shader_type_resolution} "
+            f"({resolution.type}, confidence={resolution.confidence:.2f}, method={resolution.method})."
         )
         if note not in notes:
             notes.append(note)
@@ -1988,19 +2029,17 @@ def _shader_resolution_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
 def _strict_unknown_shader_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
     """Return strict-mode violations for unknown raw shader values with no resolution.
 
-    A block is a violation only when its ``shader_type_resolution`` is
-    ``"default_fallback"``, meaning every resolution strategy (mapping table,
-    semantic-flag inference, and texture-slot inference) failed to identify the
-    type.  Blocks that are explicitly resolved — even from an unknown raw value
-    — are *not* violations, because unknown does not mean invalid in Skyrim SE.
+    A block is a violation only when its normalized resolution type is
+    ``UNRESOLVED``. ``WEAK_RESOLUTION`` paths (e.g. masked low-byte decoding or
+    cubemap-slot-only guesses) are accepted but surfaced as warnings by
+    diagnostics so strict mode can avoid hard-failing legacy meshes.
     """
     violations: list[str] = []
     for sp in shader_props:
         if sp.raw_shader_type in _KNOWN_SHADER_TYPES or sp.raw_shader_type == 0xFFFFFFFF:
             continue
-        if sp.shader_type_resolution != "default_fallback":
-            # Resolved via mapping_table / semantic inference / texture suffixes:
-            # not a strict-mode violation.
+        resolution = _classify_shader_type_resolution(sp.shader_type_resolution)
+        if resolution.type != RESOLUTION_UNRESOLVED:
             continue
         violations.append(
             f"Block {sp.block_index}: unknown raw shader_type 0x{sp.raw_shader_type:08X} "
@@ -3603,10 +3642,9 @@ def _main() -> None:  # pragma: no cover
                         help="Just validate and report, do not patch.")
     parser.add_argument("--strict-unknown-shader-types", action="store_true",
                         help="Fail patching only when an unknown raw shader_type value "
-                             "cannot be resolved by any strategy (mapping table, "
-                             "semantic-flag inference, or texture-slot inference). "
-                             "Unknown types that ARE resolved by one of those strategies "
-                             "are accepted — use --unknown-shader-type-map for explicit "
+                             "is classified as UNRESOLVED after mapping, semantic, and "
+                             "texture-signature checks. Weak heuristic resolutions are "
+                             "kept as warnings; use --unknown-shader-type-map for explicit "
                              "overrides.")
     parser.add_argument("--unknown-shader-type-map", nargs="*", default=None,
                         metavar="RAW:TYPE",
