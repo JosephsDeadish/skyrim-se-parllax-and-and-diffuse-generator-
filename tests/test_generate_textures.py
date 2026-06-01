@@ -1,4 +1,5 @@
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,12 +10,20 @@ from PIL import Image, ImageStat
 
 from generate_textures import (
     APP_VERSION,
+    MODDING_WIKI_SKYRIM_URL,
     PATREON_URL,
     _create_panda_icon_image,
     _map_parallax_strength_to_nif_scale,
     _compute_tooltip_position,
+    _candidate_nif_patcher_search_dirs,
+    _compute_nif_editor_controls_pane_height,
+    _compute_nif_editor_result_details_height,
     _format_nif_result_row_details,
+    _normalize_nif_editor_texture_input_path,
+    _load_nif_patcher_exports,
     _normalize_nif_result_details,
+    _preferred_dds_formats_for_output,
+    _RENDER_PROFILE_GUI_VALUES,
     _run_cli,
     _normalize_gui_state,
     _save_with_dds_fallback,
@@ -23,6 +32,7 @@ from generate_textures import (
     auto_patch_related_nifs_for_texture,
     apply_recommendations_by_auto_flags,
     build_nif_patch_options_for_generated_outputs,
+    build_nif_patch_options_for_nif_editor,
     build_render_profile_recommendation_message,
     build_complex_preview_image,
     build_complex_output_path,
@@ -31,9 +41,12 @@ from generate_textures import (
     classify_material_type,
     collect_source_textures,
     compute_wrapped_preview_index,
+    ModManagerContext,
     describe_render_profile_default_outputs,
+    describe_render_profile_files_to_create,
     detect_workflow_profile,
     detect_mod_manager_context,
+    detect_render_profile_from_mod_manager_context,
     enforce_skyrim_output_profile,
     find_related_nif_files_for_texture,
     build_glow_output_path,
@@ -59,11 +72,16 @@ from generate_textures import (
     recommend_generation_settings,
     recommend_render_profile,
     resolve_nif_patch_defaults_for_render_profile,
+    resolve_render_profile_guardrails,
+    resolve_render_profile_mode_control_states,
     resolve_render_profile_mode_selection,
     resolve_render_profile_output_defaults,
     resolve_render_profile_options,
+    build_render_profile_mode_controls_hint,
+    render_profile_has_locked_controls,
     restore_nif_backups,
     resolve_env_mask_complex_workflow,
+    resolve_nif_editor_patch_options_for_target,
     load_gui_state,
     main,
     parse_args,
@@ -73,11 +91,98 @@ from generate_textures import (
     should_apply_preview_recommendations,
     select_generation_context_source,
     get_output_folder_format_warnings,
+    generate_ambient_occlusion,
+    generate_roughness,
+    analyze_material_type_from_image,
+    _prefilter_for_mipmap_stability,
+    generate_wetness_mask,
+    generate_snow_mask,
+    build_wetness_mask_output_path,
+    build_snow_mask_output_path,
+    build_ao_output_path,
+    build_roughness_output_path,
+    GENERATED_TEXTURE_SUFFIXES,
+    recommend_output_resolution,
+    write_rmaos_json_sidecar,
 )
 
 
 def _sample_image() -> Image.Image:
     return Image.new("RGB", (8, 8), color=(60, 100, 140))
+
+
+class TestNifPatcherLoading(unittest.TestCase):
+    def test_candidate_nif_patcher_search_dirs_deduplicates(self) -> None:
+        base = Path("/tmp/skyrim-texture-generator")
+        self.assertEqual(
+            _candidate_nif_patcher_search_dirs(
+                script_path=base / "generate_textures.py",
+                executable_path=base / "generate_textures.exe",
+                meipass_path=base,
+            ),
+            (base,),
+        )
+
+    def test_load_nif_patcher_exports_from_explicit_search_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module_path = Path(temp_dir) / "nif_patcher.py"
+            module_path.write_text(
+                "\n".join(
+                    [
+                        "class NifPatchOptions: pass",
+                        "def find_nif_files(*args, **kwargs): return []",
+                        "def guess_cubemap_path_for_nif(*args, **kwargs): return None",
+                        "def guess_env_mask_path_for_nif(*args, **kwargs): return None",
+                        "def guess_glow_path_for_nif(*args, **kwargs): return None",
+                        "def guess_normal_path_for_nif(*args, **kwargs): return None",
+                        "def guess_parallax_path_for_nif(*args, **kwargs): return None",
+                        "def patch_nif(*args, **kwargs): return None",
+                        "def scan_nif(*args, **kwargs): return None",
+                        "def validate_nif_for_parallax(*args, **kwargs): return None",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            original_sys_path = list(sys.path)
+            try:
+                sys.modules.pop("nif_patcher", None)
+                exports = _load_nif_patcher_exports((Path(temp_dir),))
+            finally:
+                sys.modules.pop("nif_patcher", None)
+                sys.path[:] = original_sys_path
+            self.assertIn("patch_nif", exports)
+            self.assertTrue(callable(exports["patch_nif"]))
+
+
+class TestNifEditorLayoutSizing(unittest.TestCase):
+    def test_controls_pane_preserves_large_controls_area(self) -> None:
+        self.assertEqual(
+            _compute_nif_editor_controls_pane_height(
+                window_height=820,
+                controls_requested_height=960,
+                footer_height=72,
+            ),
+            568,
+        )
+
+    def test_controls_pane_keeps_minimum_height_when_window_is_tight(self) -> None:
+        self.assertEqual(
+            _compute_nif_editor_controls_pane_height(
+                window_height=560,
+                controls_requested_height=120,
+                footer_height=80,
+            ),
+            340,
+        )
+
+    def test_result_details_height_leaves_room_for_results_list(self) -> None:
+        self.assertEqual(
+            _compute_nif_editor_result_details_height(
+                results_height=300,
+                details_requested_height=220,
+            ),
+            160,
+        )
 
 
 def _flat_dark_image() -> Image.Image:
@@ -198,8 +303,8 @@ def _shield_art_image() -> Image.Image:
 
 
 class GenerateTexturesTests(unittest.TestCase):
-    def test_app_version_is_0_6(self) -> None:
-        self.assertEqual(APP_VERSION, "0.6")
+    def test_app_version_is_0_7(self) -> None:
+        self.assertEqual(APP_VERSION, "0.7")
 
     def test_normalize_gui_state_turns_off_individual_auto_flags_when_master_off(self) -> None:
         normalized = _normalize_gui_state(
@@ -220,6 +325,11 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(bool(normalized["auto_environment_mask"]))
         self.assertFalse(bool(normalized["auto_complex"]))
         self.assertFalse(bool(normalized["auto_specular"]))
+
+    def test_normalize_gui_state_prevents_emboss_relief_conflict(self) -> None:
+        normalized = _normalize_gui_state({"emboss_mode": True, "relief_mode": True})
+        self.assertFalse(bool(normalized["emboss_mode"]))
+        self.assertTrue(bool(normalized["relief_mode"]))
 
     def test_normalize_gui_state_clears_missing_input_path(self) -> None:
         normalized = _normalize_gui_state({"input_path": "/definitely/not/a/real/path.dds"})
@@ -341,9 +451,29 @@ class GenerateTexturesTests(unittest.TestCase):
         normalized = _normalize_gui_state({"render_profile": "true pbr"})
         self.assertEqual(str(normalized["render_profile"]), "truepbr")
 
-    def test_normalize_gui_state_maps_experimental_alias_to_custom(self) -> None:
+    def test_normalize_gui_state_maps_non_renderer_aliases_to_custom(self) -> None:
         normalized = _normalize_gui_state({"render_profile": "experimental"})
         self.assertEqual(str(normalized["render_profile"]), "custom")
+
+    def test_normalize_gui_state_maps_performance_and_vr_profiles_to_custom(self) -> None:
+        performance = _normalize_gui_state({"render_profile": "performance"})
+        vr = _normalize_gui_state({"render_profile": "vr"})
+        self.assertEqual(str(performance["render_profile"]), "custom")
+        self.assertEqual(str(vr["render_profile"]), "custom")
+
+    def test_normalize_gui_state_maps_extended_non_renderer_profiles_to_custom(self) -> None:
+        terrain = _normalize_gui_state({"render_profile": "terrain"})
+        architecture = _normalize_gui_state({"render_profile": "architecture"})
+        characters = _normalize_gui_state({"render_profile": "characters"})
+        self.assertEqual(str(terrain["render_profile"]), "custom")
+        self.assertEqual(str(architecture["render_profile"]), "custom")
+        self.assertEqual(str(characters["render_profile"]), "custom")
+
+    def test_gui_render_profile_values_only_include_renderer_choices(self) -> None:
+        self.assertEqual(
+            _RENDER_PROFILE_GUI_VALUES,
+            ("custom", "vanilla", "community_shaders", "truepbr", "enb"),
+        )
 
     def test_generate_diffuse_returns_rgb_same_size(self) -> None:
         diffuse = generate_diffuse(_sample_image())
@@ -485,6 +615,97 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(msn.split()[:3], expected_normal.split())
         self.assertEqual(msn.split()[3].tobytes(), expected_specular.tobytes())
 
+    def test_generate_ambient_occlusion_returns_l_mode_same_size(self) -> None:
+        source = _sample_image()
+        ao = generate_ambient_occlusion(source)
+        self.assertEqual(ao.mode, "L")
+        self.assertEqual(ao.size, source.size)
+
+    def test_generate_ambient_occlusion_has_no_pure_black_holes(self) -> None:
+        source = _sample_image()
+        ao = generate_ambient_occlusion(source, strength=1.0)
+        min_val = min(ao.getdata())
+        self.assertGreater(min_val, 0, "AO should have no pure-black pixels")
+
+    def test_generate_ambient_occlusion_higher_strength_increases_contrast(self) -> None:
+        source = _vertical_gradient_image()
+        ao_low = generate_ambient_occlusion(source, strength=0.5)
+        ao_high = generate_ambient_occlusion(source, strength=3.0)
+        import numpy as np
+        std_low = float(np.std(list(ao_low.getdata())))
+        std_high = float(np.std(list(ao_high.getdata())))
+        self.assertGreater(std_high, std_low)
+
+    def test_generate_roughness_returns_l_mode_same_size(self) -> None:
+        source = _sample_image()
+        roughness = generate_roughness(source)
+        self.assertEqual(roughness.mode, "L")
+        self.assertEqual(roughness.size, source.size)
+
+    def test_generate_roughness_has_no_pure_black_holes(self) -> None:
+        source = _sample_image()
+        roughness = generate_roughness(source, strength=1.0)
+        min_val = min(roughness.getdata())
+        self.assertGreater(min_val, 0, "Roughness should have no pure-black pixels")
+
+    def test_generate_roughness_metal_is_smoother_than_stone(self) -> None:
+        source = _vertical_gradient_image()
+        roughness_metal = generate_roughness(source, material_type="metal")
+        roughness_stone = generate_roughness(source, material_type="stone")
+        mean_metal = sum(roughness_metal.getdata()) / (source.width * source.height)
+        mean_stone = sum(roughness_stone.getdata()) / (source.width * source.height)
+        self.assertLess(mean_metal, mean_stone, "Metal should have lower roughness than stone")
+
+    def test_prefilter_mipmap_stability_normal_preserves_size_and_mode(self) -> None:
+        source = _sample_image().convert("RGB")
+        result = _prefilter_for_mipmap_stability(source, "normal")
+        self.assertEqual(result.size, source.size)
+        self.assertEqual(result.mode, "RGB")
+
+    def test_prefilter_mipmap_stability_normal_blue_channel_raised(self) -> None:
+        # Pre-filter blends blue toward 255 (flat normal) — mean should rise slightly.
+        source = _sample_image().convert("RGB")
+        original_b = list(source.getchannel("B").getdata())
+        result = _prefilter_for_mipmap_stability(source, "normal")
+        filtered_b = list(result.getchannel("B").getdata())
+        mean_orig = sum(original_b) / len(original_b)
+        mean_filtered = sum(filtered_b) / len(filtered_b)
+        self.assertGreaterEqual(mean_filtered, mean_orig - 1)  # should not darken blue
+
+    def test_prefilter_mipmap_stability_parallax_preserves_size_and_mode(self) -> None:
+        source = _sample_image().convert("L")
+        result = _prefilter_for_mipmap_stability(source, "parallax")
+        self.assertEqual(result.size, source.size)
+        self.assertEqual(result.mode, "L")
+
+    def test_prefilter_mipmap_stability_passthrough_for_diffuse(self) -> None:
+        source = _sample_image().convert("RGB")
+        result = _prefilter_for_mipmap_stability(source, "diffuse")
+        self.assertEqual(result.tobytes(), source.tobytes())
+
+    def test_prefilter_mipmap_stability_passthrough_for_unknown_kind(self) -> None:
+        source = _sample_image().convert("RGB")
+        result = _prefilter_for_mipmap_stability(source, "")
+        self.assertEqual(result.tobytes(), source.tobytes())
+
+    def test_analyze_material_type_from_image_returns_none_or_valid_type(self) -> None:
+        valid_types = {
+            "metal", "stone", "wood", "leather", "fur", "cloth", "glass", "skin",
+            "snow", "plants", "terrain", "dirt", "sand", "architecture", "paper", "general", None,
+        }
+        result = analyze_material_type_from_image(_sample_image())
+        self.assertIn(result, valid_types)
+
+    def test_analyze_material_type_from_image_accepts_rgba_input(self) -> None:
+        source = _sample_image().convert("RGBA")
+        result = analyze_material_type_from_image(source)
+        # Should not raise; result is None or a valid type string
+        valid_types = {
+            "metal", "stone", "wood", "leather", "fur", "cloth", "glass", "skin",
+            "snow", "plants", "terrain", "dirt", "sand", "architecture", "paper", "general", None,
+        }
+        self.assertIn(result, valid_types)
+
     def test_recommend_generation_settings_returns_valid_ranges(self) -> None:
         settings = recommend_generation_settings(_sample_image())
         self.assertIn("specular_strength", settings)
@@ -499,8 +720,13 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertGreaterEqual(int(settings["glow_threshold"]), 140)
         self.assertLessEqual(int(settings["glow_threshold"]), 235)
 
-    def test_classify_material_type_returns_stone_for_brick_path(self) -> None:
-        self.assertEqual(classify_material_type(Path("textures/architecture/brick_wall.dds")), "stone")
+    def test_classify_material_type_returns_architecture_for_brick_path(self) -> None:
+        # textures/architecture/ folder is now its own category; stone is the fallback
+        # when only the filename has stone tokens but no architecture folder token.
+        self.assertEqual(classify_material_type(Path("textures/architecture/brick_wall.dds")), "architecture")
+
+    def test_classify_material_type_returns_stone_for_non_architecture_brick_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/dungeons/brick_floor.dds")), "stone")
 
     def test_classify_material_type_returns_metal_for_iron_path(self) -> None:
         self.assertEqual(classify_material_type(Path("textures/armor/iron_helmet.dds")), "metal")
@@ -514,6 +740,25 @@ class GenerateTexturesTests(unittest.TestCase):
     def test_classify_material_type_returns_general_for_unknown_path(self) -> None:
         self.assertEqual(classify_material_type(Path("textures/misc/unknown.dds")), "general")
 
+    def test_classify_material_type_returns_leather_for_hide_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/armor/leather/hide_strap.dds")), "leather")
+
+    def test_classify_material_type_returns_fur_for_pelt_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/armor/fur/wolf_pelt.dds")), "fur")
+
+    def test_classify_material_type_returns_dirt_for_mud_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/clutter/mud_pile.dds")), "dirt")
+
+    def test_classify_material_type_returns_sand_for_dune_token(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/environment/dune_surface.dds")), "sand")
+
+    def test_classify_material_type_returns_sand_for_sand_token(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/misc/sand_pile.dds")), "sand")
+
+    def test_classify_material_type_dirt_path_classifies_as_dirt_not_sand(self) -> None:
+        # "dirt" is a dirt token; sand no longer includes it so a dirt-named path stays dirt
+        self.assertEqual(classify_material_type(Path("textures/clutter/dirt_road.dds")), "dirt")
+
     def test_classify_material_type_returns_paper_for_cards_path(self) -> None:
         self.assertEqual(
             classify_material_type(Path("textures/interface/cards/collectible_waifu_card_01.dds")),
@@ -523,11 +768,31 @@ class GenerateTexturesTests(unittest.TestCase):
     def test_classify_material_type_returns_paper_for_sign_path(self) -> None:
         self.assertEqual(classify_material_type(Path("textures/signs/inn_sign_painted.dds")), "paper")
 
+    def test_classify_material_type_returns_terrain_for_landscape_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/landscape/dirt01.dds")), "terrain")
+
+    def test_classify_material_type_returns_terrain_for_ground_token_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/ground/rocky_terrain.dds")), "terrain")
+
+    def test_classify_material_type_returns_architecture_for_whiterun_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/whiterun/wrbuildings01.dds")), "architecture")
+
+    def test_classify_material_type_returns_architecture_for_dwemer_path(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/dwemer/dwmplatform01.dds")), "architecture")
+
+    def test_classify_material_type_returns_architecture_for_nordic_ruin(self) -> None:
+        self.assertEqual(classify_material_type(Path("textures/nordic/norwall01.dds")), "architecture")
+
     def test_detect_workflow_profile_detects_interface_paths(self) -> None:
         self.assertEqual(
             detect_workflow_profile(Path("textures/interface/cards/deck01.dds")),
             "interface",
         )
+
+    def test_detect_workflow_profile_detects_renderer_and_content_profiles(self) -> None:
+        self.assertEqual(detect_workflow_profile(Path("textures/vr/armor/helmet.dds")), "vr")
+        self.assertEqual(detect_workflow_profile(Path("textures/performance/stone.dds")), "performance")
+        self.assertEqual(detect_workflow_profile(Path("textures/architecture/ruins/wall.dds")), "architecture")
 
     def test_recommend_render_profile_detects_enb_from_path_hint(self) -> None:
         self.assertEqual(
@@ -557,10 +822,68 @@ class GenerateTexturesTests(unittest.TestCase):
     def test_recommend_render_profile_defaults_to_vanilla_without_renderer_hints(self) -> None:
         self.assertEqual(
             recommend_render_profile(
-                Path("textures/architecture/metalplate.dds"),
+                Path("textures/clutter/misc/metalplate.dds"),
                 source=_detailed_low_saturation_image(),
             ),
             "vanilla",
+        )
+
+    def test_recommend_render_profile_infers_content_profile_from_path_when_unspecified(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(Path("textures/architecture/stone/wall.dds")),
+            "architecture",
+        )
+        self.assertEqual(
+            recommend_render_profile(Path("textures/landscape/mountain.dds")),
+            "terrain",
+        )
+        self.assertEqual(
+            recommend_render_profile(Path("textures/actors/character/face.dds")),
+            "characters",
+        )
+
+    def test_recommend_render_profile_uses_extended_profiles_for_neutral_material_hints(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(Path("textures/landscape/mountain.dds"), material_type="terrain"),
+            "terrain",
+        )
+        self.assertEqual(
+            recommend_render_profile(Path("textures/architecture/stone/wall.dds"), material_type="architecture"),
+            "architecture",
+        )
+        self.assertEqual(
+            recommend_render_profile(Path("textures/actors/character/face.dds"), material_type="skin"),
+            "characters",
+        )
+
+    def test_recommend_render_profile_uses_workflow_profile_hints(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/architecture/stone.dds"),
+                workflow_profile="vr",
+            ),
+            "vr",
+        )
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/architecture/stone.dds"),
+                workflow_profile="performance",
+            ),
+            "performance",
+        )
+
+    def test_recommend_render_profile_uses_mod_manager_context_hint_when_path_is_neutral(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            loaded_mods=("Community Shaders", "Some Texture Pack"),
+        )
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/architecture/metalplate.dds"),
+                source=_detailed_low_saturation_image(),
+                manager_context=context,
+            ),
+            "community_shaders",
         )
 
     def test_recommend_render_profile_detects_truepbr_from_rmaos_suffix(self) -> None:
@@ -583,6 +906,23 @@ class GenerateTexturesTests(unittest.TestCase):
             "truepbr",
         )
 
+    def test_recommend_render_profile_detects_truepbr_from_orm_suffix(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/architecture/stone_orm.dds"),
+                detected_role="environment_mask",
+                detected_suffix="_orm",
+            ),
+            "truepbr",
+        )
+
+    def test_recommend_generation_settings_leather_is_less_reflective_than_metal(self) -> None:
+        source = _detailed_low_saturation_image()
+        leather = recommend_generation_settings(source, Path("textures/armor/leather/hide_strap.dds"))
+        metal = recommend_generation_settings(source, Path("textures/armor/steel/plate.dds"))
+        self.assertLess(float(leather["environment_mask_strength"]), float(metal["environment_mask_strength"]))
+        self.assertLess(float(leather["specular_strength"]), float(metal["specular_strength"]))
+
     def test_recommend_render_profile_detects_truepbr_from_pbrnifpatcher_path_hint(self) -> None:
         self.assertEqual(
             recommend_render_profile(
@@ -591,11 +931,166 @@ class GenerateTexturesTests(unittest.TestCase):
             "truepbr",
         )
 
+    def test_recommend_render_profile_detects_truepbr_from_textures_pbr_path_hint(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(
+                Path("mods/MyPack/textures/pbr/architecture/stone.dds"),
+            ),
+            "truepbr",
+        )
+
+    def test_detect_render_profile_from_mod_manager_context_prefers_enb_when_truepbr_and_enb_are_both_detected(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            loaded_mods=("Community Shaders", "PBRNifPatcher", "ENB Light"),
+        )
+        self.assertEqual(detect_render_profile_from_mod_manager_context(context), "enb")
+
+    def test_detect_render_profile_from_mod_manager_context_prefers_enb_when_enb_and_cs_both_detected(self) -> None:
+        context = ModManagerContext(
+            manager="Vortex",
+            loaded_mods=("Community Shaders", "ENB Light"),
+        )
+        self.assertEqual(detect_render_profile_from_mod_manager_context(context), "enb")
+
+    def test_detect_render_profile_from_mod_manager_context_uses_plugin_and_load_order_hints(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            enabled_plugins=("CommunityShaders.esp",),
+            load_order=("PBRNifPatcher.esp",),
+        )
+        self.assertEqual(detect_render_profile_from_mod_manager_context(context), "truepbr")
+
+    def test_detect_render_profile_from_mod_manager_context_detects_enb_from_runtime_markers(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "d3d11.dll").write_bytes(b"")
+            context = ModManagerContext(
+                manager="MO2",
+                instance_root=root,
+            )
+            self.assertEqual(detect_render_profile_from_mod_manager_context(context), "enb")
+
+    def test_detect_render_profile_from_mod_manager_context_detects_cs_from_skse_plugin_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plugin_dir = root / "SKSE" / "Plugins"
+            plugin_dir.mkdir(parents=True)
+            (plugin_dir / "CommunityShaders.dll").write_bytes(b"")
+            context = ModManagerContext(
+                manager="Vortex",
+                staging_root=root,
+            )
+            self.assertEqual(detect_render_profile_from_mod_manager_context(context), "community_shaders")
+
+    def test_detect_render_profile_from_mod_manager_context_detects_truepbr_from_textures_pbr_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            pbr_dir = root / "textures" / "pbr"
+            pbr_dir.mkdir(parents=True)
+            context = ModManagerContext(
+                manager="MO2",
+                instance_root=root,
+            )
+            self.assertEqual(detect_render_profile_from_mod_manager_context(context), "truepbr")
+
+    def test_detect_render_profile_from_mod_manager_context_detects_enb_from_game_root_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game_root = Path(temp_dir) / "SkyrimSE"
+            game_root.mkdir(parents=True)
+            (game_root / "d3d11.dll").write_bytes(b"")
+            context = ModManagerContext(
+                manager="MO2",
+                game_root=game_root,
+            )
+            self.assertEqual(detect_render_profile_from_mod_manager_context(context), "enb")
+
+    def test_detect_render_profile_from_mod_manager_context_detects_cs_from_game_data_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game_root = Path(temp_dir) / "SkyrimSE"
+            plugin_dir = game_root / "Data" / "SKSE" / "Plugins"
+            plugin_dir.mkdir(parents=True)
+            (plugin_dir / "CommunityShaders.dll").write_bytes(b"")
+            context = ModManagerContext(
+                manager="Vortex",
+                game_root=game_root,
+            )
+            self.assertEqual(detect_render_profile_from_mod_manager_context(context), "community_shaders")
+
+    def test_detect_render_profile_from_mod_manager_context_uses_character_fallback_for_body_hints(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            detected_body_profiles=("cbbe",),
+        )
+        self.assertEqual(detect_render_profile_from_mod_manager_context(context), "characters")
+
+    def test_detect_render_profile_from_mod_manager_context_ignores_fsmp_mcm_helper_mod(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            loaded_mods=("FSMPM - The FSMP MCM",),
+            enabled_plugins=("FSMPM - The FSMP MCM.esp",),
+            load_order=("FSMPM - The FSMP MCM.esp",),
+        )
+        self.assertIsNone(detect_render_profile_from_mod_manager_context(context))
+
+    def test_recommend_render_profile_uses_character_fallback_for_mod_manager_body_hints(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            detected_body_profiles=("himbo",),
+            detected_skeleton_profiles=("xpmsse",),
+        )
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/misc/neutral_asset.dds"),
+                manager_context=context,
+            ),
+            "characters",
+        )
+
+    def test_recommend_render_profile_ignores_fsmp_mcm_helper_mod(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            loaded_mods=("FSMPM - The FSMP MCM",),
+            enabled_plugins=("FSMPM - The FSMP MCM.esp",),
+        )
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/misc/neutral_asset.dds"),
+                manager_context=context,
+            ),
+            "vanilla",
+        )
+
     def test_resolve_render_profile_options_returns_expected_modes(self) -> None:
         enb = resolve_render_profile_options("enb")
         self.assertEqual(enb["complex_format"], "msn")
         self.assertEqual(enb["env_mask_mode"], "complex")
         self.assertEqual(enb["parallax_mode"], "occlusion")
+
+        performance = resolve_render_profile_options("performance")
+        self.assertEqual(performance["complex_format"], "msn")
+        self.assertEqual(performance["env_mask_mode"], "standard")
+        self.assertEqual(performance["parallax_mode"], "standard")
+
+        vr = resolve_render_profile_options("vr")
+        self.assertEqual(vr["complex_format"], "msn")
+        self.assertEqual(vr["env_mask_mode"], "standard")
+        self.assertEqual(vr["parallax_mode"], "standard")
+
+        terrain = resolve_render_profile_options("terrain")
+        self.assertEqual(terrain["complex_format"], "msn")
+        self.assertEqual(terrain["env_mask_mode"], "standard")
+        self.assertEqual(terrain["parallax_mode"], "standard")
+
+        architecture = resolve_render_profile_options("architecture")
+        self.assertEqual(architecture["complex_format"], "msn")
+        self.assertEqual(architecture["env_mask_mode"], "standard")
+        self.assertEqual(architecture["parallax_mode"], "standard")
+
+        characters = resolve_render_profile_options("characters")
+        self.assertEqual(characters["complex_format"], "msn")
+        self.assertEqual(characters["env_mask_mode"], "standard")
+        self.assertEqual(characters["parallax_mode"], "standard")
 
         cs = resolve_render_profile_options("community_shaders")
         self.assertEqual(cs["complex_format"], "cm")
@@ -615,18 +1110,78 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(auto["complex_format"], "msn")
         self.assertEqual(auto["env_mask_mode"], "complex")
 
+    def test_resolve_render_profile_guardrails_enforces_locked_profile_modes(self) -> None:
+        guarded = resolve_render_profile_guardrails(
+            selected_profile="enb",
+            complex_format="cm",
+            env_mask_mode="standard",
+            parallax_mode="standard",
+        )
+        self.assertEqual(str(guarded["effective_profile"]), "enb")
+        self.assertEqual(str(guarded["complex_format"]), "msn")
+        self.assertEqual(str(guarded["env_mask_mode"]), "complex")
+        self.assertEqual(str(guarded["parallax_mode"]), "occlusion")
+        self.assertEqual(len(list(guarded["changes"])), 3)
+
+    def test_resolve_render_profile_guardrails_keeps_auto_modes_without_recommendation(self) -> None:
+        guarded = resolve_render_profile_guardrails(
+            selected_profile="auto",
+            recommended_profile=None,
+            complex_format="cm",
+            env_mask_mode="complex",
+            parallax_mode="occlusion",
+        )
+        self.assertEqual(str(guarded["effective_profile"]), "auto")
+        self.assertEqual(str(guarded["complex_format"]), "cm")
+        self.assertEqual(str(guarded["env_mask_mode"]), "complex")
+        self.assertEqual(str(guarded["parallax_mode"]), "occlusion")
+        self.assertEqual(list(guarded["changes"]), [])
+
     def test_resolve_render_profile_output_defaults_returns_expected_checkboxes(self) -> None:
         vanilla = resolve_render_profile_output_defaults("vanilla")
         self.assertTrue(bool(vanilla["include_diffuse"]))
         self.assertTrue(bool(vanilla["include_normal"]))
         self.assertFalse(bool(vanilla["include_parallax"]))
         self.assertFalse(bool(vanilla["include_complex"]))
+        self.assertFalse(bool(vanilla["include_wetness_mask"]))
+        self.assertFalse(bool(vanilla["include_snow_mask"]))
+
+        performance = resolve_render_profile_output_defaults("performance")
+        self.assertTrue(bool(performance["include_diffuse"]))
+        self.assertTrue(bool(performance["include_normal"]))
+        self.assertFalse(bool(performance["include_parallax"]))
+        self.assertFalse(bool(performance["include_complex"]))
+        self.assertFalse(bool(performance["include_wetness_mask"]))
+        self.assertFalse(bool(performance["include_snow_mask"]))
+
+        terrain = resolve_render_profile_output_defaults("terrain")
+        self.assertTrue(bool(terrain["include_parallax"]))
+        self.assertFalse(bool(terrain["include_environment_mask"]))
+        self.assertFalse(bool(terrain["include_complex"]))
+        self.assertFalse(bool(terrain["include_wetness_mask"]))
+        self.assertFalse(bool(terrain["include_snow_mask"]))
+
+        architecture = resolve_render_profile_output_defaults("architecture")
+        self.assertTrue(bool(architecture["include_parallax"]))
+        self.assertTrue(bool(architecture["include_environment_mask"]))
+        self.assertFalse(bool(architecture["include_complex"]))
+        self.assertFalse(bool(architecture["include_wetness_mask"]))
+        self.assertFalse(bool(architecture["include_snow_mask"]))
+
+        characters = resolve_render_profile_output_defaults("characters")
+        self.assertFalse(bool(characters["include_parallax"]))
+        self.assertFalse(bool(characters["include_environment_mask"]))
+        self.assertFalse(bool(characters["include_complex"]))
+        self.assertFalse(bool(characters["include_wetness_mask"]))
+        self.assertFalse(bool(characters["include_snow_mask"]))
 
         enb = resolve_render_profile_output_defaults("enb")
         self.assertTrue(bool(enb["include_parallax"]))
         self.assertTrue(bool(enb["include_environment_mask"]))
         self.assertTrue(bool(enb["include_complex"]))
         self.assertFalse(bool(enb["include_normal"]))
+        self.assertFalse(bool(enb["include_wetness_mask"]))
+        self.assertFalse(bool(enb["include_snow_mask"]))
 
         truepbr = resolve_render_profile_output_defaults("truepbr")
         self.assertTrue(bool(truepbr["include_parallax"]))
@@ -634,19 +1189,110 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(truepbr["include_rmaos"]))
         self.assertFalse(bool(truepbr["include_complex"]))
         self.assertTrue(bool(truepbr["include_normal"]))
+        self.assertFalse(bool(truepbr["include_wetness_mask"]))
+        self.assertFalse(bool(truepbr["include_snow_mask"]))
+
+    def test_render_profile_has_locked_controls_only_in_custom_mode(self) -> None:
+        self.assertFalse(render_profile_has_locked_controls("custom"))
+        self.assertTrue(render_profile_has_locked_controls("auto"))
+        self.assertTrue(render_profile_has_locked_controls("enb"))
+
+    def test_resolve_render_profile_mode_control_states_locks_all_modes_for_non_custom_profile(self) -> None:
+        states = resolve_render_profile_mode_control_states(
+            selected_profile="enb",
+            include_complex=True,
+            include_environment_mask=True,
+            include_parallax=True,
+        )
+        self.assertTrue(bool(states["locked"]))
+        self.assertEqual(str(states["complex_format"]), "disabled")
+        self.assertEqual(str(states["env_mask_mode"]), "disabled")
+        self.assertEqual(str(states["parallax_mode"]), "disabled")
+
+    def test_resolve_render_profile_mode_control_states_only_enables_modes_for_checked_outputs(self) -> None:
+        states = resolve_render_profile_mode_control_states(
+            selected_profile="custom",
+            include_complex=False,
+            include_environment_mask=True,
+            include_parallax=False,
+        )
+        self.assertFalse(bool(states["locked"]))
+        self.assertEqual(str(states["complex_format"]), "disabled")
+        self.assertEqual(str(states["env_mask_mode"]), "readonly")
+        self.assertEqual(str(states["parallax_mode"]), "disabled")
+
+    def test_build_render_profile_mode_controls_hint_reports_disabled_outputs_in_custom_mode(self) -> None:
+        hint = build_render_profile_mode_controls_hint(
+            {
+                "locked": False,
+                "complex_format": "disabled",
+                "env_mask_mode": "readonly",
+                "parallax_mode": "disabled",
+            }
+        )
+        self.assertIn("Custom mode: enable", hint)
+        self.assertIn("ENB Complex Material", hint)
+        self.assertIn("Parallax", hint)
+
+    def test_build_render_profile_mode_controls_hint_reports_locked_state(self) -> None:
+        hint = build_render_profile_mode_controls_hint(
+            {
+                "locked": True,
+                "complex_format": "disabled",
+                "env_mask_mode": "disabled",
+                "parallax_mode": "disabled",
+            }
+        )
+        self.assertIn("locks mode selectors", hint)
 
     def test_resolve_nif_patch_defaults_for_render_profile_returns_expected_toggles(self) -> None:
         vanilla = resolve_nif_patch_defaults_for_render_profile("vanilla")
         self.assertTrue(bool(vanilla["enable_parallax"]))
         self.assertFalse(bool(vanilla["enable_pom"]))
         self.assertFalse(bool(vanilla["enable_env_mapping"]))
+        self.assertFalse(bool(vanilla["enable_pbr"]))
         self.assertFalse(bool(vanilla["force_shader_type_3"]))
         self.assertFalse(bool(vanilla["prefer_msn_normal"]))
+
+        performance = resolve_nif_patch_defaults_for_render_profile("performance")
+        self.assertFalse(bool(performance["enable_parallax"]))
+        self.assertFalse(bool(performance["enable_pom"]))
+        self.assertFalse(bool(performance["enable_env_mapping"]))
+        self.assertFalse(bool(performance["enable_pbr"]))
+        self.assertFalse(bool(performance["force_shader_type_3"]))
+        self.assertFalse(bool(performance["prefer_msn_normal"]))
+
+        vr = resolve_nif_patch_defaults_for_render_profile("vr")
+        self.assertFalse(bool(vr["enable_parallax"]))
+        self.assertFalse(bool(vr["enable_pom"]))
+        self.assertFalse(bool(vr["enable_env_mapping"]))
+        self.assertFalse(bool(vr["enable_pbr"]))
+        self.assertFalse(bool(vr["force_shader_type_3"]))
+        self.assertFalse(bool(vr["prefer_msn_normal"]))
+
+        terrain = resolve_nif_patch_defaults_for_render_profile("terrain")
+        self.assertTrue(bool(terrain["enable_parallax"]))
+        self.assertFalse(bool(terrain["enable_pom"]))
+        self.assertFalse(bool(terrain["enable_env_mapping"]))
+        self.assertFalse(bool(terrain["enable_pbr"]))
+
+        architecture = resolve_nif_patch_defaults_for_render_profile("architecture")
+        self.assertTrue(bool(architecture["enable_parallax"]))
+        self.assertFalse(bool(architecture["enable_pom"]))
+        self.assertTrue(bool(architecture["enable_env_mapping"]))
+        self.assertFalse(bool(architecture["enable_pbr"]))
+
+        characters = resolve_nif_patch_defaults_for_render_profile("characters")
+        self.assertFalse(bool(characters["enable_parallax"]))
+        self.assertFalse(bool(characters["enable_pom"]))
+        self.assertFalse(bool(characters["enable_env_mapping"]))
+        self.assertFalse(bool(characters["enable_pbr"]))
 
         enb = resolve_nif_patch_defaults_for_render_profile("enb")
         self.assertTrue(bool(enb["enable_parallax"]))
         self.assertTrue(bool(enb["enable_pom"]))
         self.assertTrue(bool(enb["enable_env_mapping"]))
+        self.assertFalse(bool(enb["enable_pbr"]))
         self.assertTrue(bool(enb["force_shader_type_3"]))
         self.assertTrue(bool(enb["prefer_msn_normal"]))
 
@@ -654,7 +1300,8 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(truepbr["enable_parallax"]))
         self.assertFalse(bool(truepbr["enable_pom"]))
         self.assertTrue(bool(truepbr["enable_env_mapping"]))
-        self.assertTrue(bool(truepbr["force_shader_type_3"]))
+        self.assertTrue(bool(truepbr["enable_pbr"]))
+        self.assertFalse(bool(truepbr["force_shader_type_3"]))
         self.assertFalse(bool(truepbr["prefer_msn_normal"]))
 
     def test_get_nif_patch_option_warnings_reports_disabled_feature_path_combos(self) -> None:
@@ -681,6 +1328,31 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         self.assertFalse(any("empty slot 5 path" in text.lower() for text in warnings))
 
+    def test_get_nif_patch_option_warnings_truepbr_requires_pbr_flag(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="truepbr",
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            enable_pbr=False,
+            force_shader_type_3=False,
+            env_mask_texture_path="textures\\pbr\\stone_rmaos.dds",
+        )
+        self.assertTrue(any("pbr flag" in text.lower() for text in warnings))
+
+    def test_get_nif_patch_option_warnings_uses_recommended_profile_when_selected_is_auto(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="auto",
+            recommended_profile="enb",
+            enable_parallax=True,
+            enable_pom=True,
+            enable_env_mapping=True,
+            force_shader_type_3=True,
+            env_mask_texture_path="",
+        )
+        self.assertFalse(any("vanilla meshes" in text.lower() for text in warnings))
+        self.assertFalse(any("empty slot 5 path" in text.lower() for text in warnings))
+
     def test_get_nif_patch_option_warnings_reports_absolute_and_non_textures_paths(self) -> None:
         warnings = get_nif_patch_option_warnings(
             selected_profile="enb",
@@ -696,6 +1368,17 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(any("start with textures\\" in text.lower() for text in warnings))
         self.assertTrue(any("_p.dds" in text for text in warnings))
         self.assertTrue(any("env mask slot" in text.lower() for text in warnings))
+
+    def test_get_nif_patch_option_warnings_reports_non_dds_paths(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="community_shaders",
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            force_shader_type_3=False,
+            parallax_texture_path="textures\\architecture\\stone\\stone_p.png",
+        )
+        self.assertTrue(any(".dds filename" in text.lower() for text in warnings))
 
     def test_get_nif_patch_option_warnings_accepts_c_env_mask_suffix(self) -> None:
         warnings = get_nif_patch_option_warnings(
@@ -721,21 +1404,170 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(any("slot 0" in text.lower() or "diffuse slot" in text.lower() for text in warnings))
         self.assertTrue(any("cubemap slot" in text.lower() for text in warnings))
 
+    def test_get_nif_patch_option_warnings_reports_diffuse_slot_misuse_for_emissive_suffix(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="vanilla",
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=False,
+            force_shader_type_3=False,
+            diffuse_texture_path="textures\\architecture\\stone\\stone_em.dds",
+        )
+        self.assertTrue(any("slot 0" in text.lower() or "diffuse slot" in text.lower() for text in warnings))
+        self.assertTrue(any("_g" in text.lower() for text in warnings))
+
+    def test_get_nif_patch_option_warnings_reports_blender_authoring_suffixes(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="truepbr",
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            enable_pbr=True,
+            force_shader_type_3=False,
+            diffuse_texture_path="textures\\architecture\\stone\\stone_albedo.dds",
+            env_mask_texture_path="textures\\architecture\\stone\\stone_roughness.dds",
+        )
+        self.assertTrue(any("blender/authoring suffix naming" in text.lower() for text in warnings))
+        self.assertTrue(any("standalone blender authoring outputs" in text.lower() for text in warnings))
+
+    def test_get_nif_patch_option_warnings_reports_renderer_specific_suffix_mismatch(self) -> None:
+        enb_warnings = get_nif_patch_option_warnings(
+            selected_profile="enb",
+            enable_parallax=True,
+            enable_pom=True,
+            enable_env_mapping=True,
+            force_shader_type_3=True,
+            normal_texture_path="textures\\architecture\\stone\\stone_n.dds",
+            env_mask_texture_path="textures\\architecture\\stone\\stone_cm.dds",
+        )
+        self.assertTrue(any("_msn" in text.lower() for text in enb_warnings))
+        self.assertTrue(any("slot 5" in text.lower() and "_m" in text.lower() for text in enb_warnings))
+
+        truepbr_warnings = get_nif_patch_option_warnings(
+            selected_profile="truepbr",
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            force_shader_type_3=True,
+            normal_texture_path="textures\\pbr\\stone_msn.dds",
+            env_mask_texture_path="textures\\pbr\\stone_cm.dds",
+        )
+        self.assertTrue(any("_n" in text.lower() and "_msn" in text.lower() for text in truepbr_warnings))
+        self.assertTrue(any("_rmaos" in text.lower() for text in truepbr_warnings))
+
     def test_build_render_profile_recommendation_message_lists_renderer_guidance(self) -> None:
         message = build_render_profile_recommendation_message("community_shaders")
         self.assertIn("Suggested target: Community Shaders", message)
         self.assertIn("Renderer quick guide:", message)
         self.assertIn("Vanilla:", message)
-        self.assertIn("Community Shaders TruePBR:", message)
+        self.assertIn("Terrain:", message)
+        self.assertIn("Architecture:", message)
+        self.assertIn("Characters / Skin:", message)
+        self.assertIn("Community Shaders PBR:", message)
         self.assertIn("ENB:", message)
         self.assertIn("Auto-check:", message)
-        self.assertIn("_C.dds", message)
+        self.assertIn("_c.dds", message)
         self.assertIn("How files should look:", message)
+
+    def test_build_render_profile_recommendation_message_avoids_experimental_inaccuracy_copy(self) -> None:
+        message = build_render_profile_recommendation_message("community_shaders")
+        lowered = message.lower()
+        self.assertNotIn("experimental", lowered)
+        self.assertNotIn("may be inaccurate", lowered)
+
+    def test_build_render_profile_recommendation_message_includes_truepbr_reference_notes(self) -> None:
+        message = build_render_profile_recommendation_message("truepbr")
+        self.assertIn("TruePBR essentials (Community Shaders):", message)
+        self.assertIn("For players/users", message)
+        self.assertIn("Landscape workflow:", message)
+        self.assertIn("Feature compatibility:", message)
+        self.assertIn("<stem>_rmaos.dds", message)
+        self.assertIn("do not swap in standalone blender-style _rough/_metallic/_ao names", message.lower())
+        self.assertIn(MODDING_WIKI_SKYRIM_URL, message)
 
     def test_describe_render_profile_default_outputs_mentions_auto_checked_outputs(self) -> None:
         summary = describe_render_profile_default_outputs("enb")
         self.assertIn("Auto-check:", summary)
         self.assertIn("parallax/_p", summary)
+
+    def test_describe_render_profile_default_outputs_includes_wetness_snow_in_disabled_list(self) -> None:
+        for profile in ("vanilla", "terrain", "architecture", "community_shaders", "enb", "truepbr"):
+            with self.subTest(profile=profile):
+                summary = describe_render_profile_default_outputs(profile)
+                self.assertIn("community shaders wetness/_wt", summary)
+                self.assertIn("community shaders snow/_sm", summary)
+
+    def test_describe_render_profile_default_outputs_glow_uses_g_suffix(self) -> None:
+        """Glow output label in profile summaries must use _g for Skyrim SE."""
+        for profile in ("vanilla", "enb", "community_shaders", "truepbr"):
+            with self.subTest(profile=profile):
+                summary = describe_render_profile_default_outputs(profile)
+                # The summary string should contain "glow/_g" wherever glow appears
+                if "glow/" in summary:
+                    self.assertIn("glow/_g", summary)
+                    self.assertNotIn("glow/_em", summary)
+
+    def test_describe_render_profile_files_to_create_mentions_enb_msn_outputs(self) -> None:
+        summary = describe_render_profile_files_to_create("enb")
+        self.assertIn("<stem>_msn.dds", summary)
+        self.assertIn("<stem>_m.dds", summary)
+        self.assertNotIn("<stem>_n.dds", summary)
+
+    def test_describe_render_profile_files_to_create_mentions_truepbr_outputs(self) -> None:
+        summary = describe_render_profile_files_to_create("truepbr")
+        self.assertIn("<stem>_rmaos.dds", summary)
+        self.assertIn("<stem>_n.dds", summary)
+        self.assertNotIn("<stem>_ao.dds", summary)
+        self.assertNotIn("<stem>_rough.dds", summary)
+
+    def test_get_nif_patch_option_warnings_truepbr_flags_legacy_orm_alias(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="truepbr",
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            enable_pbr=True,
+            force_shader_type_3=False,
+            env_mask_texture_path="textures\\pbr\\stone_orm.dds",
+        )
+        joined = "\n".join(warnings).lower()
+        self.assertIn("legacy generic alias", joined)
+        self.assertIn("_rmaos/_ramos", joined)
+
+    def test_get_nif_patch_option_warnings_flags_legacy_env_mask_alias_for_non_truepbr(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="community_shaders",
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            force_shader_type_3=False,
+            env_mask_texture_path="textures\\architecture\\stone_orm.dds",
+        )
+        joined = "\n".join(warnings).lower()
+        self.assertIn("legacy/generic alias", joined)
+        self.assertIn("_m.dds", joined)
+        self.assertIn("_cm.dds", joined)
+        self.assertIn("_rmaos.dds", joined)
+
+    def test_get_nif_patch_option_warnings_reports_glow_and_cubemap_clear_write_conflicts(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="custom",
+            enable_parallax=False,
+            enable_pom=False,
+            enable_env_mapping=False,
+            force_shader_type_3=False,
+            glow_texture_path="textures\\arch\\stone_g.dds",
+            diffuse_texture_path="textures\\arch\\stone.dds",
+            cubemap_texture_path="textures\\arch\\stone_env.dds",
+            disable_glow_map=True,
+            clear_glow_texture_path=True,
+            clear_diffuse_texture_path=True,
+            clear_cubemap_texture_path=True,
+        )
+        self.assertTrue(any("disable and write a slot 2 path" in text.lower() for text in warnings))
+        self.assertTrue(any("glow slot is set to both clear and write a path" in text.lower() for text in warnings))
+        self.assertTrue(any("diffuse slot is set to both clear and write a path" in text.lower() for text in warnings))
+        self.assertTrue(any("cubemap slot is set to both clear and write a path" in text.lower() for text in warnings))
 
     def test_resolve_render_profile_mode_selection_preserves_current_modes_without_preset_apply(self) -> None:
         resolved = resolve_render_profile_mode_selection(
@@ -880,6 +1712,133 @@ class GenerateTexturesTests(unittest.TestCase):
         ids = [w[0] for w in warnings]
         self.assertIn("parallax_flat_plants", ids)
 
+    def test_get_generation_warnings_parallax_on_terrain_always_warns(self) -> None:
+        # Terrain shimmer warning must fire regardless of source_hint content
+        warnings = get_generation_warnings(
+            "terrain",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("parallax_landscape_shimmer", ids)
+
+    def test_get_generation_warnings_parallax_on_terrain_fires_without_landscape_hint(self) -> None:
+        # Previously required "landscape" in source_hint — now fires on material_type alone
+        warnings_no_hint = get_generation_warnings(
+            "terrain",
+            source_hint=None,
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            include_complex=False,
+        )
+        warnings_unrelated_hint = get_generation_warnings(
+            "terrain",
+            source_hint="forest path texture",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            include_complex=False,
+        )
+        self.assertIn("parallax_landscape_shimmer", [w[0] for w in warnings_no_hint])
+        self.assertIn("parallax_landscape_shimmer", [w[0] for w in warnings_unrelated_hint])
+
+    def test_get_generation_warnings_parallax_high_strength_snow_warns(self) -> None:
+        warnings = get_generation_warnings(
+            "snow",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            parallax_strength=2.0,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("parallax_high_strength_snow", ids)
+
+    def test_get_generation_warnings_parallax_low_strength_snow_no_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "snow",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            parallax_strength=1.2,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertNotIn("parallax_high_strength_snow", ids)
+
+    def test_get_generation_warnings_parallax_high_strength_dirt_warns(self) -> None:
+        warnings = get_generation_warnings(
+            "dirt",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            parallax_strength=2.5,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("parallax_high_strength_ground", ids)
+
+    def test_get_generation_warnings_parallax_high_strength_sand_warns(self) -> None:
+        warnings = get_generation_warnings(
+            "sand",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            parallax_strength=3.0,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("parallax_high_strength_ground", ids)
+
+    def test_get_generation_warnings_parallax_within_threshold_ground_no_warning(self) -> None:
+        for mat in ("dirt", "sand"):
+            warnings = get_generation_warnings(
+                mat,
+                include_glow=False,
+                include_environment_mask=False,
+                env_mask_mode="standard",
+                env_mask_strength=1.0,
+                include_parallax=True,
+                parallax_strength=1.8,
+                include_complex=False,
+            )
+            ids = [w[0] for w in warnings]
+            self.assertNotIn("parallax_high_strength_ground", ids, msg=f"Unexpected warning for {mat}")
+
+    def test_get_generation_warnings_parallax_strength_none_no_false_positives(self) -> None:
+        # When parallax_strength is not provided the strength-based warnings must not fire
+        for mat in ("snow", "dirt", "sand"):
+            warnings = get_generation_warnings(
+                mat,
+                include_glow=False,
+                include_environment_mask=False,
+                env_mask_mode="standard",
+                env_mask_strength=1.0,
+                include_parallax=True,
+                parallax_strength=None,
+                include_complex=False,
+            )
+            ids = [w[0] for w in warnings]
+            self.assertNotIn("parallax_high_strength_snow", ids, msg=f"Unexpected snow warning for {mat}")
+            self.assertNotIn("parallax_high_strength_ground", ids, msg=f"Unexpected ground warning for {mat}")
+
     def test_get_generation_warnings_diffuse_from_normal_source(self) -> None:
         warnings = get_generation_warnings(
             "stone",
@@ -894,6 +1853,10 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         ids = [w[0] for w in warnings]
         self.assertIn("diffuse_from_derived_source", ids)
+        warning_lookup = dict(warnings)
+        self.assertIn("_g", warning_lookup["diffuse_from_derived_source"])
+        self.assertIn("_rmaos", warning_lookup["diffuse_from_derived_source"])
+        self.assertNotIn("_em", warning_lookup["diffuse_from_derived_source"])
 
     def test_get_generation_warnings_normal_from_normal_source(self) -> None:
         warnings = get_generation_warnings(
@@ -924,6 +1887,20 @@ class GenerateTexturesTests(unittest.TestCase):
         ids = [w[0] for w in warnings]
         self.assertIn("ui_texture_advanced_maps", ids)
 
+    def test_get_generation_warnings_orm_source_triggers_truepbr_suffix_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            source_suffix="_orm",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            include_complex=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("rmaos_source_requires_renderer_check", ids)
+
     def test_recommend_generation_settings_clamps_interface_workflow_strengths(self) -> None:
         settings = recommend_generation_settings(
             _detailed_bright_image(),
@@ -932,6 +1909,65 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertLessEqual(float(settings["parallax_strength"]), 1.0)
         self.assertLessEqual(float(settings["environment_mask_strength"]), 1.15)
         self.assertLessEqual(float(settings["specular_strength"]), 1.15)
+
+    def test_recommend_generation_settings_clamps_performance_workflow_strengths(self) -> None:
+        settings = recommend_generation_settings(
+            _detailed_bright_image(),
+            input_path=Path("textures/performance/armor/steelarmor.dds"),
+        )
+        self.assertLessEqual(float(settings["parallax_strength"]), 1.25)
+        self.assertLessEqual(float(settings["complex_strength"]), 1.7)
+        self.assertLessEqual(float(settings["rmaos_strength"]), 1.75)
+
+    def test_recommend_generation_settings_clamps_vr_workflow_strengths(self) -> None:
+        settings = recommend_generation_settings(
+            _detailed_bright_image(),
+            input_path=Path("textures/vr/architecture/whiterunwall.dds"),
+        )
+        self.assertLessEqual(float(settings["parallax_strength"]), 1.15)
+        self.assertLessEqual(float(settings["normal_strength"]), 2.1)
+        self.assertLessEqual(float(settings["specular_strength"]), 1.3)
+
+    def test_recommend_generation_settings_clamps_terrain_workflow_strengths(self) -> None:
+        settings = recommend_generation_settings(
+            _detailed_bright_image(),
+            input_path=Path("textures/terrain/landscape/mountainslab.dds"),
+        )
+        self.assertLessEqual(float(settings["parallax_strength"]), 1.2)
+        self.assertLessEqual(float(settings["environment_mask_strength"]), 1.3)
+        self.assertLessEqual(float(settings["specular_strength"]), 1.3)
+
+    def test_recommend_generation_settings_clamps_characters_workflow_strengths(self) -> None:
+        settings = recommend_generation_settings(
+            _detailed_bright_image(),
+            input_path=Path("textures/characters/skin/femalebody_1.dds"),
+        )
+        self.assertLessEqual(float(settings["parallax_strength"]), 1.1)
+        self.assertLessEqual(float(settings["normal_strength"]), 2.0)
+        self.assertLessEqual(float(settings["specular_strength"]), 1.4)
+
+    def test_recommend_generation_settings_clamps_architecture_workflow_strengths(self) -> None:
+        settings = recommend_generation_settings(
+            _detailed_bright_image(),
+            input_path=Path("textures/architecture/whiterun/stonewall.dds"),
+        )
+        self.assertLessEqual(float(settings["parallax_strength"]), 1.5)
+        self.assertLessEqual(float(settings["environment_mask_strength"]), 1.6)
+        self.assertLessEqual(float(settings["complex_strength"]), 2.15)
+
+    def test_recommend_generation_settings_uses_material_path_hints_for_metal_reflectivity(self) -> None:
+        source = _detailed_bright_image()
+        iron = recommend_generation_settings(source, input_path=Path("textures/armor/iron/ironplate.dds"))
+        polished = recommend_generation_settings(source, input_path=Path("textures/armor/steel/polished_steel_plate.dds"))
+        self.assertLess(float(iron["environment_mask_strength"]), float(polished["environment_mask_strength"]))
+        self.assertLess(float(iron["specular_strength"]), float(polished["specular_strength"]))
+
+    def test_recommend_generation_settings_boosts_wet_stone_reflectivity(self) -> None:
+        source = _detailed_bright_image()
+        dry_stone = recommend_generation_settings(source, input_path=Path("textures/dungeons/stone/rough_rock.dds"))
+        wet_stone = recommend_generation_settings(source, input_path=Path("textures/dungeons/stone/wet_rock.dds"))
+        self.assertGreater(float(wet_stone["environment_mask_strength"]), float(dry_stone["environment_mask_strength"]))
+        self.assertGreater(float(wet_stone["specular_strength"]), float(dry_stone["specular_strength"]))
 
     def test_generate_complex_material_slider_produces_visible_change(self) -> None:
         source = _large_high_detail_image()
@@ -1056,6 +2092,23 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(
             resolve_env_mask_complex_workflow(env_mask_mode="complex", complex_format="msn", render_profile="truepbr"),
             "truepbr",
+        )
+
+    def test_resolve_env_mask_complex_workflow_community_shaders_returns_enb(self) -> None:
+        # Community Shaders Extended Materials uses ENB-compatible RGBA channel packing
+        # (R=env reflection, G=glossiness, B=metallic, A=height) — confirmed from CS Lighting.hlsl.
+        # Must NOT fall through to "truepbr" (R=roughness, G=metallic, B=AO — different layout).
+        self.assertEqual(
+            resolve_env_mask_complex_workflow(env_mask_mode="complex", complex_format="cm", render_profile="community_shaders"),
+            "enb",
+        )
+        self.assertEqual(
+            resolve_env_mask_complex_workflow(env_mask_mode="complex", complex_format="msn", render_profile="community_shaders"),
+            "enb",
+        )
+        self.assertEqual(
+            resolve_env_mask_complex_workflow(env_mask_mode="complex", render_profile="cs"),
+            "enb",
         )
 
     def test_resolve_env_mask_complex_workflow_falls_back_to_complex_format(self) -> None:
@@ -1426,6 +2479,10 @@ class GenerateTexturesTests(unittest.TestCase):
                 "brick_msn.dds",
                 "brick_c.dds",
                 "brick_rmaos.dds",
+                "brick_em.dds",
+                "brick_emissive.dds",
+                "brick_s.dds",
+                "brick_sk.dds",
                 "preview.png",
             ):
                 (temp_path / name).write_bytes(b"stub")
@@ -1447,6 +2504,8 @@ class GenerateTexturesTests(unittest.TestCase):
             tool_dir.mkdir(parents=True)
             profile_dir.mkdir(parents=True)
             (profile_dir / "modlist.txt").write_text("+Texture Pack\n-Disabled Mod\n", encoding="utf-8")
+            (profile_dir / "plugins.txt").write_text("*Skyrim.esm\n*CommunityShaders.esp\n", encoding="utf-8")
+            (profile_dir / "loadorder.txt").write_text("Skyrim.esm\nCommunityShaders.esp\n", encoding="utf-8")
 
             context = detect_mod_manager_context(
                 {"MO_PROFILE": "Default"},
@@ -1456,9 +2515,37 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(context.manager, "Mod Organizer 2")
             self.assertEqual(context.profile_name, "Default")
             self.assertEqual(context.loaded_mods, ("Texture Pack",))
+            self.assertEqual(context.enabled_plugins, ("Skyrim.esm", "CommunityShaders.esp"))
+            self.assertEqual(context.load_order, ("Skyrim.esm", "CommunityShaders.esp"))
             self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
             self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
             self.assertEqual(context.output_dir, (instance_root / "overwrite"))
+            self.assertIn("plugin(s)", context.summary)
+            self.assertIn("load-order", context.summary)
+
+    def test_detect_mod_manager_context_detects_body_and_skeleton_hints(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            instance_root = temp_path / "MO2"
+            textures_dir = instance_root / "mods" / "CBBE 3BA" / "textures"
+            tool_dir = instance_root / "mods" / "Skyrim Texture Generator"
+            profile_dir = instance_root / "profiles" / "Default"
+            textures_dir.mkdir(parents=True)
+            tool_dir.mkdir(parents=True)
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "modlist.txt").write_text("+CBBE 3BA\n+XPMSSE\n", encoding="utf-8")
+            (profile_dir / "plugins.txt").write_text("*Skyrim.esm\n", encoding="utf-8")
+            (profile_dir / "loadorder.txt").write_text("Skyrim.esm\n", encoding="utf-8")
+
+            context = detect_mod_manager_context(
+                {"MO_PROFILE": "Default"},
+                executable_path=tool_dir / "generate_textures.exe",
+            )
+
+            self.assertEqual(context.detected_body_profiles, ("CBBE", "3BA"))
+            self.assertEqual(context.detected_skeleton_profiles, ("XPMSSE",))
+            self.assertIn("body hints CBBE, 3BA", context.summary)
+            self.assertIn("skeleton hints XPMSSE", context.summary)
 
     def test_detect_mod_manager_context_reads_vortex_profile_and_staging_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1467,6 +2554,8 @@ class GenerateTexturesTests(unittest.TestCase):
             profile_dir = appdata_dir / "Vortex" / "skyrimse" / "profiles" / "Main"
             profile_dir.mkdir(parents=True)
             (profile_dir / "modlist.txt").write_text("+Texture Pack\n", encoding="utf-8")
+            (profile_dir / "plugins.txt").write_text("*Skyrim.esm\n*PBRNifPatcher.esp\n", encoding="utf-8")
+            (profile_dir / "loadorder.txt").write_text("Skyrim.esm\nPBRNifPatcher.esp\n", encoding="utf-8")
 
             staging_root = temp_path / "Vortex Mods" / "skyrimse"
             textures_dir = staging_root / "Texture Pack" / "textures"
@@ -1487,10 +2576,76 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(context.manager, "Vortex")
             self.assertEqual(context.profile_name, "Main")
             self.assertEqual(context.loaded_mods, ("Texture Pack",))
+            self.assertEqual(context.enabled_plugins, ("Skyrim.esm", "PBRNifPatcher.esp"))
+            self.assertEqual(context.load_order, ("Skyrim.esm", "PBRNifPatcher.esp"))
             self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
             self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
             self.assertEqual(context.staging_root, staging_root.resolve())
             self.assertEqual(context.output_dir, (tool_dir / "generated_textures").resolve())
+
+    def test_detect_mod_manager_context_vortex_falls_back_to_staging_scan_when_mod_names_do_not_match_folder_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            appdata_dir = temp_path / "AppData" / "Roaming"
+            profile_dir = appdata_dir / "Vortex" / "skyrimse" / "profiles" / "Main"
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "modlist.txt").write_text("+Texture Pack Pretty Name\n", encoding="utf-8")
+
+            staging_root = temp_path / "Vortex Mods" / "skyrimse"
+            textures_dir = staging_root / "Texture Pack-1234" / "textures"
+            meshes_dir = staging_root / "Texture Pack-1234" / "meshes"
+            tool_dir = staging_root / "Skyrim Texture Generator"
+            textures_dir.mkdir(parents=True)
+            meshes_dir.mkdir(parents=True)
+            tool_dir.mkdir(parents=True)
+
+            context = detect_mod_manager_context(
+                {
+                    "APPDATA": str(appdata_dir),
+                    "VORTEX_PROFILE": "Main",
+                },
+                executable_path=tool_dir / "generate_textures.exe",
+            )
+
+            self.assertEqual(context.manager, "Vortex")
+            self.assertEqual(context.loaded_mods, ("Texture Pack Pretty Name",))
+            self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
+            self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
+
+    def test_detect_mod_manager_context_includes_mo2_overwrite_dirs_and_game_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            instance_root = temp_path / "MO2"
+            textures_dir = instance_root / "mods" / "Texture Pack" / "textures"
+            meshes_dir = instance_root / "mods" / "Texture Pack" / "meshes"
+            overwrite_textures_dir = instance_root / "overwrite" / "textures"
+            overwrite_meshes_dir = instance_root / "overwrite" / "meshes"
+            tool_dir = instance_root / "mods" / "Skyrim Texture Generator"
+            profile_dir = instance_root / "profiles" / "Default"
+            game_root = temp_path / "SkyrimSE"
+            textures_dir.mkdir(parents=True)
+            meshes_dir.mkdir(parents=True)
+            overwrite_textures_dir.mkdir(parents=True)
+            overwrite_meshes_dir.mkdir(parents=True)
+            tool_dir.mkdir(parents=True)
+            profile_dir.mkdir(parents=True)
+            game_root.mkdir(parents=True)
+            (profile_dir / "modlist.txt").write_text("+Texture Pack\n", encoding="utf-8")
+
+            context = detect_mod_manager_context(
+                {"MO_PROFILE": "Default", "MO2_GAME_PATH": str(game_root)},
+                executable_path=tool_dir / "generate_textures.exe",
+            )
+
+            self.assertEqual(context.game_root, game_root)
+            self.assertEqual(
+                context.loaded_texture_dirs,
+                (overwrite_textures_dir.resolve(), textures_dir.resolve()),
+            )
+            self.assertEqual(
+                context.loaded_mesh_dirs,
+                (overwrite_meshes_dir.resolve(), meshes_dir.resolve()),
+            )
 
     def test_find_related_nif_files_for_texture_matches_family_stem(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1499,6 +2654,28 @@ class GenerateTexturesTests(unittest.TestCase):
             nif_path.parent.mkdir(parents=True)
             nif_path.write_bytes(b"")
             source = temp_path / "textures" / "sign01_d.dds"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"")
+
+            class _FakeInfo:
+                def __init__(self, texture_paths: dict[int, str]) -> None:
+                    self.texture_paths = texture_paths
+
+            related = find_related_nif_files_for_texture(
+                source,
+                candidate_roots=(nif_path.parent,),
+                nif_info_provider=lambda _: [_FakeInfo({0: "textures\\sign01.dds"})],
+            )
+
+            self.assertEqual(related, (nif_path.resolve(),))
+
+    def test_find_related_nif_files_for_texture_matches_alias_family_stem(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            nif_path = temp_path / "meshes" / "sign01.nif"
+            nif_path.parent.mkdir(parents=True)
+            nif_path.write_bytes(b"")
+            source = temp_path / "textures" / "sign01_envmask.dds"
             source.parent.mkdir(parents=True)
             source.write_bytes(b"")
 
@@ -1550,6 +2727,25 @@ class GenerateTexturesTests(unittest.TestCase):
 
             self.assertEqual(related, ())
 
+    def test_find_related_nif_files_for_texture_searches_source_parent_when_not_under_textures(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_dir = temp_path / "custom_assets"
+            source_dir.mkdir(parents=True)
+
+            source = source_dir / "sign01_d.dds"
+            source.write_bytes(b"")
+
+            nif_path = source_dir / "sign01.nif"
+            nif_path.write_bytes(b"")
+
+            related = find_related_nif_files_for_texture(
+                source,
+                nif_info_provider=lambda _: (_ for _ in ()).throw(ValueError("parse failed")),
+            )
+
+            self.assertEqual(related, (nif_path.resolve(),))
+
     def test_build_nif_patch_options_for_generated_outputs_prefers_msn_for_complex_parallax(self) -> None:
         outputs = {
             "parallax": Path("/tmp/textures/sign01_p.dds"),
@@ -1570,11 +2766,27 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(options.enable_parallax)
         self.assertTrue(options.enable_pom)
         self.assertTrue(options.enable_env_mapping)
-        self.assertTrue(options.force_shader_type_3)
+        self.assertFalse(options.force_shader_type_3)
         self.assertEqual(options.normal_texture_path, "textures\\sign01_msn.dds")
         self.assertEqual(options.parallax_texture_path, "textures\\sign01_p.dds")
         self.assertEqual(options.env_mask_texture_path, "textures\\sign01_m.dds")
         self.assertEqual(options.parallax_scale, 4.0)
+
+    def test_build_nif_patch_options_for_generated_outputs_accepts_gui_occlusion_label(self) -> None:
+        outputs = {"parallax": Path("/tmp/textures/sign01_p.dds")}
+
+        options = build_nif_patch_options_for_generated_outputs(
+            None,
+            outputs,
+            complex_format="msn",
+            env_mask_mode="standard",
+            parallax_mode="occlusion (ENB/POM)",
+            parallax_scale=4.0,
+            render_profile="enb",
+        )
+
+        self.assertTrue(options.enable_parallax)
+        self.assertTrue(options.enable_pom)
 
     def test_build_nif_patch_options_render_profile_vanilla_no_type3_upgrade(self) -> None:
         outputs = {"parallax": Path("/tmp/textures/brick_p.dds")}
@@ -1606,7 +2818,7 @@ class GenerateTexturesTests(unittest.TestCase):
             parallax_scale=2.0,
             render_profile="community_shaders",
         )
-        self.assertTrue(options.force_shader_type_3)
+        self.assertFalse(options.force_shader_type_3)
         self.assertTrue(options.enable_parallax)
 
     def test_build_nif_patch_options_render_profile_enb_enables_type3(self) -> None:
@@ -1634,8 +2846,35 @@ class GenerateTexturesTests(unittest.TestCase):
             parallax_scale=2.0,
             render_profile="truepbr",
         )
-        self.assertTrue(options.force_shader_type_3)
+        self.assertFalse(options.force_shader_type_3)
         self.assertTrue(options.enable_parallax)
+        self.assertTrue(options.enable_pbr)
+
+    def test_build_nif_patch_options_auto_enables_pbr_for_rmaos_output(self) -> None:
+        options = build_nif_patch_options_for_generated_outputs(
+            None,
+            {"rmaos": Path("/tmp/textures/brick_rmaos.dds")},
+            complex_format="cm",
+            env_mask_mode="complex",
+            parallax_mode="standard",
+            parallax_scale=None,
+            render_profile="auto",
+        )
+        self.assertTrue(options.enable_pbr)
+
+    def test_build_nif_patch_options_for_generated_outputs_uses_cm_for_env_slot(self) -> None:
+        outputs = {"complex_material": Path("/tmp/textures/stone_cm.dds")}
+        options = build_nif_patch_options_for_generated_outputs(
+            None,
+            outputs,
+            complex_format="cm",
+            env_mask_mode="standard",
+            parallax_mode="standard",
+            parallax_scale=None,
+            render_profile="community_shaders",
+        )
+        self.assertTrue(options.enable_env_mapping)
+        self.assertEqual(options.env_mask_texture_path, "textures\\stone_cm.dds")
 
     def test_build_nif_patch_options_no_parallax_never_forces_type3(self) -> None:
         for profile in ("vanilla", "community_shaders", "truepbr", "enb", "auto"):
@@ -1672,6 +2911,22 @@ class GenerateTexturesTests(unittest.TestCase):
 
         self.assertEqual(options.parallax_texture_path, "textures\\architecture\\stone\\brick_p.dds")
         self.assertEqual(options.normal_texture_path, "textures\\architecture\\stone\\brick_n.dds")
+
+    def test_build_nif_patch_options_for_generated_outputs_defaults_to_textures_prefix_without_source_context(self) -> None:
+        outputs = {
+            "parallax": Path("/tmp/generated/brick_p.dds"),
+            "normal": Path("/tmp/generated/brick_n.dds"),
+        }
+        options = build_nif_patch_options_for_generated_outputs(
+            None,
+            outputs,
+            complex_format="msn",
+            env_mask_mode="standard",
+            parallax_mode="standard",
+            parallax_scale=2.0,
+        )
+        self.assertEqual(options.parallax_texture_path, "textures\\brick_p.dds")
+        self.assertEqual(options.normal_texture_path, "textures\\brick_n.dds")
 
     def test_build_nif_patch_options_for_generated_outputs_coerces_non_dds_slots_to_dds(self) -> None:
         source_texture = Path("/tmp/mod/textures/architecture/stone/brick.dds")
@@ -1724,6 +2979,160 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(options.disable_env_mapping)
         self.assertTrue(options.clear_env_mask_texture_path)
         self.assertFalse(options.enable_env_mapping)
+
+    def test_build_nif_patch_options_for_nif_editor_preserves_disable_and_clear_flags(self) -> None:
+        options = build_nif_patch_options_for_nif_editor(
+            enable_parallax=False,
+            enable_pom=False,
+            enable_env_mapping=False,
+            enable_glow_map=False,
+            enable_pbr=True,
+            parallax_scale=3.5,
+            force_shader_type_3=True,
+            diffuse_texture_path=" textures\\arch\\stone.dds ",
+            parallax_texture_path=" textures\\arch\\stone_p.dds ",
+            normal_texture_path="",
+            glow_texture_path=" ",
+            env_mask_texture_path="textures\\arch\\stone_m.dds",
+            cubemap_texture_path="textures\\cubemaps\\chrome_e.dds",
+            backup=False,
+            dry_run=True,
+            disable_parallax=True,
+            disable_pom=True,
+            disable_env_mapping=True,
+            disable_glow_map=True,
+            disable_pbr=True,
+            clear_parallax_texture_path=True,
+            clear_normal_texture_path=True,
+            clear_env_mask_texture_path=True,
+            clear_glow_texture_path=True,
+            clear_diffuse_texture_path=True,
+            clear_cubemap_texture_path=True,
+        )
+
+        self.assertIsNone(options.parallax_scale)
+        self.assertEqual(options.diffuse_texture_path, "textures\\arch\\stone.dds")
+        self.assertEqual(options.parallax_texture_path, "textures\\arch\\stone_p.dds")
+        self.assertIsNone(options.normal_texture_path)
+        self.assertIsNone(options.glow_texture_path)
+        self.assertEqual(options.env_mask_texture_path, "textures\\arch\\stone_m.dds")
+        self.assertEqual(options.cubemap_texture_path, "textures\\cubemaps\\chrome_e.dds")
+        self.assertTrue(options.enable_pbr)
+        self.assertTrue(options.disable_parallax)
+        self.assertTrue(options.disable_pom)
+        self.assertTrue(options.disable_env_mapping)
+        self.assertTrue(options.disable_glow_map)
+        self.assertTrue(options.disable_pbr)
+        self.assertTrue(options.clear_parallax_texture_path)
+        self.assertTrue(options.clear_normal_texture_path)
+        self.assertTrue(options.clear_env_mask_texture_path)
+        self.assertTrue(options.clear_glow_texture_path)
+        self.assertTrue(options.clear_diffuse_texture_path)
+        self.assertTrue(options.clear_cubemap_texture_path)
+        self.assertFalse(options.backup)
+        self.assertTrue(options.dry_run)
+
+    def test_build_nif_patch_options_for_nif_editor_normalizes_manual_paths_to_dds(self) -> None:
+        options = build_nif_patch_options_for_nif_editor(
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            enable_glow_map=False,
+            enable_pbr=False,
+            parallax_scale=2.0,
+            force_shader_type_3=False,
+            diffuse_texture_path=r"Data\Textures\architecture\stone\stone.png",
+            parallax_texture_path=r"C:\Mod\Data\Textures\architecture\stone\stone_p.tga",
+            normal_texture_path=r"textures\architecture\stone\stone_n.jpeg",
+            glow_texture_path="",
+            env_mask_texture_path=r"textures\architecture\stone\stone_cm.bmp",
+            cubemap_texture_path=r"textures\cubemaps\chrome_e.PNG",
+        )
+
+        self.assertEqual(options.diffuse_texture_path, r"textures\architecture\stone\stone.dds")
+        self.assertEqual(options.parallax_texture_path, r"textures\architecture\stone\stone_p.dds")
+        self.assertEqual(options.normal_texture_path, r"textures\architecture\stone\stone_n.dds")
+        self.assertEqual(options.env_mask_texture_path, r"textures\architecture\stone\stone_cm.dds")
+        self.assertEqual(options.cubemap_texture_path, r"textures\cubemaps\chrome_e.dds")
+
+    def test_build_nif_patch_options_for_nif_editor_prefixes_relative_paths_with_textures(self) -> None:
+        options = build_nif_patch_options_for_nif_editor(
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            enable_glow_map=False,
+            enable_pbr=False,
+            parallax_scale=2.0,
+            force_shader_type_3=False,
+            diffuse_texture_path=r"architecture\stone\stone.dds",
+            parallax_texture_path=r"stone_p.dds",
+            normal_texture_path=r"meshes\shared\stone_n.dds",
+            env_mask_texture_path=r"architecture\stone\stone_m.dds",
+            cubemap_texture_path=r"cubemaps\chrome_e.dds",
+        )
+        self.assertEqual(options.diffuse_texture_path, r"textures\architecture\stone\stone.dds")
+        self.assertEqual(options.parallax_texture_path, r"textures\stone_p.dds")
+        self.assertEqual(options.normal_texture_path, r"textures\meshes\shared\stone_n.dds")
+        self.assertEqual(options.env_mask_texture_path, r"textures\architecture\stone\stone_m.dds")
+        self.assertEqual(options.cubemap_texture_path, r"textures\cubemaps\chrome_e.dds")
+
+    def test_normalize_nif_editor_texture_input_path_returns_none_for_blank(self) -> None:
+        self.assertIsNone(_normalize_nif_editor_texture_input_path("   "))
+
+    def test_resolve_nif_editor_patch_options_for_target_autofills_missing_paths(self) -> None:
+        base_options = build_nif_patch_options_for_nif_editor(
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=True,
+            enable_glow_map=True,
+            enable_pbr=True,
+            parallax_scale=2.0,
+            force_shader_type_3=False,
+            backup=False,
+        )
+
+        with mock.patch("generate_textures.guess_parallax_path_for_nif", return_value=r"textures\arch\stone_p.dds"), \
+             mock.patch("generate_textures.guess_normal_path_for_nif", return_value=r"textures\arch\stone_msn.dds"), \
+             mock.patch("generate_textures.guess_glow_path_for_nif", return_value=r"textures\arch\stone_g.dds"), \
+             mock.patch("generate_textures.guess_env_mask_path_for_nif", return_value=r"textures\arch\stone_rmaos.dds"), \
+             mock.patch("generate_textures.guess_cubemap_path_for_nif", return_value=r"textures\cubemaps\stone_e.dds"):
+            resolved, notes = resolve_nif_editor_patch_options_for_target(
+                Path("example.nif"),
+                base_options,
+                prefer_msn_normal=True,
+                preferred_env_mask_suffix="_rmaos.dds",
+            )
+
+        self.assertEqual(resolved.parallax_texture_path, r"textures\arch\stone_p.dds")
+        self.assertEqual(resolved.normal_texture_path, r"textures\arch\stone_msn.dds")
+        self.assertEqual(resolved.glow_texture_path, r"textures\arch\stone_g.dds")
+        self.assertEqual(resolved.env_mask_texture_path, r"textures\arch\stone_rmaos.dds")
+        self.assertEqual(resolved.cubemap_texture_path, r"textures\cubemaps\stone_e.dds")
+        self.assertTrue(any("slot 3 parallax path" in note for note in notes))
+
+    def test_resolve_nif_editor_patch_options_for_target_keeps_manual_paths(self) -> None:
+        base_options = build_nif_patch_options_for_nif_editor(
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=False,
+            enable_glow_map=False,
+            enable_pbr=False,
+            parallax_scale=2.0,
+            force_shader_type_3=False,
+            parallax_texture_path=r"textures\manual\stone_p.dds",
+            normal_texture_path=r"textures\manual\stone_n.dds",
+            backup=False,
+        )
+
+        with mock.patch("generate_textures.guess_parallax_path_for_nif") as guess_parallax, \
+             mock.patch("generate_textures.guess_normal_path_for_nif") as guess_normal:
+            resolved, notes = resolve_nif_editor_patch_options_for_target(Path("example.nif"), base_options)
+
+        self.assertEqual(resolved.parallax_texture_path, r"textures\manual\stone_p.dds")
+        self.assertEqual(resolved.normal_texture_path, r"textures\manual\stone_n.dds")
+        self.assertEqual(notes, ())
+        guess_parallax.assert_not_called()
+        guess_normal.assert_not_called()
 
     def test_auto_patch_related_nifs_for_texture_patches_all_matches(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1870,11 +3279,37 @@ class GenerateTexturesTests(unittest.TestCase):
             _sample_image().save(deeper / "stone_n.dds", format="DDS", pixel_format="DXT5")
             _sample_image().save(deeper / "stone_c.dds", format="DDS", pixel_format="DXT5")
             _sample_image().save(deeper / "stone_rmaos.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_em.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_emissive.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_sk.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_specular.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_height.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_envmask.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_roughness.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_metalness.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_ao.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(deeper / "stone_orm.dds", format="DDS", pixel_format="DXT5")
 
             discovered = collect_source_textures(root)
             self.assertEqual(
                 sorted(path.relative_to(root).as_posix() for path in discovered),
                 ["nested/brick.dds", "nested/deeper/stone.dds", "top.dds"],
+            )
+
+    def test_collect_source_textures_includes_uppercase_dds_extensions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "input"
+            nested = root / "nested"
+            nested.mkdir(parents=True)
+
+            _sample_image().save(root / "top.DDS", format="DDS", pixel_format="DXT5")
+            _sample_image().save(nested / "stone.DDS", format="DDS", pixel_format="DXT5")
+            _sample_image().save(nested / "stone_n.DDS", format="DDS", pixel_format="DXT5")
+
+            discovered = collect_source_textures(root)
+            self.assertEqual(
+                sorted(path.relative_to(root).as_posix() for path in discovered),
+                ["nested/stone.DDS", "top.DDS"],
             )
 
     def test_select_generation_context_source_prefers_first_selected_input(self) -> None:
@@ -1987,6 +3422,9 @@ class GenerateTexturesTests(unittest.TestCase):
     def test_patreon_url_is_correct(self) -> None:
         self.assertEqual(PATREON_URL, "https://www.patreon.com/cw/DeadOnTheInside")
 
+    def test_modding_wiki_url_is_correct(self) -> None:
+        self.assertEqual(MODDING_WIKI_SKYRIM_URL, "https://modding.wiki/en/skyrim")
+
     def test_parse_args_accepts_pbr_material_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             input_file = Path(temp_dir) / "brick.dds"
@@ -1994,6 +3432,22 @@ class GenerateTexturesTests(unittest.TestCase):
             with mock.patch("sys.argv", ["generate_textures.py", str(input_file), "--pbr-material"]):
                 args = parse_args()
         self.assertTrue(args.pbr_material)
+
+    def test_parse_args_accepts_render_profile_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_file = Path(temp_dir) / "brick.dds"
+            input_file.write_bytes(b"dds")
+            with mock.patch("sys.argv", ["generate_textures.py", str(input_file), "--render-profile", "enb"]):
+                args = parse_args()
+        self.assertEqual(str(args.render_profile), "enb")
+
+    def test_parse_args_accepts_extended_render_profile_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_file = Path(temp_dir) / "brick.dds"
+            input_file.write_bytes(b"dds")
+            with mock.patch("sys.argv", ["generate_textures.py", str(input_file), "--render-profile", "architecture"]):
+                args = parse_args()
+        self.assertEqual(str(args.render_profile), "architecture")
 
     def test_main_pbr_material_forces_complex_material_cm_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2027,6 +3481,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 environment_mask=False,
                 complex_material=False,
                 pbr_material=True,
+                render_profile="auto",
             )
             with mock.patch("generate_textures.parse_args", return_value=args):
                 with mock.patch("generate_textures.run_with_options", return_value={}) as run_with_options_mock:
@@ -2039,6 +3494,54 @@ class GenerateTexturesTests(unittest.TestCase):
         run_with_options_mock.assert_called_once()
         self.assertTrue(bool(run_with_options_mock.call_args.kwargs["include_complex"]))
         self.assertEqual(str(run_with_options_mock.call_args.kwargs["complex_format"]), "cm")
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["render_profile"]), "auto")
+
+    def test_main_passes_selected_render_profile_to_run_with_options(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_file = Path(temp_dir) / "brick.dds"
+            input_file.write_bytes(b"dds")
+            args = mock.Mock(
+                gui=False,
+                input_file=input_file,
+                output_dir=None,
+                diffuse_name=None,
+                normal_name=None,
+                parallax_name=None,
+                glow_name=None,
+                environment_mask_name=None,
+                rmaos_name=None,
+                complex_name=None,
+                normal_strength=None,
+                parallax_strength=None,
+                glow_threshold=None,
+                environment_mask_strength=None,
+                rmaos_strength=None,
+                complex_strength=None,
+                specular_strength=None,
+                complex_format="msn",
+                environment_mask_mode="standard",
+                emboss_mode=False,
+                relief_mode=False,
+                parallax_mode="standard",
+                no_diffuse=False,
+                no_normal=False,
+                no_parallax=False,
+                glow_map=False,
+                environment_mask=False,
+                rmaos=False,
+                complex_material=False,
+                pbr_material=False,
+                render_profile="enb",
+            )
+            with mock.patch("generate_textures.parse_args", return_value=args):
+                with mock.patch("generate_textures.run_with_options", return_value={}) as run_with_options_mock:
+                    exit_code = main()
+        self.assertEqual(exit_code, 0)
+        run_with_options_mock.assert_called_once()
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["render_profile"]), "enb")
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["complex_format"]), "msn")
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["env_mask_mode"]), "complex")
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["parallax_mode"]), "occlusion")
 
     def test_run_cli_handles_missing_gui_dependencies_without_traceback(self) -> None:
         with mock.patch("generate_textures.main", side_effect=RuntimeError("GUI dependencies are unavailable in this environment.")):
@@ -2182,6 +3685,18 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(result["role"], "parallax")
         self.assertEqual(result["suffix"], "_p")
 
+    def test_identify_skyrim_texture_role_em_is_glow(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/effects/fire_em.dds"))
+        self.assertEqual(result["role"], "glow")
+        self.assertEqual(result["suffix"], "_em")
+        self.assertIn("Slot 2", result["notes"])
+
+    def test_identify_skyrim_texture_role_emis_is_glow_alias(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/effects/fire_emis.dds"))
+        self.assertEqual(result["role"], "glow")
+        self.assertEqual(result["suffix"], "_emis")
+        self.assertIn("Slot 2", result["notes"])
+
     def test_identify_skyrim_texture_role_environment_mask(self) -> None:
         result = identify_skyrim_texture_role(Path("textures/armor/iron_m.dds"))
         self.assertEqual(result["role"], "environment_mask")
@@ -2192,6 +3707,30 @@ class GenerateTexturesTests(unittest.TestCase):
         result = identify_skyrim_texture_role(Path("textures/armor/iron_rmaos.dds"))
         self.assertEqual(result["role"], "environment_mask")
         self.assertEqual(result["suffix"], "_rmaos")
+
+    def test_identify_skyrim_texture_role_specular_alias_maps_to_environment_mask(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/armor/iron_specular.dds"))
+        self.assertEqual(result["role"], "environment_mask")
+        self.assertEqual(result["suffix"], "_specular")
+        self.assertIn("alias", result["description"].lower())
+
+    def test_identify_skyrim_texture_role_roughness_alias_maps_to_environment_mask(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/armor/iron_roughness.dds"))
+        self.assertEqual(result["role"], "environment_mask")
+        self.assertEqual(result["suffix"], "_roughness")
+        self.assertIn("alias", result["description"].lower())
+
+    def test_identify_skyrim_texture_role_ao_alias_maps_to_environment_mask(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/armor/iron_ao.dds"))
+        self.assertEqual(result["role"], "environment_mask")
+        self.assertEqual(result["suffix"], "_ao")
+        self.assertIn("alias", result["description"].lower())
+
+    def test_identify_skyrim_texture_role_orm_alias_maps_to_rmaos_environment_mask(self) -> None:
+        result = identify_skyrim_texture_role(Path("textures/armor/iron_orm.dds"))
+        self.assertEqual(result["role"], "environment_mask")
+        self.assertEqual(result["suffix"], "_orm")
+        self.assertIn("alias", result["description"].lower())
 
     def test_identify_skyrim_texture_role_c_as_complex_material(self) -> None:
         result = identify_skyrim_texture_role(Path("textures/architecture/brick_c.dds"))
@@ -2303,6 +3842,66 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(save_mock.call_count, 1)
             self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT1", "DXT5"))
 
+    def test_run_with_options_normal_prefers_bc5_then_legacy_fallbacks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ) as save_mock:
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=False,
+                    include_normal=True,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                )
+
+            self.assertEqual(save_mock.call_count, 1)
+            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("BC5", "DXT5", "DXT3"))
+
+    def test_run_with_options_parallax_prefers_dxt1_then_dxt5(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ) as save_mock:
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=True,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                )
+
+            self.assertEqual(save_mock.call_count, 1)
+            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT1", "DXT5"))
+
+    def test_preferred_dds_formats_for_opaque_diffuse_uses_bc7_then_dxt1(self) -> None:
+        formats = _preferred_dds_formats_for_output("diffuse", Image.new("RGB", (4, 4), color=(10, 20, 30)))
+        self.assertEqual(formats, ("BC7", "DXT1", "DXT5"))
+
+    def test_preferred_dds_formats_for_alpha_diffuse_avoids_dxt1(self) -> None:
+        image = Image.new("RGBA", (4, 4), color=(10, 20, 30, 255))
+        image.putpixel((0, 0), (10, 20, 30, 80))
+        formats = _preferred_dds_formats_for_output("diffuse", image)
+        self.assertEqual(formats, ("BC7", "DXT5", "DXT3"))
+
     def test_run_with_options_complex_env_mask_uses_dxt5_and_defaults_to_m_for_enb_path(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -2331,7 +3930,7 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(save_mock.call_count, 2)
             env_calls = [call for call in save_mock.call_args_list if call.args[1].name.endswith("_m.dds")]
             self.assertEqual(len(env_calls), 1)
-            self.assertEqual(env_calls[0].kwargs["preferred_pixel_formats"], ("DXT5",))
+            self.assertEqual(env_calls[0].kwargs["preferred_pixel_formats"], ("BC7", "DXT5", "DXT3"))
 
     def test_run_with_options_truepbr_complex_env_mask_defaults_to_m_name(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2359,7 +3958,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 )
 
             self.assertEqual(save_mock.call_count, 1)
-            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT5",))
+            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("BC7", "DXT5", "DXT3"))
             self.assertEqual(save_mock.call_args.args[1].name, "brick_m.dds")
 
     def test_run_with_options_rmaos_writes_rmaos_name(self) -> None:
@@ -2386,8 +3985,27 @@ class GenerateTexturesTests(unittest.TestCase):
                 )
 
             self.assertEqual(save_mock.call_count, 1)
-            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("DXT5",))
+            self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("BC7", "DXT5", "DXT3"))
             self.assertEqual(save_mock.call_args.args[1].name, "brick_rmaos.dds")
+
+    def test_run_with_options_rejects_env_mask_with_rmaos_combination(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            _sample_image().save(input_path)
+
+            with self.assertRaises(ValueError) as err:
+                run_with_options(
+                    input_file=input_path,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=True,
+                    include_rmaos=True,
+                    include_complex=False,
+                )
+            self.assertIn("cannot be generated together", str(err.exception))
 
     def test_run_with_options_rmaos_writes_json_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2417,6 +4035,11 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(len(payload), 1)
             self.assertEqual(payload[0]["texture"], "brick")
             self.assertFalse(bool(payload[0]["parallax"]))
+            self.assertFalse(bool(payload[0]["emissive"]))
+            self.assertFalse(bool(payload[0]["subsurface"]))
+            self.assertFalse(bool(payload[0]["subsurface_foliage"]))
+            self.assertEqual(payload[0]["subsurface_color"], [1.0, 1.0, 1.0])
+            self.assertAlmostEqual(float(payload[0]["subsurface_opacity"]), 1.0)
             self.assertAlmostEqual(float(payload[0]["specular_level"]), 0.04)
 
     def test_run_with_options_rmaos_writes_sidecar_next_to_textures_root(self) -> None:
@@ -2868,6 +4491,98 @@ class ParallaxOcclusionTests(unittest.TestCase):
                     parallax_mode="broken",
                 )
 
+    def test_run_with_options_uses_resolved_truepbr_env_mask_workflow(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "stone.png"
+            _sample_image().save(input_path)
+            captured_workflows: list[str] = []
+            original_generate = generate_environment_mask_for_workflow
+
+            def _spy(source, *, strength=1.2, mode="standard", complex_workflow="truepbr"):
+                captured_workflows.append(str(complex_workflow))
+                return original_generate(
+                    source,
+                    strength=strength,
+                    mode=mode,
+                    complex_workflow=complex_workflow,
+                )
+
+            with mock.patch("generate_textures.generate_environment_mask_for_workflow", side_effect=_spy), \
+                 mock.patch(
+                     "generate_textures._save_with_dds_fallback",
+                     side_effect=lambda _image, path, **_kwargs: path,
+                 ):
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=temp_path / "out",
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=True,
+                    include_complex=True,
+                    complex_format="cm",
+                    env_mask_mode="complex",
+                    render_profile="auto",
+                )
+            self.assertEqual(captured_workflows, ["truepbr"])
+
+    def test_generate_preview_outputs_uses_resolved_truepbr_env_mask_workflow(self) -> None:
+        source = _sample_image()
+        captured_workflows: list[str] = []
+        original_generate = generate_environment_mask_for_workflow
+
+        def _spy(source_image, *, strength=1.2, mode="standard", complex_workflow="truepbr"):
+            captured_workflows.append(str(complex_workflow))
+            return original_generate(
+                source_image,
+                strength=strength,
+                mode=mode,
+                complex_workflow=complex_workflow,
+            )
+
+        with mock.patch("generate_textures.generate_environment_mask_for_workflow", side_effect=_spy):
+            generate_preview_outputs(
+                source,
+                normal_strength=2.0,
+                parallax_strength=1.35,
+                glow_threshold=190,
+                environment_mask_strength=1.2,
+                complex_strength=1.2,
+                specular_strength=1.1,
+                complex_format="cm",
+                env_mask_mode="complex",
+                include_diffuse=False,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=True,
+                include_complex=True,
+                render_profile="auto",
+            )
+        self.assertEqual(captured_workflows, ["truepbr"])
+
+    def test_run_with_options_rejects_conflicting_output_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "stone.png"
+            _sample_image().save(input_path)
+            with self.assertRaisesRegex(ValueError, "Conflicting output filenames detected"):
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=temp_path / "out",
+                    diffuse_name="stone_shared",
+                    normal_name="stone_shared",
+                    include_diffuse=True,
+                    include_normal=True,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_rmaos=False,
+                    include_complex=False,
+                )
+
     def test_generate_parallax_occlusion_relief_mode_differs_from_standard(self) -> None:
         """Relief mode should change the occlusion heightmap (luminosity-as-height)."""
         source = _detailed_bright_image()
@@ -3010,6 +4725,44 @@ class ParallaxOcclusionTests(unittest.TestCase):
             ids = [w[0] for w in warnings]
             self.assertNotIn("depth_mode_without_normal", ids)
 
+    def test_emboss_non_paper_material_triggers_warning(self) -> None:
+        """Emboss mode on a solid material (stone, terrain, metal…) should warn."""
+        for material in ("stone", "terrain", "metal", "wood", "skin"):
+            with self.subTest(material=material):
+                warnings = get_generation_warnings(
+                    material,
+                    include_normal=True,
+                    emboss_mode=True,
+                    relief_mode=False,
+                    **self._base_kwargs(),
+                )
+                ids = [w[0] for w in warnings]
+                self.assertIn("emboss_non_paper_material", ids)
+
+    def test_emboss_paper_no_false_positive_for_non_paper_warning(self) -> None:
+        """Emboss mode on paper is correct usage — should NOT trigger the non-paper warning."""
+        warnings = get_generation_warnings(
+            "paper",
+            include_normal=True,
+            emboss_mode=True,
+            relief_mode=False,
+            **self._base_kwargs(),
+        )
+        ids = [w[0] for w in warnings]
+        self.assertNotIn("emboss_non_paper_material", ids)
+
+    def test_emboss_non_paper_warning_not_raised_when_emboss_off(self) -> None:
+        """No false positive when emboss_mode is False on a non-paper material."""
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=True,
+            emboss_mode=False,
+            relief_mode=False,
+            **self._base_kwargs(),
+        )
+        ids = [w[0] for w in warnings]
+        self.assertNotIn("emboss_non_paper_material", ids)
+
     def test_env_mask_with_complex_material_triggers_warning(self) -> None:
         warnings = get_generation_warnings(
             "stone",
@@ -3142,6 +4895,44 @@ class ParallaxOcclusionTests(unittest.TestCase):
         )
         ids = [w[0] for w in warnings]
         self.assertIn("rmaos_with_msn_mix", ids)
+
+    def test_get_generation_warnings_rmaos_with_env_mask_triggers_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=True,
+            include_environment_mask=True,
+            include_rmaos=True,
+            include_complex=False,
+            include_glow=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("rmaos_with_env_mask", ids)
+
+    def test_get_generation_warnings_rmaos_without_env_mask_no_false_env_mask_warnings(self) -> None:
+        """RMAOS alone must not trigger env-mask-specific warnings (false-positive guard)."""
+        warnings = get_generation_warnings(
+            "organic",
+            include_normal=True,
+            include_environment_mask=False,
+            include_rmaos=True,
+            include_complex=False,
+            include_glow=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.8,
+            include_parallax=False,
+        )
+        ids = [w[0] for w in warnings]
+        env_mask_specific = {
+            "high_env_mask_organic",
+            "high_env_mask_glass",
+            "low_env_mask_metal",
+            "high_env_mask_strength",
+        }
+        for warning_id in env_mask_specific:
+            self.assertNotIn(warning_id, ids, f"False-positive: {warning_id} fired with RMAOS only")
 
     def test_msn_with_normal_output_triggers_warning(self) -> None:
         warnings = get_generation_warnings(
@@ -3276,6 +5067,963 @@ class ParallaxOcclusionTests(unittest.TestCase):
         from generate_textures import _normalize_gui_state
         state = _normalize_gui_state({})
         self.assertFalse(state["auto_patch_nifs"])
+
+    # --- Wetness mask tests ---
+
+    def test_generate_wetness_mask_returns_l_mode_same_size(self) -> None:
+        source = _sample_image()
+        result = generate_wetness_mask(source, strength=1.0)
+        self.assertEqual(result.mode, "L")
+        self.assertEqual(result.size, source.size)
+
+    def test_generate_wetness_mask_no_pure_black(self) -> None:
+        source = _sample_image()
+        result = generate_wetness_mask(source, strength=1.0)
+        pixels = list(result.get_flattened_data())
+        self.assertTrue(all(v > 0 for v in pixels), "Wetness mask should have no pure-black pixels (floor-lifted)")
+
+    def test_generate_wetness_mask_higher_strength_increases_contrast(self) -> None:
+        source = Image.new("RGB", (32, 32))
+        pixels = source.load()
+        for y in range(32):
+            for x in range(32):
+                pixels[x, y] = (x * 8, y * 8, 0)
+        low = generate_wetness_mask(source, strength=0.5)
+        high = generate_wetness_mask(source, strength=2.5)
+        low_vals = list(low.get_flattened_data())
+        high_vals = list(high.get_flattened_data())
+        low_range = max(low_vals) - min(low_vals)
+        high_range = max(high_vals) - min(high_vals)
+        self.assertGreaterEqual(high_range, low_range, "Higher strength should produce >= contrast range")
+
+    # --- Snow mask tests ---
+
+    def test_generate_snow_mask_returns_l_mode_same_size(self) -> None:
+        source = _sample_image()
+        result = generate_snow_mask(source, strength=1.0)
+        self.assertEqual(result.mode, "L")
+        self.assertEqual(result.size, source.size)
+
+    def test_generate_snow_mask_no_pure_black(self) -> None:
+        source = _sample_image()
+        result = generate_snow_mask(source, strength=1.0)
+        pixels = list(result.get_flattened_data())
+        self.assertTrue(all(v > 0 for v in pixels), "Snow mask should have no pure-black pixels (floor-lifted)")
+
+    def test_generate_snow_mask_higher_strength_increases_brightness(self) -> None:
+        source = _sample_image()
+        low = generate_snow_mask(source, strength=0.5)
+        high = generate_snow_mask(source, strength=2.5)
+        low_mean = sum(low.get_flattened_data()) / (source.width * source.height)
+        high_mean = sum(high.get_flattened_data()) / (source.width * source.height)
+        self.assertGreaterEqual(high_mean, low_mean, "Higher snow mask strength should produce >= mean brightness")
+
+    # --- Output path builder tests ---
+
+    def test_build_wetness_mask_output_path_uses_wt_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "stone.dds"
+            input_path.write_bytes(b"stub")
+            result = build_wetness_mask_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+                wetness_name=None,
+            )
+            self.assertEqual(result.name, "stone_wt.dds")
+
+    def test_build_snow_mask_output_path_uses_sm_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "stone.dds"
+            input_path.write_bytes(b"stub")
+            result = build_snow_mask_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+                snow_name=None,
+            )
+            self.assertEqual(result.name, "stone_sm.dds")
+
+    # --- GENERATED_TEXTURE_SUFFIXES tests ---
+
+    def test_wt_in_generated_texture_suffixes(self) -> None:
+        self.assertIn("_wt", GENERATED_TEXTURE_SUFFIXES)
+
+    def test_sm_in_generated_texture_suffixes(self) -> None:
+        self.assertIn("_sm", GENERATED_TEXTURE_SUFFIXES)
+
+    # --- run_with_options wetness/snow integration tests ---
+
+    def test_run_with_options_generates_wetness_mask(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ) as save_mock:
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                    include_wetness_mask=True,
+                )
+
+            self.assertEqual(save_mock.call_count, 1)
+            self.assertEqual(save_mock.call_args.args[1].name, "brick_wt.dds")
+
+    def test_run_with_options_generates_snow_mask(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ) as save_mock:
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                    include_snow_mask=True,
+                )
+
+            self.assertEqual(save_mock.call_count, 1)
+            self.assertEqual(save_mock.call_args.args[1].name, "brick_sm.dds")
+
+    # --- Generation warnings for snow/wetness tests ---
+
+    def test_snow_mask_on_glass_raises_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "glass",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            include_complex=False,
+            include_snow_mask=True,
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertIn("snow_mask_on_non_accumulating_material", warning_ids)
+
+    def test_snow_mask_on_stone_raises_no_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            include_complex=False,
+            include_snow_mask=True,
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("snow_mask_on_non_accumulating_material", warning_ids)
+
+    def test_wetness_mask_on_glass_raises_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "glass",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            include_complex=False,
+            include_wetness_mask=True,
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertIn("wetness_mask_on_reflective_material", warning_ids)
+
+    def test_wetness_mask_on_stone_raises_no_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            include_complex=False,
+            include_wetness_mask=True,
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("wetness_mask_on_reflective_material", warning_ids)
+
+
+# ---------------------------------------------------------------------------
+# Parallax warnings — glass and skin
+# ---------------------------------------------------------------------------
+
+
+class ParallaxGlassSkinWarningTests(unittest.TestCase):
+    """Tests for new parallax_flat_glass and parallax_character_skin warnings."""
+
+    def _base_kwargs(self) -> dict:
+        return dict(
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=True,
+            include_complex=False,
+        )
+
+    def test_parallax_glass_raises_warning(self) -> None:
+        warnings = get_generation_warnings("glass", **self._base_kwargs())
+        warning_ids = [w[0] for w in warnings]
+        self.assertIn("parallax_flat_glass", warning_ids)
+
+    def test_parallax_glass_no_warning_when_parallax_off(self) -> None:
+        kwargs = self._base_kwargs()
+        kwargs["include_parallax"] = False
+        warnings = get_generation_warnings("glass", **kwargs)
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("parallax_flat_glass", warning_ids)
+
+    def test_parallax_skin_raises_warning(self) -> None:
+        warnings = get_generation_warnings("skin", **self._base_kwargs())
+        warning_ids = [w[0] for w in warnings]
+        self.assertIn("parallax_character_skin", warning_ids)
+
+    def test_parallax_skin_no_warning_when_parallax_off(self) -> None:
+        kwargs = self._base_kwargs()
+        kwargs["include_parallax"] = False
+        warnings = get_generation_warnings("skin", **kwargs)
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("parallax_character_skin", warning_ids)
+
+    def test_parallax_stone_raises_no_glass_or_skin_warning(self) -> None:
+        warnings = get_generation_warnings("stone", **self._base_kwargs())
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("parallax_flat_glass", warning_ids)
+        self.assertNotIn("parallax_character_skin", warning_ids)
+
+
+# ---------------------------------------------------------------------------
+# recommend_output_resolution
+# ---------------------------------------------------------------------------
+
+
+class RecommendOutputResolutionTests(unittest.TestCase):
+    """Tests for recommend_output_resolution(width, height, material_type)."""
+
+    def test_terrain_max_is_2048(self) -> None:
+        max_dim, _ = recommend_output_resolution(4096, 4096, "terrain")
+        self.assertEqual(max_dim, 2048)
+
+    def test_skin_max_is_2048(self) -> None:
+        max_dim, _ = recommend_output_resolution(4096, 4096, "skin")
+        self.assertEqual(max_dim, 2048)
+
+    def test_plants_max_is_1024(self) -> None:
+        max_dim, _ = recommend_output_resolution(2048, 2048, "plants")
+        self.assertEqual(max_dim, 1024)
+
+    def test_paper_max_is_1024(self) -> None:
+        max_dim, _ = recommend_output_resolution(2048, 2048, "paper")
+        self.assertEqual(max_dim, 1024)
+
+    def test_architecture_max_is_4096(self) -> None:
+        max_dim, _ = recommend_output_resolution(8192, 8192, "architecture")
+        self.assertEqual(max_dim, 4096)
+
+    def test_general_max_is_4096(self) -> None:
+        max_dim, _ = recommend_output_resolution(8192, 8192, "general")
+        self.assertEqual(max_dim, 4096)
+
+    def test_unknown_material_max_is_4096(self) -> None:
+        max_dim, _ = recommend_output_resolution(8192, 8192, "unknownmaterial")
+        self.assertEqual(max_dim, 4096)
+
+    def test_returns_reason_string(self) -> None:
+        _, reason = recommend_output_resolution(2048, 2048, "general")
+        self.assertIsInstance(reason, str)
+        self.assertTrue(len(reason) > 0)
+
+    def test_small_source_returns_max_dim_unchanged(self) -> None:
+        max_dim, _ = recommend_output_resolution(512, 512, "terrain")
+        self.assertEqual(max_dim, 2048)
+
+    def test_8k_source_reason_mentions_resolution(self) -> None:
+        _, reason = recommend_output_resolution(16384, 16384, "general")
+        self.assertIn("16384", reason)
+
+
+# ---------------------------------------------------------------------------
+# Source resolution warning in get_generation_warnings
+# ---------------------------------------------------------------------------
+
+
+class SourceResolutionWarningTests(unittest.TestCase):
+    """Tests that get_generation_warnings emits source_resolution_excessive when appropriate."""
+
+    def _base_kwargs(self) -> dict:
+        return dict(
+            include_glow=False,
+            include_environment_mask=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            include_complex=False,
+        )
+
+    def test_terrain_8k_source_raises_resolution_warning(self) -> None:
+        warnings = get_generation_warnings("terrain", source_size=(8192, 8192), **self._base_kwargs())
+        warning_ids = [w[0] for w in warnings]
+        self.assertIn("source_resolution_excessive", warning_ids)
+
+    def test_terrain_2k_source_no_resolution_warning(self) -> None:
+        warnings = get_generation_warnings("terrain", source_size=(2048, 2048), **self._base_kwargs())
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("source_resolution_excessive", warning_ids)
+
+    def test_general_4k_source_no_resolution_warning(self) -> None:
+        warnings = get_generation_warnings("general", source_size=(4096, 4096), **self._base_kwargs())
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("source_resolution_excessive", warning_ids)
+
+    def test_general_8k_source_raises_resolution_warning(self) -> None:
+        warnings = get_generation_warnings("general", source_size=(8192, 4096), **self._base_kwargs())
+        warning_ids = [w[0] for w in warnings]
+        self.assertIn("source_resolution_excessive", warning_ids)
+
+    def test_no_source_size_no_resolution_warning(self) -> None:
+        warnings = get_generation_warnings("terrain", source_size=None, **self._base_kwargs())
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("source_resolution_excessive", warning_ids)
+
+
+# ---------------------------------------------------------------------------
+# Material-aware write_rmaos_json_sidecar
+# ---------------------------------------------------------------------------
+
+
+class RmaosJsonMaterialTypeTests(unittest.TestCase):
+    """Tests that write_rmaos_json_sidecar applies per-material PBR overrides."""
+
+    def setUp(self) -> None:
+        import tempfile
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _write_and_read(self, material_type: str) -> dict:
+        import json
+        from pathlib import Path
+
+        rmaos_path = Path(self._tmpdir) / f"test_{material_type}_rmaos.dds"
+        write_rmaos_json_sidecar(rmaos_path, parallax_enabled=False, material_type=material_type)
+        # The function writes into a PBRNifPatcher sub-directory.
+        json_path = Path(self._tmpdir) / "PBRNifPatcher" / f"{rmaos_path.stem}.json"
+        with open(json_path) as f:
+            raw = json.load(f)
+        # Payload is a list; return the first (and only) entry for convenience.
+        return raw[0] if isinstance(raw, list) else raw
+
+    def test_general_uses_defaults(self) -> None:
+        data = self._write_and_read("general")
+        # General should not enable subsurface
+        self.assertFalse(data.get("subsurface", False))
+        self.assertFalse(data.get("subsurface_foliage", False))
+
+    def test_skin_enables_subsurface(self) -> None:
+        data = self._write_and_read("skin")
+        self.assertTrue(data.get("subsurface", False))
+        self.assertAlmostEqual(data["subsurface_color"][0], 1.0, places=3)
+        self.assertAlmostEqual(data["subsurface_color"][1], 0.85, places=3)
+        self.assertAlmostEqual(data["subsurface_color"][2], 0.7, places=3)
+        self.assertAlmostEqual(data["subsurface_opacity"], 0.65, places=3)
+        self.assertAlmostEqual(data["displacement_scale"], 0.0, places=3)
+
+    def test_plants_enables_foliage_subsurface(self) -> None:
+        data = self._write_and_read("plants")
+        self.assertTrue(data.get("subsurface_foliage", False))
+        self.assertAlmostEqual(data["displacement_scale"], 0.0, places=3)
+
+    def test_metal_has_high_specular(self) -> None:
+        data = self._write_and_read("metal")
+        self.assertAlmostEqual(data["specular_level"], 0.5, places=3)
+
+    def test_glass_has_low_roughness(self) -> None:
+        data = self._write_and_read("glass")
+        self.assertAlmostEqual(data["roughness_scale"], 0.35, places=3)
+
+    def test_terrain_has_shallow_displacement(self) -> None:
+        data = self._write_and_read("terrain")
+        self.assertAlmostEqual(data["displacement_scale"], 0.08, places=3)
+
+    def test_snow_roughness_set(self) -> None:
+        data = self._write_and_read("snow")
+        self.assertAlmostEqual(data["roughness_scale"], 0.75, places=3)
+
+    def test_cloth_low_specular(self) -> None:
+        data = self._write_and_read("cloth")
+        self.assertAlmostEqual(data["specular_level"], 0.016, places=4)
+
+    def test_fur_has_very_high_roughness_and_very_low_specular(self) -> None:
+        data = self._write_and_read("fur")
+        self.assertGreater(data["roughness_scale"], 1.2)
+        self.assertLess(data["specular_level"], 0.02)
+
+    def test_paper_has_low_specular_and_shallow_displacement(self) -> None:
+        data = self._write_and_read("paper")
+        self.assertLess(data["specular_level"], 0.02)
+        self.assertLess(data["displacement_scale"], 0.1)
+
+    def test_dirt_has_high_roughness(self) -> None:
+        data = self._write_and_read("dirt")
+        self.assertGreater(data["roughness_scale"], 1.1)
+
+    def test_sand_has_low_specular(self) -> None:
+        data = self._write_and_read("sand")
+        self.assertLess(data["specular_level"], 0.03)
+
+    def test_architecture_has_moderate_roughness(self) -> None:
+        data = self._write_and_read("architecture")
+        self.assertGreater(data["roughness_scale"], 1.0)
+        self.assertLess(data["roughness_scale"], 1.2)
+
+    def test_fur_displacement_is_shallow(self) -> None:
+        data = self._write_and_read("fur")
+        self.assertLess(data["displacement_scale"], 0.15)
+
+    def test_dirt_no_subsurface(self) -> None:
+        data = self._write_and_read("dirt")
+        self.assertFalse(data.get("subsurface", False))
+        self.assertFalse(data.get("subsurface_foliage", False))
+
+    def test_sand_no_subsurface(self) -> None:
+        data = self._write_and_read("sand")
+        self.assertFalse(data.get("subsurface", False))
+        self.assertFalse(data.get("subsurface_foliage", False))
+
+    def test_hair_has_notable_specular_and_no_displacement(self) -> None:
+        data = self._write_and_read("hair")
+        self.assertGreater(data["specular_level"], 0.04)
+        self.assertAlmostEqual(data["displacement_scale"], 0.0, places=3)
+
+    def test_hair_no_subsurface(self) -> None:
+        data = self._write_and_read("hair")
+        self.assertFalse(data.get("subsurface", False))
+        self.assertFalse(data.get("subsurface_foliage", False))
+
+    def test_glass_has_high_emissive_scale(self) -> None:
+        data = self._write_and_read("glass")
+        self.assertGreater(data["emissive_scale"], 0.4)
+
+    def test_metal_has_elevated_emissive_scale(self) -> None:
+        data = self._write_and_read("metal")
+        self.assertGreater(data["emissive_scale"], 0.25)
+
+    def test_emissive_scale_present_for_all_material_types(self) -> None:
+        for material_type in (
+            "skin", "plants", "metal", "glass", "snow", "terrain", "cloth",
+            "leather", "stone", "wood", "fur", "paper", "dirt", "sand",
+            "architecture", "hair", "general",
+        ):
+            with self.subTest(material_type=material_type):
+                data = self._write_and_read(material_type)
+                self.assertIn("emissive_scale", data)
+                self.assertIsInstance(data["emissive_scale"], float)
+
+    def test_vertex_color_lum_mult_present_for_all_material_types(self) -> None:
+        for material_type in (
+            "skin", "plants", "metal", "glass", "snow", "terrain", "cloth",
+            "leather", "stone", "wood", "fur", "paper", "dirt", "sand",
+            "architecture", "hair", "general",
+        ):
+            with self.subTest(material_type=material_type):
+                data = self._write_and_read(material_type)
+                self.assertIn("vertex_color_lum_mult", data)
+
+
+class RmaosJsonGlowEnabledTests(unittest.TestCase):
+    """Tests that write_rmaos_json_sidecar threads glow_enabled into the emissive flag."""
+
+    def setUp(self) -> None:
+        import tempfile
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _write_and_read(self, *, glow_enabled: bool, material_type: str = "general") -> dict:
+        import json
+        from pathlib import Path
+
+        rmaos_path = Path(self._tmpdir) / "test_rmaos.dds"
+        write_rmaos_json_sidecar(rmaos_path, parallax_enabled=False, material_type=material_type, glow_enabled=glow_enabled)
+        json_path = Path(self._tmpdir) / "PBRNifPatcher" / f"{rmaos_path.stem}.json"
+        with open(json_path) as f:
+            raw = json.load(f)
+        return raw[0] if isinstance(raw, list) else raw
+
+    def test_glow_disabled_sets_emissive_false(self) -> None:
+        data = self._write_and_read(glow_enabled=False)
+        self.assertFalse(bool(data["emissive"]))
+
+    def test_glow_enabled_sets_emissive_true(self) -> None:
+        data = self._write_and_read(glow_enabled=True)
+        self.assertTrue(bool(data["emissive"]))
+
+    def test_glow_enabled_emissive_scale_inherits_material_override(self) -> None:
+        glass_data = self._write_and_read(glow_enabled=True, material_type="glass")
+        general_data = self._write_and_read(glow_enabled=True, material_type="general")
+        self.assertGreater(glass_data["emissive_scale"], general_data["emissive_scale"])
+
+    def test_glow_disabled_emissive_scale_still_present(self) -> None:
+        data = self._write_and_read(glow_enabled=False)
+        self.assertIn("emissive_scale", data)
+
+
+class ClassifyHairMaterialTypeTests(unittest.TestCase):
+    """Tests that hair-related texture paths classify as 'hair'."""
+
+    def test_hair_token_classifies_as_hair(self) -> None:
+        result = classify_material_type(Path("textures/actors/character/hair/hairfemalenord.dds"))
+        self.assertEqual(result, "hair")
+
+    def test_eyebrow_classifies_as_hair(self) -> None:
+        result = classify_material_type(Path("textures/actors/character/eyebrow.dds"))
+        self.assertEqual(result, "hair")
+
+    def test_beard_classifies_as_hair(self) -> None:
+        result = classify_material_type(Path("textures/actors/character/beard.dds"))
+        self.assertEqual(result, "hair")
+
+    def test_lash_classifies_as_hair(self) -> None:
+        result = classify_material_type(Path("textures/actors/character/eyelash.dds"))
+        self.assertEqual(result, "hair")
+
+
+
+
+
+class TerrainParallaxStrengthWarningTests(unittest.TestCase):
+    """Tests for the terrain-parallax high-strength warning added to get_generation_warnings."""
+
+    def _base_kwargs(self) -> dict:
+        return {
+            "include_glow": False,
+            "include_environment_mask": False,
+            "env_mask_mode": "standard",
+            "env_mask_strength": 1.2,
+            "include_parallax": True,
+            "include_complex": False,
+        }
+
+    def test_terrain_parallax_below_threshold_no_high_strength_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "terrain",
+            parallax_strength=0.9,
+            **self._base_kwargs(),
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("parallax_high_strength_terrain", warning_ids)
+
+    def test_terrain_parallax_at_threshold_no_high_strength_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "terrain",
+            parallax_strength=1.0,
+            **self._base_kwargs(),
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("parallax_high_strength_terrain", warning_ids)
+
+    def test_terrain_parallax_above_threshold_raises_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "terrain",
+            parallax_strength=1.5,
+            **self._base_kwargs(),
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertIn("parallax_high_strength_terrain", warning_ids)
+
+    def test_terrain_parallax_high_strength_warning_includes_value(self) -> None:
+        warnings = get_generation_warnings(
+            "terrain",
+            parallax_strength=2.0,
+            **self._base_kwargs(),
+        )
+        messages = {w[0]: w[1] for w in warnings}
+        self.assertIn("parallax_high_strength_terrain", messages)
+        self.assertIn("2.00", messages["parallax_high_strength_terrain"])
+
+    def test_terrain_parallax_still_emits_shimmer_warning_alongside_high_strength(self) -> None:
+        warnings = get_generation_warnings(
+            "terrain",
+            parallax_strength=1.5,
+            **self._base_kwargs(),
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertIn("parallax_landscape_shimmer", warning_ids)
+        self.assertIn("parallax_high_strength_terrain", warning_ids)
+
+    def test_terrain_parallax_disabled_no_high_strength_warning(self) -> None:
+        kwargs = dict(self._base_kwargs())
+        kwargs["include_parallax"] = False
+        warnings = get_generation_warnings(
+            "terrain",
+            parallax_strength=2.5,
+            **kwargs,
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("parallax_high_strength_terrain", warning_ids)
+
+    def test_non_terrain_material_no_terrain_high_strength_warning(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            parallax_strength=3.0,
+            **self._base_kwargs(),
+        )
+        warning_ids = [w[0] for w in warnings]
+        self.assertNotIn("parallax_high_strength_terrain", warning_ids)
+
+
+# ---------------------------------------------------------------------------
+# Glow map mipmap pre-filter
+# ---------------------------------------------------------------------------
+
+
+class GlowMipmapPrefilterTests(unittest.TestCase):
+    """Tests for the glow-map branch added to _prefilter_for_mipmap_stability."""
+
+    def _solid_l(self, value: int = 200, size: tuple[int, int] = (64, 64)) -> Image.Image:
+        return Image.new("L", size, value)
+
+    def _solid_rgb(self, value: tuple[int, int, int] = (200, 150, 50), size: tuple[int, int] = (64, 64)) -> Image.Image:
+        return Image.new("RGB", size, value)
+
+    def test_glow_l_mode_preserved_size_and_mode(self) -> None:
+        src = self._solid_l()
+        result = _prefilter_for_mipmap_stability(src, "glow")
+        self.assertEqual(result.size, src.size)
+        self.assertEqual(result.mode, "L")
+
+    def test_glow_rgb_mode_preserved(self) -> None:
+        src = self._solid_rgb()
+        result = _prefilter_for_mipmap_stability(src, "glow")
+        self.assertEqual(result.size, src.size)
+        self.assertEqual(result.mode, "RGB")
+
+    def test_glow_rgba_mode_preserved(self) -> None:
+        src = Image.new("RGBA", (64, 64), (200, 150, 50, 255))
+        result = _prefilter_for_mipmap_stability(src, "glow")
+        self.assertEqual(result.size, src.size)
+        self.assertEqual(result.mode, "RGBA")
+
+    def test_glow_flat_image_value_unchanged(self) -> None:
+        src = self._solid_l(200)
+        result = _prefilter_for_mipmap_stability(src, "glow")
+        pixels = list(result.getdata())
+        self.assertTrue(all(abs(p - 200) <= 2 for p in pixels))
+
+    def test_glow_noisy_image_is_smoothed(self) -> None:
+        import random
+        rng = random.Random(42)
+        noisy = Image.new("L", (64, 64))
+        pixels = [rng.randint(0, 255) for _ in range(64 * 64)]
+        noisy.putdata(pixels)
+        result = _prefilter_for_mipmap_stability(noisy, "glow")
+        orig_std = float(np.std(np.array(noisy, dtype=np.float32)))
+        result_std = float(np.std(np.array(result, dtype=np.float32)))
+        self.assertLess(result_std, orig_std)
+
+    def test_unknown_mode_glow_passthrough(self) -> None:
+        src = Image.new("P", (64, 64))
+        result = _prefilter_for_mipmap_stability(src, "glow")
+        self.assertIs(result, src)
+
+    def test_non_glow_kind_passthrough(self) -> None:
+        src = self._solid_l()
+        result = _prefilter_for_mipmap_stability(src, "diffuse")
+        self.assertIs(result, src)
+
+    def test_glow_kind_is_applied_not_passthrough(self) -> None:
+        import random
+        rng = random.Random(7)
+        noisy = Image.new("L", (64, 64))
+        noisy.putdata([rng.randint(0, 255) for _ in range(64 * 64)])
+        result = _prefilter_for_mipmap_stability(noisy, "glow")
+        self.assertIsNot(result, noisy)
+
+
+class AoRoughnessPathTests(unittest.TestCase):
+    def test_build_ao_output_path_uses_ao_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.dds"
+            input_path.write_bytes(b"stub")
+
+            ao_path = build_ao_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+            )
+
+            self.assertEqual(ao_path.name, "brick_ao.dds")
+
+    def test_build_ao_output_path_places_file_in_output_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "subdir" / "stone.dds"
+            output_dir = temp_path / "out"
+
+            ao_path = build_ao_output_path(input_path=input_path, output_dir=output_dir)
+
+            self.assertEqual(ao_path.parent, output_dir)
+
+    def test_build_roughness_output_path_uses_rough_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.dds"
+            input_path.write_bytes(b"stub")
+
+            rough_path = build_roughness_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+            )
+
+            self.assertEqual(rough_path.name, "brick_rough.dds")
+
+    def test_build_roughness_output_path_places_file_in_output_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "subdir" / "stone.dds"
+            output_dir = temp_path / "out"
+
+            rough_path = build_roughness_output_path(input_path=input_path, output_dir=output_dir)
+
+            self.assertEqual(rough_path.parent, output_dir)
+
+
+class AoRoughnessRunWithOptionsTests(unittest.TestCase):
+    def test_run_with_options_generates_ao_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ) as save_mock:
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                    include_ao=True,
+                )
+
+            self.assertEqual(save_mock.call_count, 1)
+            self.assertEqual(save_mock.call_args.args[1].name, "brick_ao.dds")
+
+    def test_run_with_options_generates_roughness_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            output_dir = temp_path / "out"
+            _sample_image().save(input_path)
+
+            with mock.patch(
+                "generate_textures._save_with_dds_fallback",
+                side_effect=lambda _image, path, **_kwargs: path,
+            ) as save_mock:
+                run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                    include_roughness=True,
+                )
+
+            self.assertEqual(save_mock.call_count, 1)
+            self.assertEqual(save_mock.call_args.args[1].name, "brick_rough.dds")
+
+
+class NormalizeGuiStateAoRoughnessTests(unittest.TestCase):
+    def test_normalize_gui_state_includes_ao_roughness_defaults(self) -> None:
+        normalized = _normalize_gui_state({})
+        self.assertIn("include_ao", normalized)
+        self.assertIn("include_roughness", normalized)
+        self.assertIn("auto_ao", normalized)
+        self.assertIn("auto_roughness", normalized)
+        self.assertIn("ao_strength", normalized)
+        self.assertIn("roughness_strength", normalized)
+
+    def test_normalize_gui_state_coerces_ao_roughness_booleans(self) -> None:
+        normalized = _normalize_gui_state({"include_ao": 1, "include_roughness": 0, "auto_ao": 1, "auto_roughness": 0})
+        self.assertIs(normalized["include_ao"], True)
+        self.assertIs(normalized["include_roughness"], False)
+        self.assertIs(normalized["auto_ao"], True)
+        self.assertIs(normalized["auto_roughness"], False)
+
+    def test_normalize_gui_state_coerces_ao_roughness_strengths(self) -> None:
+        normalized = _normalize_gui_state({"ao_strength": "2.5", "roughness_strength": "0.8"})
+        self.assertAlmostEqual(float(normalized["ao_strength"]), 2.5)
+        self.assertAlmostEqual(float(normalized["roughness_strength"]), 0.8)
+
+
+class RecommendGenerationSettingsAoRoughnessTests(unittest.TestCase):
+    def test_recommend_generation_settings_includes_ao_roughness_keys(self) -> None:
+        image = _sample_image()
+        result = recommend_generation_settings(image)
+        self.assertIn("ao_strength", result)
+        self.assertIn("roughness_strength", result)
+
+    def test_recommend_generation_settings_ao_roughness_in_valid_range(self) -> None:
+        image = _sample_image()
+        result = recommend_generation_settings(image)
+        ao_strength = float(result["ao_strength"])
+        roughness_strength = float(result["roughness_strength"])
+        self.assertGreater(ao_strength, 0.0)
+        self.assertLessEqual(ao_strength, 8.0)
+        self.assertGreater(roughness_strength, 0.0)
+        self.assertLessEqual(roughness_strength, 8.0)
+
+
+# ---------------------------------------------------------------------------
+# Per-material parallax override (parallax vs displacement_scale distinction)
+# ---------------------------------------------------------------------------
+
+
+class RmaosJsonParallaxVsDisplacementTests(unittest.TestCase):
+    """Tests that parallax (POM flag) and displacement_scale are independent controls.
+
+    CS TruePBR distinguishes:
+    - parallax (bool): whether the POM shader feature is enabled on the mesh.
+    - displacement_scale (float): height/depth multiplier; has no effect unless parallax=True.
+
+    Materials whose geometry makes POM harmful or irrelevant force parallax=False regardless
+    of the parallax_enabled argument passed to write_rmaos_json_sidecar.
+    """
+
+    def setUp(self) -> None:
+        import tempfile
+        self._tmpdir = tempfile.mkdtemp()
+
+    def tearDown(self) -> None:
+        import shutil
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def _write_and_read(self, material_type: str, parallax_enabled: bool = True) -> dict:
+        import json
+        from pathlib import Path
+
+        rmaos_path = Path(self._tmpdir) / f"test_{material_type}_rmaos.dds"
+        write_rmaos_json_sidecar(rmaos_path, parallax_enabled=parallax_enabled, material_type=material_type)
+        json_path = Path(self._tmpdir) / "PBRNifPatcher" / f"{rmaos_path.stem}.json"
+        with open(json_path) as f:
+            raw = json.load(f)
+        return raw[0] if isinstance(raw, list) else raw
+
+    # --- materials that always disable parallax regardless of parallax_enabled ---
+
+    def test_skin_forces_parallax_false_even_when_requested(self) -> None:
+        data = self._write_and_read("skin", parallax_enabled=True)
+        self.assertFalse(bool(data["parallax"]))
+
+    def test_plants_forces_parallax_false_even_when_requested(self) -> None:
+        data = self._write_and_read("plants", parallax_enabled=True)
+        self.assertFalse(bool(data["parallax"]))
+
+    def test_hair_forces_parallax_false_even_when_requested(self) -> None:
+        data = self._write_and_read("hair", parallax_enabled=True)
+        self.assertFalse(bool(data["parallax"]))
+
+    def test_terrain_forces_parallax_false_even_when_requested(self) -> None:
+        """Terrain CS TruePBR parallax is driven by PBRTextureSets JSON, not PBRNifPatcher."""
+        data = self._write_and_read("terrain", parallax_enabled=True)
+        self.assertFalse(bool(data["parallax"]))
+
+    # --- displacement_scale is present and meaningful even when parallax is False ---
+
+    def test_terrain_has_displacement_scale_when_parallax_disabled(self) -> None:
+        data = self._write_and_read("terrain", parallax_enabled=True)
+        self.assertFalse(bool(data["parallax"]))
+        self.assertGreater(data["displacement_scale"], 0.0)
+
+    def test_skin_has_zero_displacement_and_parallax_false(self) -> None:
+        data = self._write_and_read("skin", parallax_enabled=True)
+        self.assertFalse(bool(data["parallax"]))
+        self.assertAlmostEqual(data["displacement_scale"], 0.0, places=3)
+
+    def test_hair_has_zero_displacement_and_parallax_false(self) -> None:
+        data = self._write_and_read("hair", parallax_enabled=True)
+        self.assertFalse(bool(data["parallax"]))
+        self.assertAlmostEqual(data["displacement_scale"], 0.0, places=3)
+
+    # --- materials without a parallax override honour the caller's flag ---
+
+    def test_stone_honours_parallax_enabled_true(self) -> None:
+        data = self._write_and_read("stone", parallax_enabled=True)
+        self.assertTrue(bool(data["parallax"]))
+
+    def test_stone_honours_parallax_enabled_false(self) -> None:
+        data = self._write_and_read("stone", parallax_enabled=False)
+        self.assertFalse(bool(data["parallax"]))
+
+    def test_metal_honours_parallax_enabled_true(self) -> None:
+        data = self._write_and_read("metal", parallax_enabled=True)
+        self.assertTrue(bool(data["parallax"]))
+
+    def test_general_honours_parallax_enabled_true(self) -> None:
+        data = self._write_and_read("general", parallax_enabled=True)
+        self.assertTrue(bool(data["parallax"]))
+
+    def test_general_honours_parallax_enabled_false(self) -> None:
+        data = self._write_and_read("general", parallax_enabled=False)
+        self.assertFalse(bool(data["parallax"]))
+
+    # --- parallax and displacement_scale are both always present in the JSON ---
+
+    def test_both_keys_present_for_all_materials(self) -> None:
+        for material_type in (
+            "skin", "plants", "metal", "glass", "snow", "terrain", "cloth",
+            "leather", "stone", "wood", "fur", "paper", "dirt", "sand",
+            "architecture", "hair", "general",
+        ):
+            with self.subTest(material_type=material_type):
+                data = self._write_and_read(material_type)
+                self.assertIn("parallax", data)
+                self.assertIn("displacement_scale", data)
+                self.assertIsInstance(data["parallax"], bool)
+                self.assertIsInstance(data["displacement_scale"], float)
+
+    # --- texture key is present and non-empty (identifier, not a type label) ---
+
+    def test_texture_key_is_present_and_non_empty(self) -> None:
+        data = self._write_and_read("stone")
+        self.assertIn("texture", data)
+        self.assertIsInstance(data["texture"], str)
+        self.assertTrue(len(data["texture"]) > 0)
 
 
 if __name__ == "__main__":

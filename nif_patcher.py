@@ -1,4 +1,4 @@
-"""Skyrim SE NIF file patcher (v0.7).
+"""Skyrim SE NIF file patcher (v0.8).
 
 Reads Skyrim SE NIF files (format 20.2.0.7, user_version=12,
 user_version_2=83/100) and patches ``BSLightingShaderProperty`` shader flags and
@@ -54,10 +54,12 @@ _NIF_VERSION_20_2_0_7: int = 0x14020007
 _SKYRIM_USER_VERSION: int = 12
 _SKYRIM_SE_USER_VERSION_2: int = 83
 _SKYRIM_SE_USER_VERSION_2_ALT: int = 100
+_SKYRIM_SE_USER_VERSION_2_CK: int = 130
 _SKYRIM_LE_USER_VERSION_2: int = 34
 _SUPPORTED_USER_VERSION_2: tuple[int, ...] = (
     _SKYRIM_SE_USER_VERSION_2,
     _SKYRIM_SE_USER_VERSION_2_ALT,
+    _SKYRIM_SE_USER_VERSION_2_CK,
     _SKYRIM_LE_USER_VERSION_2,
 )
 
@@ -156,10 +158,23 @@ _DIFFUSE_SLOT_DISALLOWED_SUFFIXES: tuple[str, ...] = (
     "_m.dds",
     "_mask.dds",
     "_envmask.dds",
+    "_ao.dds",
+    "_ambientocclusion.dds",
+    "_rough.dds",
+    "_roughness.dds",
+    "_metal.dds",
+    "_metallic.dds",
+    "_metalness.dds",
     "_em.dds",
+    "_emis.dds",
     "_cm.dds",
     "_c.dds",
     "_rmaos.dds",
+    "_ramos.dds",
+    "_orm.dds",
+    "_orms.dds",
+    "_mrao.dds",
+    "_mra.dds",
     "_e.dds",
     "_cube.dds",
     "_env.dds",
@@ -177,10 +192,24 @@ _CUBEMAP_SLOT_WRONG_SUFFIXES: tuple[str, ...] = (
     "_msn.dds",
     "_p.dds",
     "_g.dds",
+    "_em.dds",
+    "_emis.dds",
     "_m.dds",
+    "_ao.dds",
+    "_ambientocclusion.dds",
+    "_rough.dds",
+    "_roughness.dds",
+    "_metal.dds",
+    "_metallic.dds",
+    "_metalness.dds",
     "_cm.dds",
     "_c.dds",
     "_rmaos.dds",
+    "_ramos.dds",
+    "_orm.dds",
+    "_orms.dds",
+    "_mrao.dds",
+    "_mra.dds",
 )
 _NORMAL_SLOT_DISALLOWED_SUFFIXES: tuple[str, ...] = (
     "_p.dds",
@@ -189,8 +218,21 @@ _NORMAL_SLOT_DISALLOWED_SUFFIXES: tuple[str, ...] = (
     "_m.dds",
     "_mask.dds",
     "_envmask.dds",
+    "_ao.dds",
+    "_ambientocclusion.dds",
+    "_rough.dds",
+    "_roughness.dds",
+    "_metal.dds",
+    "_metallic.dds",
+    "_metalness.dds",
     "_em.dds",
+    "_emis.dds",
     "_rmaos.dds",
+    "_ramos.dds",
+    "_orm.dds",
+    "_orms.dds",
+    "_mrao.dds",
+    "_mra.dds",
     "_cm.dds",
     "_c.dds",
     "_e.dds",
@@ -198,6 +240,77 @@ _NORMAL_SLOT_DISALLOWED_SUFFIXES: tuple[str, ...] = (
     "_envmap.dds",
     "_cube.dds",
     "_cubemap.dds",
+)
+_ENV_MASK_SLOT_EXPECTED_SUFFIXES: tuple[str, ...] = (
+    "_m.dds",
+    "_mask.dds",
+    "_envmask.dds",
+    "_rmaos.dds",
+    "_ramos.dds",
+    "_orm.dds",
+    "_orms.dds",
+    "_mrao.dds",
+    "_mra.dds",
+    "_cm.dds",
+    "_c.dds",
+)
+_TRUEPBR_ENV_MASK_SUFFIXES: tuple[str, ...] = (
+    "_rmaos.dds",
+    "_ramos.dds",
+)
+_LEGACY_TRUEPBR_ENV_MASK_SUFFIXES: tuple[str, ...] = (
+    "_orm.dds",
+    "_orms.dds",
+    "_mrao.dds",
+    "_mra.dds",
+)
+_GENERIC_AUTHORING_PACKED_SUFFIXES: tuple[str, ...] = (
+    "_orm.dds",
+    "_orms.dds",
+    "_mrao.dds",
+    "_mra.dds",
+    "_rough.dds",
+    "_roughness.dds",
+    "_metal.dds",
+    "_metallic.dds",
+    "_metalness.dds",
+    "_ao.dds",
+    "_ambientocclusion.dds",
+)
+_CANONICAL_ENV_MASK_SUFFIXES: tuple[str, ...] = (
+    "_m.dds",
+    "_mask.dds",
+    "_envmask.dds",
+    "_rmaos.dds",
+    "_ramos.dds",
+    "_cm.dds",
+    "_c.dds",
+)
+_GENERIC_DIFFUSE_AUTHORING_SUFFIXES: tuple[str, ...] = (
+    "_d.dds",
+    "_diff.dds",
+    "_diffuse.dds",
+    "_albedo.dds",
+    "_basecolor.dds",
+    "_base_color.dds",
+)
+_GENERIC_GLOW_ALIAS_SUFFIXES: tuple[str, ...] = (
+    "_em.dds",
+    "_emis.dds",
+    "_emissive.dds",
+    "_emit.dds",
+    "_glow.dds",
+)
+_GENERIC_SOURCE_TEXTURE_EXTENSIONS: tuple[str, ...] = (
+    ".png",
+    ".tga",
+    ".tif",
+    ".tiff",
+    ".exr",
+    ".jpg",
+    ".jpeg",
+    ".bmp",
+    ".psd",
 )
 
 # BSLightingShaderPropertyShaderType values
@@ -243,10 +356,10 @@ _DEFAULT_PARALLAX_SCALE: float = 1.0
 # type-specific fields, measured from the start of the block and assuming
 # zero extra-data entries.  For each extra-data entry, add 4 bytes.
 #
-# Breakdown:
+# Breakdown (Skyrim/SE BSLightingShaderProperty per nifxml):
 #   NiObjectNET : name_ref(4) + num_extra(4) + controller_ref(4) = 12
+#   BSLighting  : shader_type(4)                                  =  4
 #   BSShaderProp: flags1(4) + flags2(4)                          =  8
-#   shader_type : (4)                                            =  4
 #   uv_offset   : (8)  uv_scale: (8)                            = 16
 #   texture_set : (4)                                            =  4
 #   emissive_col: (12) emissive_mul: (4)                        = 16
@@ -256,17 +369,33 @@ _DEFAULT_PARALLAX_SCALE: float = 1.0
 #
 #   Total common = 100  (no extra-data; add 4 × num_extra)
 _COMMON_FIELDS_SIZE: int = 100
+_REAL_COMMON_FIELDS_SIZE: int = 96
 
 # Offsets within the common section (from block_start, 0 extra-data)
-_OFFSET_FLAGS1: int = 12        # block_start + 12 + 4*num_extra
-_OFFSET_FLAGS2: int = 16
-_OFFSET_SHADER_TYPE: int = 20
+_OFFSET_NUM_EXTRA: int = 4
+_OFFSET_CONTROLLER: int = 8
+_OFFSET_SHADER_TYPE: int = 12
+_OFFSET_FLAGS1: int = 16        # block_start + 16 + 4*num_extra
+_OFFSET_FLAGS2: int = 20
 _OFFSET_TEXTURE_SET: int = 40   # after shader_type + uv_offset + uv_scale
 _OFFSET_GLOSSINESS: int = 72    # clamp_mode(4)+alpha(4)+refraction(4)+glossiness(4)
 _OFFSET_SPEC_COLOR: int = 76    # 3 × float32 = 12 bytes (R,G,B)
 _OFFSET_SPEC_STRENGTH: int = 88 # immediately after spec_color
 _OFFSET_LIGHT_EFF1: int = 92    # lighting effect 1 (soft lighting)
 _OFFSET_LIGHT_EFF2: int = 96    # lighting effect 2
+
+# Real Skyrim/SE BSLightingShaderProperty layout used by actual meshes:
+# there is no standalone on-disk shader_type field before flags1/flags2.
+# The block starts with the NiObjectNET prefix and then BSShaderProperty's
+# packed flags/UV data, so texture_set_ref sits 4 bytes earlier than in the
+# older simplified layout above.
+_REAL_OFFSET_FLAGS1: int = 12
+_REAL_OFFSET_FLAGS2: int = 16
+_REAL_OFFSET_TEXTURE_SET: int = 36
+_REAL_OFFSET_SPEC_COLOR: int = 72
+_REAL_OFFSET_SPEC_STRENGTH: int = 84
+_REAL_OFFSET_LIGHT_EFF1: int = 88
+_REAL_OFFSET_LIGHT_EFF2: int = 92
 
 # For SHADER_TYPE_ENVMAP (1) blocks, env_map_scale is the first type-specific
 # float immediately after the 100-byte common section.
@@ -316,6 +445,9 @@ class NifPatchOptions:
     enable_glow_map:
         Set ``SLSF2_Glow_Map`` in Shader_Flags_2.  Set this together with
         *glow_texture_path* to activate an emissive/glow map in-game.
+    enable_pbr:
+        Set ``SLSF2 Unused01`` / Community Shaders TruePBR flag on the
+        ``BSLightingShaderProperty`` so ``_rmaos`` + JSON workflows render.
     parallax_texture_path:
         Texture path for slot 3. Absolute ``Data\\Textures`` picks are normalized
         to Skyrim-relative form (e.g. ``textures\\arch\\stone_p.dds``).
@@ -326,8 +458,11 @@ class NifPatchOptions:
         Relative path for slot 2 (glow/emissive map, ``_g.dds``).  Pair with
         *enable_glow_map* to activate the emissive effect on the mesh.
     diffuse_texture_path:
-        Relative path for slot 0 (diffuse/albedo, ``_d.dds`` or similar).
-        Useful for re-pointing a NIF's diffuse slot after a texture rename.
+        Relative path for slot 0 (diffuse/albedo).  In vanilla Skyrim SE the
+        diffuse texture has **no** suffix — it is just ``textures\\arch\\stone.dds``,
+        not ``stone_d.dds`` or ``stone_diffuse.dds``.  Blender exports ``_d`` /
+        ``_diffuse`` / ``_albedo`` by default but those names are not used by
+        Skyrim SE.  Useful for re-pointing a NIF's diffuse slot after a rename.
     env_mask_texture_path:
         Relative path for slot 5 (environment mask / ``_m.dds``).
     cubemap_texture_path:
@@ -344,6 +479,8 @@ class NifPatchOptions:
         Clear ``SLSF1_Environment_Mapping``.
     disable_glow_map:
         Clear ``SLSF2_Glow_Map`` in Shader_Flags_2.
+    disable_pbr:
+        Clear ``SLSF2 Unused01`` / Community Shaders TruePBR flag.
     clear_parallax_texture_path:
         Empty texture slot 3 (parallax map).
     clear_normal_texture_path:
@@ -364,6 +501,7 @@ class NifPatchOptions:
     force_shader_type_3: bool = False
     enable_env_mapping: bool = False
     enable_glow_map: bool = False
+    enable_pbr: bool = False
     parallax_texture_path: str | None = None
     normal_texture_path: str | None = None
     glow_texture_path: str | None = None
@@ -376,6 +514,7 @@ class NifPatchOptions:
     disable_pom: bool = False
     disable_env_mapping: bool = False
     disable_glow_map: bool = False
+    disable_pbr: bool = False
     clear_parallax_texture_path: bool = False
     clear_normal_texture_path: bool = False
     clear_glow_texture_path: bool = False
@@ -457,6 +596,16 @@ class NifShaderInfo:
     flags2: int
     parallax_scale: float | None   # None if block is not shader-type 3
     texture_paths: dict[int, str]  # slot → path
+    env_map_scale: float | None = None
+
+    # Shape-context fields — populated by scan_nif_diagnostics when a parent
+    # BSTriShape-family block can be matched to this shader property.
+    parent_block_type: str = ""       # e.g. "BSTriShape", "BSLODTriShape"
+    is_lod_shape: bool = False        # True when parent is a LOD geometry type
+    is_skinned: bool = False          # True when parent has a skin instance
+    has_alpha_property: bool = False  # True when parent has NiAlphaProperty
+
+    # ------------------------------------------------------------------ flags
 
     @property
     def has_parallax_flag(self) -> bool:
@@ -473,6 +622,78 @@ class NifShaderInfo:
     @property
     def has_glow_map_flag(self) -> bool:
         return bool(self.flags2 & SLSF2_GLOW_MAP)
+
+    @property
+    def has_model_space_normals_flag(self) -> bool:
+        """True when ``SLSF1_Model_Space_Normals`` is set (required for ENB _msn workflow)."""
+        return bool(self.flags1 & SLSF1_MODEL_SPACE_NORMALS)
+
+    @property
+    def has_landscape_flag(self) -> bool:
+        """True when ``SLSF1_Landscape`` is set.
+
+        Landscape shaders use a separate parallax mechanism; standard parallax
+        flags set on a landscape shader have no visible effect in-game.
+        """
+        return bool(self.flags1 & SLSF1_LANDSCAPE)
+
+    @property
+    def has_skinned_flag(self) -> bool:
+        """True when ``SLSF1_Skinned`` is set in the shader block itself."""
+        return bool(self.flags1 & SLSF1_SKINNED)
+
+    @property
+    def has_decal_flag(self) -> bool:
+        """True when ``SLSF1_Decal`` or ``SLSF1_Dynamic_Decal`` is set.
+
+        Parallax combined with a decal flag produces visible rendering glitches
+        in Skyrim SE.
+        """
+        return bool(self.flags1 & (SLSF1_DECAL | SLSF1_DYNAMIC_DECAL))
+
+    @property
+    def has_soft_lighting_flag(self) -> bool:
+        return bool(self.flags2 & SLSF2_SOFT_LIGHTING)
+
+    @property
+    def has_rim_lighting_flag(self) -> bool:
+        return bool(self.flags2 & SLSF2_RIM_LIGHTING)
+
+    @property
+    def has_back_lighting_flag(self) -> bool:
+        return bool(self.flags2 & SLSF2_BACK_LIGHTING)
+
+    @property
+    def has_anisotropic_flag(self) -> bool:
+        """True when ``SLSF2_Anisotropic_Lighting`` is set.
+
+        Anisotropic-lit shapes produce incorrect results when parallax is
+        enabled.
+        """
+        return bool(self.flags2 & SLSF2_ANISOTROPIC_LIGHTING)
+
+    @property
+    def has_vertex_colors_flag(self) -> bool:
+        """True when ``SLSF2_Vertex_Colors`` is set.
+
+        Skyrim SE requires this flag to be present on parallax-enabled meshes
+        for correct rendering.
+        """
+        return bool(self.flags2 & SLSF2_VERTEX_COLORS)
+
+    @property
+    def has_multi_layer_parallax_flag(self) -> bool:
+        """True when ``SLSF2_Multi_Layer_Parallax`` is set.
+
+        Multi-layer parallax (shader type 11) uses a completely different
+        rendering path and is mutually exclusive with standard parallax.
+        """
+        return bool(self.flags2 & SLSF2_MULTI_LAYER_PARALLAX)
+
+    @property
+    def has_pbr_flag(self) -> bool:
+        """True when ``SLSF2_Unused01`` is set — the Community Shaders TruePBR flag."""
+        return bool(self.flags2 & SLSF2_UNUSED01)
 
     @property
     def shader_type_name(self) -> str:
@@ -504,8 +725,26 @@ class NifValidationResult:
     shader_count: int = 0
     ready_count: int = 0          # shaders that already have parallax enabled
     needs_patch_count: int = 0    # shaders present but missing flags/texture
+    skip_count: int = 0           # shaders skipped due to hard incompatibilities
+    has_havok: bool = False       # True if a BSBehaviorGraphExtraData block exists
     issues: list[str] = field(default_factory=list)
     suggestions: list[str] = field(default_factory=list)
+    skip_reasons: list[str] = field(default_factory=list)
+    """Per-block reasons why parallax patching was or would be skipped.
+
+    Each entry names the specific incompatibility, for example:
+    ``"Block 2: skinned mesh (NiSkinInstance) — parallax causes CTD on animated geometry"``.
+    """
+    renderer_notes: dict[str, list[str]] = field(default_factory=dict)
+    """Per-renderer compatibility notes keyed by renderer name.
+
+    Keys are ``'vanilla'``, ``'enb'``, ``'community_shaders'``, and
+    ``'truepbr'``.  Each value is a list of human-readable status strings for
+    all shader blocks combined, describing what is ready and what needs to
+    change for that renderer.
+    """
+    renderer_verdicts: dict[str, str] = field(default_factory=dict)
+    """High-level in-game verdicts keyed by renderer name."""
 
 
 # ---------------------------------------------------------------------------
@@ -760,11 +999,29 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
 
     num_blocks = buf.read_u32()
 
+    # Bethesda stream header (BSStreamHeader):
+    #   bs_version (u32)
+    #   author (ExportString/u8 sized string)
+    #   unknown_int (u32)              if bs_version > 130
+    #   process_script (ExportString)  if bs_version < 131
+    #   export_script (ExportString)
+    #   max_filepath (ExportString)    if bs_version >= 103
+    #
+    # Older revisions of this parser assumed a fixed 3-string layout. That
+    # misaligned blocks_start for valid Skyrim meshes using bs_version >= 103
+    # (notably CK-style 130 headers), causing real blocks to be misread and
+    # skipped during patching.
     user_version_2 = buf.read_u32()
     if user_version_2 not in _SUPPORTED_USER_VERSION_2:
         return None
-    for _ in range(3):
-        buf.read_sstring_u8()  # export strings
+    buf.read_sstring_u8()  # author
+    if user_version_2 > 130:
+        buf.read_u32()  # unknown int
+    if user_version_2 < 131:
+        buf.read_sstring_u8()  # process script
+    buf.read_sstring_u8()  # export script
+    if user_version_2 >= 103:
+        buf.read_sstring_u8()  # max filepath
 
     num_block_types = buf.read_u16()
     block_types = [buf.read_sstring_u32() for _ in range(num_block_types)]
@@ -778,11 +1035,9 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
     strings = [buf.read_sstring_u32() for _ in range(num_strings)]
 
     # Per the NIF 20.2.0.7 format specification, a num_groups u32 field
-    # follows the string table when user_version_2 < 130.  Skyrim SE uses
-    # user_version_2 = 83 or 100 (both < 130), so this field is always
-    # present in real game meshes.  It is always 0 for Skyrim SE NIFs, but
-    # must be consumed here so that blocks_start is positioned correctly.
-    # Omitting this read shifts every block offset 4 bytes early, which
+    # follows the string table. It is usually 0 for Skyrim meshes, but must
+    # be consumed so that blocks_start is positioned correctly. Omitting this
+    # read shifts every block offset 4 bytes early, which
     # causes _upgrade_block_to_type3 to insert type-3 fields at the wrong
     # position and corrupts the block — producing exactly the kind of
     # EXCEPTION_ACCESS_VIOLATION crash seen in game.
@@ -817,7 +1072,7 @@ class _ShaderPropBlock:
 
     flags1_offset: int
     flags2_offset: int
-    shader_type_offset: int
+    shader_type_offset: int | None
     texture_set_ref_offset: int
 
     flags1: int
@@ -862,10 +1117,10 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
                        block_size: int, num_blocks: int) -> _ShaderPropBlock | None:
     """Parse a BSLightingShaderProperty block.
 
-    Layout for NIF 20.2.0.7 / user_version=12 (zero extra-data):
-      NiObjectNET  12 B   name_ref + num_extra + controller_ref
-      flags1/2      8 B
+    Layout for Skyrim/SE BSLightingShaderProperty (NIF 20.2.0.7 / user_version=12):
+      NiObjectNET  12 B   name_ref + num_extra + [extra_data_refs...] + controller_ref
       shader_type   4 B
+      flags1/2      8 B
       uv_offset/scale 16 B
       texture_set   4 B   (Ref — block index, i32)
       emissive_col 12 B + emissive_mul 4 B
@@ -876,26 +1131,24 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
       [type-3 only] parallax_max_passes 4 B + parallax_scale 4 B
     """
     block_end = block_start + block_size
-    if block_size < 16 or block_end > len(buf._b):
+    if block_size < _REAL_COMMON_FIELDS_SIZE or block_end > len(buf._b):
         return None
-    if block_start + 12 > block_end:
+    if block_start + _OFFSET_CONTROLLER + 4 > block_end:
         return None
 
-    buf.seek(block_start)
-    _name_ref = buf.read_u32()
-    num_extra = buf.read_u32()
-    max_extra_refs = max((block_size - 12) // 4, 0)
+    num_extra = buf.read_u32_at(block_start + _OFFSET_NUM_EXTRA)
+    max_extra_refs = max((block_size - (_REAL_OFFSET_FLAGS1 + 4)) // 4, 0)
     if num_extra > max_extra_refs:
         return None
-    if block_start + 12 + num_extra * 4 > block_end:
+    controller_offset = block_start + _OFFSET_CONTROLLER + num_extra * 4
+    if controller_offset + 4 > block_end:
         return None
-    for _ in range(num_extra):
-        buf.read_u32()
-    if buf.pos + 4 > block_end:
+    controller_ref = struct.unpack_from("<i", buf._b, controller_offset)[0]
+    if controller_ref != -1 and not (0 <= controller_ref < num_blocks):
         return None
-    _controller = buf.read_i32()
 
     extra_shift = num_extra * 4
+    raw_shader_type = buf.read_u32_at(block_start + _OFFSET_SHADER_TYPE + extra_shift)
 
     def _decode_shader_type(raw_value: int) -> int:
         if raw_value in _KNOWN_SHADER_TYPES:
@@ -908,99 +1161,172 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
             return low16
         return raw_value
 
-    # Always use layout_shift=0 for Skyrim SE NIFs (user_version_2=83/100).
-    # A speculative layout_shift=4 heuristic was previously attempted but
-    # its scoring was unreliable: on standard NIFs it could mis-select the
-    # shifted layout, causing _upgrade_block_to_type3 to insert type-3 float
-    # fields at the wrong offset and corrupt the adjacent block — which
-    # manifested as an EXCEPTION_ACCESS_VIOLATION in-game when Skyrim read
-    # the garbled BSLightingShaderMaterial.
-    layout_shift = 0
-    flags1_offset = block_start + _OFFSET_FLAGS1 + extra_shift + layout_shift
-    flags2_offset = block_start + _OFFSET_FLAGS2 + extra_shift + layout_shift
-    shader_type_offset = block_start + _OFFSET_SHADER_TYPE + extra_shift + layout_shift
-    texture_set_ref_offset = block_start + _OFFSET_TEXTURE_SET + extra_shift + layout_shift
-    if (
-        flags1_offset + 4 > block_end
-        or flags2_offset + 4 > block_end
-        or shader_type_offset + 4 > block_end
-        or texture_set_ref_offset + 4 > block_end
-    ):
+    def _infer_real_shader_type(flags1: int, payload_size: int) -> int | None:
+        if payload_size < 0:
+            return None
+        if payload_size == 0:
+            return SHADER_TYPE_DEFAULT
+        if payload_size == 4:
+            return SHADER_TYPE_ENVMAP
+        if payload_size == 8:
+            return SHADER_TYPE_HEIGHTMAP
+        if payload_size == 24:
+            return SHADER_TYPE_MULTILAYER
         return None
-    flags1 = buf.read_u32_at(flags1_offset)
-    flags2 = buf.read_u32_at(flags2_offset)
-    raw_shader_type = buf.read_u32_at(shader_type_offset)
-    shader_type = _decode_shader_type(raw_shader_type)
-    texture_set_ref = struct.unpack_from("<i", buf._b, texture_set_ref_offset)[0]
 
-    # Type-specific parallax fields (only when shader_type == 3)
-    common_end = block_start + _COMMON_FIELDS_SIZE + extra_shift + layout_shift
-    pmx_offset: int | None = None
-    psc_offset: int | None = None
-    pmx_val: float | None = None
-    psc_val: float | None = None
+    def _build_candidate(
+        *,
+        layout_name: str,
+        flags1_base: int,
+        flags2_base: int,
+        texture_set_base: int,
+        spec_color_base: int,
+        spec_strength_base: int,
+        light_eff1_base: int,
+        common_size: int,
+        shader_type_offset: int | None,
+        shader_type_value: int | None,
+    ) -> tuple[int, _ShaderPropBlock] | None:
+        flags1_offset = block_start + flags1_base + extra_shift
+        flags2_offset = block_start + flags2_base + extra_shift
+        texture_set_ref_offset = block_start + texture_set_base + extra_shift
+        if (
+            flags1_offset + 4 > block_end
+            or flags2_offset + 4 > block_end
+            or texture_set_ref_offset + 4 > block_end
+        ):
+            return None
+        flags1 = buf.read_u32_at(flags1_offset)
+        flags2 = buf.read_u32_at(flags2_offset)
+        texture_set_ref = struct.unpack_from("<i", buf._b, texture_set_ref_offset)[0]
+        if texture_set_ref != -1 and not (0 <= texture_set_ref < num_blocks):
+            return None
 
-    if shader_type == SHADER_TYPE_HEIGHTMAP and block_size >= _COMMON_FIELDS_SIZE + extra_shift + 8:
-        pmx_offset = common_end
-        psc_offset = common_end + 4
-        buf.seek(pmx_offset)
-        pmx_val = buf.read_float()
-        psc_val = buf.read_float()
+        shader_type = shader_type_value
+        if shader_type is None or shader_type not in _KNOWN_SHADER_TYPES:
+            return None
 
-    # Additional always-present fields (spec_color, spec_strength, light_eff1)
-    spec_color_off = block_start + _OFFSET_SPEC_COLOR + extra_shift + layout_shift
-    spec_strength_off = block_start + _OFFSET_SPEC_STRENGTH + extra_shift + layout_shift
-    light_eff1_off = block_start + _OFFSET_LIGHT_EFF1 + extra_shift + layout_shift
+        common_end = block_start + common_size + extra_shift
+        payload_size = block_size - (common_size + extra_shift)
+        pmx_offset: int | None = None
+        psc_offset: int | None = None
+        pmx_val: float | None = None
+        psc_val: float | None = None
+        if shader_type == SHADER_TYPE_HEIGHTMAP and payload_size >= 8:
+            pmx_offset = common_end
+            psc_offset = common_end + 4
+            pmx_val = struct.unpack_from("<f", buf._b, pmx_offset)[0]
+            psc_val = struct.unpack_from("<f", buf._b, psc_offset)[0]
 
-    spec_r, spec_g, spec_b = 1.0, 1.0, 1.0
-    spec_strength_val: float = 1.0
-    light_eff1_val: float = 0.3
+        spec_color_off = block_start + spec_color_base + extra_shift
+        spec_strength_off = block_start + spec_strength_base + extra_shift
+        light_eff1_off = block_start + light_eff1_base + extra_shift
+        spec_r, spec_g, spec_b = 1.0, 1.0, 1.0
+        spec_strength_val: float = 1.0
+        light_eff1_val: float = 0.3
+        if spec_color_off + 12 <= block_end:
+            spec_r = struct.unpack_from("<f", buf._b, spec_color_off)[0]
+            spec_g = struct.unpack_from("<f", buf._b, spec_color_off + 4)[0]
+            spec_b = struct.unpack_from("<f", buf._b, spec_color_off + 8)[0]
+        if spec_strength_off + 4 <= block_end:
+            spec_strength_val = struct.unpack_from("<f", buf._b, spec_strength_off)[0]
+        if light_eff1_off + 4 <= block_end:
+            light_eff1_val = struct.unpack_from("<f", buf._b, light_eff1_off)[0]
 
-    if spec_color_off + 12 <= block_end:
-        spec_r = struct.unpack_from("<f", buf._b, spec_color_off)[0]
-        spec_g = struct.unpack_from("<f", buf._b, spec_color_off + 4)[0]
-        spec_b = struct.unpack_from("<f", buf._b, spec_color_off + 8)[0]
-    if spec_strength_off + 4 <= block_end:
-        spec_strength_val = struct.unpack_from("<f", buf._b, spec_strength_off)[0]
-    if light_eff1_off + 4 <= block_end:
-        light_eff1_val = struct.unpack_from("<f", buf._b, light_eff1_off)[0]
+        envmap_scale_off: int | None = None
+        envmap_scale_val: float | None = None
+        if shader_type == SHADER_TYPE_ENVMAP:
+            esc_off = common_end + _ENVMAP_SCALE_OFFSET_FROM_COMMON
+            if esc_off + 4 <= block_end:
+                envmap_scale_off = esc_off
+                envmap_scale_val = struct.unpack_from("<f", buf._b, esc_off)[0]
 
-    # Env map scale: only for SHADER_TYPE_ENVMAP (1), first field after common
-    envmap_scale_off: int | None = None
-    envmap_scale_val: float | None = None
-    if shader_type == SHADER_TYPE_ENVMAP:
-        esc_off = common_end + _ENVMAP_SCALE_OFFSET_FROM_COMMON
-        if esc_off + 4 <= block_end:
-            envmap_scale_off = esc_off
-            envmap_scale_val = struct.unpack_from("<f", buf._b, esc_off)[0]
+        score = 0
+        if layout_name == "real":
+            score += 20
+            if raw_shader_type not in _KNOWN_SHADER_TYPES:
+                score += 8
+            if payload_size in (0, 4, 8, 24):
+                score += 4
+        else:
+            if raw_shader_type in _KNOWN_SHADER_TYPES:
+                score += 20
+            elif _decode_shader_type(raw_shader_type) in _KNOWN_SHADER_TYPES:
+                score += 8
+            if payload_size in (0, 4, 8):
+                score += 2
 
-    return _ShaderPropBlock(
-        block_index=block_index,
-        block_start=block_start,
-        num_extra=num_extra,
-        flags1_offset=flags1_offset,
-        flags2_offset=flags2_offset,
-        shader_type_offset=shader_type_offset,
-        texture_set_ref_offset=texture_set_ref_offset,
-        flags1=flags1,
-        flags2=flags2,
-        shader_type=shader_type,
-        texture_set_ref=texture_set_ref,
-        layout_shift=layout_shift,
-        common_end_offset=common_end,
-        parallax_max_passes_offset=pmx_offset,
-        parallax_scale_offset=psc_offset,
-        parallax_max_passes=pmx_val,
-        parallax_scale=psc_val,
-        spec_color_offset=spec_color_off,
-        spec_strength_offset=spec_strength_off,
-        light_eff1_offset=light_eff1_off,
-        spec_color=(spec_r, spec_g, spec_b),
-        spec_strength=spec_strength_val,
-        light_eff1=light_eff1_val,
-        env_map_scale_offset=envmap_scale_off,
-        env_map_scale=envmap_scale_val,
+        return score, _ShaderPropBlock(
+            block_index=block_index,
+            block_start=block_start,
+            num_extra=num_extra,
+            flags1_offset=flags1_offset,
+            flags2_offset=flags2_offset,
+            shader_type_offset=shader_type_offset,
+            texture_set_ref_offset=texture_set_ref_offset,
+            flags1=flags1,
+            flags2=flags2,
+            shader_type=shader_type,
+            texture_set_ref=texture_set_ref,
+            layout_shift=0,
+            common_end_offset=common_end,
+            parallax_max_passes_offset=pmx_offset,
+            parallax_scale_offset=psc_offset,
+            parallax_max_passes=pmx_val,
+            parallax_scale=psc_val,
+            spec_color_offset=spec_color_off,
+            spec_strength_offset=spec_strength_off,
+            light_eff1_offset=light_eff1_off,
+            spec_color=(spec_r, spec_g, spec_b),
+            spec_strength=spec_strength_val,
+            light_eff1=light_eff1_val,
+            env_map_scale_offset=envmap_scale_off,
+            env_map_scale=envmap_scale_val,
+        )
+
+    candidates: list[tuple[int, _ShaderPropBlock]] = []
+    real_payload_size = block_size - (_REAL_COMMON_FIELDS_SIZE + extra_shift)
+    real_shader_type = _infer_real_shader_type(
+        buf.read_u32_at(block_start + _REAL_OFFSET_FLAGS1 + extra_shift),
+        real_payload_size,
     )
+    real_candidate = _build_candidate(
+        layout_name="real",
+        flags1_base=_REAL_OFFSET_FLAGS1,
+        flags2_base=_REAL_OFFSET_FLAGS2,
+        texture_set_base=_REAL_OFFSET_TEXTURE_SET,
+        spec_color_base=_REAL_OFFSET_SPEC_COLOR,
+        spec_strength_base=_REAL_OFFSET_SPEC_STRENGTH,
+        light_eff1_base=_REAL_OFFSET_LIGHT_EFF1,
+        common_size=_REAL_COMMON_FIELDS_SIZE,
+        shader_type_offset=None,
+        shader_type_value=real_shader_type,
+    )
+    if real_candidate is not None:
+        candidates.append(real_candidate)
+
+    legacy_candidate = _build_candidate(
+        layout_name="legacy",
+        flags1_base=_OFFSET_FLAGS1,
+        flags2_base=_OFFSET_FLAGS2,
+        texture_set_base=_OFFSET_TEXTURE_SET,
+        spec_color_base=_OFFSET_SPEC_COLOR,
+        spec_strength_base=_OFFSET_SPEC_STRENGTH,
+        light_eff1_base=_OFFSET_LIGHT_EFF1,
+        common_size=_COMMON_FIELDS_SIZE,
+        shader_type_offset=block_start + _OFFSET_SHADER_TYPE + extra_shift,
+        shader_type_value=_decode_shader_type(raw_shader_type),
+    )
+    if legacy_candidate is not None:
+        candidates.append(legacy_candidate)
+
+    if not candidates:
+        raise ValueError(
+            "unsupported BSLightingShaderProperty layout "
+            f"(block_size={block_size}, raw_field=0x{raw_shader_type:08X})"
+        )
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
 
 
 def _parse_texture_set(buf: _Buf, block_index: int,
@@ -1118,6 +1444,14 @@ _SHAPE_BLOCK_TYPES: frozenset[str] = frozenset({
     "BSDynamicTriShape",
 })
 
+#: Subset of shape block types that are LOD geometry.  Parallax is visible at
+#: normal viewing distances on LOD shapes but is absent at the LOD/distant view
+#: transition — worth noting to the user but not a hard incompatibility.
+_LOD_SHAPE_BLOCK_TYPES: frozenset[str] = frozenset({
+    "BSLODTriShape",
+    "BSMeshLODTriShape",
+})
+
 
 @dataclass
 class _ShapeBlock:
@@ -1126,6 +1460,7 @@ class _ShapeBlock:
     shader_property_ref: int   # block index; -1 if none
     skin_instance_ref: int     # block index; -1 if none (indicates skinned mesh)
     alpha_property_ref: int    # block index; -1 if none
+    block_type: str = ""       # e.g. "BSTriShape", "BSLODTriShape"
 
 
 def _parse_shape_block(
@@ -1210,6 +1545,7 @@ def _build_shape_map(
             bsize = header.block_sizes[bi]
             shape = _parse_shape_block(data, bi, bstart, bsize, header.num_blocks)
             if shape is not None and shape.shader_property_ref >= 0:
+                shape.block_type = btype
                 shader_to_shape[shape.shader_property_ref] = shape
 
     return shader_to_shape, has_havok
@@ -1289,11 +1625,174 @@ def _normalise_path(p: str) -> str:
         while tail.lower().startswith("texture\\"):
             tail = tail[len("texture\\"):]
         return f"textures\\{tail}" if tail else "textures"
-    return collapsed
+    raise ValueError(
+        f"Invalid texture path '{p}'. Expected a Skyrim-relative path under 'textures\\'."
+    )
 
 
 def _normalise_slot_path(path: str) -> str:
     return path.strip().lower().replace("/", "\\")
+
+
+def _shader_type_mesh_hint(shader_type: int) -> str | None:
+    """Return a concise mesh-context hint for a shader type."""
+    if shader_type == SHADER_TYPE_FACE_TINT:
+        return "Face Tint (4) is for head/face tint materials; parallax workflows are generally incompatible."
+    if shader_type == SHADER_TYPE_SKIN_TINT:
+        return "Skin Tint (5) is for skin/body tint materials; parallax and complex material flags are usually unsafe."
+    if shader_type == SHADER_TYPE_HAIR_TINT:
+        return "Hair Tint (6) is a dedicated hair shader path; parallax/complex workflows are not typically used."
+    if shader_type == SHADER_TYPE_GLOW:
+        return "Glow (2) shader type is emissive-focused and is not a standard parallax mesh workflow."
+    if shader_type == SHADER_TYPE_PARALLAX_OCC:
+        return "Parallax Occlusion (7) is uncommon; most Skyrim setups use Heightmap (3) + flags instead."
+    if shader_type == SHADER_TYPE_MULTILAYER:
+        return "MultiLayer Parallax (11) is a specialized landscape/terrain-oriented path."
+    return None
+
+
+def _path_has_dds_extension(path: str) -> bool:
+    normalized = _normalise_slot_path(path)
+    return normalized.endswith(".dds")
+
+
+def _path_uses_known_authoring_extension(path: str) -> bool:
+    normalized = _normalise_slot_path(path)
+    return normalized.endswith(_GENERIC_SOURCE_TEXTURE_EXTENSIONS)
+
+
+def _summarize_blocker(blocker: str) -> str:
+    _, sep, remainder = blocker.partition(": ")
+    return remainder if sep else blocker
+
+
+def _append_limited_unique(items: list[str], message: str, *, limit: int = 3) -> None:
+    if message in items or len(items) >= limit:
+        return
+    items.append(message)
+
+
+def _renderer_blockers(info: NifShaderInfo) -> dict[str, list[str]]:
+    bname = f"Block {info.block_index}"
+    slot1 = _normalise_slot_path(info.texture_paths.get(TEXTURE_SLOT_NORMAL, ""))
+    slot3 = _normalise_slot_path(info.texture_paths.get(TEXTURE_SLOT_PARALLAX, ""))
+    slot5 = _normalise_slot_path(info.texture_paths.get(TEXTURE_SLOT_ENV_MASK, ""))
+    blockers: dict[str, list[str]] = {
+        "vanilla": [],
+        "enb": [],
+        "community_shaders": [],
+        "truepbr": [],
+    }
+
+    vanilla = blockers["vanilla"]
+    if info.shader_type not in (SHADER_TYPE_DEFAULT, SHADER_TYPE_HEIGHTMAP):
+        vanilla.append(f"{bname}: shader type is {info.shader_type_name}, not Default/Heightmap")
+    if not info.has_parallax_flag:
+        vanilla.append(f"{bname}: SLSF1_Parallax is not enabled")
+    if not slot3:
+        vanilla.append(f"{bname}: slot 3 is empty")
+    elif not slot3.endswith("_p.dds"):
+        vanilla.append(f"{bname}: slot 3 uses {slot3!r}, not a _p.dds height map")
+    if info.has_decal_flag:
+        vanilla.append(f"{bname}: decal flags conflict with parallax")
+    if info.has_landscape_flag:
+        vanilla.append(f"{bname}: landscape shaders do not use standard mesh parallax")
+    if info.is_skinned or info.has_skinned_flag:
+        vanilla.append(f"{bname}: skinned geometry is unsafe for parallax")
+    if info.has_alpha_property:
+        vanilla.append(f"{bname}: alpha property conflicts with parallax")
+
+    enb = blockers["enb"]
+    if info.shader_type != SHADER_TYPE_ENVMAP:
+        enb.append(f"{bname}: shader type is {info.shader_type_name}, not EnvMap")
+    if not info.has_env_mapping_flag:
+        enb.append(f"{bname}: SLSF1_Environment_Mapping is not enabled")
+    if not info.has_model_space_normals_flag:
+        enb.append(f"{bname}: SLSF1_Model_Space_Normals is not enabled")
+    if not slot1:
+        enb.append(f"{bname}: slot 1 is empty")
+    elif not slot1.endswith("_msn.dds"):
+        enb.append(f"{bname}: slot 1 uses {slot1!r}, not an ENB _msn normal")
+    if not slot5:
+        enb.append(f"{bname}: slot 5 is empty")
+    elif slot5.endswith(_GENERIC_AUTHORING_PACKED_SUFFIXES):
+        enb.append(f"{bname}: slot 5 uses generic packed naming {slot5!r} instead of ENB _m.dds")
+    elif not slot5.endswith(("_m.dds", "_mask.dds", "_envmask.dds")):
+        enb.append(f"{bname}: slot 5 uses {slot5!r}, not an ENB _m.dds env mask")
+
+    cs = blockers["community_shaders"]
+    if info.has_pbr_flag:
+        cs.append(f"{bname}: TruePBR flag is enabled, so this is not a standard CS parallax setup")
+    if info.shader_type not in (SHADER_TYPE_DEFAULT, SHADER_TYPE_HEIGHTMAP):
+        cs.append(f"{bname}: shader type is {info.shader_type_name}, not Default/Heightmap")
+    if not info.has_parallax_flag:
+        cs.append(f"{bname}: SLSF1_Parallax is not enabled")
+    if not slot3:
+        cs.append(f"{bname}: slot 3 is empty")
+    elif not slot3.endswith("_p.dds"):
+        cs.append(f"{bname}: slot 3 uses {slot3!r}, not a _p.dds height map")
+    if info.is_skinned or info.has_skinned_flag:
+        cs.append(f"{bname}: skinned geometry is unsafe for parallax")
+    if info.has_alpha_property:
+        cs.append(f"{bname}: alpha property conflicts with parallax")
+
+    truepbr = blockers["truepbr"]
+    if not info.has_pbr_flag:
+        truepbr.append(f"{bname}: Community Shaders TruePBR flag is not enabled")
+    if not slot1:
+        truepbr.append(f"{bname}: slot 1 is empty")
+    elif slot1.endswith("_msn.dds"):
+        truepbr.append(f"{bname}: slot 1 uses {slot1!r}; TruePBR expects tangent-space _n.dds")
+    elif not slot1.endswith("_n.dds"):
+        truepbr.append(f"{bname}: slot 1 uses {slot1!r}, not a _n.dds normal")
+    if not slot5:
+        truepbr.append(f"{bname}: slot 5 is empty")
+    elif slot5.endswith(_LEGACY_TRUEPBR_ENV_MASK_SUFFIXES):
+        truepbr.append(f"{bname}: slot 5 uses generic packed alias {slot5!r} instead of canonical _rmaos")
+    elif slot5.endswith(("_cm.dds", "_c.dds")):
+        truepbr.append(f"{bname}: slot 5 uses Community Shaders Extended Materials naming {slot5!r}")
+    elif slot5.endswith(("_m.dds", "_mask.dds", "_envmask.dds")):
+        truepbr.append(f"{bname}: slot 5 uses vanilla/ENB naming {slot5!r}")
+    elif not slot5.endswith(_TRUEPBR_ENV_MASK_SUFFIXES):
+        truepbr.append(f"{bname}: slot 5 uses {slot5!r}, not canonical _rmaos")
+
+    return blockers
+
+
+def _build_renderer_verdicts(
+    infos: list[NifShaderInfo],
+    *,
+    has_havok: bool,
+) -> dict[str, str]:
+    verdicts: dict[str, str] = {}
+    renderer_labels = {
+        "vanilla": "Vanilla parallax",
+        "enb": "ENB complex material/POM",
+        "community_shaders": "Community Shaders parallax",
+        "truepbr": "TruePBR",
+    }
+    blocker_summaries: dict[str, list[str]] = {key: [] for key in renderer_labels}
+
+    for info in infos:
+        for renderer, block_blockers in _renderer_blockers(info).items():
+            for blocker in block_blockers:
+                _append_limited_unique(blocker_summaries[renderer], _summarize_blocker(blocker))
+
+    for renderer, label in renderer_labels.items():
+        blockers = list(blocker_summaries[renderer])
+        if has_havok:
+            _append_limited_unique(
+                blockers,
+                "NIF has BSBehaviorGraphExtraData/Havok animation data, so parallax-style mesh patching is unsafe",
+            )
+        if blockers:
+            verdict = f"Won't work yet: {'; '.join(blockers)}."
+        elif renderer == "truepbr":
+            verdict = "Mesh-side setup looks ready, but TruePBR still needs a matching JSON entry that this scan cannot verify."
+        else:
+            verdict = "Mesh-side setup looks ready."
+        verdicts[renderer] = f"{label}: {verdict}"
+    return verdicts
 
 
 def _build_block_map(
@@ -1369,6 +1868,12 @@ def _upgrade_block_to_type3(
             f"fields to avoid corrupting the NIF."
         )
 
+    if sp.shader_type_offset is None:
+        raise ValueError(
+            f"Block {block_index}: cannot force shader type 3 on a real-layout "
+            "Skyrim shader block without an explicit on-disk shader_type field."
+        )
+
     # 1. Write new shader_type = 3
     buf.write_u32_at(sp.shader_type_offset, SHADER_TYPE_HEIGHTMAP)
 
@@ -1383,6 +1888,42 @@ def _upgrade_block_to_type3(
     return buf.to_bytes()
 
 
+def _should_enable_parallax_on_shader(
+    sp: _ShaderPropBlock,
+    *,
+    effective_parallax: bool,
+    opts: NifPatchOptions,
+    shader_to_shape: dict[int, _ShapeBlock],
+    has_havok: bool,
+) -> bool:
+    if not effective_parallax or opts.disable_parallax:
+        return False
+    if has_havok and opts.skip_if_havok:
+        return False
+    if opts.skip_incompatible_shader_types and sp.shader_type not in (
+        SHADER_TYPE_DEFAULT,
+        SHADER_TYPE_HEIGHTMAP,
+        SHADER_TYPE_ENVMAP,
+    ):
+        return False
+    if opts.skip_decal and ((sp.flags1 & SLSF1_DECAL) or (sp.flags1 & SLSF1_DYNAMIC_DECAL)):
+        return False
+    if opts.skip_lighting_effects and (
+        (sp.flags2 & SLSF2_SOFT_LIGHTING)
+        or (sp.flags2 & SLSF2_RIM_LIGHTING)
+        or (sp.flags2 & SLSF2_BACK_LIGHTING)
+    ):
+        return False
+    if opts.skip_anisotropic and (sp.flags2 & SLSF2_ANISOTROPIC_LIGHTING):
+        return False
+    shape = shader_to_shape.get(sp.block_index)
+    if opts.skip_if_skinned and shape is not None and shape.skin_instance_ref >= 0:
+        return False
+    if opts.skip_if_alpha and shape is not None and shape.alpha_property_ref >= 0:
+        return False
+    return True
+
+
 def _apply_patches(
     data: bytes,
     header: _NifHeader,
@@ -1394,6 +1935,16 @@ def _apply_patches(
     upgraded = 0
     effective_parallax = opts.enable_parallax or opts.enable_pom
     want_scale = opts.parallax_scale is not None and opts.parallax_scale > 0
+    shader_to_shape: dict[int, _ShapeBlock] = {}
+    has_havok = False
+    need_shape_map = (
+        opts.skip_if_havok
+        or opts.skip_if_skinned
+        or opts.skip_if_alpha
+        or (opts.force_shader_type_3 and effective_parallax and want_scale)
+    )
+    if need_shape_map:
+        shader_to_shape, has_havok = _build_shape_map(data, header)
 
     # --- Phase 1: block upgrades (type 0 → 3) ------------------------------
     if opts.force_shader_type_3 and effective_parallax and want_scale:
@@ -1408,7 +1959,18 @@ def _apply_patches(
                 raise RuntimeError("Header corrupted after type-3 upgrade.")
             fresh_props, _, _ = _build_block_map(data, chk_header)
             sp_to_upgrade = next(
-                (sp for sp in fresh_props if sp.shader_type == SHADER_TYPE_DEFAULT),
+                (
+                    sp
+                    for sp in fresh_props
+                    if sp.shader_type == SHADER_TYPE_DEFAULT
+                    and _should_enable_parallax_on_shader(
+                        sp,
+                        effective_parallax=effective_parallax,
+                        opts=opts,
+                        shader_to_shape=shader_to_shape,
+                        has_havok=has_havok,
+                    )
+                ),
                 None,
             )
             if sp_to_upgrade is None:
@@ -1432,15 +1994,6 @@ def _apply_patches(
     buf = _Buf(data)
     props_patched = 0
 
-    # Build shape map and check for Havok when any skip option is enabled
-    shader_to_shape: dict[int, _ShapeBlock] = {}
-    has_havok = False
-    need_shape_map = (
-        opts.skip_if_havok or opts.skip_if_skinned or opts.skip_if_alpha
-    )
-    if need_shape_map:
-        shader_to_shape, has_havok = _build_shape_map(data, header)
-
     # NIFs with Havok-animated skeletons must not receive parallax — doing so
     # causes an EXCEPTION_ACCESS_VIOLATION crash at runtime.
     if has_havok and opts.skip_if_havok and effective_parallax:
@@ -1453,65 +2006,29 @@ def _apply_patches(
         new_flags2 = sp.flags2
 
         # ---- Determine whether parallax is safe to enable on this block ----
-        enabling_parallax = effective_parallax and not opts.disable_parallax
-        if enabling_parallax:
-            # Skip incompatible shader types (not Default/Parallax/EnvMap)
-            if opts.skip_incompatible_shader_types and sp.shader_type not in (
-                SHADER_TYPE_DEFAULT, SHADER_TYPE_HEIGHTMAP, SHADER_TYPE_ENVMAP
-            ):
-                enabling_parallax = False
-
-            # Skip decal shaders — parallax+decal produces visual glitches
-            if enabling_parallax and opts.skip_decal:
-                if (new_flags1 & SLSF1_DECAL) or (new_flags1 & SLSF1_DYNAMIC_DECAL):
-                    enabling_parallax = False
-
-            # Skip shaders with lighting modes incompatible with parallax
-            if enabling_parallax and opts.skip_lighting_effects:
-                if (
-                    (new_flags2 & SLSF2_SOFT_LIGHTING)
-                    or (new_flags2 & SLSF2_RIM_LIGHTING)
-                    or (new_flags2 & SLSF2_BACK_LIGHTING)
-                ):
-                    enabling_parallax = False
-
-            # Skip anisotropic-lit shaders
-            if enabling_parallax and opts.skip_anisotropic:
-                if new_flags2 & SLSF2_ANISOTROPIC_LIGHTING:
-                    enabling_parallax = False
-
-            # Skip skinned shapes (NiSkinInstance / BSDismemberSkinInstance)
-            if enabling_parallax and opts.skip_if_skinned:
-                shape = shader_to_shape.get(sp.block_index)
-                if shape is not None and shape.skin_instance_ref >= 0:
-                    enabling_parallax = False
-
-            # Skip alpha-property shapes (NiAlphaProperty)
-            if enabling_parallax and opts.skip_if_alpha:
-                shape = shader_to_shape.get(sp.block_index)
-                if shape is not None and shape.alpha_property_ref >= 0:
-                    enabling_parallax = False
+        enabling_parallax = _should_enable_parallax_on_shader(
+            sp,
+            effective_parallax=effective_parallax,
+            opts=opts,
+            shader_to_shape=shader_to_shape,
+            has_havok=has_havok,
+        )
 
         # ---- Apply flag changes ----
         if enabling_parallax:
             new_flags1 |= SLSF1_PARALLAX
-            # Clear flags that conflict with vanilla parallax
-            new_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
             new_flags2 &= ~SLSF2_MULTI_LAYER_PARALLAX
-            new_flags2 &= ~SLSF2_UNUSED01        # PBR flag — conflicts with parallax
             # Vertex colours must be set for parallax meshes to render correctly
             new_flags2 |= SLSF2_VERTEX_COLORS
-        if opts.enable_pom:
+        if opts.enable_pom and enabling_parallax:
             new_flags1 |= SLSF1_PARALLAX_OCCLUSION
         if opts.enable_env_mapping:
             new_flags1 |= SLSF1_ENVIRONMENT_MAPPING
-            # Clear parallax flags — env mapping and parallax are mutually exclusive
-            new_flags1 &= ~SLSF1_PARALLAX
-            new_flags1 &= ~SLSF1_PARALLAX_OCCLUSION
             new_flags2 &= ~SLSF2_MULTI_LAYER_PARALLAX
-            new_flags2 &= ~SLSF2_UNUSED01
         if opts.enable_glow_map:
             new_flags2 |= SLSF2_GLOW_MAP
+        if opts.enable_pbr:
+            new_flags2 |= SLSF2_UNUSED01
         if opts.disable_parallax:
             new_flags1 &= ~SLSF1_PARALLAX
             new_flags1 &= ~SLSF1_PARALLAX_OCCLUSION
@@ -1521,6 +2038,8 @@ def _apply_patches(
             new_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
         if opts.disable_glow_map:
             new_flags2 &= ~SLSF2_GLOW_MAP
+        if opts.disable_pbr:
+            new_flags2 &= ~SLSF2_UNUSED01
 
         flags_changed = (new_flags1 != sp.flags1) or (new_flags2 != sp.flags2)
         if flags_changed:
@@ -1640,7 +2159,7 @@ def _apply_patches(
             if slot >= ts.num_textures:
                 return
             new = "" if clear else _normalise_path(new_raw or "")
-            old = ts.slot_paths[slot] if slot < ts.num_textures else ""
+            old = ts.slot_paths[slot]
             if old != new:
                 slot_changes.append((slot, old, new))
 
@@ -1717,6 +2236,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
             opts.parallax_scale is not None and opts.parallax_scale > 0,
             opts.enable_env_mapping,
             opts.enable_glow_map,
+            opts.enable_pbr,
             opts.normal_texture_path is not None,
             opts.parallax_texture_path is not None,
             opts.glow_texture_path is not None,
@@ -1727,6 +2247,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
             opts.disable_pom,
             opts.disable_env_mapping,
             opts.disable_glow_map,
+            opts.disable_pbr,
             opts.clear_parallax_texture_path,
             opts.clear_normal_texture_path,
             opts.clear_glow_texture_path,
@@ -1742,6 +2263,19 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
     if not has_any_toggle:
         result.message = "Nothing to patch — all options are disabled."
         return result
+
+    for field_name, path_value in (
+        ("parallax_texture_path", opts.parallax_texture_path),
+        ("normal_texture_path", opts.normal_texture_path),
+        ("glow_texture_path", opts.glow_texture_path),
+        ("diffuse_texture_path", opts.diffuse_texture_path),
+        ("env_mask_texture_path", opts.env_mask_texture_path),
+        ("cubemap_texture_path", opts.cubemap_texture_path),
+    ):
+        if path_value is not None and not path_value.strip():
+            result.errors.append(f"{field_name} cannot be empty or whitespace-only.")
+            result.message = f"Invalid {field_name}."
+            return result
 
     try:
         original_data = nif_path.read_bytes()
@@ -1861,6 +2395,10 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
     diagnostics.extend(parse_errors)
     if not shader_props:
         diagnostics.extend(_summarize_non_patchable_block_types(header))
+
+    # Build shape map so we can annotate each NifShaderInfo with its mesh context.
+    shader_to_shape, _has_havok = _build_shape_map(data, header)
+
     results: list[NifShaderInfo] = []
     for sp in shader_props:
         ts = texture_sets.get(sp.texture_set_ref)
@@ -1869,14 +2407,22 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
             for i, p in enumerate(ts.slot_paths):
                 if p:
                     tex_paths[i] = p
-        results.append(NifShaderInfo(
+        shape = shader_to_shape.get(sp.block_index)
+        info = NifShaderInfo(
             block_index=sp.block_index,
             shader_type=sp.shader_type,
             flags1=sp.flags1,
             flags2=sp.flags2,
             parallax_scale=sp.parallax_scale,
             texture_paths=tex_paths,
-        ))
+            env_map_scale=sp.env_map_scale,
+        )
+        if shape is not None:
+            info.parent_block_type = shape.block_type
+            info.is_lod_shape = shape.block_type in _LOD_SHAPE_BLOCK_TYPES
+            info.is_skinned = shape.skin_instance_ref >= 0
+            info.has_alpha_property = shape.alpha_property_ref >= 0
+        results.append(info)
     return results, diagnostics
 
 
@@ -1886,9 +2432,220 @@ def scan_nif(nif_path: Path) -> list[NifShaderInfo]:
     return infos
 
 
+def _renderer_compatibility(info: NifShaderInfo) -> dict[str, list[str]]:
+    """Return per-renderer compatibility notes for a single shader block.
+
+    Keys are ``'vanilla'``, ``'enb'``, ``'community_shaders'``, and
+    ``'truepbr'``.  Each value is a list of human-readable status strings that
+    describe what is already correct and what needs to change for that renderer.
+    """
+    notes: dict[str, list[str]] = {
+        "vanilla": [],
+        "enb": [],
+        "community_shaders": [],
+        "truepbr": [],
+    }
+    bname = f"Block {info.block_index}"
+    mesh_hint = _shader_type_mesh_hint(info.shader_type)
+    if mesh_hint:
+        for renderer_notes in notes.values():
+            renderer_notes.append(f"{bname}: mesh-type note — {mesh_hint}")
+
+    # ------------------------------------------------------------------ vanilla
+    # Requirements: shader_type Default(0) or Heightmap(3),
+    #               SLSF1_Parallax flag set, _p.dds in slot 3.
+    v = notes["vanilla"]
+    if info.shader_type not in (SHADER_TYPE_DEFAULT, SHADER_TYPE_HEIGHTMAP):
+        v.append(
+            f"{bname}: shader type is {info.shader_type_name!r}; vanilla parallax "
+            f"requires Default (0) or Heightmap/Parallax (3)"
+        )
+    else:
+        v.append(f"{bname}: shader type {info.shader_type_name!r} ✓")
+    if not info.has_parallax_flag:
+        v.append(f"{bname}: SLSF1_Parallax flag not set — must be enabled for vanilla parallax")
+    else:
+        v.append(f"{bname}: SLSF1_Parallax flag ✓")
+    slot3 = info.texture_paths.get(3, "")
+    if not slot3:
+        v.append(f"{bname}: slot 3 (height-map) is empty — needs a _p.dds parallax texture")
+    elif not slot3.lower().endswith("_p.dds"):
+        v.append(f"{bname}: slot 3 is {slot3!r}; expected a _p.dds height-map texture")
+    else:
+        v.append(f"{bname}: slot 3 {slot3!r} ✓")
+    if info.has_model_space_normals_flag:
+        v.append(
+            f"{bname}: SLSF1_Model_Space_Normals is set; vanilla parallax requires "
+            f"tangent-space normals (clear this flag)"
+        )
+    if info.has_decal_flag:
+        v.append(f"{bname}: decal flag set — parallax + decal causes glitches in-game")
+    if info.has_landscape_flag:
+        v.append(f"{bname}: landscape shader — vanilla parallax flags have no effect here")
+    if info.is_skinned:
+        v.append(f"{bname}: skinned/animated mesh — parallax will crash or glitch in-game")
+    if info.has_alpha_property:
+        v.append(f"{bname}: alpha-blended/tested mesh — parallax + alpha causes glitches")
+    if info.is_lod_shape:
+        v.append(f"{bname}: LOD geometry — parallax works at normal distance but absent at LOD transition")
+    if info.has_pom_flag:
+        v.append(f"{bname}: SLSF1_Parallax_Occlusion (POM) requires ENB or Community Shaders; vanilla ignores it")
+
+    # ------------------------------------------------------------------ enb complex material
+    e = notes["enb"]
+    if info.shader_type != SHADER_TYPE_ENVMAP:
+        e.append(
+            f"{bname}: ENB Complex Material requires shader type EnvMap (1), "
+            f"currently {info.shader_type_name!r}"
+        )
+    else:
+        e.append(f"{bname}: shader type EnvMap ✓")
+    if not info.has_env_mapping_flag:
+        e.append(f"{bname}: SLSF1_Environment_Mapping not set — required for ENB Complex Material")
+    else:
+        e.append(f"{bname}: SLSF1_Environment_Mapping ✓")
+    if not info.has_model_space_normals_flag:
+        e.append(f"{bname}: SLSF1_Model_Space_Normals not set — required for ENB _msn workflow")
+    else:
+        e.append(f"{bname}: SLSF1_Model_Space_Normals ✓")
+    slot1 = info.texture_paths.get(1, "")
+    if not (slot1.lower().endswith("_msn.dds") or slot1.lower().endswith("_n.dds")):
+        e.append(f"{bname}: slot 1 normal should be _msn.dds (model-space) for ENB Complex Material, got {slot1!r}")
+    else:
+        e.append(f"{bname}: slot 1 normal {slot1!r} ✓")
+    slot5 = info.texture_paths.get(5, "")
+    slot5_normalized = slot5.lower()
+    if not slot5:
+        e.append(f"{bname}: slot 5 (env-mask) is empty — ENB Complex Material needs an _m.dds map")
+    elif slot5_normalized.endswith(("_m.dds", "_mask.dds", "_envmask.dds")):
+        e.append(f"{bname}: slot 5 env-mask {slot5!r} ✓")
+    elif slot5_normalized.endswith(_TRUEPBR_ENV_MASK_SUFFIXES + _LEGACY_TRUEPBR_ENV_MASK_SUFFIXES):
+        e.append(f"{bname}: slot 5 (env-mask) needs a _m.dds complex material map, got {slot5!r}")
+        e.append(
+            f"{bname}: slot 5 looks TruePBR/generic-packed ({slot5!r}); ENB Complex Material expects ENB-style _m.dds data, not generic Blender/Substance ORM-style naming."
+        )
+    elif slot5_normalized.endswith(("_cm.dds", "_c.dds")):
+        e.append(
+            f"{bname}: slot 5 uses Community Shaders Extended Materials naming ({slot5!r}); ENB expects _m.dds."
+        )
+    else:
+        e.append(f"{bname}: slot 5 (env-mask) needs a _m.dds complex material map, got {slot5!r}")
+    if info.has_parallax_flag:
+        e.append(
+            f"{bname}: SLSF1_Parallax flag set — for pure ENB Complex Material, clear this; "
+            f"set SLSF1_Parallax_Occlusion for POM inside ENB instead"
+        )
+    if info.has_pom_flag:
+        e.append(f"{bname}: SLSF1_Parallax_Occlusion (POM) enabled ✓ (ENB will render POM)")
+
+    # ------------------------------------------------------------------ community shaders
+    cs = notes["community_shaders"]
+    if info.shader_type not in (SHADER_TYPE_DEFAULT, SHADER_TYPE_HEIGHTMAP):
+        cs.append(
+            f"{bname}: Community Shaders standard parallax requires Default (0) or "
+            f"Heightmap (3) shader type, currently {info.shader_type_name!r}"
+        )
+    else:
+        cs.append(f"{bname}: shader type {info.shader_type_name!r} ✓")
+    if not info.has_parallax_flag:
+        cs.append(f"{bname}: SLSF1_Parallax not set — must be enabled")
+    else:
+        cs.append(f"{bname}: SLSF1_Parallax ✓")
+    if not slot3:
+        cs.append(f"{bname}: slot 3 height-map is empty — needs _p.dds")
+    elif not slot3.lower().endswith("_p.dds"):
+        cs.append(f"{bname}: slot 3 {slot3!r} — expected _p.dds")
+    else:
+        cs.append(f"{bname}: slot 3 {slot3!r} ✓")
+    if info.has_pom_flag:
+        cs.append(
+            f"{bname}: SLSF1_Parallax_Occlusion set — Community Shaders handles POM "
+            f"internally; this flag is unnecessary but harmless"
+        )
+    cpm_slot5 = info.texture_paths.get(5, "")
+    cpm_slot5_normalized = cpm_slot5.lower()
+    if cpm_slot5_normalized.endswith(("_cm.dds", "_c.dds")):
+        cs.append(f"{bname}: slot 5 CM map {cpm_slot5!r} detected — Community Shaders Extended Materials active ✓")
+    elif cpm_slot5_normalized.endswith(("_m.dds", "_mask.dds", "_envmask.dds")):
+        cs.append(
+            f"{bname}: slot 5 uses ENB/vanilla-style _m naming ({cpm_slot5!r}); CS Extended Materials expects _cm/_c."
+        )
+    elif cpm_slot5_normalized.endswith(_LEGACY_TRUEPBR_ENV_MASK_SUFFIXES):
+        cs.append(
+            f"{bname}: slot 5 uses generic packed alias naming ({cpm_slot5!r}); rename/repack to explicit _cm/_c for CS Extended Materials or _rmaos for TruePBR."
+        )
+    if info.has_pbr_flag:
+        cs.append(f"{bname}: SLSF2_Unused01 (TruePBR) flag present — this overrides standard parallax in CS")
+    if info.is_skinned:
+        cs.append(f"{bname}: skinned mesh — parallax still not safe on animated geometry even with CS")
+    if info.has_alpha_property:
+        cs.append(f"{bname}: alpha property — parallax + alpha may glitch even with CS")
+
+    # ------------------------------------------------------------------ truepbr
+    pb = notes["truepbr"]
+    if not info.has_pbr_flag:
+        pb.append(
+            f"{bname}: SLSF2_Unused01 (TruePBR flag) not set — TruePBR requires this flag "
+            f"plus a matching .json nif entry file"
+        )
+    else:
+        pb.append(f"{bname}: SLSF2_Unused01 TruePBR flag ✓")
+    slot1_pb = info.texture_paths.get(1, "")
+    if slot1_pb.lower().endswith("_msn.dds"):
+        pb.append(f"{bname}: slot 1 is _msn.dds (model-space); TruePBR expects _n.dds (tangent-space)")
+    elif slot1_pb.lower().endswith("_n.dds"):
+        pb.append(f"{bname}: slot 1 normal {slot1_pb!r} ✓")
+    else:
+        pb.append(f"{bname}: slot 1 normal {slot1_pb!r} — TruePBR expects _n.dds")
+    rmaos = info.texture_paths.get(5, "")
+    if not rmaos:
+        pb.append(f"{bname}: slot 5 (roughness/metallic/AO/specular) is empty — TruePBR needs _rmaos.dds")
+    elif rmaos.lower().endswith(_TRUEPBR_ENV_MASK_SUFFIXES):
+        pb.append(f"{bname}: slot 5 {rmaos!r} ✓")
+    elif rmaos.lower().endswith(_LEGACY_TRUEPBR_ENV_MASK_SUFFIXES):
+        pb.append(
+            f"{bname}: slot 5 {rmaos!r} uses a generic packed alias (_orm/_mrao) commonly exported by Blender/Substance; "
+            f"rename/repack to canonical _rmaos for clearer TruePBR handling so it is not confused with non-runtime authoring tags."
+        )
+    elif rmaos.lower().endswith(("_cm.dds", "_c.dds")):
+        pb.append(f"{bname}: slot 5 {rmaos!r} looks like Community Shaders Extended Materials (_cm/_c), not TruePBR.")
+    elif rmaos.lower().endswith(("_m.dds", "_mask.dds", "_envmask.dds")):
+        pb.append(f"{bname}: slot 5 {rmaos!r} looks like ENB/vanilla _m workflow, not TruePBR _rmaos.")
+    else:
+        pb.append(f"{bname}: slot 5 {rmaos!r} — TruePBR expects _rmaos.dds")
+    pb.append(
+        f"{bname}: TruePBR also requires a .json nif entry alongside the mesh — "
+        f"this patcher cannot generate that file"
+    )
+
+    return notes
+
+
 def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
-    """Check whether a NIF is ready for parallax, and suggest fixes."""
+    """Check whether a NIF is ready for parallax, and suggest fixes.
+
+    The result now carries per-block :attr:`~NifValidationResult.skip_reasons`
+    (explaining exactly why each shader will be skipped by the patcher),
+    :attr:`~NifValidationResult.has_havok` (whether the NIF contains a
+    behaviour-graph block), and per-renderer
+    :attr:`~NifValidationResult.renderer_notes` and
+    :attr:`~NifValidationResult.renderer_verdicts` for vanilla, ENB, Community
+    Shaders, and TruePBR.
+    """
     result = NifValidationResult(nif_path=nif_path, valid=False)
+
+    # ------------------------------------------------------------------
+    # Fast binary check for BSBehaviorGraphExtraData (Havok-animated mesh).
+    # We do this before the full parse because it is a NIF-level flag that
+    # unconditionally skips ALL shader blocks.
+    # ------------------------------------------------------------------
+    try:
+        raw = nif_path.read_bytes()
+    except OSError as exc:
+        result.issues.append(f"Cannot read NIF: {exc}")
+        return result
+    result.has_havok = b"BSBehaviorGraphExtraData" in raw
+
     infos, diagnostics = scan_nif_diagnostics(nif_path)
     guessed_parallax = guess_parallax_path_for_nif(nif_path)
 
@@ -1907,51 +2664,186 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                 _append_unique(result.suggestions, diagnostic)
         return result
 
+    if result.has_havok:
+        _append_unique(
+            result.skip_reasons,
+            "NIF contains BSBehaviorGraphExtraData (Havok animation graph) — "
+            "patching parallax onto Havok-animated meshes causes CTD/crashes in-game."
+        )
+
     result.shader_count = len(infos)
+
+    # ---- aggregate renderer notes across all shader blocks ----
+    agg_renderer_notes: dict[str, list[str]] = {
+        "vanilla": [],
+        "enb": [],
+        "community_shaders": [],
+        "truepbr": [],
+    }
+
     for info in infos:
-        has_flag = info.has_parallax_flag
-        parallax_path = info.texture_paths.get(TEXTURE_SLOT_PARALLAX, "").strip()
+        bname = f"Block {info.block_index}"
+
+        # ---- determine skip conditions for this block ----
+        block_skipped = False
+
+        if result.has_havok:
+            # Already reported at NIF level; every block is skipped.
+            block_skipped = True
+
+        if info.shader_type not in (SHADER_TYPE_DEFAULT, SHADER_TYPE_HEIGHTMAP, SHADER_TYPE_ENVMAP):
+            mesh_hint = _shader_type_mesh_hint(info.shader_type)
+            hint_text = f" {mesh_hint}" if mesh_hint else ""
+            reason = (
+                f"{bname}: incompatible shader type {info.shader_type_name!r} "
+                f"({info.shader_type}) — patcher only supports Default (0), "
+                f"Heightmap/Parallax (3), and EnvMap (1)"
+                f"{hint_text}"
+            )
+            _append_unique(result.skip_reasons, reason)
+            block_skipped = True
+
+        if info.has_decal_flag:
+            reason = (
+                f"{bname}: decal flag (SLSF1_Decal or SLSF1_Dynamic_Decal) is set — "
+                f"parallax combined with decal rendering causes visual glitches"
+            )
+            _append_unique(result.skip_reasons, reason)
+            block_skipped = True
+
+        if info.has_soft_lighting_flag or info.has_rim_lighting_flag or info.has_back_lighting_flag:
+            active = []
+            if info.has_soft_lighting_flag:
+                active.append("SLSF2_Soft_Lighting")
+            if info.has_rim_lighting_flag:
+                active.append("SLSF2_Rim_Lighting")
+            if info.has_back_lighting_flag:
+                active.append("SLSF2_Back_Lighting")
+            reason = (
+                f"{bname}: subsurface-scattering lighting flags active "
+                f"({', '.join(active)}) — these are mutually exclusive with parallax"
+            )
+            _append_unique(result.skip_reasons, reason)
+            block_skipped = True
+
+        if info.has_anisotropic_flag:
+            reason = (
+                f"{bname}: SLSF2_Anisotropic_Lighting is set — "
+                f"anisotropic shading and parallax produce incorrect results together"
+            )
+            _append_unique(result.skip_reasons, reason)
+            block_skipped = True
+
+        if info.is_skinned or info.has_skinned_flag:
+            sources = []
+            if info.is_skinned:
+                sources.append("NiSkinInstance on parent shape")
+            if info.has_skinned_flag:
+                sources.append("SLSF1_Skinned in shader flags")
+            reason = (
+                f"{bname}: skinned/animated mesh ({'; '.join(sources)}) — "
+                f"parallax on skinned geometry causes CTD in Skyrim SE"
+            )
+            _append_unique(result.skip_reasons, reason)
+            block_skipped = True
+
+        if info.has_alpha_property:
+            reason = (
+                f"{bname}: NiAlphaProperty on parent shape — "
+                f"parallax combined with alpha-blending/testing produces rendering artifacts"
+            )
+            _append_unique(result.skip_reasons, reason)
+            block_skipped = True
+
+        if info.has_landscape_flag:
+            reason = (
+                f"{bname}: SLSF1_Landscape is set — landscape shaders use a separate "
+                f"parallax mechanism; standard parallax flags have no effect here"
+            )
+            _append_unique(result.skip_reasons, reason)
+            block_skipped = True
+
+        if info.is_lod_shape:
+            _append_unique(
+                result.skip_reasons,
+                f"{bname}: LOD geometry ({info.parent_block_type!r}) — parallax works "
+                f"at normal viewing distance but disappears at the LOD transition; "
+                f"patcher will still patch it, but this is worth noting"
+            )
+            # LOD is a warning, not a hard skip for counting purposes
+
+        if block_skipped:
+            result.skip_count += 1
+        else:
+            has_flag = info.has_parallax_flag
+            parallax_path = info.texture_paths.get(TEXTURE_SLOT_PARALLAX, "").strip()
+            has_tex = bool(parallax_path)
+            if has_flag and has_tex:
+                result.ready_count += 1
+            else:
+                result.needs_patch_count += 1
+                if not has_flag:
+                    _append_unique(
+                        result.issues,
+                        f"{bname}: SLSF1_Parallax flag not set."
+                    )
+                    _append_unique(
+                        result.suggestions,
+                        "Run patch_nif with enable_parallax=True."
+                    )
+                if not has_tex:
+                    _append_unique(
+                        result.issues,
+                        f"{bname}: Texture slot 3 (parallax) is empty."
+                    )
+                    _append_unique(
+                        result.suggestions,
+                        (
+                            f"Supply parallax_texture_path pointing to a _p.dds height map"
+                            f"{f' (for example {guessed_parallax})' if guessed_parallax else ''}."
+                        )
+                    )
+                if info.shader_type != SHADER_TYPE_HEIGHTMAP:
+                    _append_unique(
+                        result.suggestions,
+                        f"{bname}: shader type is {info.shader_type} "
+                        "(not Heightmap/3). Use force_shader_type_3=True to enable "
+                        "the parallax_scale field for stronger in-game depth."
+                    )
+
         diffuse_path = info.texture_paths.get(TEXTURE_SLOT_DIFFUSE, "").strip()
         normal_path = info.texture_paths.get(TEXTURE_SLOT_NORMAL, "").strip()
-        has_tex = bool(parallax_path)
-        if has_flag and has_tex:
-            result.ready_count += 1
-        else:
-            result.needs_patch_count += 1
-            if not has_flag:
-                _append_unique(
-                    result.issues,
-                    f"Block {info.block_index}: SLSF1_Parallax flag not set."
-                )
-                _append_unique(
-                    result.suggestions,
-                    "Run patch_nif with enable_parallax=True."
-                )
-            if not has_tex:
-                _append_unique(
-                    result.issues,
-                    f"Block {info.block_index}: Texture slot 3 (parallax) is empty."
-                )
-                _append_unique(
-                    result.suggestions,
-                    (
-                        f"Supply parallax_texture_path pointing to a _p.dds height map"
-                        f"{f' (for example {guessed_parallax})' if guessed_parallax else ''}."
-                    )
-                )
-            if info.shader_type != SHADER_TYPE_HEIGHTMAP:
-                _append_unique(
-                    result.suggestions,
-                    f"Block {info.block_index}: shader type is {info.shader_type} "
-                    "(not Heightmap/3). Use force_shader_type_3=True to enable "
-                    "the parallax_scale field for stronger in-game depth."
-                )
+        parallax_path = info.texture_paths.get(TEXTURE_SLOT_PARALLAX, "").strip()
+
         if diffuse_path:
             normalized_diffuse = _normalise_slot_path(diffuse_path)
+            if not _path_has_dds_extension(diffuse_path):
+                _append_unique(
+                    result.issues,
+                    f"{bname}: slot 0 diffuse path '{diffuse_path}' is not a .dds texture path."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Convert/export diffuse textures to .dds for Skyrim; Blender/Substance authoring extensions (.png/.tga/.exr) are source assets, not final game paths."
+                )
+                if _path_uses_known_authoring_extension(diffuse_path):
+                    _append_unique(
+                        result.suggestions,
+                        "Slot 0 currently points at a source/authoring texture extension, so the NIF will not resolve that file in-game until it is exported to .dds.",
+                    )
+            if normalized_diffuse.endswith(_GENERIC_DIFFUSE_AUTHORING_SUFFIXES):
+                _append_unique(
+                    result.issues,
+                    f"{bname}: slot 0 diffuse path '{diffuse_path}' uses Blender/authoring suffix naming rather than Skyrim's usual bare diffuse name."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "For in-game Skyrim runtime paths, diffuse/albedo is usually just <stem>.dds; _d/_diffuse/_albedo names are authoring conventions, not required vanilla naming.",
+                )
             if normalized_diffuse.endswith(_DIFFUSE_SLOT_DISALLOWED_SUFFIXES):
                 _append_unique(
                     result.issues,
-                    f"Block {info.block_index}: slot 0 diffuse path '{diffuse_path}' looks like a non-diffuse map."
+                    f"{bname}: slot 0 diffuse path '{diffuse_path}' looks like a non-diffuse map."
                 )
                 _append_unique(
                     result.suggestions,
@@ -1959,10 +2851,19 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                 )
         if parallax_path:
             normalized_parallax = _normalise_slot_path(parallax_path)
+            if not _path_has_dds_extension(parallax_path):
+                _append_unique(
+                    result.issues,
+                    f"{bname}: slot 3 parallax path '{parallax_path}' is not a .dds texture path."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Convert parallax/height textures to .dds before patching NIF slot 3."
+                )
             if not normalized_parallax.startswith("textures\\"):
                 _append_unique(
                     result.issues,
-                    f"Block {info.block_index}: parallax path '{parallax_path}' is not a Skyrim-relative textures\\ path."
+                    f"{bname}: parallax path '{parallax_path}' is not a Skyrim-relative textures\\ path."
                 )
                 _append_unique(
                     result.suggestions,
@@ -1971,7 +2872,7 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
             if not normalized_parallax.endswith("_p.dds"):
                 _append_unique(
                     result.issues,
-                    f"Block {info.block_index}: parallax path '{parallax_path}' does not use the expected _p.dds naming."
+                    f"{bname}: parallax path '{parallax_path}' does not use the expected _p.dds naming."
                 )
                 _append_unique(
                     result.suggestions,
@@ -1980,7 +2881,7 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
             if normalized_parallax.endswith(_CUBEMAP_SLOT_EXPECTED_SUFFIXES):
                 _append_unique(
                     result.issues,
-                    f"Block {info.block_index}: slot 3 parallax path '{parallax_path}' looks like a cubemap path."
+                    f"{bname}: slot 3 parallax path '{parallax_path}' looks like a cubemap path."
                 )
                 _append_unique(
                     result.suggestions,
@@ -1989,19 +2890,33 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
             if diffuse_path and normalized_parallax == _normalise_slot_path(diffuse_path):
                 _append_unique(
                     result.issues,
-                    f"Block {info.block_index}: parallax slot 3 points at the diffuse texture instead of a _p.dds height map."
+                    f"{bname}: parallax slot 3 points at the diffuse texture instead of a _p.dds height map."
                 )
             if normal_path and normalized_parallax == _normalise_slot_path(normal_path):
                 _append_unique(
                     result.issues,
-                    f"Block {info.block_index}: parallax slot 3 points at the normal texture instead of a dedicated height map."
+                    f"{bname}: parallax slot 3 points at the normal texture instead of a dedicated height map."
                 )
         if normal_path:
             normalized_normal = _normalise_slot_path(normal_path)
+            if not _path_has_dds_extension(normal_path):
+                _append_unique(
+                    result.issues,
+                    f"{bname}: slot 1 normal path '{normal_path}' is not a .dds texture path."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Use a .dds normal map in slot 1 (_n.dds or _msn.dds). Generic Blender source files should be converted first."
+                )
+                if _path_uses_known_authoring_extension(normal_path):
+                    _append_unique(
+                        result.suggestions,
+                        "Slot 1 currently points at a source/authoring texture extension, so the game will not load it as a runtime normal map until it is exported to .dds.",
+                    )
             if normalized_normal.endswith(_NORMAL_SLOT_DISALLOWED_SUFFIXES):
                 _append_unique(
                     result.issues,
-                    f"Block {info.block_index}: slot 1 normal path '{normal_path}' does not look like a normal map path."
+                    f"{bname}: slot 1 normal path '{normal_path}' does not look like a normal map path."
                 )
                 _append_unique(
                     result.suggestions,
@@ -2010,17 +2925,17 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
         if not normal_path:
             _append_unique(
                 result.suggestions,
-                f"Block {info.block_index}: slot 1 normal map is empty; parallax will still patch, but lighting usually looks wrong without a matching _n.dds or _msn.dds."
+                f"{bname}: slot 1 normal map is empty; parallax will still patch, but lighting usually looks wrong without a matching _n.dds or _msn.dds."
             )
         if info.has_pom_flag and info.shader_type not in (SHADER_TYPE_HEIGHTMAP, SHADER_TYPE_PARALLAX_OCC):
             _append_unique(
                 result.issues,
-                f"Block {info.block_index}: POM flag is set on shader type {info.shader_type}; ENB parallax occlusion is more reliable on Heightmap/3 blocks."
+                f"{bname}: POM flag is set on shader type {info.shader_type}; ENB parallax occlusion is more reliable on Heightmap/3 blocks."
             )
         if info.has_pom_flag and not info.has_parallax_flag:
             _append_unique(
                 result.issues,
-                f"Block {info.block_index}: POM flag is enabled without the base SLSF1_Parallax flag."
+                f"{bname}: POM flag is enabled without the base SLSF1_Parallax flag."
             )
             _append_unique(
                 result.suggestions,
@@ -2029,19 +2944,62 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
         env_mask_path = info.texture_paths.get(TEXTURE_SLOT_ENV_MASK, "").strip()
         if env_mask_path:
             normalized_env_mask = _normalise_slot_path(env_mask_path)
-            if not normalized_env_mask.endswith(("_m.dds", "_mask.dds", "_envmask.dds", "_em.dds", "_rmaos.dds", "_cm.dds", "_c.dds")):
+            if not _path_has_dds_extension(env_mask_path):
                 _append_unique(
                     result.issues,
-                    f"Block {info.block_index}: slot 5 environment-mask path '{env_mask_path}' does not look like an environment mask."
+                    f"{bname}: slot 5 environment-mask path '{env_mask_path}' is not a .dds texture path."
                 )
                 _append_unique(
                     result.suggestions,
-                    "Use slot 5 for _m.dds (standard env mask) or complex-material mask naming such as _cm/_c/_rmaos."
+                    "Convert packed masks to .dds before assigning slot 5; source authoring files are not valid Skyrim runtime paths."
+                )
+                if _path_uses_known_authoring_extension(env_mask_path):
+                    _append_unique(
+                        result.suggestions,
+                        "Slot 5 currently points at a source/authoring texture extension, so it will not resolve in-game until it is exported to .dds.",
+                    )
+            if not normalized_env_mask.endswith(_ENV_MASK_SLOT_EXPECTED_SUFFIXES):
+                _append_unique(
+                    result.issues,
+                    f"{bname}: slot 5 environment-mask path '{env_mask_path}' does not look like an environment mask."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Use slot 5 for _m.dds (vanilla/ENB), _cm/_c (Community Shaders Extended Materials), or _rmaos (TruePBR)."
+                )
+                if normalized_env_mask.endswith(_GENERIC_AUTHORING_PACKED_SUFFIXES):
+                    _append_unique(
+                        result.suggestions,
+                        "This suffix looks like a generic Blender/Substance packed map naming; do not assume it is ENB/CS/TruePBR-ready until it is repacked into the target workflow format."
+                    )
+            if normalized_env_mask.endswith(_LEGACY_TRUEPBR_ENV_MASK_SUFFIXES):
+                _append_unique(
+                    result.issues,
+                    f"{bname}: slot 5 environment-mask path '{env_mask_path}' uses a generic packed alias suffix (_orm/_mrao) instead of an explicit Skyrim workflow suffix."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Use _m for vanilla/ENB, _cm/_c for Community Shaders Extended Materials, or canonical _rmaos/_ramos for TruePBR so the target workflow is unambiguous.",
+                )
+            if normalized_env_mask.endswith(_TRUEPBR_ENV_MASK_SUFFIXES + _LEGACY_TRUEPBR_ENV_MASK_SUFFIXES) and not normalized_env_mask.startswith("textures\\pbr\\"):
+                _append_unique(
+                    result.suggestions,
+                    "TruePBR _rmaos workflows are usually placed under textures\\pbr\\... and paired with a matching PBRNifPatcher JSON entry."
+                )
+            if normalized_env_mask.endswith(_LEGACY_TRUEPBR_ENV_MASK_SUFFIXES):
+                _append_unique(
+                    result.suggestions,
+                    "Slot 5 uses a generic packed alias suffix (_orm/_mrao) often exported by DCC tools; for explicit TruePBR workflows prefer canonical _rmaos/_ramos naming."
+                )
+            if normalized_env_mask.endswith(("_cm.dds", "_c.dds")):
+                _append_unique(
+                    result.suggestions,
+                    "Slot 5 _cm/_c usually indicates Community Shaders Extended Materials; avoid mixing those files with ENB _msn workflows."
                 )
         if env_mask_path and not info.has_env_mapping_flag:
             _append_unique(
                 result.issues,
-                f"Block {info.block_index}: texture slot 5 is filled ('{env_mask_path}') but SLSF1_Environment_Mapping is not enabled."
+                f"{bname}: texture slot 5 is filled ('{env_mask_path}') but SLSF1_Environment_Mapping is not enabled."
             )
             _append_unique(
                 result.suggestions,
@@ -2050,29 +3008,48 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
         if info.has_env_mapping_flag and not env_mask_path:
             _append_unique(
                 result.suggestions,
-                f"Block {info.block_index}: SLSF1_Environment_Mapping is enabled but slot 5 is empty; add an _m.dds mask or disable the flag."
+                f"{bname}: SLSF1_Environment_Mapping is enabled but slot 5 is empty; add an _m.dds mask or disable the flag."
             )
         if info.parallax_scale is not None and info.parallax_scale < 0.35:
             _append_unique(
                 result.suggestions,
-                f"Block {info.block_index}: parallax scale is only {info.parallax_scale:.2f}; increase it if the mesh patches successfully but depth is still invisible in game."
+                f"{bname}: parallax scale is only {info.parallax_scale:.2f}; increase it if the mesh patches successfully but depth is still invisible in game."
             )
         glow_path = info.texture_paths.get(TEXTURE_SLOT_GLOW, "").strip()
         if glow_path:
             normalized_glow = _normalise_slot_path(glow_path)
-            if not normalized_glow.endswith(("_g.dds", "_glow.dds", "_emit.dds", "_emissive.dds", "_sk.dds")):
+            if not _path_has_dds_extension(glow_path):
                 _append_unique(
                     result.issues,
-                    f"Block {info.block_index}: slot 2 glow path '{glow_path}' does not look like an emissive/glow texture."
+                    f"{bname}: slot 2 glow path '{glow_path}' is not a .dds texture path."
                 )
                 _append_unique(
                     result.suggestions,
-                    "Use slot 2 for emissive textures (usually _g.dds) and keep normal/parallax/env-mask maps in their own slots."
+                    "Convert emissive textures to .dds for Skyrim slot 2 usage."
+                )
+                if _path_uses_known_authoring_extension(glow_path):
+                    _append_unique(
+                        result.suggestions,
+                        "Slot 2 currently points at a source/authoring texture extension, so it will not resolve in-game until it is exported to .dds.",
+                    )
+            if not normalized_glow.endswith(("_g.dds", "_sk.dds")):
+                _append_unique(
+                    result.issues,
+                    f"{bname}: slot 2 glow path '{glow_path}' does not look like an emissive/glow texture."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Use slot 2 for emissive textures and prefer _g.dds for new outputs. Legacy aliases such as _em/_emit/_glow should usually be normalized back to _g."
+                )
+            if normalized_glow.endswith(_GENERIC_GLOW_ALIAS_SUFFIXES):
+                _append_unique(
+                    result.suggestions,
+                    "Slot 2 uses a generic emissive alias suffix; Skyrim tools in this repo treat _g.dds as the canonical glow output name.",
                 )
         if glow_path and not info.has_glow_map_flag:
             _append_unique(
                 result.issues,
-                f"Block {info.block_index}: texture slot 2 is filled ('{glow_path}') but SLSF2_Glow_Map is not set — the emissive map will not be visible."
+                f"{bname}: texture slot 2 is filled ('{glow_path}') but SLSF2_Glow_Map is not set — the emissive map will not be visible."
             )
             _append_unique(
                 result.suggestions,
@@ -2081,15 +3058,29 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
         if info.has_glow_map_flag and not glow_path:
             _append_unique(
                 result.suggestions,
-                f"Block {info.block_index}: SLSF2_Glow_Map is set but slot 2 is empty; add a _g.dds emissive map or disable the flag."
+                f"{bname}: SLSF2_Glow_Map is set but slot 2 is empty; add a _g.dds emissive map or disable the flag."
             )
         cubemap_path = info.texture_paths.get(TEXTURE_SLOT_CUBEMAP, "").strip()
         if cubemap_path:
             normalized_cubemap = _normalise_slot_path(cubemap_path)
+            if not _path_has_dds_extension(cubemap_path):
+                _append_unique(
+                    result.issues,
+                    f"{bname}: slot 4 cubemap path '{cubemap_path}' is not a .dds texture path."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Use .dds cubemap textures for slot 4."
+                )
+                if _path_uses_known_authoring_extension(cubemap_path):
+                    _append_unique(
+                        result.suggestions,
+                        "Slot 4 currently points at a source/authoring texture extension, so the game will not load it as a cubemap until it is exported to .dds.",
+                    )
             if normalized_cubemap.endswith(_CUBEMAP_SLOT_WRONG_SUFFIXES):
                 _append_unique(
                     result.issues,
-                    f"Block {info.block_index}: slot 4 cubemap path '{cubemap_path}' looks like a non-cubemap texture."
+                    f"{bname}: slot 4 cubemap path '{cubemap_path}' looks like a non-cubemap texture."
                 )
                 _append_unique(
                     result.suggestions,
@@ -2098,16 +3089,27 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
             elif "cubemap" not in normalized_cubemap and not normalized_cubemap.endswith(_CUBEMAP_SLOT_EXPECTED_SUFFIXES):
                 _append_unique(
                     result.suggestions,
-                    f"Block {info.block_index}: slot 4 path '{cubemap_path}' does not use common cubemap naming (_e/_env/_cube); verify the file is the intended reflection cubemap."
+                    f"{bname}: slot 4 path '{cubemap_path}' does not use common cubemap naming (_e/_env/_cube); verify the file is the intended reflection cubemap."
                 )
 
+        # ---- per-renderer compatibility notes ----
+        block_renderer_notes = _renderer_compatibility(info)
+        for renderer, notes in block_renderer_notes.items():
+            agg_renderer_notes[renderer].extend(notes)
+
+    result.renderer_notes = agg_renderer_notes
+    result.renderer_verdicts = _build_renderer_verdicts(infos, has_havok=result.has_havok)
     result.valid = result.shader_count > 0
     return result
 
 
 def find_nif_files(root: Path) -> list[Path]:
-    """Return all ``.nif`` files under *root* (recursive, sorted)."""
-    return sorted(root.rglob("*.nif"))
+    """Return all ``.nif`` files under *root* (recursive, case-insensitive, sorted)."""
+    return sorted(
+        p
+        for p in root.rglob("*")
+        if p.is_file() and p.suffix.lower() == ".nif"
+    )
 
 
 def guess_parallax_path_for_nif(nif_path: Path) -> str | None:
@@ -2178,7 +3180,7 @@ def guess_glow_path_for_nif(nif_path: Path) -> str | None:
         if existing:
             p = Path(existing.replace("\\", "/"))
             stem = p.stem
-            for s in ("_g", "_glow", "_emissive", "_emit", "_sk"):
+            for s in ("_g", "_glow", "_em", "_emis", "_emissive", "_emit", "_sk"):
                 if stem.lower().endswith(s):
                     stem = stem[: -len(s)]
                     break
@@ -2196,23 +3198,23 @@ def guess_glow_path_for_nif(nif_path: Path) -> str | None:
     return None
 
 
-def guess_env_mask_path_for_nif(nif_path: Path) -> str | None:
-    """Guess the environment-mask path from a NIF's diffuse or env-mask slot.
+def guess_cubemap_path_for_nif(nif_path: Path) -> str | None:
+    """Guess a cubemap/environment path from slot 4 or the diffuse slot.
 
-    Returns a Windows-style relative ``_m.dds`` path, or ``None`` if no
+    Returns a Windows-style relative ``_e.dds`` path, or ``None`` if no
     suitable texture path is found in the NIF.
     """
     infos = scan_nif(nif_path)
     for info in infos:
-        existing = info.texture_paths.get(TEXTURE_SLOT_ENV_MASK, "").strip()
+        existing = info.texture_paths.get(TEXTURE_SLOT_CUBEMAP, "").strip()
         if existing:
             p = Path(existing.replace("\\", "/"))
             stem = p.stem
-            for s in ("_m", "_mask", "_envmask", "_env", "_em", "_rmaos", "_cm", "_c"):
+            for s in ("_cubemap", "_cube", "_envmap", "_env", "_e"):
                 if stem.lower().endswith(s):
                     stem = stem[: -len(s)]
                     break
-            return str(p.parent / (stem + "_m.dds")).replace("/", "\\")
+            return str(p.parent / (stem + "_e.dds")).replace("/", "\\")
         diffuse = info.texture_paths.get(TEXTURE_SLOT_DIFFUSE, "").strip()
         if not diffuse:
             continue
@@ -2222,7 +3224,68 @@ def guess_env_mask_path_for_nif(nif_path: Path) -> str | None:
             if stem.lower().endswith(s):
                 stem = stem[: -len(s)]
                 break
-        return str(p.parent / (stem + "_m.dds")).replace("/", "\\")
+        return str(p.parent / (stem + "_e.dds")).replace("/", "\\")
+    return None
+
+
+def guess_env_mask_path_for_nif(nif_path: Path, *, preferred_suffix: str = "_m.dds") -> str | None:
+    """Guess the environment-mask path from a NIF's diffuse or env-mask slot.
+
+    Returns a Windows-style relative path using *preferred_suffix* (default:
+    ``_m.dds``), or ``None`` if no suitable texture path is found in the NIF.
+    """
+    suffix_aliases = {
+        "_m": "_m.dds",
+        "_m.dds": "_m.dds",
+        "_cm": "_cm.dds",
+        "_cm.dds": "_cm.dds",
+        "_rmaos": "_rmaos.dds",
+        "_rmaos.dds": "_rmaos.dds",
+        "_ramos": "_rmaos.dds",
+        "_ramos.dds": "_rmaos.dds",
+        "_orm": "_rmaos.dds",
+        "_orm.dds": "_rmaos.dds",
+        "_orms": "_rmaos.dds",
+        "_orms.dds": "_rmaos.dds",
+        "_mrao": "_rmaos.dds",
+        "_mrao.dds": "_rmaos.dds",
+        "_mra": "_rmaos.dds",
+        "_mra.dds": "_rmaos.dds",
+    }
+    resolved_suffix = suffix_aliases.get(str(preferred_suffix or "").strip().lower(), "_m.dds")
+    infos = scan_nif(nif_path)
+    for info in infos:
+        existing = info.texture_paths.get(TEXTURE_SLOT_ENV_MASK, "").strip()
+        if existing:
+            p = Path(existing.replace("\\", "/"))
+            stem = p.stem
+            for s in (
+                "_m",
+                "_mask",
+                "_envmask",
+                "_rmaos",
+                "_ramos",
+                "_orm",
+                "_orms",
+                "_mrao",
+                "_mra",
+                "_cm",
+                "_c",
+            ):
+                if stem.lower().endswith(s):
+                    stem = stem[: -len(s)]
+                    break
+            return str(p.parent / (stem + resolved_suffix)).replace("/", "\\")
+        diffuse = info.texture_paths.get(TEXTURE_SLOT_DIFFUSE, "").strip()
+        if not diffuse:
+            continue
+        p = Path(diffuse.replace("\\", "/"))
+        stem = p.stem
+        for s in ("_d", "_diff", "_diffuse", "_albedo"):
+            if stem.lower().endswith(s):
+                stem = stem[: -len(s)]
+                break
+        return str(p.parent / (stem + resolved_suffix)).replace("/", "\\")
     return None
 
 

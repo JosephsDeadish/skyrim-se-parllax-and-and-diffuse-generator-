@@ -1,0 +1,213 @@
+test_generate_textures (unittest.loader._FailedTest.test_generate_textures) ... ERROR
+test_backup_created_when_none_exists (test_nif_patcher.TestBackupOverwriteProtection.test_backup_created_when_none_exists)
+A .nif.bak file is created on the first patch when no backup exists. ... ok
+test_existing_backup_not_overwritten (test_nif_patcher.TestBackupOverwriteProtection.test_existing_backup_not_overwritten)
+When a .nif.bak already exists the patch succeeds but skips the backup ... ok
+test_no_warning_when_backup_disabled (test_nif_patcher.TestBackupOverwriteProtection.test_no_warning_when_backup_disabled)
+With backup=False no warning is emitted even if a .nif.bak exists. ... ok
+test_patch_still_writes_nif_when_backup_skipped (test_nif_patcher.TestBackupOverwriteProtection.test_patch_still_writes_nif_when_backup_skipped)
+Skipping the backup must not prevent the NIF itself from being patched. ... ok
+test_result_has_warnings_field (test_nif_patcher.TestBackupOverwriteProtection.test_result_has_warnings_field)
+NifPatchResult must expose a 'warnings' list. ... ok
+test_batch_captures_errors_without_raising (test_nif_patcher.TestBatchPatchNif.test_batch_captures_errors_without_raising) ... ok
+test_batch_patches_multiple_files (test_nif_patcher.TestBatchPatchNif.test_batch_patches_multiple_files) ... ok
+test_batch_results_preserve_order (test_nif_patcher.TestBatchPatchNif.test_batch_results_preserve_order) ... ok
+test_batch_returns_empty_list_for_empty_input (test_nif_patcher.TestBatchPatchNif.test_batch_returns_empty_list_for_empty_input) ... ok
+test_enabling_env_mapping_clears_multi_layer_flag (test_nif_patcher.TestFlagManagement.test_enabling_env_mapping_clears_multi_layer_flag)
+SLSF2_MULTI_LAYER_PARALLAX must be cleared when enabling env mapping. ... ok
+test_enabling_env_mapping_preserves_parallax_flag (test_nif_patcher.TestFlagManagement.test_enabling_env_mapping_preserves_parallax_flag)
+Environment mapping patching should not strip parallax from mixed workflows. ... ok
+test_enabling_env_mapping_preserves_pom_flag (test_nif_patcher.TestFlagManagement.test_enabling_env_mapping_preserves_pom_flag)
+Environment mapping patching should not strip ENB POM from mixed workflows. ... ok
+test_enabling_parallax_clears_multi_layer_flag (test_nif_patcher.TestFlagManagement.test_enabling_parallax_clears_multi_layer_flag)
+SLSF2_MULTI_LAYER_PARALLAX must be cleared when enabling parallax. ... ok
+test_enabling_parallax_preserves_existing_env_mapping_flag (test_nif_patcher.TestFlagManagement.test_enabling_parallax_preserves_existing_env_mapping_flag)
+Parallax patching should not strip environment mapping from mixed workflows. ... ok
+test_enabling_parallax_preserves_existing_pbr_flag (test_nif_patcher.TestFlagManagement.test_enabling_parallax_preserves_existing_pbr_flag)
+Parallax patching should not strip the TruePBR flag from mixed workflows. ... ok
+test_enabling_parallax_sets_vertex_colors (test_nif_patcher.TestFlagManagement.test_enabling_parallax_sets_vertex_colors)
+SLSF2_VERTEX_COLORS must be set alongside SLSF1_PARALLAX. ... ok
+test_enabling_pbr_sets_truepbr_flag (test_nif_patcher.TestFlagManagement.test_enabling_pbr_sets_truepbr_flag) ... ok
+test_already_type3_not_double_upgraded (test_nif_patcher.TestForceShaderType3.test_already_type3_not_double_upgraded) ... ok
+test_flags_set_after_upgrade (test_nif_patcher.TestForceShaderType3.test_flags_set_after_upgrade) ... ok
+test_nif_file_remains_parseable_after_upgrade (test_nif_patcher.TestForceShaderType3.test_nif_file_remains_parseable_after_upgrade) ... ok
+test_upgrades_type0_to_type3 (test_nif_patcher.TestForceShaderType3.test_upgrades_type0_to_type3) ... ok
+test_clear_diffuse_texture_path (test_nif_patcher.TestGlowAndDiffusePatching.test_clear_diffuse_texture_path) ... ok
+test_clear_glow_texture_path (test_nif_patcher.TestGlowAndDiffusePatching.test_clear_glow_texture_path) ... ok
+test_disable_glow_map_flag (test_nif_patcher.TestGlowAndDiffusePatching.test_disable_glow_map_flag) ... ok
+test_enable_glow_map_flag (test_nif_patcher.TestGlowAndDiffusePatching.test_enable_glow_map_flag) ... ok
+test_glow_and_parallax_patched_together (test_nif_patcher.TestGlowAndDiffusePatching.test_glow_and_parallax_patched_together) ... ok
+test_writes_diffuse_texture_path (test_nif_patcher.TestGlowAndDiffusePatching.test_writes_diffuse_texture_path) ... ok
+test_writes_glow_texture_path (test_nif_patcher.TestGlowAndDiffusePatching.test_writes_glow_texture_path) ... ok
+test_guess_cubemap_path_from_diffuse (test_nif_patcher.TestGuessHelpers.test_guess_cubemap_path_from_diffuse) ... ok
+test_guess_cubemap_path_from_existing_env_suffix (test_nif_patcher.TestGuessHelpers.test_guess_cubemap_path_from_existing_env_suffix) ... ok
+test_guess_cubemap_returns_none_for_no_paths (test_nif_patcher.TestGuessHelpers.test_guess_cubemap_returns_none_for_no_paths) ... ok
+test_guess_env_mask_path_from_diffuse (test_nif_patcher.TestGuessHelpers.test_guess_env_mask_path_from_diffuse) ... ok
+test_guess_env_mask_path_from_existing_orm_slot (test_nif_patcher.TestGuessHelpers.test_guess_env_mask_path_from_existing_orm_slot) ... ok
+test_guess_env_mask_path_from_existing_rmaos_slot (test_nif_patcher.TestGuessHelpers.test_guess_env_mask_path_from_existing_rmaos_slot) ... ok
+test_guess_env_mask_path_from_existing_slot (test_nif_patcher.TestGuessHelpers.test_guess_env_mask_path_from_existing_slot) ... ok
+test_guess_env_mask_path_prefers_cm_suffix_when_requested (test_nif_patcher.TestGuessHelpers.test_guess_env_mask_path_prefers_cm_suffix_when_requested) ... ok
+test_guess_env_mask_path_prefers_orm_suffix_when_requested (test_nif_patcher.TestGuessHelpers.test_guess_env_mask_path_prefers_orm_suffix_when_requested) ... ok
+test_guess_env_mask_path_prefers_rmaos_suffix_when_requested (test_nif_patcher.TestGuessHelpers.test_guess_env_mask_path_prefers_rmaos_suffix_when_requested) ... ok
+test_guess_env_mask_returns_none_for_no_paths (test_nif_patcher.TestGuessHelpers.test_guess_env_mask_returns_none_for_no_paths) ... ok
+test_guess_glow_path_from_diffuse (test_nif_patcher.TestGuessHelpers.test_guess_glow_path_from_diffuse) ... ok
+test_guess_glow_path_from_existing_emis_suffix (test_nif_patcher.TestGuessHelpers.test_guess_glow_path_from_existing_emis_suffix) ... ok
+test_guess_glow_path_from_existing_glow_slot (test_nif_patcher.TestGuessHelpers.test_guess_glow_path_from_existing_glow_slot) ... ok
+test_guess_glow_path_from_existing_skin_tint_slot (test_nif_patcher.TestGuessHelpers.test_guess_glow_path_from_existing_skin_tint_slot) ... ok
+test_guess_glow_returns_none_for_no_diffuse (test_nif_patcher.TestGuessHelpers.test_guess_glow_returns_none_for_no_diffuse) ... ok
+test_find_nif_files_recursive (test_nif_patcher.TestHelpers.test_find_nif_files_recursive) ... ok
+test_find_nif_files_recursive_case_insensitive_extension (test_nif_patcher.TestHelpers.test_find_nif_files_recursive_case_insensitive_extension) ... ok
+test_guess_normal_path_msn (test_nif_patcher.TestHelpers.test_guess_normal_path_msn) ... ok
+test_guess_normal_path_standard (test_nif_patcher.TestHelpers.test_guess_normal_path_standard) ... ok
+test_guess_parallax_path_from_diffuse (test_nif_patcher.TestHelpers.test_guess_parallax_path_from_diffuse) ... ok
+test_guess_parallax_returns_none_for_no_diffuse (test_nif_patcher.TestHelpers.test_guess_parallax_returns_none_for_no_diffuse) ... ok
+test_all_type0_blocks_upgraded_to_type3 (test_nif_patcher.TestMultiBlockType0Upgrade.test_all_type0_blocks_upgraded_to_type3)
+All type-0 BSLightingShaderProperty blocks must be upgraded when ... ok
+test_mixed_types_only_upgrades_type0 (test_nif_patcher.TestMultiBlockType0Upgrade.test_mixed_types_only_upgrades_type0)
+Only type-0 blocks should be upgraded; existing type-3 blocks stay untouched. ... ok
+test_nif_parseable_after_multi_block_upgrade (test_nif_patcher.TestMultiBlockType0Upgrade.test_nif_parseable_after_multi_block_upgrade)
+The NIF must remain structurally valid after upgrading multiple blocks. ... ok
+test_builder_creates_multiple_shader_blocks (test_nif_patcher.TestMultipleShaderBlocks.test_builder_creates_multiple_shader_blocks) ... ok
+test_patch_affects_all_shader_blocks (test_nif_patcher.TestMultipleShaderBlocks.test_patch_affects_all_shader_blocks) ... ok
+test_has_glow_map_flag_false_by_default (test_nif_patcher.TestNifShaderInfoProperties.test_has_glow_map_flag_false_by_default) ... ok
+test_has_glow_map_flag_true_when_set (test_nif_patcher.TestNifShaderInfoProperties.test_has_glow_map_flag_true_when_set) ... ok
+test_shader_type_name_default (test_nif_patcher.TestNifShaderInfoProperties.test_shader_type_name_default) ... ok
+test_shader_type_name_heightmap (test_nif_patcher.TestNifShaderInfoProperties.test_shader_type_name_heightmap) ... ok
+test_shader_type_name_unknown (test_nif_patcher.TestNifShaderInfoProperties.test_shader_type_name_unknown) ... ok
+test_shader_type_names_covers_all_known_types (test_nif_patcher.TestNifShaderInfoProperties.test_shader_type_names_covers_all_known_types) ... ok
+test_extreme_parallax_scale_allowed (test_nif_patcher.TestParallaxScale.test_extreme_parallax_scale_allowed) ... ok
+test_no_scale_on_type0_without_force (test_nif_patcher.TestParallaxScale.test_no_scale_on_type0_without_force) ... ok
+test_write_parallax_scale_on_type3_block (test_nif_patcher.TestParallaxScale.test_write_parallax_scale_on_type3_block) ... ok
+test_scale_only_no_patch_when_already_matching (test_nif_patcher.TestParallaxScaleOnly.test_scale_only_no_patch_when_already_matching)
+No write should occur when the existing scale already matches the requested value. ... ok
+test_scale_only_updates_existing_type3_block (test_nif_patcher.TestParallaxScaleOnly.test_scale_only_updates_existing_type3_block)
+Setting parallax_scale alone (no enable_parallax) must update the ... ok
+test_backup_is_written (test_nif_patcher.TestPatchNifFlags.test_backup_is_written) ... ok
+test_disable_env_mapping_clears_flag (test_nif_patcher.TestPatchNifFlags.test_disable_env_mapping_clears_flag) ... ok
+test_disable_parallax_clears_parallax_and_pom_flags (test_nif_patcher.TestPatchNifFlags.test_disable_parallax_clears_parallax_and_pom_flags) ... ok
+test_dry_run_does_not_write (test_nif_patcher.TestPatchNifFlags.test_dry_run_does_not_write) ... ok
+test_enable_env_mapping_sets_flag (test_nif_patcher.TestPatchNifFlags.test_enable_env_mapping_sets_flag) ... ok
+test_enable_parallax_sets_flag (test_nif_patcher.TestPatchNifFlags.test_enable_parallax_sets_flag) ... ok
+test_enable_pom_sets_both_parallax_and_occlusion_flags (test_nif_patcher.TestPatchNifFlags.test_enable_pom_sets_both_parallax_and_occlusion_flags) ... ok
+test_no_options_returns_success_with_no_changes (test_nif_patcher.TestPatchNifFlags.test_no_options_returns_success_with_no_changes) ... ok
+test_patch_is_idempotent (test_nif_patcher.TestPatchNifFlags.test_patch_is_idempotent) ... ok
+test_clear_env_mask_texture_path (test_nif_patcher.TestPatchTexturePaths.test_clear_env_mask_texture_path) ... ok
+test_clear_parallax_texture_path (test_nif_patcher.TestPatchTexturePaths.test_clear_parallax_texture_path) ... ok
+test_extends_low_slot_texture_set_to_full_skyrim_slot_count (test_nif_patcher.TestPatchTexturePaths.test_extends_low_slot_texture_set_to_full_skyrim_slot_count) ... ok
+test_extends_low_slot_u16_texture_set_to_full_skyrim_slot_count (test_nif_patcher.TestPatchTexturePaths.test_extends_low_slot_u16_texture_set_to_full_skyrim_slot_count) ... ok
+test_normalises_absolute_data_singular_texture_root (test_nif_patcher.TestPatchTexturePaths.test_normalises_absolute_data_singular_texture_root) ... ok
+test_normalises_absolute_data_textures_path_to_skyrim_relative (test_nif_patcher.TestPatchTexturePaths.test_normalises_absolute_data_textures_path_to_skyrim_relative) ... ok
+test_normalises_dot_segments_and_duplicate_separators (test_nif_patcher.TestPatchTexturePaths.test_normalises_dot_segments_and_duplicate_separators) ... ok
+test_normalises_duplicate_textures_root_segments (test_nif_patcher.TestPatchTexturePaths.test_normalises_duplicate_textures_root_segments) ... ok
+test_normalises_forward_slashes_to_backslashes (test_nif_patcher.TestPatchTexturePaths.test_normalises_forward_slashes_to_backslashes) ... ok
+test_normalises_singular_texture_root (test_nif_patcher.TestPatchTexturePaths.test_normalises_singular_texture_root) ... ok
+test_rejects_texture_paths_outside_textures_root (test_nif_patcher.TestPatchTexturePaths.test_rejects_texture_paths_outside_textures_root) ... ok
+test_rejects_whitespace_only_texture_path_option (test_nif_patcher.TestPatchTexturePaths.test_rejects_whitespace_only_texture_path_option) ... ok
+test_replace_longer_path_with_shorter (test_nif_patcher.TestPatchTexturePaths.test_replace_longer_path_with_shorter) ... ok
+test_writes_env_mask_texture_path_even_without_enabling_env_mapping_flag (test_nif_patcher.TestPatchTexturePaths.test_writes_env_mask_texture_path_even_without_enabling_env_mapping_flag) ... ok
+test_writes_normal_texture_path (test_nif_patcher.TestPatchTexturePaths.test_writes_normal_texture_path) ... ok
+test_writes_parallax_texture_path (test_nif_patcher.TestPatchTexturePaths.test_writes_parallax_texture_path) ... ok
+test_writes_parallax_texture_path_even_without_enabling_parallax_flag (test_nif_patcher.TestPatchTexturePaths.test_writes_parallax_texture_path_even_without_enabling_parallax_flag) ... ok
+test_patch_nif_with_u16_count_texture_set (test_nif_patcher.TestScanNif.test_patch_nif_with_u16_count_texture_set)
+patch_nif must work correctly on a NIF whose texture set uses a u16 count. ... ok
+test_scan_accepts_crlf_header_line (test_nif_patcher.TestScanNif.test_scan_accepts_crlf_header_line) ... ok
+test_scan_accepts_user_version_2_100 (test_nif_patcher.TestScanNif.test_scan_accepts_user_version_2_100) ... ok
+test_scan_bad_file_returns_empty (test_nif_patcher.TestScanNif.test_scan_bad_file_returns_empty) ... ok
+test_scan_decodes_packed_shader_type_value (test_nif_patcher.TestScanNif.test_scan_decodes_packed_shader_type_value) ... ok
+test_scan_detects_shader_type (test_nif_patcher.TestScanNif.test_scan_detects_shader_type) ... ok
+test_scan_detects_shifted_texture_set_layout (test_nif_patcher.TestScanNif.test_scan_detects_shifted_texture_set_layout) ... ok
+test_scan_does_not_raise_out_of_range_for_invalid_num_extra (test_nif_patcher.TestScanNif.test_scan_does_not_raise_out_of_range_for_invalid_num_extra) ... ok
+test_scan_ignores_shader_controller_block_name (test_nif_patcher.TestScanNif.test_scan_ignores_shader_controller_block_name)
+Only exact BSLightingShaderProperty blocks should be parsed as shader blocks. ... ok
+test_scan_missing_file_returns_empty (test_nif_patcher.TestScanNif.test_scan_missing_file_returns_empty) ... ok
+test_scan_parses_nif_with_num_groups_zero (test_nif_patcher.TestScanNif.test_scan_parses_nif_with_num_groups_zero)
+num_groups=0 is always present in real Skyrim SE NIFs (user_version_2 < 130). ... ok
+test_scan_parses_u16_count_texture_set_with_empty_paths (test_nif_patcher.TestScanNif.test_scan_parses_u16_count_texture_set_with_empty_paths)
+LE-format BSShaderTextureSet with u16 count and all-empty paths. ... ok
+test_scan_parses_u16_count_texture_set_with_nonempty_paths (test_nif_patcher.TestScanNif.test_scan_parses_u16_count_texture_set_with_nonempty_paths)
+LE-format BSShaderTextureSet with u16 count and actual texture paths. ... ok
+test_scan_reads_texture_paths (test_nif_patcher.TestScanNif.test_scan_reads_texture_paths) ... ok
+test_scan_returns_one_shader_for_minimal_nif (test_nif_patcher.TestScanNif.test_scan_returns_one_shader_for_minimal_nif) ... ok
+test_scan_u16_count_no_parse_error_in_diagnostics (test_nif_patcher.TestScanNif.test_scan_u16_count_no_parse_error_in_diagnostics)
+Scanning a u16-count NIF must not produce BSShaderTextureSet parse errors. ... ok
+test_env_map_scale_patched_on_envmap_shader (test_nif_patcher.TestShaderFieldPatches.test_env_map_scale_patched_on_envmap_shader)
+env_map_scale must be written when shader type is ENVMAP (1). ... ok
+test_fix_mesh_lighting_clamps_high_value (test_nif_patcher.TestShaderFieldPatches.test_fix_mesh_lighting_clamps_high_value)
+fix_mesh_lighting must clamp light_eff1 > 0.6 down to 0.6. ... ok
+test_fix_mesh_lighting_leaves_low_value_unchanged (test_nif_patcher.TestShaderFieldPatches.test_fix_mesh_lighting_leaves_low_value_unchanged)
+fix_mesh_lighting must not modify light_eff1 when it is already ≤ 0.6. ... ok
+test_spec_color_patch (test_nif_patcher.TestShaderFieldPatches.test_spec_color_patch)
+spec_color option must write all three RGB floats to the shader block. ... ok
+test_spec_strength_patch (test_nif_patcher.TestShaderFieldPatches.test_spec_strength_patch)
+spec_strength option must write the correct float to the shader block. ... ok
+test_havok_skip_does_not_affect_env_mapping (test_nif_patcher.TestSkipConditions.test_havok_skip_does_not_affect_env_mapping)
+Havok skip only blocks parallax; env-mapping patching must still work. ... ok
+test_no_skip_when_flags_disabled (test_nif_patcher.TestSkipConditions.test_no_skip_when_flags_disabled)
+With all skip options disabled, decal shaders still get parallax. ... ok
+test_skip_anisotropic_lighting (test_nif_patcher.TestSkipConditions.test_skip_anisotropic_lighting)
+Shaders with SLSF2_ANISOTROPIC_LIGHTING must not receive parallax. ... ok
+test_skip_back_lighting (test_nif_patcher.TestSkipConditions.test_skip_back_lighting)
+Shaders with SLSF2_BACK_LIGHTING must not receive parallax. ... ok
+test_skip_decal_flag (test_nif_patcher.TestSkipConditions.test_skip_decal_flag)
+Shaders with SLSF1_DECAL must not receive parallax. ... ok
+test_skip_dynamic_decal_flag (test_nif_patcher.TestSkipConditions.test_skip_dynamic_decal_flag)
+Shaders with SLSF1_DYNAMIC_DECAL must not receive parallax. ... ok
+test_skip_if_alpha (test_nif_patcher.TestSkipConditions.test_skip_if_alpha)
+Shapes with NiAlphaProperty must not receive parallax. ... ok
+test_skip_if_havok (test_nif_patcher.TestSkipConditions.test_skip_if_havok)
+NIFs with BSBehaviorGraphExtraData must not have parallax enabled. ... ok
+test_skip_if_skinned (test_nif_patcher.TestSkipConditions.test_skip_if_skinned)
+Shapes with a skin instance must not receive parallax. ... ok
+test_skip_incompatible_shader_type (test_nif_patcher.TestSkipConditions.test_skip_incompatible_shader_type)
+Shaders with types other than Default/Parallax/EnvMap must be skipped. ... ok
+test_skip_rim_lighting (test_nif_patcher.TestSkipConditions.test_skip_rim_lighting)
+Shaders with SLSF2_RIM_LIGHTING must not receive parallax. ... ok
+test_skip_soft_lighting (test_nif_patcher.TestSkipConditions.test_skip_soft_lighting)
+Shaders with SLSF2_SOFT_LIGHTING must not receive parallax. ... ok
+test_reports_glow_flag_without_glow_slot (test_nif_patcher.TestValidateGlowMap.test_reports_glow_flag_without_glow_slot) ... ok
+test_reports_glow_slot_without_glow_flag (test_nif_patcher.TestValidateGlowMap.test_reports_glow_slot_without_glow_flag) ... ok
+test_accepts_c_suffix_in_env_mask_slot (test_nif_patcher.TestValidateNifForParallax.test_accepts_c_suffix_in_env_mask_slot) ... ok
+test_accepts_g_suffix_in_glow_slot (test_nif_patcher.TestValidateNifForParallax.test_accepts_g_suffix_in_glow_slot) ... ok
+test_accepts_orm_suffix_in_env_mask_slot (test_nif_patcher.TestValidateNifForParallax.test_accepts_orm_suffix_in_env_mask_slot) ... ok
+test_invalid_for_non_nif (test_nif_patcher.TestValidateNifForParallax.test_invalid_for_non_nif) ... ok
+test_ready_when_flag_and_texture_set (test_nif_patcher.TestValidateNifForParallax.test_ready_when_flag_and_texture_set) ... ok
+test_reports_actionable_resolution_for_truncated_header (test_nif_patcher.TestValidateNifForParallax.test_reports_actionable_resolution_for_truncated_header) ... ok
+test_reports_blender_style_env_mask_suffix_in_slot_five (test_nif_patcher.TestValidateNifForParallax.test_reports_blender_style_env_mask_suffix_in_slot_five) ... ok
+test_reports_env_mask_slot_without_env_mapping_flag (test_nif_patcher.TestValidateNifForParallax.test_reports_env_mask_slot_without_env_mapping_flag) ... ok
+test_reports_env_mask_suffix_in_diffuse_slot (test_nif_patcher.TestValidateNifForParallax.test_reports_env_mask_suffix_in_diffuse_slot) ... ok
+test_reports_legacy_shader_property_when_no_bslighting_blocks_exist (test_nif_patcher.TestValidateNifForParallax.test_reports_legacy_shader_property_when_no_bslighting_blocks_exist) ... ok
+test_reports_low_parallax_scale (test_nif_patcher.TestValidateNifForParallax.test_reports_low_parallax_scale) ... ok
+test_reports_missing_flag (test_nif_patcher.TestValidateNifForParallax.test_reports_missing_flag) ... ok
+test_reports_non_cubemap_texture_in_cubemap_slot (test_nif_patcher.TestValidateNifForParallax.test_reports_non_cubemap_texture_in_cubemap_slot) ... ok
+test_reports_non_diffuse_texture_in_diffuse_slot (test_nif_patcher.TestValidateNifForParallax.test_reports_non_diffuse_texture_in_diffuse_slot) ... ok
+test_reports_non_skyrim_relative_parallax_path (test_nif_patcher.TestValidateNifForParallax.test_reports_non_skyrim_relative_parallax_path) ... ok
+test_reports_pom_without_base_parallax_flag (test_nif_patcher.TestValidateNifForParallax.test_reports_pom_without_base_parallax_flag) ... ok
+test_reports_skin_tint_suffix_in_diffuse_slot (test_nif_patcher.TestValidateNifForParallax.test_reports_skin_tint_suffix_in_diffuse_slot) ... ok
+test_reports_truepbr_alias_suffix_in_diffuse_slot (test_nif_patcher.TestValidateNifForParallax.test_reports_truepbr_alias_suffix_in_diffuse_slot) ... ok
+test_reports_wrong_texture_type_in_env_mask_slot (test_nif_patcher.TestValidateNifForParallax.test_reports_wrong_texture_type_in_env_mask_slot) ... ok
+test_reports_wrong_texture_type_in_glow_slot (test_nif_patcher.TestValidateNifForParallax.test_reports_wrong_texture_type_in_glow_slot) ... ok
+test_reports_wrong_texture_type_in_normal_slot (test_nif_patcher.TestValidateNifForParallax.test_reports_wrong_texture_type_in_normal_slot) ... ok
+test_reports_wrong_texture_type_in_normal_slot_for_env_mask_suffix (test_nif_patcher.TestValidateNifForParallax.test_reports_wrong_texture_type_in_normal_slot_for_env_mask_suffix) ... ok
+test_reports_wrong_texture_type_in_normal_slot_for_truepbr_alias_suffix (test_nif_patcher.TestValidateNifForParallax.test_reports_wrong_texture_type_in_normal_slot_for_truepbr_alias_suffix) ... ok
+test_truepbr_orm_path_warns_when_not_in_textures_pbr (test_nif_patcher.TestValidateNifForParallax.test_truepbr_orm_path_warns_when_not_in_textures_pbr) ... ok
+test_truepbr_rmaos_path_warns_when_not_in_textures_pbr (test_nif_patcher.TestValidateNifForParallax.test_truepbr_rmaos_path_warns_when_not_in_textures_pbr) ... ok
+
+======================================================================
+ERROR: test_generate_textures (unittest.loader._FailedTest.test_generate_textures)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_generate_textures
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/unittest/loader.py", line 394, in _find_test_path
+    module = self._get_module_from_name(name)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/unittest/loader.py", line 337, in _get_module_from_name
+    __import__(name)
+  File "/tmp/workspace/JosephsDeadish/skyrim-se-parllax-and-and-diffuse-generator-/tests/test_generate_textures.py", line 7, in <module>
+    import numpy as np
+ModuleNotFoundError: No module named 'numpy'
+
+
+----------------------------------------------------------------------
+Ran 153 tests in 0.083s
+
+FAILED (errors=1)

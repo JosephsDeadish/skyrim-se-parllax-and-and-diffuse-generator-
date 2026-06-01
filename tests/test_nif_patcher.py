@@ -12,6 +12,7 @@ from nif_patcher import (
     SLSF1_PARALLAX,
     SLSF1_PARALLAX_OCCLUSION,
     SLSF2_GLOW_MAP,
+    SLSF2_UNUSED01,
     SLSF2_VERTEX_COLORS,
     SHADER_TYPE_DEFAULT,
     SHADER_TYPE_ENVMAP,
@@ -27,6 +28,7 @@ from nif_patcher import (
     NifPatchOptions,
     NifPatchResult,
     find_nif_files,
+    guess_cubemap_path_for_nif,
     guess_env_mask_path_for_nif,
     guess_glow_path_for_nif,
     guess_normal_path_for_nif,
@@ -38,6 +40,7 @@ from nif_patcher import (
     validate_nif_for_parallax,
     _Buf,
     _build_block_map,
+    _renderer_compatibility,
     _read_header,
 )
 
@@ -67,10 +70,11 @@ def _build_shader_block(
     texture_set_ref: int = 0,
 ) -> bytes:
     """Build a single BSLightingShaderProperty block body."""
-    # NiObjectNET: name_ref(0) + num_extra(0) + controller(-1)
+    # Skyrim/SE BSLightingShaderProperty starts with NiObjectNET, then shader_type.
+    # NiObjectNET: name_ref + num_extra + controller_ref
     nio = struct.pack("<IIi", 0, 0, -1)
+    shader_type_field = struct.pack("<I", shader_type)
     flags = struct.pack("<II", flags1, flags2)
-    stype = struct.pack("<I", shader_type)
     uv = struct.pack("<ffff", 0.0, 0.0, 1.0, 1.0)
     tsref = struct.pack("<i", texture_set_ref)
     emit = struct.pack("<ffff", 0.0, 0.0, 0.0, 1.0)
@@ -78,12 +82,41 @@ def _build_shader_block(
     spec = struct.pack("<ffff", 1.0, 1.0, 1.0, 1.0)
     light = struct.pack("<ff", 0.3, 2.0)
 
-    body = nio + flags + stype + uv + tsref + emit + misc + spec + light
+    body = nio + shader_type_field + flags + uv + tsref + emit + misc + spec + light
     if shader_type == SHADER_TYPE_HEIGHTMAP:
         scale = parallax_scale if parallax_scale is not None else 1.0
         body += struct.pack("<ff", 4.0, scale)
     elif shader_type == SHADER_TYPE_ENVMAP:
         # Env map scale is the first type-specific field after the common section
+        scale = env_map_scale if env_map_scale is not None else 1.0
+        body += struct.pack("<f", scale)
+    return body
+
+
+def _build_real_shader_block(
+    *,
+    shader_type: int = SHADER_TYPE_DEFAULT,
+    flags1: int = 0,
+    flags2: int = 0,
+    parallax_scale: float | None = None,
+    env_map_scale: float | None = None,
+    texture_set_ref: int = 0,
+) -> bytes:
+    """Build a Skyrim-style BSLightingShaderProperty without a standalone shader_type field."""
+    nio = struct.pack("<IIi", 0, 0, -1)
+    flags = struct.pack("<II", flags1, flags2)
+    uv = struct.pack("<ffff", 0.0, 0.0, 1.0, 1.0)
+    tsref = struct.pack("<i", texture_set_ref)
+    emit = struct.pack("<ffff", 0.0, 0.0, 0.0, 1.0)
+    misc = struct.pack("<Ifff", 3, 1.0, 0.0, 80.0)
+    spec = struct.pack("<ffff", 1.0, 1.0, 1.0, 1.0)
+    light = struct.pack("<ff", 0.3, 2.0)
+
+    body = nio + flags + uv + tsref + emit + misc + spec + light
+    if shader_type == SHADER_TYPE_HEIGHTMAP:
+        scale = parallax_scale if parallax_scale is not None else 1.0
+        body += struct.pack("<ff", 4.0, scale)
+    elif shader_type == SHADER_TYPE_ENVMAP:
         scale = env_map_scale if env_map_scale is not None else 1.0
         body += struct.pack("<f", scale)
     return body
@@ -116,6 +149,7 @@ def _build_minimal_nif(
     flags1: int = 0,
     flags2: int = 0,
     parallax_scale: float | None = None,
+    env_map_scale: float | None = None,
     texture_paths: list[str] | None = None,
     shader_block_type: str = "BSLightingShaderProperty",
     user_ver2: int = 83,
@@ -123,6 +157,7 @@ def _build_minimal_nif(
     texture_set_layout_shift: int = 0,
     texture_set_count_u16: bool = False,
     extra_shader_blocks: list[dict] | None = None,
+    shader_layout: str = "legacy",
 ) -> bytes:
     """Build a minimal but structurally valid Skyrim SE NIF in memory.
 
@@ -147,11 +182,13 @@ def _build_minimal_nif(
         texture_set_layout_shift=texture_set_layout_shift,
         texture_set_count_u16=texture_set_count_u16,
     )
-    sp0_body = _build_shader_block(
+    shader_builder = _build_shader_block if shader_layout == "legacy" else _build_real_shader_block
+    sp0_body = shader_builder(
         shader_type=shader_type,
         flags1=flags1,
         flags2=flags2,
         parallax_scale=parallax_scale,
+        env_map_scale=env_map_scale,
         texture_set_ref=0,
     )
 
@@ -160,7 +197,7 @@ def _build_minimal_nif(
     for extra in (extra_shader_blocks or []):
         ts_idx = 2 + len(extra_bodies) * 2
         ts_body = _build_texture_set_block()
-        sp_body = _build_shader_block(texture_set_ref=ts_idx, **extra)
+        sp_body = shader_builder(texture_set_ref=ts_idx, **extra)
         extra_bodies.append((ts_body, sp_body))
 
     # --- Assemble block list --------------------------------------------
@@ -184,8 +221,18 @@ def _build_minimal_nif(
     endian = struct.pack("B", 1)
     user_ver = struct.pack("<I", 12)
     num_blocks_bytes = struct.pack("<I", num_blks)
-    user_ver2 = struct.pack("<I", user_ver2)
-    export = _sstring_u8("") + _sstring_u8("") + _sstring_u8("")
+    bs_version = user_ver2
+    user_ver2 = struct.pack("<I", bs_version)
+    # BSStreamHeader export strings depend on BS version (user_ver2 field).
+    # Skyrim SE commonly uses 83/100; CK-style exports can use 130.
+    export = _sstring_u8("")  # author
+    if bs_version > 130:
+        export += struct.pack("<I", 0)  # unknown int (FO4+ style)
+    if bs_version < 131:
+        export += _sstring_u8("")  # process script
+    export += _sstring_u8("")  # export script
+    if bs_version >= 103:
+        export += _sstring_u8("")  # max filepath
     num_block_types = struct.pack("<H", len(block_type_names))
     btypes = b"".join(_sstring_u32(t) for t in block_type_names)
     string_table = struct.pack("<II", 0, 0)
@@ -242,6 +289,11 @@ class TestScanNif(unittest.TestCase):
         infos = scan_nif(nif)
         self.assertEqual(len(infos), 1)
 
+    def test_scan_accepts_user_version_2_130(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+
     def test_scan_accepts_crlf_header_line(self) -> None:
         nif = _write_nif(self.tmp, header_line_ending=b"\r\n")
         infos = scan_nif(nif)
@@ -265,6 +317,29 @@ class TestScanNif(unittest.TestCase):
         infos = scan_nif(nif)
         self.assertEqual(len(infos), 1)
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
+
+    def test_scan_prefers_real_skyrim_shader_layout(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            flags1=0x82400301,
+        )
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
+
+    def test_scan_reads_env_map_scale_from_real_skyrim_layout(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=0x82400301,
+            env_map_scale=2.5,
+        )
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
+        self.assertAlmostEqual(infos[0].env_map_scale or 0.0, 2.5, places=3)
 
     def test_scan_reads_texture_paths(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8
@@ -311,7 +386,7 @@ class TestScanNif(unittest.TestCase):
     def test_scan_does_not_raise_out_of_range_for_invalid_num_extra(self) -> None:
         nif = _write_nif(self.tmp)
         raw = bytearray(nif.read_bytes())
-        shader_header = struct.pack("<IIi", 0, 0, -1)
+        shader_header = struct.pack("<IIiI", 0, 0, -1, SHADER_TYPE_DEFAULT)
         shader_start = raw.find(shader_header)
         self.assertNotEqual(shader_start, -1)
         struct.pack_into("<I", raw, shader_start + 4, 0xFFFFFFFF)
@@ -468,6 +543,15 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertIn("slot 1 normal path", joined)
         self.assertIn("_n.dds or _msn.dds", joined)
 
+    def test_reports_wrong_texture_type_in_normal_slot_for_truepbr_alias_suffix(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_NORMAL] = "textures\\arch\\stone_orm.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 1 normal path", joined)
+        self.assertIn("_n.dds or _msn.dds", joined)
+
     def test_reports_wrong_texture_type_in_glow_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_n.dds"
@@ -476,6 +560,14 @@ class TestValidateNifForParallax(unittest.TestCase):
         joined = "\n".join(v.issues + v.suggestions).lower()
         self.assertIn("slot 2 glow path", joined)
         self.assertIn("slot 2 for emissive textures", joined)
+
+    def test_accepts_g_suffix_in_glow_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_g.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertNotIn("slot 2 glow path", joined)
 
     def test_reports_wrong_texture_type_in_env_mask_slot(self) -> None:
         paths = [""] * 9
@@ -499,6 +591,122 @@ class TestValidateNifForParallax(unittest.TestCase):
         joined = "\n".join(v.issues + v.suggestions).lower()
         self.assertNotIn("slot 5 environment-mask path", joined)
 
+    def test_reports_generic_orm_suffix_in_env_mask_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_orm.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            shader_type=SHADER_TYPE_ENVMAP,
+        )
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("generic packed alias suffix", joined)
+        self.assertIn("target workflow is unambiguous", joined)
+
+    def test_truepbr_rmaos_path_warns_when_not_in_textures_pbr(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\architecture\\stone_rmaos.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            shader_type=SHADER_TYPE_ENVMAP,
+        )
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("textures\\pbr\\", joined)
+        self.assertIn("pbrnifpatcher json", joined)
+
+    def test_truepbr_orm_path_warns_when_not_in_textures_pbr(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\architecture\\stone_orm.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            shader_type=SHADER_TYPE_ENVMAP,
+        )
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("textures\\pbr\\", joined)
+        self.assertIn("pbrnifpatcher json", joined)
+        self.assertIn("generic packed alias suffix", joined)
+        self.assertIn("_rmaos/_ramos", joined)
+
+    def test_reports_blender_style_diffuse_suffix(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_DIFFUSE] = "textures\\architecture\\stone_albedo.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("blender/authoring suffix naming", joined)
+        self.assertIn("bare diffuse name", joined)
+
+    def test_reports_non_dds_extension_in_parallax_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\architecture\\stone_p.png"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 3 parallax path", joined)
+        self.assertIn("not a .dds texture path", joined)
+        self.assertIn("convert parallax/height textures to .dds", joined)
+
+    def test_truepbr_renderer_notes_distinguish_generic_orm_alias(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\architecture\\stone_orm.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        infos = scan_nif(nif)
+        notes = _renderer_compatibility(infos[0])
+        joined = "\n".join(notes["truepbr"]).lower()
+        self.assertIn("generic packed alias", joined)
+        self.assertIn("blender/substance", joined)
+
+    def test_renderer_verdicts_explain_vanilla_ready_but_enb_not_ready(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_NORMAL] = "textures\\architecture\\stone_n.dds"
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\architecture\\stone_p.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=SLSF1_PARALLAX,
+            shader_type=SHADER_TYPE_HEIGHTMAP,
+        )
+        v = validate_nif_for_parallax(nif)
+        self.assertIn("mesh-side setup looks ready", v.renderer_verdicts["vanilla"].lower())
+        enb_verdict = v.renderer_verdicts["enb"].lower()
+        self.assertIn("won't work yet", enb_verdict)
+        self.assertIn("envmap", enb_verdict)
+        self.assertIn("model_space_normals", enb_verdict)
+
+    def test_renderer_verdicts_flag_generic_truepbr_aliases(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_NORMAL] = "textures\\pbr\\architecture\\stone_n.dds"
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\pbr\\architecture\\stone_orm.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths, flags2=SLSF2_UNUSED01)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("generic packed alias suffix", joined)
+        truepbr_verdict = v.renderer_verdicts["truepbr"].lower()
+        self.assertIn("won't work yet", truepbr_verdict)
+        self.assertIn("generic packed alias", truepbr_verdict)
+
+    def test_reports_blender_style_env_mask_suffix_in_slot_five(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\architecture\\stone_rough.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            shader_type=SHADER_TYPE_ENVMAP,
+        )
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 5 environment-mask path", joined)
+        self.assertIn("use slot 5 for _m.dds", joined)
+
     def test_reports_non_diffuse_texture_in_diffuse_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_DIFFUSE] = "textures\\arch\\stone_p.dds"
@@ -511,6 +719,15 @@ class TestValidateNifForParallax(unittest.TestCase):
     def test_reports_env_mask_suffix_in_diffuse_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_DIFFUSE] = "textures\\arch\\stone_em.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 0 diffuse path", joined)
+        self.assertIn("use slot 0 for diffuse/albedo", joined)
+
+    def test_reports_truepbr_alias_suffix_in_diffuse_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_DIFFUSE] = "textures\\arch\\stone_orms.dds"
         nif = _write_nif(self.tmp, texture_paths=paths)
         v = validate_nif_for_parallax(nif)
         joined = "\n".join(v.issues + v.suggestions).lower()
@@ -776,6 +993,34 @@ class TestPatchTexturePaths(unittest.TestCase):
             "textures\\architecture\\stone\\stone_p.dds",
         )
 
+    def test_rejects_texture_paths_outside_textures_root(self) -> None:
+        nif = _write_nif(self.tmp)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_texture_path=r"C:\Users\Desktop\stone_p.dds",
+                backup=False,
+            ),
+        )
+        self.assertFalse(result.success)
+        self.assertIn("Patch error:", " ".join(result.errors))
+        self.assertIn("Expected a Skyrim-relative path under 'textures\\'", result.message)
+
+    def test_rejects_whitespace_only_texture_path_option(self) -> None:
+        nif = _write_nif(self.tmp)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_texture_path="   ",
+                backup=False,
+            ),
+        )
+        self.assertFalse(result.success)
+        self.assertEqual(result.message, "Invalid parallax_texture_path.")
+        self.assertIn("parallax_texture_path cannot be empty or whitespace-only.", result.errors)
+
     def test_writes_normal_texture_path(self) -> None:
         nif = _write_nif(self.tmp)
         patch_nif(
@@ -998,6 +1243,26 @@ class TestForceShaderType3(unittest.TestCase):
         self.assertEqual(len(infos), 1)
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
 
+    def test_skip_if_havok_does_not_upgrade_default_shader(self) -> None:
+        nif = self.tmp / "havok_default.nif"
+        nif.write_bytes(_build_nif_with_shapes(shader_type=SHADER_TYPE_DEFAULT, add_havok=True))
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                enable_pom=True,
+                parallax_scale=5.0,
+                force_shader_type_3=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertEqual(result.blocks_upgraded_to_type3, 0)
+        info = scan_nif(nif)[0]
+        self.assertEqual(info.shader_type, SHADER_TYPE_DEFAULT)
+        self.assertFalse(info.has_parallax_flag)
+        self.assertFalse(info.has_pom_flag)
+
 
 
 # ---------------------------------------------------------------------------
@@ -1048,6 +1313,16 @@ class TestHelpers(unittest.TestCase):
         self.assertIn("a.nif", names)
         self.assertIn("b.nif", names)
         self.assertNotIn("skip.txt", names)
+
+    def test_find_nif_files_recursive_case_insensitive_extension(self) -> None:
+        sub = self.tmp / "sub"
+        sub.mkdir()
+        (self.tmp / "upper.NIF").write_bytes(b"")
+        (sub / "mixed.NiF").write_bytes(b"")
+        found = find_nif_files(self.tmp)
+        names = [f.name for f in found]
+        self.assertIn("upper.NIF", names)
+        self.assertIn("mixed.NiF", names)
 
 
 # ---------------------------------------------------------------------------
@@ -1232,6 +1507,14 @@ class TestGuessHelpers(unittest.TestCase):
         self.assertIsNotNone(guessed)
         self.assertTrue((guessed or "").endswith("_g.dds"))
 
+    def test_guess_glow_path_from_existing_emis_suffix(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_emis.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_glow_path_for_nif(nif)
+        self.assertIsNotNone(guessed)
+        self.assertTrue((guessed or "").endswith("_g.dds"))
+
     def test_guess_glow_path_from_existing_skin_tint_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_GLOW] = "textures\\actors\\dragon\\dragon_sk.dds"
@@ -1242,6 +1525,23 @@ class TestGuessHelpers(unittest.TestCase):
     def test_guess_glow_returns_none_for_no_diffuse(self) -> None:
         nif = _write_nif(self.tmp)
         self.assertIsNone(guess_glow_path_for_nif(nif))
+
+    def test_guess_cubemap_path_from_diffuse(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_cubemap_path_for_nif(nif)
+        self.assertEqual(guessed, "textures\\arch\\stone_e.dds")
+
+    def test_guess_cubemap_path_from_existing_env_suffix(self) -> None:
+        paths = [""] * 9
+        paths[4] = "textures\\arch\\stone_env.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_cubemap_path_for_nif(nif)
+        self.assertEqual(guessed, "textures\\arch\\stone_e.dds")
+
+    def test_guess_cubemap_returns_none_for_no_paths(self) -> None:
+        nif = _write_nif(self.tmp)
+        self.assertIsNone(guess_cubemap_path_for_nif(nif))
 
     def test_guess_env_mask_path_from_diffuse(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8
@@ -1265,6 +1565,32 @@ class TestGuessHelpers(unittest.TestCase):
         nif = _write_nif(self.tmp, texture_paths=paths)
         guessed = guess_env_mask_path_for_nif(nif)
         self.assertEqual(guessed, "textures\\arch\\stone_m.dds")
+
+    def test_guess_env_mask_path_from_existing_orm_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_orm.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_env_mask_path_for_nif(nif)
+        self.assertEqual(guessed, "textures\\arch\\stone_m.dds")
+
+    def test_guess_env_mask_path_prefers_rmaos_suffix_when_requested(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_env_mask_path_for_nif(nif, preferred_suffix="_rmaos.dds")
+        self.assertEqual(guessed, "textures\\arch\\stone_rmaos.dds")
+
+    def test_guess_env_mask_path_prefers_orm_suffix_when_requested(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_env_mask_path_for_nif(nif, preferred_suffix="_orm")
+        self.assertEqual(guessed, "textures\\arch\\stone_rmaos.dds")
+
+    def test_guess_env_mask_path_prefers_cm_suffix_when_requested(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_mask.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        guessed = guess_env_mask_path_for_nif(nif, preferred_suffix="_cm")
+        self.assertEqual(guessed, "textures\\arch\\stone_cm.dds")
 
     def test_guess_env_mask_returns_none_for_no_paths(self) -> None:
         nif = _write_nif(self.tmp)
@@ -1703,13 +2029,13 @@ class TestFlagManagement(unittest.TestCase):
         info = scan_nif(nif)[0]
         self.assertTrue(info.flags2 & SLSF2_VERTEX_COLORS, "SLSF2_VERTEX_COLORS not set")
 
-    def test_enabling_parallax_clears_env_mapping_flag(self) -> None:
-        """SLSF1_ENVIRONMENT_MAPPING must be cleared when enabling parallax."""
+    def test_enabling_parallax_preserves_existing_env_mapping_flag(self) -> None:
+        """Parallax patching should not strip environment mapping from mixed workflows."""
         nif = _write_nif(self.tmp, flags1=SLSF1_ENVIRONMENT_MAPPING)
         patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
         info = scan_nif(nif)[0]
-        self.assertFalse(info.flags1 & SLSF1_ENVIRONMENT_MAPPING,
-                         "SLSF1_ENVIRONMENT_MAPPING should be cleared by parallax")
+        self.assertTrue(info.flags1 & SLSF1_ENVIRONMENT_MAPPING,
+                        "SLSF1_ENVIRONMENT_MAPPING should remain set alongside parallax")
 
     def test_enabling_parallax_clears_multi_layer_flag(self) -> None:
         """SLSF2_MULTI_LAYER_PARALLAX must be cleared when enabling parallax."""
@@ -1719,29 +2045,29 @@ class TestFlagManagement(unittest.TestCase):
         self.assertFalse(info.flags2 & SLSF2_MULTI_LAYER_PARALLAX,
                          "SLSF2_MULTI_LAYER_PARALLAX should be cleared by parallax")
 
-    def test_enabling_parallax_clears_pbr_flag(self) -> None:
-        """SLSF2_UNUSED01 (PBR flag) must be cleared when enabling parallax."""
+    def test_enabling_parallax_preserves_existing_pbr_flag(self) -> None:
+        """Parallax patching should not strip the TruePBR flag from mixed workflows."""
         nif = _write_nif(self.tmp, flags2=SLSF2_UNUSED01)
         patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
         info = scan_nif(nif)[0]
-        self.assertFalse(info.flags2 & SLSF2_UNUSED01,
-                         "SLSF2_UNUSED01 (PBR) should be cleared by parallax")
+        self.assertTrue(info.flags2 & SLSF2_UNUSED01,
+                        "SLSF2_UNUSED01 (PBR) should remain set alongside parallax")
 
-    def test_enabling_env_mapping_clears_parallax_flag(self) -> None:
-        """SLSF1_PARALLAX must be cleared when enabling env mapping."""
+    def test_enabling_env_mapping_preserves_parallax_flag(self) -> None:
+        """Environment mapping patching should not strip parallax from mixed workflows."""
         nif = _write_nif(self.tmp, flags1=SLSF1_PARALLAX)
         patch_nif(nif, NifPatchOptions(enable_env_mapping=True, backup=False))
         info = scan_nif(nif)[0]
-        self.assertFalse(info.flags1 & SLSF1_PARALLAX,
-                         "SLSF1_PARALLAX should be cleared by env mapping")
+        self.assertTrue(info.flags1 & SLSF1_PARALLAX,
+                        "SLSF1_PARALLAX should remain set alongside environment mapping")
 
-    def test_enabling_env_mapping_clears_pom_flag(self) -> None:
-        """SLSF1_PARALLAX_OCCLUSION must be cleared when enabling env mapping."""
+    def test_enabling_env_mapping_preserves_pom_flag(self) -> None:
+        """Environment mapping patching should not strip ENB POM from mixed workflows."""
         nif = _write_nif(self.tmp, flags1=SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION)
         patch_nif(nif, NifPatchOptions(enable_env_mapping=True, backup=False))
         info = scan_nif(nif)[0]
-        self.assertFalse(info.flags1 & SLSF1_PARALLAX_OCCLUSION,
-                         "SLSF1_PARALLAX_OCCLUSION should be cleared by env mapping")
+        self.assertTrue(info.flags1 & SLSF1_PARALLAX_OCCLUSION,
+                        "SLSF1_PARALLAX_OCCLUSION should remain set alongside environment mapping")
 
     def test_enabling_env_mapping_clears_multi_layer_flag(self) -> None:
         """SLSF2_MULTI_LAYER_PARALLAX must be cleared when enabling env mapping."""
@@ -1750,6 +2076,12 @@ class TestFlagManagement(unittest.TestCase):
         info = scan_nif(nif)[0]
         self.assertFalse(info.flags2 & SLSF2_MULTI_LAYER_PARALLAX,
                          "SLSF2_MULTI_LAYER_PARALLAX should be cleared by env mapping")
+
+    def test_enabling_pbr_sets_truepbr_flag(self) -> None:
+        nif = _write_nif(self.tmp)
+        patch_nif(nif, NifPatchOptions(enable_pbr=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertTrue(info.flags2 & SLSF2_UNUSED01, "SLSF2_UNUSED01 (PBR) should be set")
 
 
 class TestSkipConditions(unittest.TestCase):
@@ -1821,6 +2153,13 @@ class TestSkipConditions(unittest.TestCase):
         patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
         info = scan_nif(nif)[0]
         self.assertFalse(info.has_parallax_flag, "Havok NIF must not get parallax")
+
+    def test_skip_if_havok_blocks_pom_flag(self) -> None:
+        nif = self._write(add_havok=True)
+        patch_nif(nif, NifPatchOptions(enable_pom=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.has_parallax_flag, "Havok NIF must not get parallax when POM is requested")
+        self.assertFalse(info.has_pom_flag, "Havok NIF must not get POM when parallax is unsafe")
 
     def test_skip_if_skinned(self) -> None:
         """Shapes with a skin instance must not receive parallax."""

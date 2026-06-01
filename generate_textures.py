@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import gc
+import importlib
 import json
 import math
 import os
@@ -13,7 +14,8 @@ import sys
 import tempfile
 import threading
 import uuid
-from dataclasses import dataclass
+from collections import defaultdict
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Mapping
 
@@ -37,26 +39,127 @@ except Exception:
     GUI_AVAILABLE = False
 
 try:
-    from nif_patcher import (
-        NifPatchOptions,
-        find_nif_files,
-        guess_env_mask_path_for_nif,
-        guess_glow_path_for_nif,
-        guess_normal_path_for_nif,
-        guess_parallax_path_for_nif,
-        patch_nif,
-        scan_nif,
-        validate_nif_for_parallax,
-    )
+    def _candidate_nif_patcher_search_dirs(
+        *,
+        script_path: Path | None = None,
+        executable_path: Path | None = None,
+        meipass_path: str | os.PathLike[str] | None = None,
+    ) -> tuple[Path, ...]:
+        candidates: list[Path] = []
+        seen: set[Path] = set()
+        raw_paths = (
+            Path(script_path).resolve().parent if script_path is not None else Path(__file__).resolve().parent,
+            Path(executable_path).resolve().parent
+            if executable_path is not None
+            else Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else None,
+            Path(meipass_path).resolve()
+            if meipass_path is not None
+            else Path(sys._MEIPASS).resolve() if getattr(sys, "_MEIPASS", None) else None,
+        )
+        for path in raw_paths:
+            if path is None or path in seen:
+                continue
+            seen.add(path)
+            candidates.append(path)
+        return tuple(candidates)
+
+
+    def _load_nif_patcher_exports(search_dirs: tuple[Path, ...] | None = None) -> dict[str, object]:
+        required_exports = (
+            "NifPatchOptions",
+            "find_nif_files",
+            "guess_cubemap_path_for_nif",
+            "guess_env_mask_path_for_nif",
+            "guess_glow_path_for_nif",
+            "guess_normal_path_for_nif",
+            "guess_parallax_path_for_nif",
+            "patch_nif",
+            "scan_nif",
+            "validate_nif_for_parallax",
+        )
+        last_error: ImportError | None = None
+        resolved_search_dirs = search_dirs or _candidate_nif_patcher_search_dirs()
+        for directory in resolved_search_dirs:
+            if not (directory / "nif_patcher.py").exists():
+                continue
+            directory_str = str(directory)
+            if directory_str not in sys.path:
+                sys.path.insert(0, directory_str)
+            try:
+                module = importlib.import_module("nif_patcher")
+            except ImportError as exc:
+                last_error = exc
+                sys.modules.pop("nif_patcher", None)
+                continue
+            missing_exports = [name for name in required_exports if not hasattr(module, name)]
+            if missing_exports:
+                sys.modules.pop("nif_patcher", None)
+                last_error = ImportError(
+                    f"nif_patcher.py is missing required exports: {', '.join(sorted(missing_exports))}"
+                )
+                continue
+            return {name: getattr(module, name) for name in required_exports}
+        if last_error is not None:
+            raise last_error
+        searched_locations = ", ".join(str(path) for path in resolved_search_dirs)
+        raise ImportError(
+            "nif_patcher.py was not found in supported locations"
+            + (f" ({searched_locations})" if searched_locations else "")
+        )
+
+
+    globals().update(_load_nif_patcher_exports())
     NIF_PATCHER_AVAILABLE = True
-except ImportError:
+    NIF_PATCHER_IMPORT_ERROR = ""
+except ImportError as exc:
     NIF_PATCHER_AVAILABLE = False
+    NIF_PATCHER_IMPORT_ERROR = str(exc)
 
 
 DDS_EXTENSION = ".dds"
-APP_VERSION = "0.6"
+APP_VERSION = "0.7"
 SUPPORTED_INPUT_EXTENSIONS = {DDS_EXTENSION, ".png", ".jpg", ".jpeg", ".tga", ".bmp"}
-GENERATED_TEXTURE_SUFFIXES = ("_msn", "_cm", "_c", "_rmaos", "_ramos", "_n", "_p", "_g", "_m")
+GENERATED_TEXTURE_SUFFIXES = (
+    "_msn",
+    "_cm",
+    "_c",
+    "_rmaos",
+    "_ramos",
+    "_orm",
+    "_orms",
+    "_mrao",
+    "_mra",
+    "_n",
+    "_p",
+    "_g",
+    "_glow",
+    "_em",
+    "_emis",
+    "_emit",
+    "_emissive",
+    "_m",
+    "_ao",
+    "_ambientocclusion",
+    "_rough",
+    "_roughness",
+    "_metal",
+    "_metallic",
+    "_metalness",
+    "_s",
+    "_sk",
+    "_wt",
+    "_sm",
+)
+TRUEPBR_ENV_MASK_SUFFIXES: frozenset[str] = frozenset({
+    "_rmaos",
+    "_ramos",
+})
+LEGACY_TRUEPBR_ENV_MASK_SUFFIXES: frozenset[str] = frozenset({
+    "_orm",
+    "_orms",
+    "_mrao",
+    "_mra",
+})
 PREVIEW_MAX_DIMENSION = 1024
 PREVIEW_SIZE_PRESETS: dict[str, tuple[int, int]] = {
     "XS": (160, 120),
@@ -87,6 +190,10 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "include_environment_mask": False,
     "include_rmaos": False,
     "include_complex": False,
+    "include_wetness_mask": False,
+    "include_snow_mask": False,
+    "include_ao": False,
+    "include_roughness": False,
     "auto_suggestions": True,
     "auto_normal": True,
     "auto_parallax": True,
@@ -95,6 +202,8 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "auto_rmaos": True,
     "auto_complex": True,
     "auto_specular": True,
+    "auto_ao": True,
+    "auto_roughness": True,
     "normal_strength": 2.0,
     "parallax_strength": 1.35,
     "glow_threshold": 190,
@@ -102,6 +211,10 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "rmaos_strength": 1.2,
     "complex_strength": 1.15,
     "specular_strength": 1.15,
+    "wetness_mask_strength": 1.0,
+    "snow_mask_strength": 1.0,
+    "ao_strength": 1.2,
+    "roughness_strength": 1.0,
     "dismissed_warnings": [],
 }
 
@@ -164,6 +277,33 @@ def _normalize_nif_result_details(details: str) -> str:
 
 def _format_nif_result_row_details(details: str) -> str:
     return _normalize_nif_result_details(details).replace("\n", " ↩ ")
+
+
+def _compute_nif_editor_controls_pane_height(
+    *,
+    window_height: int,
+    controls_requested_height: int,
+    footer_height: int = 0,
+    min_controls_height: int = 340,
+    min_results_height: int = 180,
+) -> int:
+    available_height = max(min_controls_height, window_height - max(0, footer_height))
+    max_controls_height = max(min_controls_height, available_height - min_results_height)
+    requested_height = max(min_controls_height, controls_requested_height)
+    return min(requested_height, max_controls_height)
+
+
+def _compute_nif_editor_result_details_height(
+    *,
+    results_height: int,
+    details_requested_height: int,
+    min_results_list_height: int = 140,
+    min_details_height: int = 120,
+) -> int:
+    available_height = max(min_details_height, results_height)
+    max_details_height = max(min_details_height, available_height - min_results_list_height)
+    requested_height = max(min_details_height, details_requested_height)
+    return min(requested_height, max_details_height)
 
 
 def restore_nif_backups(nif_paths: list[Path]) -> list[tuple[str, str, str]]:
@@ -235,6 +375,10 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         "include_environment_mask",
         "include_rmaos",
         "include_complex",
+        "include_wetness_mask",
+        "include_snow_mask",
+        "include_ao",
+        "include_roughness",
         "auto_suggestions",
         "auto_normal",
         "auto_parallax",
@@ -243,8 +387,13 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         "auto_rmaos",
         "auto_complex",
         "auto_specular",
+        "auto_ao",
+        "auto_roughness",
     ):
         state[key] = _coerce_bool(raw.get(key), bool(state[key]))
+    if bool(state["emboss_mode"]) and bool(state["relief_mode"]):
+        # Keep depth-mode startup state unambiguous: relief mode wins.
+        state["emboss_mode"] = False
     if not bool(state["auto_suggestions"]):
         state["auto_normal"] = False
         state["auto_parallax"] = False
@@ -253,6 +402,8 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         state["auto_rmaos"] = False
         state["auto_complex"] = False
         state["auto_specular"] = False
+        state["auto_ao"] = False
+        state["auto_roughness"] = False
     input_path = str(state["input_path"]).strip()
     output_path = str(state["output_path"]).strip()
     if input_path and not Path(input_path).exists():
@@ -277,13 +428,19 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     else:
         state["parallax_mode"] = str(_GUI_STATE_DEFAULTS["parallax_mode"])
     render_profile = str(raw.get("render_profile", state["render_profile"]) or state["render_profile"]).strip().lower()
-    if render_profile in {"auto", "custom", "experimental", "vanilla", "community_shaders", "community shaders", "truepbr", "true pbr", "enb"}:
+    if render_profile in {
+        "custom",
+        "vanilla",
+        "community_shaders",
+        "community shaders",
+        "truepbr",
+        "true pbr",
+        "enb",
+    }:
         if render_profile == "community shaders":
             state["render_profile"] = "community_shaders"
         elif render_profile == "true pbr":
             state["render_profile"] = "truepbr"
-        elif render_profile == "experimental":
-            state["render_profile"] = "custom"
         else:
             state["render_profile"] = render_profile
     else:
@@ -300,6 +457,16 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     )
     state["complex_strength"] = _coerce_float(raw.get("complex_strength"), float(state["complex_strength"]), 0.1, 8.0)
     state["specular_strength"] = _coerce_float(raw.get("specular_strength"), float(state["specular_strength"]), 0.1, 8.0)
+    state["wetness_mask_strength"] = _coerce_float(
+        raw.get("wetness_mask_strength"), float(state["wetness_mask_strength"]), 0.1, 3.0
+    )
+    state["snow_mask_strength"] = _coerce_float(
+        raw.get("snow_mask_strength"), float(state["snow_mask_strength"]), 0.1, 3.0
+    )
+    state["ao_strength"] = _coerce_float(raw.get("ao_strength"), float(state["ao_strength"]), 0.1, 8.0)
+    state["roughness_strength"] = _coerce_float(
+        raw.get("roughness_strength"), float(state["roughness_strength"]), 0.1, 8.0
+    )
     raw_dismissed = raw.get("dismissed_warnings", [])
     if isinstance(raw_dismissed, list):
         state["dismissed_warnings"] = [str(w) for w in raw_dismissed if isinstance(w, str)]
@@ -334,12 +501,17 @@ class ModManagerContext:
     manager: str | None = None
     profile_name: str | None = None
     game_id: str | None = None
+    game_root: Path | None = None
     instance_root: Path | None = None
     staging_root: Path | None = None
     output_dir: Path | None = None
     loaded_mods: tuple[str, ...] = ()
+    enabled_plugins: tuple[str, ...] = ()
+    load_order: tuple[str, ...] = ()
     loaded_texture_dirs: tuple[Path, ...] = ()
     loaded_mesh_dirs: tuple[Path, ...] = ()
+    detected_body_profiles: tuple[str, ...] = ()
+    detected_skeleton_profiles: tuple[str, ...] = ()
 
     @property
     def summary(self) -> str:
@@ -352,8 +524,18 @@ class ModManagerContext:
             details.append(f"{len(self.loaded_texture_dirs)} loaded mod texture folder(s)")
         elif self.loaded_mods:
             details.append(f"{len(self.loaded_mods)} loaded mod(s)")
+        if self.enabled_plugins:
+            details.append(f"{len(self.enabled_plugins)} plugin(s)")
+        if self.load_order:
+            details.append(f"{len(self.load_order)} load-order entry/entries")
         if self.loaded_mesh_dirs:
             details.append(f"{len(self.loaded_mesh_dirs)} mesh folder(s)")
+        if self.detected_body_profiles:
+            details.append(f"body hints {', '.join(self.detected_body_profiles)}")
+        if self.detected_skeleton_profiles:
+            details.append(f"skeleton hints {', '.join(self.detected_skeleton_profiles)}")
+        if self.game_root is not None:
+            details.append(f"game root {self.game_root}")
         return " — ".join(details)
 
 
@@ -406,10 +588,107 @@ def _parse_enabled_modlist(modlist_path: Path) -> tuple[str, ...]:
     return tuple(enabled_mods)
 
 
+def _parse_enabled_plugins(plugins_path: Path) -> tuple[str, ...]:
+    plugins: list[str] = []
+    if not plugins_path.exists():
+        return ()
+    for raw_line in plugins_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line[0] in {";", "-"}:
+            continue
+        if line[0] in {"+", "*"}:
+            line = line[1:].strip()
+        if line:
+            plugins.append(line)
+    return tuple(plugins)
+
+
+def _parse_load_order(loadorder_path: Path) -> tuple[str, ...]:
+    entries: list[str] = []
+    if not loadorder_path.exists():
+        return ()
+    for raw_line in loadorder_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line.startswith(";"):
+            continue
+        if line[0] in {"+", "*", "-"}:
+            line = line[1:].strip()
+        if line:
+            entries.append(line)
+    return tuple(entries)
+
+
+_BODY_PROFILE_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("CBBE", ("cbbe", "caliente")),
+    ("3BA", ("3ba", "3bbb")),
+    ("UNP", ("unp",)),
+    ("BHUNP", ("bhunp",)),
+    ("HIMBO", ("himbo",)),
+    ("SAM", ("schlongs of skyrim", "sam light", "shape atlas for men", "sam")),
+)
+
+_SKELETON_PROFILE_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("XPMSSE", ("xpmsse", "xpmse", "xp32")),
+)
+
+
+def _normalize_profile_hint_source(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _hint_token_matches_source(source: str, token: str) -> bool:
+    normalized_source = _normalize_profile_hint_source(source)
+    normalized_token = _normalize_profile_hint_source(token)
+    if not normalized_source or not normalized_token:
+        return False
+    if " " in normalized_token:
+        collapsed_source = normalized_source.replace(" ", "")
+        collapsed_token = normalized_token.replace(" ", "")
+        return normalized_token in normalized_source or collapsed_token in collapsed_source
+    source_words = normalized_source.split()
+    if normalized_token in source_words:
+        return True
+    if len(normalized_token) <= 3:
+        return False
+    return normalized_token in normalized_source.replace(" ", "")
+
+
+def _detect_profile_hints(
+    sources: tuple[str, ...], hint_map: tuple[tuple[str, tuple[str, ...]], ...]
+) -> tuple[str, ...]:
+    if not sources:
+        return ()
+    normalized_sources = tuple(_normalize_profile_hint_source(source) for source in sources if source)
+    detected: list[str] = []
+    for profile, hints in hint_map:
+        if any(any(_hint_token_matches_source(source, hint) for hint in hints) for source in normalized_sources):
+            detected.append(profile)
+    return tuple(detected)
+
+
 def _find_manager_instance_root(start: Path, required_children: tuple[str, ...]) -> Path | None:
     for candidate in (start, *start.parents):
         if all((candidate / child).exists() for child in required_children):
             return candidate
+    return None
+
+
+def _resolve_game_root_from_env(env: Mapping[str, str]) -> Path | None:
+    for key in (
+        "MO2_GAME_PATH",
+        "MO_GAME_PATH",
+        "MO2_GAME_DIRECTORY",
+        "VORTEX_GAME_PATH",
+        "GAME_PATH",
+        "SKYRIMSE_PATH",
+        "SKYRIM_GAME_PATH",
+    ):
+        raw = str(env.get(key, "")).strip()
+        if not raw:
+            continue
+        return Path(raw).expanduser()
     return None
 
 
@@ -456,6 +735,7 @@ def _detect_mo2_context(
     *,
     executable_path: Path,
 ) -> ModManagerContext:
+    game_root = _resolve_game_root_from_env(env)
     profile_name = env.get("MO_PROFILE") or env.get("MO2_PROFILE")
     instance_root = _find_manager_instance_root(executable_path.parent, ("mods", "profiles"))
     if instance_root is None and not profile_name:
@@ -468,28 +748,42 @@ def _detect_mo2_context(
             resolved_profile = profile_dirs[0].name
 
     loaded_mods: tuple[str, ...] = ()
-    loaded_texture_dirs: tuple[Path, ...] = ()
+    enabled_plugins: tuple[str, ...] = ()
+    load_order: tuple[str, ...] = ()
+    loaded_texture_candidates: list[Path] = []
     if instance_root is not None and resolved_profile:
         modlist_path = instance_root / "profiles" / resolved_profile / "modlist.txt"
+        plugins_path = instance_root / "profiles" / resolved_profile / "plugins.txt"
+        loadorder_path = instance_root / "profiles" / resolved_profile / "loadorder.txt"
         loaded_mods = _parse_enabled_modlist(modlist_path)
-        loaded_texture_dirs = _unique_existing_paths(
-            [instance_root / "mods" / mod_name / "textures" for mod_name in loaded_mods]
-        )
-    loaded_mesh_dirs = _unique_existing_paths(
-        [instance_root / "mods" / mod_name / "meshes" for mod_name in loaded_mods]
-        if instance_root is not None else []
-    )
+        enabled_plugins = _parse_enabled_plugins(plugins_path)
+        load_order = _parse_load_order(loadorder_path)
+        loaded_texture_candidates.extend(instance_root / "mods" / mod_name / "textures" for mod_name in loaded_mods)
+    loaded_mesh_candidates = [instance_root / "mods" / mod_name / "meshes" for mod_name in loaded_mods] if instance_root is not None else []
+    if instance_root is not None:
+        loaded_texture_candidates.insert(0, instance_root / "overwrite" / "textures")
+        loaded_mesh_candidates.insert(0, instance_root / "overwrite" / "meshes")
+    loaded_texture_dirs = _unique_existing_paths(loaded_texture_candidates)
+    loaded_mesh_dirs = _unique_existing_paths(loaded_mesh_candidates)
+    detection_sources = tuple((*loaded_mods, *enabled_plugins, *load_order))
+    detected_body_profiles = _detect_profile_hints(detection_sources, _BODY_PROFILE_HINTS)
+    detected_skeleton_profiles = _detect_profile_hints(detection_sources, _SKELETON_PROFILE_HINTS)
 
     output_dir = instance_root / "overwrite" if instance_root is not None else None
     return ModManagerContext(
         manager="Mod Organizer 2",
         profile_name=resolved_profile,
         game_id="skyrimse",
+        game_root=game_root,
         instance_root=instance_root,
         output_dir=output_dir,
         loaded_mods=loaded_mods,
+        enabled_plugins=enabled_plugins,
+        load_order=load_order,
         loaded_texture_dirs=loaded_texture_dirs,
         loaded_mesh_dirs=loaded_mesh_dirs,
+        detected_body_profiles=detected_body_profiles,
+        detected_skeleton_profiles=detected_skeleton_profiles,
     )
 
 
@@ -510,6 +804,7 @@ def _detect_vortex_context(
     executable_path: Path,
 ) -> ModManagerContext:
     env_signals = any(key.startswith("VORTEX") for key in env)
+    game_root = _resolve_game_root_from_env(env)
     game_id = env.get("VORTEX_GAME_ID") or env.get("GAME_ID") or "skyrimse"
     profile_dirs = _candidate_vortex_profile_dirs(env, game_id)
     staging_root = None
@@ -524,9 +819,19 @@ def _detect_vortex_context(
     profile_dir = profile_dirs[0] if profile_dirs else None
     profile_name = env.get("VORTEX_PROFILE") or (profile_dir.name if profile_dir is not None else None)
     loaded_mods = _parse_enabled_modlist(profile_dir / "modlist.txt") if profile_dir is not None else ()
+    enabled_plugins = _parse_enabled_plugins(profile_dir / "plugins.txt") if profile_dir is not None else ()
+    load_order = _parse_load_order(profile_dir / "loadorder.txt") if profile_dir is not None else ()
     if staging_root is not None and loaded_mods:
         texture_dirs = _unique_existing_paths([staging_root / mod_name / "textures" for mod_name in loaded_mods])
         mesh_dirs = _unique_existing_paths([staging_root / mod_name / "meshes" for mod_name in loaded_mods])
+        if not texture_dirs:
+            texture_dirs = _unique_existing_paths(
+                [path / "textures" for path in staging_root.iterdir() if path.is_dir() and (path / "textures").exists()]
+            )
+        if not mesh_dirs:
+            mesh_dirs = _unique_existing_paths(
+                [path / "meshes" for path in staging_root.iterdir() if path.is_dir() and (path / "meshes").exists()]
+            )
     elif staging_root is not None:
         texture_dirs = _unique_existing_paths(
             [path / "textures" for path in staging_root.iterdir() if path.is_dir() and (path / "textures").exists()]
@@ -537,16 +842,24 @@ def _detect_vortex_context(
     else:
         texture_dirs = ()
         mesh_dirs = ()
+    detection_sources = tuple((*loaded_mods, *enabled_plugins, *load_order))
+    detected_body_profiles = _detect_profile_hints(detection_sources, _BODY_PROFILE_HINTS)
+    detected_skeleton_profiles = _detect_profile_hints(detection_sources, _SKELETON_PROFILE_HINTS)
 
     return ModManagerContext(
         manager="Vortex",
         profile_name=profile_name,
         game_id=game_id,
+        game_root=game_root,
         staging_root=staging_root,
         output_dir=executable_path.parent / "generated_textures",
         loaded_mods=loaded_mods,
+        enabled_plugins=enabled_plugins,
+        load_order=load_order,
         loaded_texture_dirs=texture_dirs,
         loaded_mesh_dirs=mesh_dirs,
+        detected_body_profiles=detected_body_profiles,
+        detected_skeleton_profiles=detected_skeleton_profiles,
     )
 
 
@@ -681,6 +994,114 @@ def _infer_likely_role_from_image(source: Image.Image) -> str | None:
     return None
 
 
+def analyze_material_type_from_image(source: Image.Image) -> str | None:
+    """Infer a Skyrim material category from image colour and texture statistics.
+
+    Returns one of the material category strings (e.g. ``'metal'``, ``'skin'``,
+    ``'snow'``, ``'glass'``) if a confident match is found, or ``None`` when the
+    image content is ambiguous.  This is a *supplemental* hint — filename-based
+    :func:`classify_material_type` always takes priority.
+
+    Heuristic rules:
+    * Very low saturation + high brightness → snow/ice or metal candidate.
+    * Very high brightness + very low saturation → snow.
+    * High saturation + warm hue bias (red/orange range) → metal (gold/copper) or
+      skin candidate.
+    * Cool neutral colours with a warm-grey average → stone/architecture.
+    * High saturation + concentrated green channel → plants.
+    * Very pale, warm, low-contrast image → skin.
+    * High specular highlight cluster (bright white spots) + low-saturation base
+      → glass/crystal or polished metal.
+    """
+    rgb = source.convert("RGB")
+    analysis_source = rgb
+    if max(rgb.width, rgb.height) > 512:
+        analysis_source = rgb.copy()
+        analysis_source.thumbnail((512, 512), Image.Resampling.BILINEAR)
+
+    arr = np.asarray(analysis_source, dtype=np.float32)
+    if arr.size == 0:
+        return None
+
+    r_mean = float(arr[:, :, 0].mean())
+    g_mean = float(arr[:, :, 1].mean())
+    b_mean = float(arr[:, :, 2].mean())
+    overall_mean = (r_mean + g_mean + b_mean) / 3.0
+    r_std = float(arr[:, :, 0].std())
+    g_std = float(arr[:, :, 1].std())
+    b_std = float(arr[:, :, 2].std())
+    overall_std = (r_std + g_std + b_std) / 3.0
+
+    hsv_arr = np.asarray(analysis_source.convert("HSV"), dtype=np.float32)
+    sat_mean = float(hsv_arr[:, :, 1].mean())
+    val_mean = float(hsv_arr[:, :, 2].mean())
+    hue_mean = float(hsv_arr[:, :, 0].mean())
+
+    brightness_ratio = overall_mean / 255.0
+    saturation_ratio = sat_mean / 255.0
+
+    # Bright cluster detection: fraction of pixels brighter than 230
+    bright_pixels = float(np.mean(arr.max(axis=2) > 230.0))
+
+    # --- Snow / Ice ---
+    # Very bright, very low saturation, cool tone
+    if brightness_ratio > 0.72 and saturation_ratio < 0.12 and b_mean >= r_mean:
+        return "snow"
+
+    # --- Glass / Crystal (polished transparent material) ---
+    # High bright cluster, very low saturation, moderate overall brightness
+    if bright_pixels > 0.18 and saturation_ratio < 0.15 and 0.3 < brightness_ratio < 0.85:
+        return "glass"
+
+    # --- Metal (grey-scale high-value with low saturation) ---
+    if saturation_ratio < 0.18 and 0.25 < brightness_ratio < 0.78 and overall_std < 60.0:
+        return "metal"
+
+    # --- Skin (warm peachy / flesh tones) ---
+    # Red channel dominant, warm hue (10–40 degrees in HSV), moderate saturation
+    warm_hue = 10.0 <= (hue_mean / 255.0 * 360.0) <= 45.0
+    if warm_hue and 0.12 < saturation_ratio < 0.45 and 0.3 < brightness_ratio < 0.72 and r_mean > g_mean > b_mean:
+        return "skin"
+
+    # --- Plants (green-dominant with moderate saturation) ---
+    if g_mean > r_mean and g_mean > b_mean and saturation_ratio > 0.20:
+        return "plants"
+
+    # --- Leather (warm brown with medium texture contrast) ---
+    if (
+        r_mean > g_mean > b_mean
+        and 0.07 < saturation_ratio < 0.35
+        and 0.20 < brightness_ratio < 0.68
+        and 16.0 < overall_std < 95.0
+    ):
+        return "leather"
+
+    # --- Fur (warm/neutral but noisy micro-variation and low shine) ---
+    if (
+        r_mean >= g_mean >= b_mean
+        and saturation_ratio < 0.28
+        and 0.18 < brightness_ratio < 0.66
+        and overall_std > 34.0
+        and bright_pixels < 0.08
+    ):
+        return "fur"
+
+    # --- Dirt / Mud (earth tones, darker and less reflective than stone) ---
+    if (
+        (r_mean + g_mean) > (b_mean * 2.0)
+        and saturation_ratio < 0.30
+        and 0.14 < brightness_ratio < 0.56
+        and 15.0 < overall_std < 85.0
+    ):
+        return "dirt"
+
+    # --- Stone / Architecture (cool-neutral grey-brown with low saturation) ---
+    if saturation_ratio < 0.22 and 0.2 < brightness_ratio < 0.65 and overall_std > 18.0:
+        return "stone"
+
+    return None
+
+
 def _adjust_recommendations_for_role(
     recommended: dict[str, float | int], detected_role: str | None
 ) -> dict[str, float | int]:
@@ -706,15 +1127,45 @@ def _adjust_recommendations_for_role(
 
 
 _MATERIAL_CATEGORY_TOKENS: dict[str, tuple[str, ...]] = {
+    "architecture": (
+        "architecture",
+        "whiterun",
+        "windhelm",
+        "solitude",
+        "riften",
+        "markarth",
+        "falkreath",
+        "dwemer",
+        "imperial",
+        "nordic",
+        "castle",
+        "ruin",
+        "ruins",
+        "pillar",
+        "column",
+        "facade",
+        "cornerstone",
+        "battlement",
+        "tower",
+        "staircase",
+        "stair",
+        "crypt",
+        "cathedral",
+        "fortress",
+    ),
+    "terrain": ("landscape", "land", "terrain", "ground"),
     "stone": ("stone", "brick", "rock", "cobble", "slate", "granite", "marble", "limestone", "pebble", "rubble", "dungeon", "wall", "cave", "cliff"),
     "wood": ("wood", "timber", "plank", "log", "bark", "trunk", "beam", "wooden", "oak", "pine", "lumber"),
     "plants": ("leaf", "leaves", "grass", "vine", "plant", "moss", "fern", "weed", "shrub", "bush", "flora", "foliage", "lichen"),
+    "leather": ("leather", "hide", "strap", "straps", "belt", "belts"),
+    "fur": ("fur", "pelt", "pelts", "fleece", "mane"),
     "metal": ("metal", "iron", "steel", "copper", "bronze", "gold", "silver", "ore", "chain", "blade", "sword", "axe", "armor", "helmet", "shield"),
     "glass": ("glass", "crystal", "gem", "jewel", "diamond", "ruby", "sapphire", "emerald", "amethyst", "quartz"),
-    "cloth": ("cloth", "fabric", "silk", "linen", "wool", "robe", "cloak", "cape", "leather", "hide", "fur"),
+    "cloth": ("cloth", "fabric", "silk", "linen", "wool", "robe", "cloak", "cape", "canvas", "tapestry"),
     "skin": ("skin", "body", "face", "head", "hand", "flesh", "creature", "humanoid"),
     "snow": ("snow", "ice", "frost", "frozen", "blizzard", "glacial"),
-    "sand": ("sand", "dirt", "mud", "earth", "soil", "ground", "terrain", "dust"),
+    "dirt": ("dirt", "mud", "soil", "earth", "grime", "silt"),
+    "sand": ("sand", "dune", "arid", "dust"),
     "paper": (
         "paper",
         "parchment",
@@ -740,15 +1191,21 @@ _MATERIAL_CATEGORY_TOKENS: dict[str, tuple[str, ...]] = {
         "bbr",
         "poster",
     ),
+    "hair": ("hair", "hairline", "eyebrow", "eyelash", "lash", "brow", "beard", "stubble"),
 }
 
 
 def classify_material_type(path: Path) -> str:
     """Classify the likely Skyrim material category from a texture file path.
 
-    Returns one of: ``'stone'``, ``'wood'``, ``'plants'``, ``'metal'``,
-    ``'glass'``, ``'cloth'``, ``'skin'``, ``'snow'``, ``'sand'``, or
-    ``'general'``.
+    Returns one of: ``'architecture'``, ``'stone'``, ``'wood'``, ``'plants'``,
+    ``'metal'``, ``'glass'``, ``'leather'``, ``'fur'``, ``'cloth'``, ``'skin'``,
+    ``'snow'``, ``'dirt'``, ``'terrain'``, ``'sand'``, ``'paper'``, ``'hair'``,
+    or ``'general'``.
+
+    Priority order matches ``_MATERIAL_CATEGORY_TOKENS`` dictionary ordering so
+    more specific categories (``'architecture'``) are checked before broader ones
+    (``'stone'``).
     """
     combined = " ".join(path.parts).lower()
     words = tuple(token for token in re.split(r"[^a-z0-9]+", combined) if token)
@@ -762,48 +1219,102 @@ def classify_material_type(path: Path) -> str:
 def _adjust_recommendations_for_material_type(
     recommended: dict[str, float | int], material_type: str
 ) -> dict[str, float | int]:
-    """Fine-tune generated slider recommendations for common Skyrim material categories."""
+    """Fine-tune generated slider recommendations for common Skyrim material categories.
+
+    Cubemap/environment-mask strength is tuned to match realistic reflectivity per
+    the Skyrim material guide: glass/ice = very high, polished metal/gold = high,
+    wet stone = medium-high, dry stone/wood = medium-low, cloth/skin = very low.
+    """
     adjusted = dict(recommended)
-    if material_type == "stone":
+    if material_type == "architecture":
+        # Architecture: stable medium-form normals, conservative parallax to avoid
+        # tiling artefacts, modest env mask (stone/plaster is not highly reflective).
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.95, 1.1, 2.8)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.9, 0.8, 1.8)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.8, 0.9, 1.8)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.85, 0.9, 1.6)
+        adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]) * 1.05, 140, 235))
+    elif material_type == "stone":
         adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 1.1, 1.1, 3.8)
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 1.1, 0.8, 2.4)
-        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.85, 0.9, 2.4)
+        # Stone is not highly reflective; medium-low cubemap strength
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.85, 0.9, 2.0)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.85, 0.9, 1.8)
         adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]) * 1.05, 140, 235))
     elif material_type == "wood":
         adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 1.05, 1.1, 3.8)
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 1.0, 0.8, 2.4)
-        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.7, 0.9, 2.4)
-        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.75, 0.9, 2.2)
+        # Wood is low-reflectivity; suppress cubemap/specular
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.7, 0.9, 1.6)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.75, 0.9, 1.6)
     elif material_type == "plants":
         adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.85, 1.1, 3.8)
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.6, 0.8, 2.4)
-        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.5, 0.9, 2.4)
+        # Plants have no meaningful cubemap reflection
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.5, 0.9, 1.4)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.55, 0.9, 1.4)
         adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]) * 1.1, 140, 235))
     elif material_type == "metal":
         adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 1.15, 1.1, 3.8)
+        # Metal has high cubemap reflection; boost env mask and specular significantly
         adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.45, 0.9, 2.4)
         adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.4, 0.9, 2.2)
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.9, 0.8, 2.4)
     elif material_type == "glass":
-        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.6, 0.9, 2.4)
-        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.5, 0.9, 2.2)
-        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.7, 0.8, 2.4)
+        # Glass/crystal has very high cubemap reflection; maximum env/specular boost
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.75, 0.9, 2.4)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.65, 0.9, 2.2)
+        # Glass is mostly flat — minimal parallax depth
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.6, 0.8, 1.4)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.9, 1.1, 2.4)
     elif material_type == "cloth":
-        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.55, 0.9, 2.4)
-        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.65, 0.9, 2.2)
-        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.75, 0.8, 2.4)
-        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.9, 1.1, 3.8)
+        # Cloth has virtually no cubemap reflection; suppress both env mask and specular
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.5, 0.9, 1.4)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.55, 0.9, 1.4)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.75, 0.8, 2.0)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.9, 1.1, 2.8)
+    elif material_type == "leather":
+        # Leather: slightly reflective highlights but far less than polished metal.
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.7, 0.9, 1.7)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.8, 0.9, 1.8)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.95, 0.8, 2.1)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.95, 1.1, 3.0)
+    elif material_type == "fur":
+        # Fur/fleece should avoid harsh shiny highlights and deep parallax.
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.5, 0.9, 1.4)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.6, 0.9, 1.5)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.8, 0.8, 1.9)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.9, 1.1, 2.8)
     elif material_type == "skin":
-        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.65, 0.9, 2.4)
-        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.8, 0.9, 2.2)
-        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.5, 0.8, 2.4)
+        # Skin has low, soft cubemap reflection; soften normals to avoid pore over-sharpening
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.65, 0.9, 1.6)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.8, 0.9, 1.6)
+        # Skin normals should be soft — reduce strength to avoid harsh microdetail
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.82, 1.1, 2.4)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.5, 0.8, 1.4)
     elif material_type == "snow":
-        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.2, 0.9, 2.4)
+        # Ice has very high cubemap, snow surface itself medium-high
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.3, 0.9, 2.4)
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 1.15, 0.8, 2.4)
-        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.1, 0.9, 2.2)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.15, 0.9, 2.2)
+        # Ice/snow normals need gentle treatment to avoid grain artefacts
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.95, 1.1, 3.0)
+    elif material_type == "terrain":
+        # Terrain/landscape: subtle parallax, stable normals, low cubemap to avoid shimmer
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.85, 0.8, 1.6)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.95, 1.1, 2.6)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.75, 0.9, 1.8)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.8, 0.9, 1.6)
+    elif material_type == "dirt":
+        # Dirt/mud should stay matte with minimal reflection sparkle.
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.95, 0.8, 2.0)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 1.0, 1.1, 3.0)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.7, 0.9, 1.7)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.7, 0.9, 1.6)
     elif material_type == "sand":
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 1.05, 0.8, 2.4)
-        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.8, 0.9, 2.4)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.8, 0.9, 1.8)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.75, 0.9, 1.6)
     elif material_type == "paper":
         adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.8, 1.1, 2.2)
         adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.55, 0.8, 1.35)
@@ -811,10 +1322,83 @@ def _adjust_recommendations_for_material_type(
         adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.6, 0.9, 1.3)
         adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]) * 0.75, 1.0, 1.6)
         adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]) * 1.1, 160, 235))
+    elif material_type == "hair":
+        # Hair cards are flat alpha geometry — no parallax, soft normals, low specular.
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.4, 0.8, 1.0)
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]) * 0.75, 1.1, 2.2)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.6, 0.9, 1.5)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.75, 0.9, 1.5)
+        adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]) * 1.1, 160, 235))
+    return adjusted
+
+
+def _adjust_recommendations_for_material_path_hints(
+    recommended: dict[str, float | int],
+    material_type: str,
+    input_path: Path | None,
+) -> dict[str, float | int]:
+    """Apply filename-aware cubemap/specular tuning for nuanced material variants."""
+    if input_path is None:
+        return recommended
+    words = {
+        token
+        for token in re.split(r"[^a-z0-9]+", " ".join(input_path.parts).lower())
+        if token
+    }
+    if not words:
+        return recommended
+
+    adjusted = dict(recommended)
+    if material_type == "metal":
+        if words.intersection({"iron", "rust", "rusty", "corroded", "oxidized", "oxide"}):
+            # Iron/rusted metals should read as medium reflectivity, not mirror-shiny.
+            adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 0.82, 0.9, 2.4)
+            adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 0.86, 0.9, 2.2)
+        elif words.intersection({"polished", "chrome", "gilded", "gold", "steel", "silver", "mirror", "brass"}):
+            # Polished steel/gold should stay in the high-reflectivity range.
+            adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.12, 0.9, 2.4)
+            adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.1, 0.9, 2.2)
+    elif material_type == "stone" and words.intersection({"wet", "rain", "water", "damp", "soaked", "slime", "slimy"}):
+        # Wet stone should have stronger cubemap response than dry stone.
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]) * 1.22, 0.9, 2.4)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]) * 1.16, 0.9, 2.2)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]) * 0.95, 0.8, 2.4)
     return adjusted
 
 
 _WORKFLOW_PROFILE_TOKENS: dict[str, tuple[str, ...]] = {
+    "performance": (
+        "performance",
+        "perf",
+        "lowend",
+        "low-end",
+        "low_end",
+        "potato",
+    ),
+    "vr": (
+        "vr",
+        "virtualreality",
+        "virtual_reality",
+        "virtual-reality",
+    ),
+    "terrain": (
+        "terrain",
+        "landscape",
+        "ground",
+    ),
+    "architecture": (
+        "architecture",
+        "building",
+        "ruins",
+        "wall",
+    ),
+    "characters": (
+        "character",
+        "characters",
+        "skin",
+        "npc",
+        "actor",
+    ),
     "interface": (
         "interface",
         "ui",
@@ -853,6 +1437,31 @@ _RENDER_PROFILE_PRESETS: dict[str, dict[str, str]] = {
         "env_mask_mode": "standard",
         "parallax_mode": "standard",
     },
+    "performance": {
+        "complex_format": "msn",
+        "env_mask_mode": "standard",
+        "parallax_mode": "standard",
+    },
+    "vr": {
+        "complex_format": "msn",
+        "env_mask_mode": "standard",
+        "parallax_mode": "standard",
+    },
+    "terrain": {
+        "complex_format": "msn",
+        "env_mask_mode": "standard",
+        "parallax_mode": "standard",
+    },
+    "architecture": {
+        "complex_format": "msn",
+        "env_mask_mode": "standard",
+        "parallax_mode": "standard",
+    },
+    "characters": {
+        "complex_format": "msn",
+        "env_mask_mode": "standard",
+        "parallax_mode": "standard",
+    },
     # Community Shaders generally expects packed _cm assets while keeping vanilla-friendly
     # environment/parallax mode selections.
     "community_shaders": {
@@ -867,7 +1476,7 @@ _RENDER_PROFILE_PRESETS: dict[str, dict[str, str]] = {
         "env_mask_mode": "complex",
         "parallax_mode": "standard",
     },
-    # ENB profile favors complex env mask and POM height maps.
+    # ENB profile keeps the tool's ENB-oriented defaults while allowing overrides.
     "enb": {
         "complex_format": "msn",
         "env_mask_mode": "complex",
@@ -879,58 +1488,117 @@ _RENDER_PROFILE_LABELS: dict[str, str] = {
     "auto": "Auto-detect",
     "custom": "Custom",
     "vanilla": "Vanilla",
+    "performance": "Performance (low-end)",
+    "vr": "VR",
+    "terrain": "Terrain",
+    "architecture": "Architecture",
+    "characters": "Characters / Skin",
     "community_shaders": "Community Shaders",
-    "truepbr": "Community Shaders TruePBR",
+    "truepbr": "Community Shaders PBR",
     "enb": "ENB",
 }
+_RENDER_PROFILE_CLI_VALUES: tuple[str, ...] = tuple(_RENDER_PROFILE_LABELS.keys())
+_RENDER_PROFILE_GUI_VALUES: tuple[str, ...] = (
+    "custom",
+    "vanilla",
+    "community_shaders",
+    "truepbr",
+    "enb",
+)
 
 _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     "custom": (
         "Custom profile.\n"
         "No renderer assumptions are applied; this profile is intentionally blank so you can choose all options manually.\n"
-        "Guidance text and channel hints are best-effort and may be inaccurate for your specific shader stack.\n"
+        "Guidance text and channel hints describe this tool's built-in presets and naming defaults.\n"
         "For TruePBR workflows, use dedicated _rmaos/_ramos output plus its JSON sidecar and validate against your installed shader docs."
     ),
     "vanilla": (
         "Vanilla Skyrim SE — no PBR, no ENB required.\n"
-        "Files: diffuse.dds + _n.dds (DirectX tangent-space normal).\n"
-        "Add _p.dds (greyscale height) only for meshes patched for parallax (requires SKSE64 memory patch).\n"
-        "Add _m.dds (greyscale, Slot 5) for reflective metals/armour — brighter = more environment reflection.\n"
-        "Add _g.dds only for emissive/glowing assets.\n"
+        "Files: <stem>.dds (diffuse — no suffix; Skyrim SE vanilla diffuse is just stone.dds not stone_d.dds) + <stem>_n.dds (DirectX tangent-space normal).\n"
+        "Add <stem>_p.dds (greyscale height) only for meshes/NIFs configured for parallax in your runtime stack.\n"
+        "Add <stem>_m.dds (greyscale, Slot 5) for reflective metals/armour — brighter = more environment reflection.\n"
+        "Add <stem>_g.dds only for emissive/glowing assets.\n"
         "How files should look: _n stays purple/blue, _p is greyscale, _m is greyscale with brighter pixels on shinier areas.\n"
+        "Do NOT use Blender-style _d/_diffuse/_albedo/_roughness/_metallic/_ao suffixes — Skyrim SE ignores them.\n"
         "Do NOT generate _rmaos, _msn, _cm, or _c — those are ignored by the vanilla renderer."
+    ),
+    "performance": (
+        "Performance-oriented Skyrim SE profile for lower-end GPUs.\n"
+        "Recommended files: diffuse.dds + _n.dds.\n"
+        "Parallax/complex outputs are disabled by default to reduce shader overhead and shimmer.\n"
+        "Use extra maps only when needed and keep strengths conservative."
+    ),
+    "vr": (
+        "VR-focused profile tuned for comfort and stability.\n"
+        "Recommended files: diffuse.dds + _n.dds with conservative settings.\n"
+        "Parallax is disabled by default to reduce depth shimmer and motion discomfort.\n"
+        "Add extra maps only after in-headset validation."
+    ),
+    "terrain": (
+        "Terrain profile tuned for stable large-scale surfaces.\n"
+        "Recommended files: diffuse.dds + _n.dds + _p.dds.\n"
+        "Uses conservative standard parallax to avoid horizon shimmer and texture swimming.\n"
+        "Enable extra packed outputs only when your shader stack specifically needs them."
+    ),
+    "architecture": (
+        "Architecture profile for walls, ruins, and structural assets.\n"
+        "Recommended files: diffuse.dds + _n.dds + _p.dds + _m.dds.\n"
+        "Keeps standard Skyrim-friendly naming with reflection control in slot 5.\n"
+        "Use ENB/Community Shaders-specific packed outputs only when targeting those renderer presets."
+    ),
+    "characters": (
+        "Character/skin profile focused on stable animated shading.\n"
+        "Recommended files: diffuse.dds + _n.dds (+ optional _g.dds for emissive assets).\n"
+        "Parallax and complex env workflows are disabled by default to avoid fragile skin/face setups.\n"
+        "Use dedicated skin/spec slots in your NIF workflow when needed."
     ),
     "community_shaders": (
         "Community Shaders Extended Materials workflow (not ENB, not TruePBR JSON).\n"
-        "Files: diffuse.dds + _n.dds + _p.dds + _cm.dds (or _c.dds / _C.dds — identical channel layout).\n"
-        "_cm/_c/_C RGBA channel layout: R=Environment reflection amount, "
-        "G=Glossiness, B=Metallic, A=Height / mode-control alpha.\n"
-        "How files should look: _n stays purple/blue, _p stays greyscale, and _cm/_c/_C should NOT look like a normal map — "
+        "Files: <stem>.dds (diffuse, no suffix) + <stem>_n.dds + <stem>_cm.dds (or _c.dds — same channel layout). "
+        "<stem>_p.dds is optional: for complex-material meshes the parallax height is embedded in the _cm alpha channel "
+        "and a separate _p.dds is not required; retain _p.dds only if non-complex-material meshes also reference it.\n"
+        "Parallax in this workflow is driven by Community Shaders, not ENB.\n"
+        "_cm/_c RGBA channel layout: R=Environment reflection amount, "
+        "G=Glossiness (must be above ~2% / 4/255 or the CS shader disables complex material entirely), "
+        "B=Metallic, A=Height / mode-control alpha (all-white alpha disables complex material mode).\n"
+        "How files should look: _n stays purple/blue, _p stays greyscale, and _cm/_c should NOT look like a normal map — "
         "it should read as packed grayscale data with reflective areas bright in red, glossy areas bright in green, metallic areas bright in blue, and a non-white alpha height channel.\n"
         "Add _g.dds only for emissive assets.\n"
-        "Do NOT generate _msn or TruePBR-style _rmaos for this preset. Community Shaders and ENB are separate renderer paths and should not be mixed.\n"
-        "If you specifically need Community Shaders TruePBR _rmaos, that is a different JSON-driven workflow than this _cm/_c/_C preset."
+        "Do NOT use Blender-style _d/_albedo/_roughness/_metallic suffix names; Skyrim SE/CS ignores them.\n"
+        "Do NOT generate _msn for this preset. TruePBR-style _rmaos belongs to the dedicated TruePBR profile.\n"
+        "Community Shaders and ENB are mutually exclusive at runtime — the CS Nexus page states 'Not compatible with ENB: this mod disables all features if ENB is present, otherwise the game will crash.' You cannot have both active simultaneously. Texture asset packs for each workflow can coexist in your modlist, but you must choose one renderer.\n"
+        "If you specifically need Community Shaders TruePBR _rmaos, that is a different JSON-driven workflow than this _cm/_c preset."
     ),
     "truepbr": (
         "Community Shaders TruePBR workflow (JSON-driven material path).\n"
-        "Typical files: diffuse.dds + _n.dds + _rmaos.dds (or _ramos.dds alias) + matching JSON sidecar in PBRNifPatcher/ (and optional _p.dds depending on your mesh/material setup).\n"
+        "Typical files: textures\\pbr\\<stem>.dds + textures\\pbr\\<stem>_n.dds + textures\\pbr\\<stem>_rmaos.dds (or _ramos.dds alias) + matching JSON sidecar in PBRNifPatcher/ (optional _p/_g and other feature textures by material).\n"
         "_rmaos/_ramos RGBA layout for this preset: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (config-driven).\n"
         "How files should look: _n stays purple/blue, _rmaos/_ramos should look like packed grayscale channels (not like a normal map).\n"
-        "JSON sidecar should reference the generated _rmaos/_ramos texture path and document channel mapping for your TruePBR setup.\n"
-        "Do NOT treat this as Community Shaders Extended Materials _cm/_c/_C, and do NOT mix it with ENB _msn workflows."
+        "Treat _rmaos/_ramos as the core packed data map for this preset — do NOT substitute separate Blender-style _rough/_metallic/_ao files into slot 5.\n"
+        "Mesh side must be TruePBR-enabled (BSLightingShaderProperty with SLSF2 Unused01/PBR flag, default shader type unless feature-specific overrides).\n"
+        "The NIF Editor's TruePBR preset now enables that PBR flag instead of stripping it during parallax/env-mask patching.\n"
+        "Core mesh tuning usually comes from specular level / roughness scale / displacement scale (or equivalent JSON patch values).\n"
+        "JSON sidecar should reference the generated base texture prefix (for example via 'texture'/'match_diffuse') and document channel mapping for your TruePBR setup.\n"
+        "PGPatcher best-practice: keep PBR textures under textures\\pbr and place your patcher JSON files under a top-level PBRNifPatcher\\ folder.\n"
+        "For landscape TruePBR, use PBRTextureSets\\<TXST_EDID>.json (roughnessScale/displacementScale/specularLevel values).\n"
+        "NOTE: Skyrim SE TruePBR diffuse is still just <stem>.dds — no Blender-style _d/_albedo/_color suffix.\n"
+        "Remember: TruePBR textures require Community Shaders at runtime and do not render correctly in non-CS tool previews.\n"
+        "Do NOT treat this as Community Shaders Extended Materials _cm/_c, and do NOT mix it with ENB _msn workflows."
     ),
     "enb": (
-        "ENBSeries workflow presets in this tool target _msn plus complex env-mask mode.\n"
-        "Some ENB material pipelines in the wild use different channel packing/naming, so verify against your ENB setup.\n"
-        "Preset files here: diffuse.dds + _msn.dds + _p.dds + _m.dds.\n"
+        "ENB complex material workflow — uses _msn.dds (slot 1) instead of vanilla _n.dds.\n"
+        "MSN = Model Space Normal: the red/green channels encode XYZ world-space normals, NOT screen-space tangent.\n"
+        "Preset files here: <stem>.dds (diffuse, no suffix) + <stem>_msn.dds + <stem>_p.dds + <stem>_m.dds.\n"
         "_msn RGBA channel layout (Slot 1, replaces _n): R=Normal X, G=Normal Y, B=Normal Z, "
         "A=Specular intensity.\n"
         "_m RGBA channel layout in this ENB preset (Slot 5): R=Reflection/specular brightness, "
         "G=Glossiness, B=Metalness (cubemap tint), A=Parallax height.\n"
-        "How files should look: _msn should remain a purple/blue normal map with a useful alpha, while _m should look like packed grayscale data — "
-        "red = reflectivity, green = gloss, blue = metalness, alpha = height. It should not look like a second normal map.\n"
+        "How files should look: _msn is purple/blue like a normal map but with a non-white alpha (specular); "
+        "_m should look like packed grayscale data — it should NOT look like a second normal map.\n"
         "Add _g.dds only for emissive assets.\n"
-        "This is not Community Shaders and not 'ENB PBR' — it is ENB complex material. Do not mix it with _cm/_c/_C workflows.\n"
+        "Do NOT use Blender-style _d/_albedo/_roughness/_metallic suffix names; Skyrim SE ignores them.\n"
+        "This profile is separate from Community Shaders Extended Materials _cm/_c/_C. Use one workflow per mesh/material.\n"
         "Do NOT generate vanilla _n.dds (replaced by _msn), _cm/_c, or TruePBR-style _rmaos for this preset."
     ),
 }
@@ -940,6 +1608,7 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "enable_parallax": True,
         "enable_pom": False,
         "enable_env_mapping": False,
+        "enable_pbr": False,
         "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
@@ -947,6 +1616,47 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "enable_parallax": True,
         "enable_pom": False,
         "enable_env_mapping": False,
+        "enable_pbr": False,
+        "force_shader_type_3": False,
+        "prefer_msn_normal": False,
+    },
+    "performance": {
+        "enable_parallax": False,
+        "enable_pom": False,
+        "enable_env_mapping": False,
+        "enable_pbr": False,
+        "force_shader_type_3": False,
+        "prefer_msn_normal": False,
+    },
+    "vr": {
+        "enable_parallax": False,
+        "enable_pom": False,
+        "enable_env_mapping": False,
+        "enable_pbr": False,
+        "force_shader_type_3": False,
+        "prefer_msn_normal": False,
+    },
+    "terrain": {
+        "enable_parallax": True,
+        "enable_pom": False,
+        "enable_env_mapping": False,
+        "enable_pbr": False,
+        "force_shader_type_3": False,
+        "prefer_msn_normal": False,
+    },
+    "architecture": {
+        "enable_parallax": True,
+        "enable_pom": False,
+        "enable_env_mapping": True,
+        "enable_pbr": False,
+        "force_shader_type_3": False,
+        "prefer_msn_normal": False,
+    },
+    "characters": {
+        "enable_parallax": False,
+        "enable_pom": False,
+        "enable_env_mapping": False,
+        "enable_pbr": False,
         "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
@@ -954,20 +1664,23 @@ _RENDER_PROFILE_NIF_PATCH_DEFAULTS: dict[str, dict[str, bool | str]] = {
         "enable_parallax": True,
         "enable_pom": False,
         "enable_env_mapping": True,
-        "force_shader_type_3": True,
+        "enable_pbr": False,
+        "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
     "truepbr": {
         "enable_parallax": True,
         "enable_pom": False,
         "enable_env_mapping": True,
-        "force_shader_type_3": True,
+        "enable_pbr": True,
+        "force_shader_type_3": False,
         "prefer_msn_normal": False,
     },
     "enb": {
         "enable_parallax": True,
         "enable_pom": True,
         "enable_env_mapping": True,
+        "enable_pbr": False,
         "force_shader_type_3": True,
         "prefer_msn_normal": True,
     },
@@ -981,7 +1694,11 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
         "include_complex": False,
+        "include_ao": False,
+        "include_roughness": False,
     },
     "vanilla": {
         "include_diffuse": True,
@@ -990,7 +1707,76 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
         "include_complex": False,
+        "include_ao": False,
+        "include_roughness": False,
+    },
+    "performance": {
+        "include_diffuse": True,
+        "include_normal": True,
+        "include_parallax": False,
+        "include_glow": False,
+        "include_environment_mask": False,
+        "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
+        "include_complex": False,
+        "include_ao": False,
+        "include_roughness": False,
+    },
+    "vr": {
+        "include_diffuse": True,
+        "include_normal": True,
+        "include_parallax": False,
+        "include_glow": False,
+        "include_environment_mask": False,
+        "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
+        "include_complex": False,
+        "include_ao": False,
+        "include_roughness": False,
+    },
+    "terrain": {
+        "include_diffuse": True,
+        "include_normal": True,
+        "include_parallax": True,
+        "include_glow": False,
+        "include_environment_mask": False,
+        "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
+        "include_complex": False,
+        "include_ao": False,
+        "include_roughness": False,
+    },
+    "architecture": {
+        "include_diffuse": True,
+        "include_normal": True,
+        "include_parallax": True,
+        "include_glow": False,
+        "include_environment_mask": True,
+        "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
+        "include_complex": False,
+        "include_ao": False,
+        "include_roughness": False,
+    },
+    "characters": {
+        "include_diffuse": True,
+        "include_normal": True,
+        "include_parallax": False,
+        "include_glow": False,
+        "include_environment_mask": False,
+        "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
+        "include_complex": False,
+        "include_ao": False,
+        "include_roughness": False,
     },
     "community_shaders": {
         "include_diffuse": True,
@@ -999,7 +1785,11 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
         "include_complex": True,
+        "include_ao": False,
+        "include_roughness": False,
     },
     "truepbr": {
         "include_diffuse": True,
@@ -1008,7 +1798,11 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": True,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
         "include_complex": False,
+        "include_ao": False,
+        "include_roughness": False,
     },
     "enb": {
         "include_diffuse": True,
@@ -1017,25 +1811,68 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": True,
         "include_rmaos": False,
+        "include_wetness_mask": False,
+        "include_snow_mask": False,
         "include_complex": True,
+        "include_ao": False,
+        "include_roughness": False,
     },
 }
 
 _RENDER_PROFILE_OUTPUT_LABELS: dict[str, str] = {
     "include_diffuse": "diffuse",
     "include_normal": "normal/_n",
-    "include_parallax": "parallax/_p",
+    "include_parallax": "height/parallax/_p",
     "include_glow": "glow/_g",
-    "include_environment_mask": "env mask/_m",
-    "include_rmaos": "rmaos/_rmaos/_ramos",
-    "include_complex": "complex material",
+    "include_environment_mask": "vanilla/enb env mask/_m",
+    "include_rmaos": "community shaders pbr/_rmaos/_ramos",
+    "include_wetness_mask": "community shaders wetness/_wt",
+    "include_snow_mask": "community shaders snow/_sm",
+    "include_complex": "complex material (_msn/_cm)",
+    "include_ao": "standalone ao/_ao (optional)",
+    "include_roughness": "roughness/_rough",
 }
 
 _RENDER_PROFILE_PATH_HINTS: dict[str, tuple[str, ...]] = {
     "enb": ("enb", "enbseries"),
     "community_shaders": ("communityshaders", "community_shaders", "community-shaders", "cs"),
-    "truepbr": ("truepbr", "true_pbr", "true-pbr", "pbrnifpatcher"),
+    "truepbr": ("truepbr", "true_pbr", "true-pbr", "pbrnifpatcher", "textures pbr"),
 }
+
+_RENDER_PROFILE_MANAGER_HINT_TOKENS: dict[str, tuple[str, ...]] = {
+    "enb": ("enb", "enbseries"),
+    "community_shaders": ("community shaders", "communityshaders", "complex material", "extended materials"),
+    "truepbr": ("truepbr", "true pbr", "pbrnifpatcher", "pbr nif patcher", "rmaos", "ramos"),
+}
+
+_RENDER_PROFILE_WORKFLOW_HINTS: dict[str, str] = {
+    "performance": "performance",
+    "vr": "vr",
+    "terrain": "terrain",
+    "architecture": "architecture",
+    "characters": "characters",
+    "interface": "vanilla",
+}
+
+_RENDER_PROFILE_ENB_MARKERS: tuple[tuple[str, ...], ...] = (
+    ("d3d11.dll",),
+    ("d3dcompiler_46e.dll",),
+    ("enbseries.ini",),
+    ("enbseries",),
+)
+
+_RENDER_PROFILE_CS_MARKERS: tuple[tuple[str, ...], ...] = (
+    ("skse", "plugins", "communityshaders.dll"),
+    ("skse", "plugins", "complexmaterial.dll"),
+    ("skse", "plugins", "terrainshadows.dll"),
+    ("skse", "plugins", "dynamiccubemaps.dll"),
+)
+
+_RENDER_PROFILE_TRUEPBR_MARKERS: tuple[tuple[str, ...], ...] = (
+    ("skse", "plugins", "pbrnifpatcher.dll"),
+    ("pbrnifpatcher",),
+    ("textures", "pbr"),
+)
 
 
 def _normalize_render_profile(value: str | None) -> str:
@@ -1044,11 +1881,44 @@ def _normalize_render_profile(value: str | None) -> str:
         return "community_shaders"
     if normalized in {"true pbr", "truepbr"}:
         return "truepbr"
+    if normalized in {"character", "character_skin", "character-skin", "skin", "npc"}:
+        return "characters"
+    if normalized in {"arch", "building"}:
+        return "architecture"
     if normalized == "experimental":
         return "custom"
-    if normalized in {"auto", "custom", "vanilla", "community_shaders", "truepbr", "enb"}:
+    if normalized in {
+        "auto",
+        "custom",
+        "vanilla",
+        "performance",
+        "vr",
+        "terrain",
+        "architecture",
+        "characters",
+        "community_shaders",
+        "truepbr",
+        "enb",
+    }:
         return normalized
     return "custom"
+
+
+def _path_exists_casefold(root: Path, parts: tuple[str, ...]) -> bool:
+    current = root
+    for part in parts:
+        direct = current / part
+        if direct.exists():
+            current = direct
+            continue
+        try:
+            matched = next((child for child in current.iterdir() if child.name.lower() == part.lower()), None)
+        except Exception:
+            return False
+        if matched is None:
+            return False
+        current = matched
+    return True
 
 
 def resolve_env_mask_complex_workflow(
@@ -1058,7 +1928,13 @@ def resolve_env_mask_complex_workflow(
     render_profile: str = "auto",
     include_complex: bool | None = None,
 ) -> str:
-    """Resolve how complex env-mask channels should be packed."""
+    """Resolve how complex env-mask channels should be packed.
+
+    Community Shaders Extended Materials uses the same RGBA channel layout as
+    ENB complex material (R=env reflection, G=glossiness, B=metallic,
+    A=height).  All CS-family profiles must return "enb" here, not "truepbr"
+    (which uses R=roughness, G=metallic, B=AO — a completely different layout).
+    """
     if _normalize_env_mask_mode(env_mask_mode) != "complex":
         return "standard"
     normalized_profile = _normalize_render_profile(render_profile)
@@ -1066,6 +1942,10 @@ def resolve_env_mask_complex_workflow(
         return "enb"
     if normalized_profile == "truepbr":
         return "truepbr"
+    # Community Shaders Extended Materials uses ENB-compatible RGBA packing
+    # (R=env, G=gloss, B=metal, A=height) — confirmed from Lighting.hlsl.
+    if normalized_profile == "community_shaders":
+        return "enb"
     if include_complex is False:
         return "enb"
     if include_complex is True:
@@ -1097,9 +1977,11 @@ def resolve_nif_patch_defaults_for_render_profile(
 def get_nif_patch_option_warnings(
     *,
     selected_profile: str,
+    recommended_profile: str | None = None,
     enable_parallax: bool,
     enable_pom: bool,
     enable_env_mapping: bool,
+    enable_pbr: bool = False,
     force_shader_type_3: bool,
     parallax_texture_path: str = "",
     normal_texture_path: str = "",
@@ -1110,18 +1992,34 @@ def get_nif_patch_option_warnings(
     disable_parallax: bool = False,
     disable_pom: bool = False,
     disable_env_mapping: bool = False,
+    disable_glow_map: bool = False,
+    disable_pbr: bool = False,
     clear_parallax_texture_path: bool = False,
     clear_normal_texture_path: bool = False,
     clear_env_mask_texture_path: bool = False,
+    clear_glow_texture_path: bool = False,
+    clear_diffuse_texture_path: bool = False,
+    clear_cubemap_texture_path: bool = False,
 ) -> list[str]:
     warnings: list[str] = []
-    profile = str(selected_profile or "auto")
-    normalized_profile = _normalize_render_profile(profile)
-    if profile in {"auto", "vanilla"} and enable_pom:
+    normalized_selected_profile = _normalize_render_profile(str(selected_profile or "auto"))
+    normalized_recommended_profile = _normalize_render_profile(recommended_profile)
+    effective_profile = (
+        normalized_recommended_profile
+        if normalized_selected_profile == "auto"
+        else normalized_selected_profile
+    )
+    if effective_profile == "auto":
+        effective_profile = "vanilla"
+    if effective_profile == "vanilla" and enable_pom:
         warnings.append("ENB POM is usually incorrect for vanilla meshes.")
+    if effective_profile in {"performance", "vr"} and enable_parallax:
+        warnings.append("Performance/VR workflows usually keep parallax disabled to reduce shimmer and GPU cost.")
+    if effective_profile == "characters" and enable_parallax:
+        warnings.append("Character workflows usually keep parallax disabled to avoid unstable face/skin shading.")
     if enable_pom and not force_shader_type_3:
         warnings.append("POM works best with shader type 3 enabled.")
-    if enable_env_mapping and not env_mask_texture_path.strip() and normalized_profile not in {"enb", "auto"}:
+    if enable_env_mapping and not env_mask_texture_path.strip() and effective_profile != "enb":
         warnings.append("Environment mapping enabled with empty slot 5 path.")
     if parallax_texture_path.strip() and not (enable_parallax or enable_pom):
         warnings.append("Parallax slot path set, but parallax/POM flags are disabled.")
@@ -1133,20 +2031,55 @@ def get_nif_patch_option_warnings(
         warnings.append("Both enable and disable POM are checked.")
     if disable_env_mapping and enable_env_mapping:
         warnings.append("Both enable and disable environment mapping are checked.")
+    if disable_glow_map and glow_texture_path.strip():
+        warnings.append("Glow map is set to both disable and write a slot 2 path.")
+    if disable_pbr and enable_pbr:
+        warnings.append("Both enable and disable TruePBR/PBR flag are checked.")
     if clear_parallax_texture_path and parallax_texture_path.strip():
         warnings.append("Parallax slot is set to both clear and write a path.")
     if clear_normal_texture_path and normal_texture_path.strip():
         warnings.append("Normal slot is set to both clear and write a path.")
     if clear_env_mask_texture_path and env_mask_texture_path.strip():
         warnings.append("Environment mask slot is set to both clear and write a path.")
+    if clear_glow_texture_path and glow_texture_path.strip():
+        warnings.append("Glow slot is set to both clear and write a path.")
+    if clear_diffuse_texture_path and diffuse_texture_path.strip():
+        warnings.append("Diffuse slot is set to both clear and write a path.")
+    if clear_cubemap_texture_path and cubemap_texture_path.strip():
+        warnings.append("Cubemap slot is set to both clear and write a path.")
 
     path_rules = (
-        ("Diffuse slot", diffuse_texture_path, ("_n.dds", "_msn.dds", "_p.dds", "_g.dds", "_m.dds", "_cm.dds", "_c.dds", "_rmaos.dds", "_ramos.dds"), True),
+        (
+            "Diffuse slot",
+            diffuse_texture_path,
+            (
+                "_n.dds",
+                "_msn.dds",
+                "_p.dds",
+                "_em.dds",
+                "_g.dds",
+                "_glow.dds",
+                "_m.dds",
+                "_cm.dds",
+                "_c.dds",
+                "_rmaos.dds",
+                "_ramos.dds",
+                "_orm.dds",
+                "_orms.dds",
+                "_mrao.dds",
+                "_mra.dds",
+                "_ao.dds",
+                "_rough.dds",
+                "_wt.dds",
+                "_sm.dds",
+            ),
+            True,
+        ),
         ("Parallax slot", parallax_texture_path, ("_p.dds",)),
-        ("Normal slot", normal_texture_path, ("_n.dds", "_msn.dds"), False),
-        ("Glow slot", glow_texture_path, ("_g.dds", "_glow.dds", "_emit.dds", "_emissive.dds"), False),
-        ("Cubemap slot", cubemap_texture_path, ("_e.dds", "_cube.dds", "_env.dds", "_envmap.dds"), False),
-        ("Env mask slot", env_mask_texture_path, ("_m.dds", "_mask.dds", "_envmask.dds", "_cm.dds", "_c.dds", "_rmaos.dds", "_ramos.dds"), False),
+        ("Normal slot", normal_texture_path, ("_n.dds", "_msn.dds")),
+        ("Glow slot", glow_texture_path, ("_g.dds",)),
+        ("Cubemap slot", cubemap_texture_path, ("_e.dds", "_cube.dds", "_env.dds", "_envmap.dds")),
+        ("Env mask slot", env_mask_texture_path, ("_m.dds", "_cm.dds", "_c.dds", "_rmaos.dds", "_ramos.dds")),
     )
     for rule in path_rules:
         label, raw_path, suffixes, *extra = rule
@@ -1155,6 +2088,8 @@ def get_nif_patch_option_warnings(
         if not normalized:
             continue
         lowered = normalized.lower()
+        if not lowered.endswith(".dds"):
+            warnings.append(f"{label} path should use a .dds filename for Skyrim runtime lookups.")
         if re.match(r"^[a-z]:\\", lowered):
             warnings.append(
                 f"{label} path is absolute; use Skyrim-relative textures\\... paths to avoid broken in-game lookups."
@@ -1169,11 +2104,59 @@ def get_nif_patch_option_warnings(
         if is_diffuse_rule:
             if lowered.endswith(lowered_suffixes):
                 warnings.append(
-                    f"{label} path looks like a generated map type (_n/_p/_g/_m/_cm/_c/_rmaos/_ramos); slot 0 should usually be diffuse/albedo."
+                    f"{label} path looks like a generated map type (_n/_msn/_p/_g/_m/_cm/_rmaos/_ramos); slot 0 should usually be diffuse/albedo."
+                )
+            if lowered.endswith(("_d.dds", "_diff.dds", "_diffuse.dds", "_albedo.dds", "_basecolor.dds", "_base_color.dds")):
+                warnings.append(
+                    f"{label} path uses Blender/authoring suffix naming (_d/_diffuse/_albedo). Skyrim runtime diffuse is usually just <stem>.dds."
                 )
             continue
         if not lowered.endswith(lowered_suffixes):
             warnings.append(f"{label} path should usually end with {', '.join(suffixes)}.")
+        if label == "Glow slot" and lowered.endswith("_sk.dds"):
+            warnings.append("Glow slot path uses legacy _sk suffix; Skyrim SE canonical emissive suffix is _g.dds.")
+        if label == "Env mask slot" and lowered.endswith(
+            ("_c.dds", "_mask.dds", "_envmask.dds", "_orm.dds", "_orms.dds", "_mrao.dds", "_mra.dds")
+        ):
+            warnings.append(
+                "Env mask slot path uses a legacy/generic alias; prefer _m.dds (vanilla/ENB), _cm.dds (Community Shaders), or _rmaos.dds (TruePBR)."
+            )
+        if label == "Env mask slot" and lowered.endswith(
+            ("_rough.dds", "_roughness.dds", "_metal.dds", "_metallic.dds", "_metalness.dds", "_ao.dds")
+        ):
+            warnings.append(
+                "Env mask slot path looks like standalone Blender authoring outputs (_rough/_metallic/_ao). Use Skyrim runtime packed naming (_m/_cm/_rmaos) instead."
+            )
+
+    normal_lower = normal_texture_path.strip().replace("/", "\\").lower()
+    env_lower = env_mask_texture_path.strip().replace("/", "\\").lower()
+    env_uses_truepbr_suffix = env_lower.endswith(tuple(TRUEPBR_ENV_MASK_SUFFIXES))
+    if effective_profile == "enb":
+        if normal_lower.endswith("_n.dds"):
+            warnings.append("ENB workflows usually use _msn.dds in slot 1 instead of _n.dds.")
+        if env_lower.endswith(("_cm.dds", "_c.dds", "_rmaos.dds", "_ramos.dds")):
+            warnings.append("ENB slot 5 usually uses _m.dds, not _cm/_c/_rmaos variants.")
+    elif effective_profile == "community_shaders":
+        if normal_lower.endswith("_msn.dds"):
+            warnings.append("Community Shaders workflows usually use _n.dds normals, not _msn.dds.")
+        if env_lower.endswith(("_rmaos.dds", "_ramos.dds")):
+            warnings.append("Community Shaders (non-TruePBR) slot 5 usually uses _cm/_c, not _rmaos/_ramos.")
+    elif effective_profile == "truepbr":
+        if normal_lower.endswith("_msn.dds"):
+            warnings.append("TruePBR workflows usually use _n.dds normals, not _msn.dds.")
+        if env_lower.endswith(("_cm.dds", "_c.dds")):
+            warnings.append("TruePBR slot 5 usually uses _rmaos/_ramos, not _cm/_c.")
+        if env_lower.endswith(("_orm.dds", "_orms.dds", "_mrao.dds", "_mra.dds")):
+            warnings.append(
+                "TruePBR slot 5 path uses a legacy generic alias (_orm/_mrao). Prefer _rmaos/_ramos naming for Skyrim Community Shaders workflows."
+            )
+        if not enable_pbr and not disable_pbr:
+            warnings.append("TruePBR workflows need the Community Shaders PBR flag enabled on the NIF.")
+    elif enable_pbr:
+        warnings.append("PBR flag is usually only needed for Community Shaders TruePBR workflows.")
+    if env_uses_truepbr_suffix or env_lower.endswith(("_orm.dds", "_orms.dds", "_mrao.dds", "_mra.dds")):
+        if not enable_pbr and not disable_pbr:
+            warnings.append("RMAOS/ORM slot 5 textures usually need the Community Shaders PBR flag enabled.")
 
     return warnings
 
@@ -1190,6 +2173,53 @@ def resolve_render_profile_output_defaults(
         effective_profile = "vanilla"
     defaults = _RENDER_PROFILE_OUTPUT_DEFAULTS.get(effective_profile, _RENDER_PROFILE_OUTPUT_DEFAULTS["vanilla"])
     return {"selected_profile": normalized_selected, "effective_profile": effective_profile, **defaults}
+
+
+def render_profile_has_locked_controls(selected_profile: str) -> bool:
+    return _normalize_render_profile(selected_profile) != "custom"
+
+
+def resolve_render_profile_mode_control_states(
+    *,
+    selected_profile: str,
+    include_complex: bool,
+    include_environment_mask: bool,
+    include_parallax: bool,
+) -> dict[str, bool | str]:
+    locked = render_profile_has_locked_controls(selected_profile)
+    if locked:
+        disabled_state = "disabled"
+        return {
+            "locked": True,
+            "complex_format": disabled_state,
+            "env_mask_mode": disabled_state,
+            "parallax_mode": disabled_state,
+        }
+    editable_state = "readonly"
+    disabled_state = "disabled"
+    return {
+        "locked": False,
+        "complex_format": editable_state if include_complex else disabled_state,
+        "env_mask_mode": editable_state if include_environment_mask else disabled_state,
+        "parallax_mode": editable_state if include_parallax else disabled_state,
+    }
+
+
+def build_render_profile_mode_controls_hint(control_states: Mapping[str, bool | str]) -> str:
+    if bool(control_states.get("locked")):
+        return "Renderer preset locks mode selectors to prevent conflicting GUI combinations."
+    disabled_controls: list[str] = []
+    if str(control_states.get("complex_format")) == "disabled":
+        disabled_controls.append("ENB Complex Material")
+    if str(control_states.get("env_mask_mode")) == "disabled":
+        disabled_controls.append("Environment mask")
+    if str(control_states.get("parallax_mode")) == "disabled":
+        disabled_controls.append("Parallax")
+    if not disabled_controls:
+        return "Custom mode: all mode selectors are available."
+    if len(disabled_controls) == 3:
+        return "Custom mode: enable ENB Complex Material, Environment mask, or Parallax outputs to unlock mode selectors."
+    return "Custom mode: enable " + ", ".join(disabled_controls) + " output(s) to unlock matching mode selectors."
 
 
 def describe_render_profile_default_outputs(profile: str) -> str:
@@ -1210,6 +2240,48 @@ def describe_render_profile_default_outputs(profile: str) -> str:
     return f"Auto-check: {enabled_text}. Auto-uncheck: {disabled_text}."
 
 
+def describe_render_profile_files_to_create(profile: str) -> str:
+    normalized = _normalize_render_profile(profile)
+    if normalized == "auto":
+        normalized = "vanilla"
+    if normalized == "custom":
+        return "Suggested files: custom/manual workflow (choose only the maps your shader stack expects)."
+
+    defaults = _RENDER_PROFILE_OUTPUT_DEFAULTS.get(normalized, _RENDER_PROFILE_OUTPUT_DEFAULTS["vanilla"])
+    suffix_map = {
+        "include_diffuse": "<stem>.dds",
+        "include_normal": "<stem>_n.dds",
+        "include_parallax": "<stem>_p.dds",
+        "include_glow": "<stem>_g.dds",
+        "include_environment_mask": "<stem>_m.dds",
+        "include_rmaos": "<stem>_rmaos.dds (or <stem>_ramos.dds)",
+        "include_wetness_mask": "<stem>_wt.dds",
+        "include_snow_mask": "<stem>_sm.dds",
+        "include_complex": "<stem>_msn.dds",
+        "include_ao": "<stem>_ao.dds",
+        "include_roughness": "<stem>_rough.dds",
+    }
+    if normalized == "community_shaders":
+        suffix_map["include_environment_mask"] = "<stem>_cm.dds (or <stem>_c.dds)"
+        suffix_map["include_complex"] = "<stem>_cm.dds (or <stem>_c.dds)"
+    elif normalized == "truepbr":
+        suffix_map["include_environment_mask"] = "<stem>_rmaos.dds (or <stem>_ramos.dds)"
+        suffix_map["include_complex"] = "<stem>_rmaos.dds (or <stem>_ramos.dds)"
+    elif normalized == "enb":
+        suffix_map["include_normal"] = "<stem>_msn.dds"
+        suffix_map["include_complex"] = "<stem>_msn.dds"
+
+    files: list[str] = []
+    for key in _RENDER_PROFILE_OUTPUT_LABELS:
+        if defaults.get(key):
+            file_hint = suffix_map.get(key)
+            if file_hint and file_hint not in files:
+                files.append(file_hint)
+    if not files:
+        return "Suggested files: none by default for this profile."
+    return f"Suggested files: {', '.join(files)}."
+
+
 def build_render_profile_recommendation_message(recommended_profile: str) -> str:
     normalized = _normalize_render_profile(recommended_profile)
     if normalized == "auto":
@@ -1219,28 +2291,61 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
     workflow_hint = {
         "custom": "manual blank profile",
         "vanilla": "best for stock Skyrim SE / safest defaults",
+        "performance": "best for lower-end systems and stability-first outputs",
+        "vr": "best for VR comfort-focused conservative outputs",
+        "terrain": "best for stable terrain outputs with conservative parallax",
+        "architecture": "best for architecture/walls with standard slot-5 env mask defaults",
+        "characters": "best for skin/character assets with safer non-parallax defaults",
         "community_shaders": "best for Community Shaders packed-material workflows",
         "truepbr": "best for Community Shaders TruePBR JSON-driven workflows",
-        "enb": "best for ENB complex material + POM workflows",
+        "enb": "best for ENB-focused setups using this tool's ENB defaults",
     }.get(normalized, "recommended workflow")
     tuple_hint = (
         f"{resolved['complex_format']} / env {resolved['env_mask_mode']} / "
         f"parallax {resolved['parallax_mode']}"
     )
     lines = [
-        "⚠ Render profile guidance is EXPERIMENTAL and may be inaccurate for some setups.",
+        "Renderer guidance below reflects this tool's built-in presets and channel mappings.",
         f"Suggested target: {label} ({workflow_hint}) → {tuple_hint}.",
         describe_render_profile_output_recommendation(normalized),
         describe_render_profile_default_outputs(normalized),
         "",
         "Renderer quick guide:",
     ]
-    for profile in ("custom", "vanilla", "community_shaders", "truepbr", "enb"):
+    for profile in (
+        "custom",
+        "vanilla",
+        "performance",
+        "vr",
+        "terrain",
+        "architecture",
+        "characters",
+        "community_shaders",
+        "truepbr",
+        "enb",
+    ):
         lines.append(
             f"- {_RENDER_PROFILE_LABELS[profile]}: "
             f"{describe_render_profile_default_outputs(profile)} "
             f"{describe_render_profile_output_recommendation(profile)}"
         )
+    lines.extend(
+        [
+            "",
+            "TruePBR essentials (Community Shaders):",
+            "- For players/users: TruePBR gives more realistic lighting than vanilla/complex material, can combine effects like parallax, glow, subsurface scattering, or dual-layer materials, and follows the same physically-based workflow used across modern game rendering pipelines.",
+            "- Runtime requirement: TruePBR texture packs need Community Shaders enabled in-game. They will not preview/render correctly in non-CS tool paths such as Creation Kit, Outfit Studio, or Bodyslide.",
+            "- For texture artists/developers: ship both sides of the workflow — (1) meshes flagged for PBR or PGPatcher/PBRNifPatcher JSON rules, and (2) the actual TruePBR textures.",
+            "- Core texture set for this tool: <stem>.dds diffuse, <stem>_n.dds normal, and packed <stem>_rmaos.dds/<stem>_ramos.dds data. Do not swap in standalone Blender-style _rough/_metallic/_ao names as the main TruePBR slot-5 texture.",
+            "- Legacy alias note: if you imported older _orm/_orms/_mrao/_mra assets, normalize them to _rmaos/_ramos naming before shipping to keep workflows unambiguous.",
+            "- Core mesh tuning: Specular Level controls non-metal reflectance, Roughness Scale controls surface smoothness, and Displacement Scale controls parallax/displacement depth.",
+            "- Colour-space rule of thumb: save in-game colour textures as sRGB; save data textures like normal/displacement/RMAOS in linear space.",
+            "- Landscape workflow: use Data/PBRTextureSets/<TXST_EDID>.json with roughnessScale, displacementScale, and specularLevel values.",
+            "- Feature compatibility: subsurface scattering conflicts with dual-layer material; glint conflicts with fuzz and dual-layer; fuzz conflicts with glint and dual-layer; hair model is a standalone shading model; dual-layer material works with parallax/emission but not glint/fuzz/subsurface.",
+            "- Material objects: PBR MATOs need single-pass records plus matching Data/PBRMaterialObjects JSON and only render on PBR-enabled surfaces.",
+            f"- Reference: {MODDING_WIKI_SKYRIM_URL}",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -1250,7 +2355,12 @@ def build_render_profile_brief_message(recommended_profile: str) -> str:
         normalized = "vanilla"
     label = _RENDER_PROFILE_LABELS.get(normalized, normalized.replace("_", " ").title())
     defaults = describe_render_profile_default_outputs(normalized)
-    return f"Suggested target: {label}. {defaults} Click Help for full renderer/channel guide."
+    files = describe_render_profile_files_to_create(normalized)
+    return (
+        f"Suggested target: {label}. {defaults} {files} "
+        "Auto-detect prioritizes installed renderer markers/suffix hints first, then falls back to content profile hints. "
+        "Click Help for full renderer/channel guide."
+    )
 
 
 def recommend_render_profile(
@@ -1261,27 +2371,121 @@ def recommend_render_profile(
     detected_suffix: str | None = None,
     material_type: str = "general",
     workflow_profile: str | None = None,
+    manager_context: ModManagerContext | None = None,
 ) -> str:
     """Recommend target rendering profile for map format/mode defaults."""
+    inferred_workflow = workflow_profile
+    inferred_material_type = material_type
+    if input_path is not None:
+        if inferred_workflow is None:
+            inferred_workflow = detect_workflow_profile(input_path)
+        if inferred_material_type == "general":
+            inferred_material_type = classify_material_type(input_path)
     normalized_suffix = (detected_suffix or "").strip().lower()
     if normalized_suffix in {"_cm", "_c"}:
         return "community_shaders"
     if normalized_suffix == "_msn":
         return "enb"
-    if normalized_suffix in {"_rmaos", "_ramos"}:
+    if normalized_suffix in TRUEPBR_ENV_MASK_SUFFIXES:
+        return "truepbr"
+    if normalized_suffix in LEGACY_TRUEPBR_ENV_MASK_SUFFIXES:
         return "truepbr"
     if detected_role == "complex_material_cm":
         return "community_shaders"
     if detected_role == "complex_material":
         return "enb"
-    if workflow_profile == "interface" or material_type == "paper":
+    explicit_workflow_hint = _RENDER_PROFILE_WORKFLOW_HINTS.get((workflow_profile or "").strip().lower())
+    if explicit_workflow_hint is not None:
+        return explicit_workflow_hint
+    if inferred_material_type == "paper":
         return "vanilla"
     if input_path is not None:
         combined = " ".join(input_path.parts).lower()
         for profile, tokens in _RENDER_PROFILE_PATH_HINTS.items():
             if any(token in combined for token in tokens):
                 return profile
+    manager_profile = detect_render_profile_from_mod_manager_context(manager_context)
+    if manager_profile is not None:
+        return manager_profile
+    inferred_workflow_hint = _RENDER_PROFILE_WORKFLOW_HINTS.get((inferred_workflow or "").strip().lower())
+    if inferred_workflow_hint is not None:
+        return inferred_workflow_hint
+    if inferred_material_type in {"terrain", "snow", "dirt", "sand"}:
+        return "terrain"
+    if inferred_material_type == "architecture":
+        return "architecture"
+    if inferred_material_type in {"skin", "fur"}:
+        return "characters"
     return "vanilla"
+
+
+def detect_render_profile_from_mod_manager_context(context: ModManagerContext | None) -> str | None:
+    """Infer installed renderer profile hints from detected MO2/Vortex context.
+
+    Community Shaders disables itself when ENB runtime binaries are present, so
+    ENB markers take precedence over CS/TruePBR hints for auto-selection.
+    """
+    if context is None or context.manager is None:
+        return None
+    candidates: list[str] = []
+    for mod_name in context.loaded_mods:
+        normalized = str(mod_name).strip().lower()
+        if normalized:
+            candidates.append(normalized)
+    for plugin_name in context.enabled_plugins:
+        normalized = str(plugin_name).strip().lower()
+        if normalized:
+            candidates.append(normalized)
+    for load_order_name in context.load_order:
+        normalized = str(load_order_name).strip().lower()
+        if normalized:
+            candidates.append(normalized)
+    for path in (*context.loaded_texture_dirs, *context.loaded_mesh_dirs):
+        parent_name = path.parent.name.strip().lower()
+        if parent_name:
+            candidates.append(parent_name)
+    has_truepbr = any(
+        _hint_token_matches_source(candidate, token)
+        for candidate in candidates
+        for token in _RENDER_PROFILE_MANAGER_HINT_TOKENS["truepbr"]
+    )
+    has_cs = any(
+        _hint_token_matches_source(candidate, token)
+        for candidate in candidates
+        for token in _RENDER_PROFILE_MANAGER_HINT_TOKENS["community_shaders"]
+    )
+    has_enb = any(
+        _hint_token_matches_source(candidate, token)
+        for candidate in candidates
+        for token in _RENDER_PROFILE_MANAGER_HINT_TOKENS["enb"]
+    )
+    marker_roots: list[Path] = []
+    marker_roots.extend(path for path in (context.game_root, context.instance_root, context.staging_root, context.output_dir) if path is not None)
+    if context.game_root is not None:
+        marker_roots.append(context.game_root / "Data")
+    marker_roots.extend(path.parent for path in (*context.loaded_texture_dirs, *context.loaded_mesh_dirs))
+    for root in _unique_existing_paths(marker_roots):
+        for parts in _RENDER_PROFILE_ENB_MARKERS:
+            if _path_exists_casefold(root, parts):
+                has_enb = True
+                break
+        for parts in _RENDER_PROFILE_CS_MARKERS:
+            if _path_exists_casefold(root, parts):
+                has_cs = True
+                break
+        for parts in _RENDER_PROFILE_TRUEPBR_MARKERS:
+            if _path_exists_casefold(root, parts):
+                has_truepbr = True
+                break
+    if has_enb:
+        return "enb"
+    if has_truepbr:
+        return "truepbr"
+    if has_cs:
+        return "community_shaders"
+    if context.detected_body_profiles or context.detected_skeleton_profiles:
+        return "characters"
+    return None
 
 
 def resolve_render_profile_options(
@@ -1359,6 +2563,69 @@ def resolve_render_profile_mode_selection(
     }
 
 
+def resolve_render_profile_guardrails(
+    *,
+    selected_profile: str,
+    recommended_profile: str | None = None,
+    complex_format: str,
+    env_mask_mode: str,
+    parallax_mode: str,
+) -> dict[str, object]:
+    """Resolve/guard core workflow modes when a renderer profile is selected."""
+    normalized_selected = _normalize_render_profile(selected_profile)
+    has_recommended_profile = bool(str(recommended_profile or "").strip())
+    normalized_recommended = _normalize_render_profile(recommended_profile) if has_recommended_profile else "auto"
+    current_complex_format = _normalize_complex_format(complex_format)
+    current_env_mask_mode = _normalize_env_mask_mode(env_mask_mode)
+    current_parallax_mode = _normalize_parallax_mode_key(parallax_mode)
+    if normalized_selected == "custom":
+        return {
+            "selected_profile": normalized_selected,
+            "effective_profile": "custom",
+            "complex_format": current_complex_format,
+            "env_mask_mode": current_env_mask_mode,
+            "parallax_mode": current_parallax_mode,
+            "changes": [],
+        }
+    if normalized_selected == "auto" and normalized_recommended in {"custom", "auto"} and has_recommended_profile:
+        normalized_recommended = "vanilla"
+    should_enforce = not (normalized_selected == "auto" and not has_recommended_profile)
+    if not should_enforce:
+        return {
+            "selected_profile": normalized_selected,
+            "effective_profile": normalized_recommended if normalized_recommended != "auto" else "auto",
+            "complex_format": current_complex_format,
+            "env_mask_mode": current_env_mask_mode,
+            "parallax_mode": current_parallax_mode,
+            "changes": [],
+        }
+    resolved = resolve_render_profile_options(
+        normalized_selected,
+        recommended_profile=normalized_recommended if normalized_recommended != "auto" else None,
+    )
+    changes: list[str] = []
+    if current_complex_format != resolved["complex_format"]:
+        changes.append(
+            f"complex format {current_complex_format} -> {resolved['complex_format']}"
+        )
+    if current_env_mask_mode != resolved["env_mask_mode"]:
+        changes.append(
+            f"env mask mode {current_env_mask_mode} -> {resolved['env_mask_mode']}"
+        )
+    if current_parallax_mode != resolved["parallax_mode"]:
+        changes.append(
+            f"parallax mode {current_parallax_mode} -> {resolved['parallax_mode']}"
+        )
+    return {
+        "selected_profile": resolved["selected_profile"],
+        "effective_profile": resolved["effective_profile"],
+        "complex_format": resolved["complex_format"],
+        "env_mask_mode": resolved["env_mask_mode"],
+        "parallax_mode": resolved["parallax_mode"],
+        "changes": changes,
+    }
+
+
 def _adjust_recommendations_for_workflow_profile(
     recommended: dict[str, float | int], workflow_profile: str | None
 ) -> dict[str, float | int]:
@@ -1372,6 +2639,44 @@ def _adjust_recommendations_for_workflow_profile(
         adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]), 1.0, 1.35)
         adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]), 0.9, 1.15)
         adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]), 200.0, 235.0))
+    elif workflow_profile == "performance":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]), 1.1, 2.2)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]), 0.8, 1.25)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]), 0.9, 1.35)
+        adjusted["rmaos_strength"] = _clamp(float(adjusted["rmaos_strength"]), 0.9, 1.75)
+        adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]), 1.0, 1.7)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]), 0.9, 1.35)
+        adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]), 185.0, 235.0))
+    elif workflow_profile == "vr":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]), 1.1, 2.1)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]), 0.8, 1.15)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]), 0.9, 1.3)
+        adjusted["rmaos_strength"] = _clamp(float(adjusted["rmaos_strength"]), 0.9, 1.7)
+        adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]), 1.0, 1.65)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]), 0.9, 1.3)
+        adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]), 190.0, 235.0))
+    elif workflow_profile == "terrain":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]), 1.1, 2.3)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]), 0.8, 1.2)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]), 0.9, 1.3)
+        adjusted["rmaos_strength"] = _clamp(float(adjusted["rmaos_strength"]), 0.9, 1.8)
+        adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]), 1.0, 1.85)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]), 0.9, 1.3)
+    elif workflow_profile == "characters":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]), 1.1, 2.0)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]), 0.8, 1.1)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]), 0.9, 1.35)
+        adjusted["rmaos_strength"] = _clamp(float(adjusted["rmaos_strength"]), 0.9, 1.8)
+        adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]), 1.0, 1.75)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]), 0.9, 1.4)
+        adjusted["glow_threshold"] = int(_clamp(float(adjusted["glow_threshold"]), 175.0, 235.0))
+    elif workflow_profile == "architecture":
+        adjusted["normal_strength"] = _clamp(float(adjusted["normal_strength"]), 1.1, 2.7)
+        adjusted["parallax_strength"] = _clamp(float(adjusted["parallax_strength"]), 0.8, 1.5)
+        adjusted["environment_mask_strength"] = _clamp(float(adjusted["environment_mask_strength"]), 0.9, 1.6)
+        adjusted["rmaos_strength"] = _clamp(float(adjusted["rmaos_strength"]), 0.9, 2.1)
+        adjusted["complex_strength"] = _clamp(float(adjusted["complex_strength"]), 1.0, 2.15)
+        adjusted["specular_strength"] = _clamp(float(adjusted["specular_strength"]), 0.9, 1.55)
     return adjusted
 
 
@@ -1491,6 +2796,8 @@ def recommend_generation_settings(source: Image.Image, input_path: Path | None =
         "complex_strength": complex_strength,
         "specular_strength": specular_strength,
         "glow_threshold": glow_threshold,
+        "ao_strength": environment_mask_strength,
+        "roughness_strength": specular_strength,
     }
     detected_role: str | None = None
     material_type = "general"
@@ -1504,9 +2811,19 @@ def recommend_generation_settings(source: Image.Image, input_path: Path | None =
         inferred_from_image = _infer_likely_role_from_image(source)
         if inferred_from_image is not None:
             detected_role = inferred_from_image
+    # When the filename gives no specific material, fall back to image-content analysis.
+    if material_type == "general":
+        image_material = analyze_material_type_from_image(source)
+        if image_material is not None:
+            material_type = image_material
     role_adjusted = _adjust_recommendations_for_role(recommended, detected_role)
     material_adjusted = _adjust_recommendations_for_material_type(role_adjusted, material_type)
-    workflow_adjusted = _adjust_recommendations_for_workflow_profile(material_adjusted, workflow_profile)
+    path_hint_adjusted = _adjust_recommendations_for_material_path_hints(
+        material_adjusted,
+        material_type,
+        input_path,
+    )
+    workflow_adjusted = _adjust_recommendations_for_workflow_profile(path_hint_adjusted, workflow_profile)
     final = _adjust_recommendations_for_role(workflow_adjusted, detected_role)
     final["rmaos_strength"] = _clamp(
         float(final.get("rmaos_strength", final["environment_mask_strength"])),
@@ -1514,6 +2831,119 @@ def recommend_generation_settings(source: Image.Image, input_path: Path | None =
         3.0,
     )
     return final
+
+
+def recommend_output_resolution(
+    width: int,
+    height: int,
+    material_type: str = "general",
+) -> tuple[int, str]:
+    """Recommend a maximum texture dimension for Skyrim SE based on asset type.
+
+    Returns ``(max_dimension, reason)`` where ``max_dimension`` is the largest
+    side length that makes practical sense for the given material category and
+    ``reason`` is a short human-readable explanation.
+
+    Skyrim SE's renderer and VRAM budgets have well-established sweet spots:
+
+    * **Terrain / landscape** — 2048 px maximum.  Landscape textures tile across
+      large areas; going above 2 K delivers diminishing returns and eats VRAM on
+      every outdoor cell.
+    * **Characters / skin / faces** — 2048 px for body/clothing, 1024–2048 for
+      face textures.  Animated meshes already limit visible texel density.
+    * **Small clutter / paper / plants / fur** — 1024 px.  Items viewed from
+      close range rarely exceed 512 texels on-screen; 2 K is wasted here.
+    * **Architecture / stone / wood** — 4096 px acceptable for hero assets, 2048
+      for tiling surfaces.
+    * **All other materials** — 4096 px maximum.  8 K+ DDS is rarely beneficial
+      given Skyrim's mipmap chain, LOD distances, and typical GPU VRAM limits.
+
+    Parameters
+    ----------
+    width, height:
+        Source image dimensions in pixels.
+    material_type:
+        Skyrim material category (from :func:`classify_material_type`).
+
+    Returns
+    -------
+    tuple[int, str]
+        ``(max_dimension, reason)`` — caller decides whether to downscale.
+    """
+    _MATERIAL_MAX_DIM: dict[str, tuple[int, str]] = {
+        "terrain": (
+            2048,
+            "Terrain/landscape textures tile across large outdoor areas — 2048 px is the practical "
+            "Skyrim SE ceiling beyond which VRAM cost rises without visible quality gain.",
+        ),
+        "skin": (
+            2048,
+            "Character skin and face textures are applied to animated meshes that limit visible "
+            "texel density; 2048 px gives excellent results without excessive VRAM use.",
+        ),
+        "plants": (
+            1024,
+            "Foliage textures are applied to flat alpha-masked polygons typically viewed from "
+            "mid-range; 1024 px is the Skyrim SE sweet spot for these assets.",
+        ),
+        "fur": (
+            1024,
+            "Fur/pelt textures have high-frequency micro-variation that is already blurred by "
+            "mipmapping at typical viewing distances; 1024 px is sufficient.",
+        ),
+        "paper": (
+            1024,
+            "Book-art, card, and parchment textures are usually small on-screen and gain little "
+            "from resolutions above 1024 px.",
+        ),
+        "cloth": (
+            2048,
+            "Cloth and fabric textures benefit from up to 2048 px on hero armor/robe pieces; "
+            "generic tiling cloth looks best at 1024 px.",
+        ),
+        "dirt": (
+            2048,
+            "Ground-cover dirt/mud textures tile aggressively in Skyrim — 2048 px provides "
+            "detail without the tiling artefacts that high-resolution exaggerates.",
+        ),
+        "sand": (
+            2048,
+            "Sand and arid-ground textures tile over large surfaces; 2048 px balances detail "
+            "and VRAM cost for typical desert landscape use.",
+        ),
+        "architecture": (
+            4096,
+            "Hero architecture assets (unique buildings, major landmarks) can use up to 4096 px; "
+            "generic tiling walls and floors are best kept at 2048 px.",
+        ),
+    }
+
+    # Maximum dimension Skyrim SE ever meaningfully uses regardless of material type.
+    _ABSOLUTE_MAX = 4096
+
+    normalised = str(material_type or "general").lower().strip()
+    max_dim, reason = _MATERIAL_MAX_DIM.get(normalised, (
+        _ABSOLUTE_MAX,
+        "4096 px is the practical maximum for most Skyrim SE materials — 8 K+ DDS files "
+        "deliver no visible improvement given the engine's mipmap chain and typical VRAM budgets.",
+    ))
+
+    source_max = max(int(width), int(height))
+    if source_max <= max_dim:
+        return (max_dim, reason)
+
+    # Distinguish between "above sweet spot" and "unnecessarily 8 K+".
+    if source_max > 8192:
+        reason = (
+            f"Source resolution ({source_max} px) exceeds 8192 px — unusually large for "
+            f"Skyrim SE.  {reason}"
+        )
+    elif source_max > _ABSOLUTE_MAX:
+        reason = (
+            f"Source resolution ({source_max} px) exceeds the practical 4096 px ceiling for "
+            f"Skyrim SE.  {reason}"
+        )
+    return (max_dim, reason)
 
 
 def _resolve_batch_workers(batch_workers: int | None, total: int) -> int:
@@ -2129,6 +3559,213 @@ def generate_specular(source: Image.Image, strength: float = 1.15) -> Image.Imag
     )
 
 
+def generate_ambient_occlusion(source: Image.Image, strength: float = 1.2) -> Image.Image:
+    """Generate an ambient occlusion (AO) map from a diffuse texture.
+
+    Approximates self-shadowing by detecting local cavity regions — areas where
+    surrounding surface curvature would block ambient light.  The result is a
+    greyscale ``L``-mode image where dark pixels indicate recessed/shadowed areas
+    and bright pixels indicate exposed/open areas.
+
+    The AO signal is intentionally subtle: crushed blacks and harsh cavity rings
+    are avoided because Skyrim's lighting engine is not path-traced and an
+    over-aggressive AO bake will make surfaces look dirty rather than shaded.
+
+    Parameters
+    ----------
+    source:
+        Input diffuse texture (any size/mode; converted to RGB internally).
+    strength:
+        Intensity multiplier (0.1–4.0).  Values around 1.0–1.5 give natural
+        results for most materials.  Values above 2.5 suit carved stone or
+        heavily worn metal.
+    """
+    rgb_source = source.convert("RGB")
+    grayscale = ImageOps.grayscale(rgb_source)
+    resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.6)
+    clamped_strength = _clamp(float(strength), 0.1, 4.0)
+
+    # Broad ambient light field — represents the large-scale illumination envelope.
+    broad = grayscale.filter(ImageFilter.GaussianBlur(radius=(4.5 + (clamped_strength * 0.8)) * resolution_scale))
+
+    # Medium-scale cavity signal: surface dips that are too small to affect the
+    # broad field but deep enough to trap ambient light.
+    medium = grayscale.filter(ImageFilter.GaussianBlur(radius=(1.8 + (clamped_strength * 0.4)) * resolution_scale))
+    cavity_medium = ImageChops.subtract(broad, medium, scale=1.0, offset=128)
+    cavity_medium = ImageEnhance.Contrast(cavity_medium).enhance(0.9 + (clamped_strength * 0.35))
+
+    # Fine-scale cavity: micro-pores, cracks, grout lines, fabric weave.
+    fine = grayscale.filter(ImageFilter.GaussianBlur(radius=0.9 * resolution_scale))
+    cavity_fine = ImageChops.subtract(medium, fine, scale=1.0, offset=128)
+    cavity_fine = ImageEnhance.Contrast(cavity_fine).enhance(0.6 + (clamped_strength * 0.2))
+
+    # Blend cavity scales: medium carries more weight than fine micro-detail.
+    ao_raw = Image.blend(cavity_medium, cavity_fine, alpha=0.32)
+    ao_blurred = ao_raw.filter(ImageFilter.GaussianBlur(radius=0.8 * resolution_scale))
+
+    # Autocontrast stretches the signal to the full 0–255 range.
+    ao_contrasted = ImageOps.autocontrast(ao_blurred, cutoff=1)
+
+    # Blend toward a bright neutral so AO stays subtle (not pitch-black cavities).
+    ao_final = Image.blend(Image.new("L", ao_contrasted.size, color=200), ao_contrasted, alpha=_clamp(0.3 + (clamped_strength * 0.18), 0.3, 0.82))
+
+    # Hard floor to avoid pure-black pixels that look like missing textures.
+    return _lift_black_floor(ao_final, floor=28)
+
+
+def generate_roughness(source: Image.Image, strength: float = 1.0, material_type: str = "general") -> Image.Image:
+    """Generate a roughness map from a diffuse texture.
+
+    Roughness is the inverse of glossiness/specularity: bright areas are rough
+    (diffuse scatter), dark areas are smooth (specular reflection).  The output
+    is a greyscale ``L``-mode image in the PBR roughness convention used by
+    Community Shaders TruePBR and Unreal Engine / modern PBR tools.
+
+    The algorithm inverts the specular estimate derived from the diffuse, then
+    applies material-type corrections so that known-smooth materials (polished
+    metal, glass, skin) come out with a lower base roughness while known-rough
+    materials (stone, terrain, cloth) come out with a higher base roughness.
+
+    Parameters
+    ----------
+    source:
+        Input diffuse texture.
+    strength:
+        Contrast/intensity multiplier (0.1–4.0).  1.0 gives a neutral result;
+        values above 1.5 sharpen the roughness variation.
+    material_type:
+        Optional Skyrim material category string (from :func:`classify_material_type`
+        or :func:`analyze_material_type_from_image`).  Used to apply a material-
+        specific roughness bias so that e.g. metal defaults to a lower baseline
+        roughness than stone.
+    """
+    clamped_strength = _clamp(float(strength), 0.1, 4.0)
+
+    # Start from the inverted specular (high specular = low roughness).
+    specular = generate_specular(source, strength=max(0.9, min(2.5, clamped_strength * 0.85)))
+    roughness = ImageOps.invert(specular)
+
+    # Blend in some diffuse luminance to capture large-scale surface texture variation.
+    luminance = ImageOps.grayscale(source.convert("RGB"))
+    local_detail = ImageChops.difference(luminance, luminance.filter(ImageFilter.GaussianBlur(radius=2.5)))
+    roughness = Image.blend(roughness, ImageOps.autocontrast(local_detail, cutoff=1), alpha=0.22)
+
+    roughness = ImageEnhance.Contrast(roughness).enhance(0.8 + (clamped_strength * 0.3))
+    roughness = ImageOps.autocontrast(roughness, cutoff=1)
+
+    # Material-type roughness bias: shift overall brightness up (rougher) or down (smoother).
+    _roughness_bias: dict[str, int] = {
+        "metal": -30,       # Polished metal is smooth
+        "glass": -45,       # Glass is very smooth
+        "snow": -15,        # Ice/packed snow is somewhat smooth
+        "skin": -12,        # Skin has moderate smoothness
+        "stone": 15,        # Stone is rough
+        "terrain": 20,      # Terrain is rough
+        "dirt": 22,         # Dirt/mud is rough
+        "sand": 18,         # Sand/dirt is rough
+        "wood": 10,         # Wood is moderately rough
+        "leather": 6,       # Leather is mid-roughness (less rough than cloth)
+        "fur": 26,          # Fur is very rough / diffuse
+        "cloth": 22,        # Cloth is rough
+        "plants": 18,       # Plants/leaves are rough
+        "architecture": 12, # Architecture surfaces are moderately rough
+        "paper": 8,         # Parchment/paper is moderately rough
+    }
+    bias = _roughness_bias.get(str(material_type or "general").lower(), 0)
+    if bias != 0:
+        roughness = roughness.point(lambda v: int(_clamp(float(v) + bias, 0.0, 255.0)))
+
+    return _lift_black_floor(roughness, floor=12)
+
+
+def generate_wetness_mask(source: Image.Image, strength: float = 1.0) -> Image.Image:
+    """Generate a surface wetness/puddle accumulation mask from a diffuse texture.
+
+    Returns a greyscale ``L``-mode image where bright pixels indicate surfaces
+    that collect and hold moisture (concave recesses, crevices, ground-level
+    areas), and dark pixels indicate exposed, dry, or elevated surfaces.
+
+    The mask is intended for Community Shaders wet-surface effects and similar
+    environment-driven wetness overlays.  It is stored as ``_wt.dds``.
+
+    Parameters
+    ----------
+    source:
+        Input diffuse texture (any size/mode; converted to RGB internally).
+    strength:
+        Intensity multiplier (0.1–3.0).  Values around 1.0 give a natural
+        moisture distribution.  Higher values exaggerate the wet/dry contrast.
+    """
+    rgb_source = source.convert("RGB")
+    grayscale = ImageOps.grayscale(rgb_source)
+    clamped_strength = _clamp(float(strength), 0.1, 3.0)
+    resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.4)
+
+    # Broad-blur captures macro surface shape: concave low-points are naturally
+    # darker than their surroundings in the diffuse, so inverting the luminance
+    # gives a first approximation of where water pools.
+    dark_bias = ImageOps.invert(grayscale)
+    dark_bias = _lift_black_floor(ImageOps.autocontrast(dark_bias, cutoff=1), floor=6)
+
+    # Concavity signal: blurred luminance minus sharp luminance is positive
+    # where the local region is recessed relative to its neighbourhood.
+    blur_radius = (3.5 + (clamped_strength * 0.6)) * resolution_scale
+    blurred = grayscale.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+    concavity = ImageChops.subtract(blurred, grayscale, scale=1.0, offset=64)
+    concavity = ImageEnhance.Contrast(concavity).enhance(0.9 + (clamped_strength * 0.3))
+    concavity = _lift_black_floor(ImageOps.autocontrast(concavity, cutoff=1), floor=6)
+
+    # Blend dark-bias (macro wet areas) with concavity (local pockets).
+    blend_alpha = _clamp(0.48 + (clamped_strength * 0.08), 0.48, 0.74)
+    wetness = Image.blend(dark_bias, concavity, alpha=blend_alpha)
+    wetness = ImageEnhance.Contrast(wetness).enhance(0.78 + (clamped_strength * 0.28))
+    wetness = _lift_black_floor(ImageOps.autocontrast(wetness, cutoff=1), floor=8)
+    return wetness.convert("L")
+
+
+def generate_snow_mask(source: Image.Image, strength: float = 1.0) -> Image.Image:
+    """Generate a dynamic snow/frost coverage mask from a diffuse texture.
+
+    Returns a greyscale ``L``-mode image where bright pixels indicate surfaces
+    that accumulate snow or frost (flat, upward-facing, or exposed high-points),
+    and dark pixels indicate sheltered, vertical, or recessed surfaces.
+
+    The mask is intended for Community Shaders Dynamic Snow and similar
+    weather/season shader packs.  It is stored as ``_sm.dds``.
+
+    Parameters
+    ----------
+    source:
+        Input diffuse texture (any size/mode; converted to RGB internally).
+    strength:
+        Intensity multiplier (0.1–3.0).  Values around 1.0 produce a
+        natural snow distribution.  Higher values exaggerate snow coverage
+        on bright surfaces.
+    """
+    rgb_source = source.convert("RGB")
+    grayscale = ImageOps.grayscale(rgb_source)
+    clamped_strength = _clamp(float(strength), 0.1, 3.0)
+    resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.4)
+
+    # Snow accumulates on bright, open surfaces — use luminance as a first
+    # approximation of upward-facing or horizontally-exposed areas.
+    brightness = ImageOps.autocontrast(grayscale, cutoff=1)
+
+    # Smooth out micro-noise: snow covers macro-form shapes, not individual
+    # pixel-level bumps.  A moderate blur preserves large exposed surfaces
+    # while suppressing speckling that would create unrealistic snow freckles.
+    blur_radius = (2.8 + (clamped_strength * 0.4)) * resolution_scale
+    blurred = brightness.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+
+    # Slight blend back to the original sharpened version so small-scale
+    # exposed highlights are still represented.
+    smooth_brightness = Image.blend(blurred, brightness, alpha=0.35)
+
+    snow = ImageEnhance.Contrast(smooth_brightness).enhance(0.72 + (clamped_strength * 0.26))
+    snow = _lift_black_floor(ImageOps.autocontrast(snow, cutoff=1), floor=6)
+    return snow.convert("L")
+
+
 def generate_msn(
     source: Image.Image,
     normal_strength: float = 2.0,
@@ -2174,9 +3811,23 @@ def generate_preview_outputs(
     render_profile: str = "auto",
     include_rmaos: bool = False,
     rmaos_strength: float = 1.2,
+    include_wetness_mask: bool = False,
+    wetness_mask_strength: float = 1.0,
+    include_snow_mask: bool = False,
+    snow_mask_strength: float = 1.0,
+    include_ao: bool = False,
+    ao_strength: float = 1.2,
+    include_roughness: bool = False,
+    roughness_strength: float = 1.0,
 ) -> dict[str, Image.Image]:
     if parallax_mode not in {"standard", "occlusion"}:
         raise ValueError("parallax_mode must be 'standard' or 'occlusion'.")
+    resolved_env_complex_workflow = resolve_env_mask_complex_workflow(
+        env_mask_mode=env_mask_mode,
+        complex_format=complex_format,
+        render_profile=render_profile,
+        include_complex=include_complex,
+    )
     outputs: dict[str, Image.Image] = {}
     if include_diffuse:
         outputs["diffuse"] = enforce_skyrim_output_profile("diffuse", generate_diffuse(source))
@@ -2202,7 +3853,7 @@ def generate_preview_outputs(
                 source,
                 strength=environment_mask_strength,
                 mode=env_mask_mode,
-                complex_workflow="enb" if _normalize_env_mask_mode(env_mask_mode) == "complex" else "standard",
+                complex_workflow=resolved_env_complex_workflow,
             ),
             env_mask_mode=env_mask_mode,
         )
@@ -2216,6 +3867,22 @@ def generate_preview_outputs(
                 complex_workflow="truepbr",
             ),
             env_mask_mode="complex",
+        )
+    if include_wetness_mask:
+        outputs["wetness_mask"] = enforce_skyrim_output_profile(
+            "parallax", generate_wetness_mask(source, strength=wetness_mask_strength)
+        )
+    if include_snow_mask:
+        outputs["snow_mask"] = enforce_skyrim_output_profile(
+            "parallax", generate_snow_mask(source, strength=snow_mask_strength)
+        )
+    if include_ao:
+        outputs["ao"] = enforce_skyrim_output_profile(
+            "parallax", generate_ambient_occlusion(source, strength=ao_strength)
+        )
+    if include_roughness:
+        outputs["roughness"] = enforce_skyrim_output_profile(
+            "parallax", generate_roughness(source, strength=roughness_strength)
         )
     if include_complex:
         outputs["complex_material"] = enforce_skyrim_output_profile(
@@ -2364,6 +4031,54 @@ def build_rmaos_output_path(
     return base_output_dir / f"{rmaos_stem}{ext}"
 
 
+def build_wetness_mask_output_path(
+    input_path: Path,
+    output_dir: Path | None,
+    wetness_name: str | None = None,
+) -> Path:
+    """Return the output path for a wetness/puddle accumulation mask (``_wt.dds``)."""
+    base_output_dir = _resolve_output_base_dir(input_path, output_dir)
+    base_output_dir.mkdir(parents=True, exist_ok=True)
+    wetness_stem = wetness_name or f"{input_path.stem}_wt"
+    return base_output_dir / f"{wetness_stem}{DDS_EXTENSION}"
+
+
+def build_snow_mask_output_path(
+    input_path: Path,
+    output_dir: Path | None,
+    snow_name: str | None = None,
+) -> Path:
+    """Return the output path for a dynamic snow/frost coverage mask (``_sm.dds``)."""
+    base_output_dir = _resolve_output_base_dir(input_path, output_dir)
+    base_output_dir.mkdir(parents=True, exist_ok=True)
+    snow_stem = snow_name or f"{input_path.stem}_sm"
+    return base_output_dir / f"{snow_stem}{DDS_EXTENSION}"
+
+
+def build_ao_output_path(
+    input_path: Path,
+    output_dir: Path | None,
+    ao_name: str | None = None,
+) -> Path:
+    """Return the output path for a standalone ambient occlusion map (``_ao.dds``)."""
+    base_output_dir = _resolve_output_base_dir(input_path, output_dir)
+    base_output_dir.mkdir(parents=True, exist_ok=True)
+    ao_stem = ao_name or f"{input_path.stem}_ao"
+    return base_output_dir / f"{ao_stem}{DDS_EXTENSION}"
+
+
+def build_roughness_output_path(
+    input_path: Path,
+    output_dir: Path | None,
+    roughness_name: str | None = None,
+) -> Path:
+    """Return the output path for a standalone roughness map (``_rough.dds``)."""
+    base_output_dir = _resolve_output_base_dir(input_path, output_dir)
+    base_output_dir.mkdir(parents=True, exist_ok=True)
+    rough_stem = roughness_name or f"{input_path.stem}_rough"
+    return base_output_dir / f"{rough_stem}{DDS_EXTENSION}"
+
+
 def _find_textures_root(path: Path) -> Path | None:
     for candidate in (path.parent, *path.parents):
         if candidate.name.lower() == "textures":
@@ -2386,8 +4101,53 @@ def _build_truepbr_texture_identifier(texture_path: Path, textures_root: Path | 
     return Path(*relative_parts).as_posix()
 
 
-def write_rmaos_json_sidecar(texture_path: Path, *, parallax_enabled: bool = True) -> Path:
-    """Write a TruePBR sidecar JSON for PBRNifPatcher."""
+def write_rmaos_json_sidecar(
+    texture_path: Path,
+    *,
+    parallax_enabled: bool = True,
+    material_type: str = "general",
+    glow_enabled: bool = False,
+) -> Path:
+    """Write a TruePBR sidecar JSON for PBRNifPatcher.
+
+    The payload is adjusted based on ``material_type`` so that material-specific
+    PBR properties (subsurface scattering, specular level, roughness scale, and
+    displacement depth) are set to Skyrim-appropriate defaults for each category.
+
+    **CS TruePBR key distinctions**
+
+    ``parallax`` (bool) and ``displacement_scale`` (float) are **independent** controls
+    in the Community Shaders TruePBR JSON schema and are not interchangeable:
+
+    * ``parallax``: Enables or disables the parallax occlusion mapping (POM) shader
+      feature on the mesh.  Setting this to ``False`` turns POM off entirely, regardless
+      of what ``displacement_scale`` is set to.
+    * ``displacement_scale``: Sets the height/depth multiplier for the height texture
+      channel when POM is active.  A non-zero value here has no visible effect unless
+      ``parallax`` is ``True``.
+
+    Some materials force ``parallax`` off regardless of the ``parallax_enabled``
+    argument because their geometry makes POM either harmful or irrelevant (e.g. skin
+    on animated meshes, flat foliage alpha-card plants, flat hair cards, and landscape
+    terrain which CS handles via a separate ``PBRTextureSets`` JSON rather than
+    ``PBRNifPatcher``).
+
+    Parameters
+    ----------
+    texture_path:
+        Path to the generated ``_rmaos.dds`` file.
+    parallax_enabled:
+        Requested parallax enablement.  The effective value written to JSON may be
+        ``False`` even when this is ``True`` if the material type overrides it.
+    material_type:
+        Skyrim material category string from :func:`classify_material_type`.
+        Adjusts subsurface, specular_level, roughness_scale, displacement_scale,
+        and the parallax enablement flag in the output JSON.
+    glow_enabled:
+        When ``True`` the ``emissive`` flag is set and ``emissive_scale`` is taken
+        from the per-material override (or the global default of ``0.25``).  Pass
+        ``True`` whenever a glow map was also generated for the same texture.
+    """
     textures_root = _find_textures_root(texture_path)
     if textures_root is None:
         json_dir = texture_path.parent / "PBRNifPatcher"
@@ -2395,21 +4155,264 @@ def write_rmaos_json_sidecar(texture_path: Path, *, parallax_enabled: bool = Tru
         relative_parent = texture_path.parent.relative_to(textures_root)
         json_dir = textures_root.parent / "PBRNifPatcher" / relative_parent
     texture_identifier = _build_truepbr_texture_identifier(texture_path, textures_root)
+
+    # Material-type-specific PBR defaults.
+    # These follow the TruePBR/PBRNifPatcher schema and Skyrim material behaviour:
+    # - parallax: whether POM is enabled for this material (bool, CS TruePBR shader flag).
+    #   Distinct from displacement_scale — setting parallax=False disables POM entirely.
+    #   Not present in the override dict means the caller's parallax_enabled arg is used.
+    # - subsurface: True only for skin (translucent flesh).
+    # - subsurface_foliage: True only for plants/foliage (two-sided leaf scattering).
+    # - specular_level: mirrors real-world IOR — dielectrics ~0.02-0.06, metals/glass ~0.5.
+    # - roughness_scale: glass is very smooth (<0.5), stone/terrain are rough (>=1.0).
+    # - displacement_scale: height/depth multiplier for the height texture channel; has no
+    #   visible effect unless parallax is True. Terrain uses shallow depth to avoid horizon
+    #   shimmer; skin/plants/hair use 0.0 because parallax is disabled for those materials.
+    # - smooth_angle: softens silhouette normals; lower for hard surfaces, higher for organic.
+    # - emissive_scale: multiplier applied when emissive/glow is active for this material.
+    # - vertex_color_lum_mult: blend weight for vertex-colour luminance contribution.
+    _RMAOS_JSON_MATERIAL_OVERRIDES: dict[str, dict[str, object]] = {
+        "skin": {
+            "parallax": False,           # POM on animated skin causes mesh-deform artefacts
+            "subsurface": True,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 0.85, 0.7],
+            "subsurface_opacity": 0.65,
+            "specular_level": 0.028,
+            "roughness_scale": 1.0,
+            "smooth_angle": 80,
+            "displacement_scale": 0.0,
+            "emissive_scale": 0.20,
+            "vertex_color_lum_mult": 0.45,
+        },
+        "plants": {
+            "parallax": False,           # foliage uses flat alpha-card geometry, not height mesh
+            "subsurface": False,
+            "subsurface_foliage": True,
+            "subsurface_color": [0.7, 1.0, 0.4],
+            "subsurface_opacity": 0.5,
+            "specular_level": 0.016,
+            "roughness_scale": 1.1,
+            "smooth_angle": 70,
+            "displacement_scale": 0.0,
+            "emissive_scale": 0.30,      # glowing fungi / enchanted flora
+            "vertex_color_lum_mult": 0.55,
+        },
+        "metal": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.5,       # metals have high Fresnel/specular
+            "roughness_scale": 0.9,
+            "smooth_angle": 60,
+            "displacement_scale": 0.15,
+            "emissive_scale": 0.30,      # heated/enchanted metal glows brightly
+            "vertex_color_lum_mult": 0.40,
+        },
+        "glass": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.5,       # glass has high dielectric IOR
+            "roughness_scale": 0.35,     # glass is very smooth
+            "smooth_angle": 55,
+            "displacement_scale": 0.05,
+            "emissive_scale": 0.50,      # crystals/gems emit strong light when glowing
+            "vertex_color_lum_mult": 0.60,
+        },
+        "snow": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.06,
+            "roughness_scale": 0.75,     # packed snow/ice has moderate smoothness
+            "smooth_angle": 75,
+            "displacement_scale": 0.18,
+            "emissive_scale": 0.15,
+            "vertex_color_lum_mult": 0.50,
+        },
+        "terrain": {
+            # CS TruePBR landscape parallax is driven via PBRTextureSets JSON, not
+            # PBRNifPatcher.  Disable the POM flag here so this object-level sidecar does
+            # not accidentally enable parallax on non-terrain meshes that share the texture.
+            # displacement_scale is still populated as a reference value.
+            "parallax": False,
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.04,
+            "roughness_scale": 1.1,
+            "smooth_angle": 60,
+            "displacement_scale": 0.08,  # shallow depth avoids horizon shimmer
+            "emissive_scale": 0.15,
+            "vertex_color_lum_mult": 0.50,
+        },
+        "cloth": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.016,     # cloth is nearly non-specular
+            "roughness_scale": 1.15,
+            "smooth_angle": 75,
+            "displacement_scale": 0.12,
+            "emissive_scale": 0.20,
+            "vertex_color_lum_mult": 0.50,
+        },
+        "leather": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.025,
+            "roughness_scale": 1.05,
+            "smooth_angle": 72,
+            "displacement_scale": 0.14,
+            "emissive_scale": 0.20,
+            "vertex_color_lum_mult": 0.50,
+        },
+        "stone": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.04,
+            "roughness_scale": 1.1,
+            "smooth_angle": 65,
+            "displacement_scale": 0.22,
+            "emissive_scale": 0.20,
+            "vertex_color_lum_mult": 0.45,
+        },
+        "wood": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.03,
+            "roughness_scale": 1.05,
+            "smooth_angle": 68,
+            "displacement_scale": 0.18,
+            "emissive_scale": 0.20,
+            "vertex_color_lum_mult": 0.50,
+        },
+        "fur": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.014,     # fur/pelt is nearly non-specular — diffuse scatter only
+            "roughness_scale": 1.25,     # very rough, micro-fibres diffuse light strongly
+            "smooth_angle": 80,
+            "displacement_scale": 0.10,  # shallow depth; fur silhouette is geometry, not parallax
+            "emissive_scale": 0.15,
+            "vertex_color_lum_mult": 0.50,
+        },
+        "paper": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.016,     # parchment/paper is nearly non-specular
+            "roughness_scale": 1.08,     # moderately rough surface
+            "smooth_angle": 75,
+            "displacement_scale": 0.06,  # paper has little height variation
+            "emissive_scale": 0.20,
+            "vertex_color_lum_mult": 0.50,
+        },
+        "dirt": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.025,     # damp dirt can have a slight sheen
+            "roughness_scale": 1.15,     # rough, granular surface
+            "smooth_angle": 65,
+            "displacement_scale": 0.14,
+            "emissive_scale": 0.15,
+            "vertex_color_lum_mult": 0.50,
+        },
+        "sand": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.022,     # fine sand grains scatter light diffusely
+            "roughness_scale": 1.12,     # rough, tiling ground material
+            "smooth_angle": 65,
+            "displacement_scale": 0.12,
+            "emissive_scale": 0.15,
+            "vertex_color_lum_mult": 0.50,
+        },
+        "architecture": {
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.04,      # cut stone and stucco have low specular
+            "roughness_scale": 1.08,     # architectural surfaces are moderately rough
+            "smooth_angle": 60,
+            "displacement_scale": 0.20,  # stonework has meaningful surface relief
+            "emissive_scale": 0.20,
+            "vertex_color_lum_mult": 0.45,
+        },
+        "hair": {
+            "parallax": False,           # hair uses flat alpha-card geometry, not height mesh
+            "subsurface": False,
+            "subsurface_foliage": False,
+            "subsurface_color": [1.0, 1.0, 1.0],
+            "subsurface_opacity": 1.0,
+            "specular_level": 0.055,     # hair has a notable anisotropic highlight
+            "roughness_scale": 1.1,      # varying rough to smooth across strands
+            "smooth_angle": 78,
+            "displacement_scale": 0.0,
+            "emissive_scale": 0.15,
+            "vertex_color_lum_mult": 0.50,
+        },
+    }
+
+    overrides = _RMAOS_JSON_MATERIAL_OVERRIDES.get(str(material_type).lower(), {})
+
+    # parallax (bool) and displacement_scale (float) are distinct CS TruePBR controls.
+    # parallax is the POM shader enablement flag; displacement_scale is the height depth
+    # multiplier.  The per-material override may force parallax off even when
+    # parallax_enabled=True (e.g. terrain, skin, plants, hair).
+    if "parallax" in overrides:
+        effective_parallax = bool(overrides["parallax"])
+    else:
+        effective_parallax = bool(parallax_enabled)
+
     payload = [
         {
+            # "texture": CS TruePBR / PBRNifPatcher texture-path identifier prefix used
+            # to match this JSON sidecar against mesh material entries.  This is the stem
+            # of the diffuse texture relative to the Data\textures root (forward-slash,
+            # no extension), not a generic "texture type" label.
             "texture": texture_identifier,
-            "parallax": bool(parallax_enabled),
-            "specular_level": 0.04,
-            "roughness_scale": 1.0,
-            "smooth_angle": 75,
-            "displacement_scale": 0.2,
-            "emissive_scale": 0.25,
-            "vertex_color_lum_mult": 0.5,
+            "emissive": bool(glow_enabled),
+            "emissive_scale": float(overrides.get("emissive_scale", 0.25)),
+            # parallax: POM shader feature on/off (CS TruePBR boolean enablement flag).
+            # Independent of displacement_scale — disabling this turns off POM entirely.
+            "parallax": effective_parallax,
+            # displacement_scale: height/depth multiplier for the height texture channel.
+            # Has no visible effect unless parallax is True.
+            "displacement_scale": float(overrides.get("displacement_scale", 0.2)),
+            "specular_level": float(overrides.get("specular_level", 0.04)),
+            "roughness_scale": float(overrides.get("roughness_scale", 1.0)),
+            "smooth_angle": int(overrides.get("smooth_angle", 75)),
+            "subsurface": bool(overrides.get("subsurface", False)),
+            "subsurface_foliage": bool(overrides.get("subsurface_foliage", False)),
+            "subsurface_color": list(overrides.get("subsurface_color", [1.0, 1.0, 1.0])),
+            "subsurface_opacity": float(overrides.get("subsurface_opacity", 1.0)),
+            "vertex_color_lum_mult": float(overrides.get("vertex_color_lum_mult", 0.5)),
         }
     ]
     json_path = json_dir / f"{texture_path.stem}.json"
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return json_path
 
 
@@ -2429,9 +4432,143 @@ def build_complex_output_path(
     return base_output_dir / f"{complex_stem}{ext}"
 
 
+def _collect_planned_output_paths(
+    *,
+    input_file: Path,
+    output_dir: Path | None,
+    diffuse_name: str | None,
+    normal_name: str | None,
+    parallax_name: str | None,
+    glow_name: str | None,
+    environment_mask_name: str | None,
+    rmaos_name: str | None,
+    complex_name: str | None,
+    complex_format: str,
+    env_mask_mode: str,
+    render_profile: str,
+    include_diffuse: bool,
+    include_normal: bool,
+    include_parallax: bool,
+    include_glow: bool,
+    include_environment_mask: bool,
+    include_rmaos: bool,
+    include_complex: bool,
+    wetness_name: str | None = None,
+    snow_name: str | None = None,
+    ao_name: str | None = None,
+    roughness_name: str | None = None,
+    include_wetness_mask: bool = False,
+    include_snow_mask: bool = False,
+    include_ao: bool = False,
+    include_roughness: bool = False,
+) -> dict[str, Path]:
+    planned: dict[str, Path] = {}
+    if include_diffuse or include_parallax:
+        diffuse_path, parallax_path = build_output_paths(
+            input_path=input_file,
+            output_dir=output_dir,
+            diffuse_name=diffuse_name,
+            parallax_name=parallax_name,
+        )
+        if include_diffuse:
+            planned["diffuse"] = diffuse_path
+        if include_parallax:
+            planned["parallax"] = parallax_path
+    if include_normal:
+        planned["normal"] = build_normal_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            normal_name=normal_name,
+        )
+    if include_glow:
+        planned["glow"] = build_glow_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            glow_name=glow_name,
+        )
+    if include_environment_mask:
+        planned["environment_mask"] = build_environment_mask_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            environment_mask_name=environment_mask_name,
+            env_mask_mode=env_mask_mode,
+            complex_format=complex_format,
+            render_profile=render_profile,
+            include_complex=include_complex,
+        )
+    if include_rmaos:
+        planned["rmaos"] = build_rmaos_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            rmaos_name=rmaos_name,
+        )
+    if include_wetness_mask:
+        planned["wetness_mask"] = build_wetness_mask_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            wetness_name=wetness_name,
+        )
+    if include_snow_mask:
+        planned["snow_mask"] = build_snow_mask_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            snow_name=snow_name,
+        )
+    if include_ao:
+        planned["ao"] = build_ao_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            ao_name=ao_name,
+        )
+    if include_roughness:
+        planned["roughness"] = build_roughness_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            roughness_name=roughness_name,
+        )
+    if include_complex:
+        planned["complex_material"] = build_complex_output_path(
+            input_path=input_file,
+            output_dir=output_dir,
+            complex_name=complex_name,
+            complex_format=complex_format,
+        )
+    return planned
+
+
+def _validate_output_path_conflicts(planned_paths: Mapping[str, Path]) -> None:
+    by_target: dict[str, list[str]] = defaultdict(list)
+    original_paths: dict[str, Path] = {}
+    for output_key, output_path in planned_paths.items():
+        normalized_key = str(output_path.resolve(strict=False)).casefold()
+        by_target[normalized_key].append(output_key)
+        original_paths.setdefault(normalized_key, output_path)
+
+    conflicts = [
+        (original_paths[path_key], sorted(output_keys))
+        for path_key, output_keys in by_target.items()
+        if len(output_keys) > 1
+    ]
+    if not conflicts:
+        return
+
+    details = "; ".join(
+        f"{path} ({', '.join(output_keys)})"
+        for path, output_keys in conflicts
+    )
+    raise ValueError(
+        "Conflicting output filenames detected. Multiple outputs resolve to the same file path: "
+        f"{details}. Use unique output names for each enabled map type."
+    )
+
+
 def _normalize_texture_family_stem(path_like: Path | str) -> str:
     normalized = str(path_like).replace("\\", "/").strip()
     stem = Path(normalized).stem.lower()
+    role_info = identify_skyrim_texture_role(Path(normalized))
+    detected_suffix = str(role_info.get("suffix", "")).strip().lower()
+    if detected_suffix and stem.endswith(detected_suffix):
+        return stem[: -len(detected_suffix)]
     for suffix in (
         "_diffuse",
         "_albedo",
@@ -2497,7 +4634,10 @@ def _resolve_generated_skyrim_resource_path(generated_path: Path, *, source_text
             if relative_parts:
                 return "\\".join(("textures", *relative_parts, generated_path.name))
             return "\\".join(("textures", generated_path.name))
-    return direct_resource_path
+    normalized = direct_resource_path.replace("/", "\\").lstrip("\\")
+    if not normalized:
+        return "textures"
+    return "\\".join(("textures", normalized))
 
 
 def _coerce_generated_resource_path_to_dds(resource_path: str) -> str:
@@ -2525,6 +4665,7 @@ def _candidate_nif_search_roots(
     if manager_context is not None:
         candidates.extend(manager_context.loaded_mesh_dirs)
     for base in filter(None, [output_dir, source_texture.parent]):
+        candidates.append(base)
         current = base
         while True:
             if current.name.lower() == "textures":
@@ -2602,37 +4743,47 @@ def build_nif_patch_options_for_generated_outputs(
 ) -> NifPatchOptions:
     normalized_complex_format = _normalize_complex_format(complex_format)
     normalized_env_mask_mode = _normalize_env_mask_mode(env_mask_mode)
-    normalized_parallax_mode = (
-        "occlusion" if str(parallax_mode or "standard").strip().lower() == "occlusion" else "standard"
-    )
+    normalized_parallax_mode = _normalize_parallax_mode_key(parallax_mode)
+    normalized_render_profile = _normalize_render_profile(render_profile)
     complex_output = outputs.get("complex_material")
     normal_output = outputs.get("normal")
     parallax_output = outputs.get("parallax")
     env_mask_output = outputs.get("environment_mask")
     rmaos_output = outputs.get("rmaos")
     glow_output = outputs.get("glow")
+    cm_complex_output = complex_output if complex_output is not None and normalized_complex_format == "cm" else None
     normal_path = complex_output if complex_output is not None and normalized_complex_format == "msn" else normal_output
     parallax_disabled_by_options = include_parallax is False
     env_mask_disabled_by_options = include_environment_mask is False
     glow_disabled_by_options = include_glow is False
-    enable_env_mapping = env_mask_output is not None
-    if rmaos_output is not None:
+    env_mask_path_source = env_mask_output if env_mask_output is not None else rmaos_output
+    if env_mask_path_source is None and cm_complex_output is not None and not env_mask_disabled_by_options:
+        env_mask_path_source = cm_complex_output
+    enable_env_mapping = env_mask_path_source is not None
+    if (
+        normalized_env_mask_mode == "complex"
+        and env_mask_path_source is None
+        and not env_mask_disabled_by_options
+        and complex_output is not None
+        and normalized_complex_format == "msn"
+    ):
         enable_env_mapping = True
-    if normalized_env_mask_mode == "complex" and env_mask_output is None and not env_mask_disabled_by_options:
-        enable_env_mapping = complex_output is not None and normalized_complex_format == "msn"
     enable_glow_map = glow_output is not None and not glow_disabled_by_options
     # Consult the render-profile NIF-patch defaults to decide whether
     # upgrading shader blocks to type-3 (HEIGHTMAP / parallax-scale) is
     # appropriate.  Vanilla Skyrim SE supports parallax via the flag +
     # texture slot 3 alone (no type-3 block upgrade required), while
-    # Community Shaders and ENB workflows benefit from the explicit scale
-    # field that type-3 provides.  Unconditionally upgrading to type-3
+    # Some workflows can use the explicit scale field that type-3 provides.
+    # Unconditionally upgrading to type-3
     # regardless of the selected renderer was the primary cause of the
     # EXCEPTION_ACCESS_VIOLATION crashes: the upgrade can corrupt the
     # block layout when the NIF header num_groups field was not yet
     # consumed correctly, so limiting upgrades to renderer profiles that
     # genuinely need them reduces the blast radius.
     profile_nif_defaults = resolve_nif_patch_defaults_for_render_profile(render_profile)
+    enable_pbr = bool(profile_nif_defaults.get("enable_pbr", False))
+    if normalized_render_profile == "auto":
+        enable_pbr = rmaos_output is not None
     force_shader_type_3 = (
         bool(profile_nif_defaults.get("force_shader_type_3", False)) and parallax_output is not None
     )
@@ -2643,6 +4794,7 @@ def build_nif_patch_options_for_generated_outputs(
         force_shader_type_3=force_shader_type_3,
         enable_env_mapping=enable_env_mapping,
         enable_glow_map=enable_glow_map,
+        enable_pbr=enable_pbr,
         parallax_texture_path=(
             _resolve_generated_dds_resource_path(parallax_output, source_texture=source_texture)
             if parallax_output is not None else None
@@ -2653,10 +4805,10 @@ def build_nif_patch_options_for_generated_outputs(
         ),
         env_mask_texture_path=(
             _resolve_generated_dds_resource_path(
-                env_mask_output if env_mask_output is not None else rmaos_output,
+                env_mask_path_source,
                 source_texture=source_texture,
             )
-            if env_mask_output is not None or rmaos_output is not None else None
+            if env_mask_path_source is not None else None
         ),
         glow_texture_path=(
             _resolve_generated_dds_resource_path(glow_output, source_texture=source_texture)
@@ -2670,6 +4822,146 @@ def build_nif_patch_options_for_generated_outputs(
         clear_glow_texture_path=glow_disabled_by_options,
         backup=True,
         dry_run=False,
+    )
+
+
+def _normalize_nif_editor_texture_input_path(value: str) -> str | None:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return None
+    normalized = cleaned.replace("/", "\\")
+    lowered = normalized.lower()
+    marker = "textures\\"
+    marker_index = lowered.rfind(marker)
+    if marker_index != -1:
+        normalized = "textures\\" + normalized[marker_index + len(marker):]
+    elif lowered.startswith("data\\textures\\"):
+        normalized = "textures\\" + normalized[len("data\\textures\\"):]
+    else:
+        normalized = "textures\\" + normalized.lstrip("\\")
+    return _coerce_generated_resource_path_to_dds(normalized)
+
+
+def resolve_nif_editor_patch_options_for_target(
+    nif_path: Path,
+    base_options: NifPatchOptions,
+    *,
+    prefer_msn_normal: bool = False,
+    preferred_env_mask_suffix: str = "_m.dds",
+) -> tuple[NifPatchOptions, tuple[str, ...]]:
+    resolved = replace(base_options)
+    notes: list[str] = []
+    effective_parallax = base_options.enable_parallax or base_options.enable_pom
+
+    def _fill_path(
+        attr_name: str,
+        *,
+        enabled: bool,
+        clear_requested: bool,
+        guesser: Callable[[], str | None],
+        note_label: str,
+    ) -> None:
+        if not enabled or clear_requested or getattr(resolved, attr_name):
+            return
+        guessed_path = _normalize_nif_editor_texture_input_path(guesser() or "")
+        if guessed_path:
+            setattr(resolved, attr_name, guessed_path)
+            notes.append(f"Auto-filled {note_label}: {guessed_path}")
+
+    _fill_path(
+        "parallax_texture_path",
+        enabled=effective_parallax or bool(base_options.parallax_scale),
+        clear_requested=base_options.clear_parallax_texture_path,
+        guesser=lambda: guess_parallax_path_for_nif(nif_path),
+        note_label="slot 3 parallax path",
+    )
+    _fill_path(
+        "normal_texture_path",
+        enabled=effective_parallax or base_options.enable_pbr,
+        clear_requested=base_options.clear_normal_texture_path,
+        guesser=lambda: guess_normal_path_for_nif(nif_path, msn=prefer_msn_normal),
+        note_label="slot 1 normal path",
+    )
+    _fill_path(
+        "glow_texture_path",
+        enabled=base_options.enable_glow_map,
+        clear_requested=base_options.clear_glow_texture_path,
+        guesser=lambda: guess_glow_path_for_nif(nif_path),
+        note_label="slot 2 glow path",
+    )
+    _fill_path(
+        "env_mask_texture_path",
+        enabled=base_options.enable_env_mapping,
+        clear_requested=base_options.clear_env_mask_texture_path,
+        guesser=lambda: guess_env_mask_path_for_nif(nif_path, preferred_suffix=preferred_env_mask_suffix),
+        note_label="slot 5 env mask path",
+    )
+    _fill_path(
+        "cubemap_texture_path",
+        enabled=base_options.enable_env_mapping,
+        clear_requested=base_options.clear_cubemap_texture_path,
+        guesser=lambda: guess_cubemap_path_for_nif(nif_path),
+        note_label="slot 4 cubemap path",
+    )
+    return resolved, tuple(notes)
+
+
+def build_nif_patch_options_for_nif_editor(
+    *,
+    enable_parallax: bool,
+    enable_pom: bool,
+    enable_env_mapping: bool,
+    enable_glow_map: bool,
+    enable_pbr: bool,
+    parallax_scale: float | None,
+    force_shader_type_3: bool,
+    diffuse_texture_path: str = "",
+    parallax_texture_path: str = "",
+    normal_texture_path: str = "",
+    glow_texture_path: str = "",
+    env_mask_texture_path: str = "",
+    cubemap_texture_path: str = "",
+    backup: bool = True,
+    dry_run: bool = False,
+    disable_parallax: bool = False,
+    disable_pom: bool = False,
+    disable_env_mapping: bool = False,
+    disable_glow_map: bool = False,
+    disable_pbr: bool = False,
+    clear_parallax_texture_path: bool = False,
+    clear_normal_texture_path: bool = False,
+    clear_env_mask_texture_path: bool = False,
+    clear_glow_texture_path: bool = False,
+    clear_diffuse_texture_path: bool = False,
+    clear_cubemap_texture_path: bool = False,
+) -> NifPatchOptions:
+    return NifPatchOptions(
+        enable_parallax=enable_parallax,
+        enable_pom=enable_pom,
+        enable_env_mapping=enable_env_mapping,
+        enable_glow_map=enable_glow_map,
+        enable_pbr=enable_pbr,
+        parallax_scale=parallax_scale if (enable_parallax or enable_pom) else None,
+        force_shader_type_3=force_shader_type_3,
+        diffuse_texture_path=_normalize_nif_editor_texture_input_path(diffuse_texture_path),
+        parallax_texture_path=_normalize_nif_editor_texture_input_path(parallax_texture_path),
+        normal_texture_path=_normalize_nif_editor_texture_input_path(normal_texture_path),
+        glow_texture_path=_normalize_nif_editor_texture_input_path(glow_texture_path),
+        env_mask_texture_path=_normalize_nif_editor_texture_input_path(env_mask_texture_path),
+        cubemap_texture_path=_normalize_nif_editor_texture_input_path(cubemap_texture_path),
+        backup=backup,
+        dry_run=dry_run,
+        disable_parallax=disable_parallax,
+        disable_pom=disable_pom,
+        disable_env_mapping=disable_env_mapping,
+        disable_glow_map=disable_glow_map,
+        disable_pbr=disable_pbr,
+        clear_parallax_texture_path=clear_parallax_texture_path,
+        clear_normal_texture_path=clear_normal_texture_path,
+        clear_env_mask_texture_path=clear_env_mask_texture_path,
+        clear_glow_texture_path=clear_glow_texture_path,
+        clear_diffuse_texture_path=clear_diffuse_texture_path,
+        clear_cubemap_texture_path=clear_cubemap_texture_path,
     )
 
 
@@ -2719,7 +5011,10 @@ def _is_supported_input_file(path: Path) -> bool:
 
 def _is_generated_texture(path: Path) -> bool:
     stem = path.stem.lower()
-    return stem.endswith("_") or any(stem.endswith(suffix) for suffix in GENERATED_TEXTURE_SUFFIXES)
+    if stem.endswith("_") or any(stem.endswith(suffix) for suffix in GENERATED_TEXTURE_SUFFIXES):
+        return True
+    role_info = identify_skyrim_texture_role(path)
+    return bool(role_info.get("suffix"))
 
 
 # ---------------------------------------------------------------------------
@@ -2738,15 +5033,45 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
         "parallax",
         "Parallax Heightmap",
         "Greyscale height map for parallax occlusion mapping. Texture Slot 3 in the NIF. "
-        "Requires BSLightingShaderProperty with Parallax shader flag set plus the SKSE64 "
-        "memory patch (or ENBSeries) to work at runtime. Brighter = raised surface.",
+        "Requires BSLightingShaderProperty with the Parallax shader flag set plus a runtime "
+        "stack that supports the chosen workflow (vanilla-capable parallax setup, Community Shaders, or ENBSeries). "
+        "Brighter = raised surface.",
+    ),
+    "_em": (
+        "glow",
+        "Glow / Emissive Map (_em legacy alias)",
+        "Legacy emissive alias sometimes found in modding toolchains. Texture Slot 2 in the NIF. "
+        "This app recognizes it as a glow/emissive map, but _g.dds remains the preferred Skyrim-facing name for new outputs.",
+    ),
+    "_emis": (
+        "glow",
+        "Glow / Emissive Map (_emis alias)",
+        "Alias naming for glow/emissive maps. Texture Slot 2 in the NIF. "
+        "Equivalent role to _em with the same SLSF1_Own_Emit shader-flag requirement.",
     ),
     "_g": (
         "glow",
         "Glow / Emissive Map",
-        "Glow/emissive map. Texture Slot 2 in the NIF. "
-        "Controls per-pixel self-illumination strength. "
+        "Glow/emissive map used by Skyrim SE. Texture Slot 2 in the NIF. "
         "Requires SLSF1_Own_Emit (0x40) shader flag on the BSLightingShaderProperty.",
+    ),
+    "_glow": (
+        "glow",
+        "Glow / Emissive Map (_glow legacy alias)",
+        "Legacy emissive alias sometimes found in authoring/export pipelines. Texture Slot 2 in the NIF. "
+        "This app treats it as glow/emissive content, but _g.dds is still the preferred output name.",
+    ),
+    "_emit": (
+        "glow",
+        "Glow / Emissive Map (_emit legacy alias)",
+        "Legacy emissive alias sometimes found in authoring/export pipelines. Texture Slot 2 in the NIF. "
+        "This app treats it as glow/emissive content, but _g.dds is still the preferred output name.",
+    ),
+    "_emissive": (
+        "glow",
+        "Glow / Emissive Map (_emissive alias)",
+        "Alias naming for glow/emissive maps. Texture Slot 2 in the NIF. "
+        "Equivalent role to _em with the same SLSF1_Own_Emit shader-flag requirement.",
     ),
     "_m": (
         "environment_mask",
@@ -2784,6 +5109,22 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
         "Specular map for character skin. Texture Slot 7 in the NIF. "
         "Character-specific shader slot for skin specularity.",
     ),
+    "_wt": (
+        "wetness_mask",
+        "Surface Wetness / Puddle Accumulation Mask",
+        "NOT a vanilla Skyrim SE texture. Greyscale mask where bright pixels indicate concave "
+        "or recessed surfaces that collect moisture (puddles, crevice water). "
+        "Used by Community Shaders wet-surface effect addons. "
+        "Generated by this tool from diffuse luminance and local concavity analysis.",
+    ),
+    "_sm": (
+        "snow_mask",
+        "Dynamic Snow / Frost Coverage Mask",
+        "NOT a vanilla Skyrim SE texture. Greyscale mask where bright pixels indicate flat, "
+        "upward-facing, or exposed surfaces that accumulate snow or frost. "
+        "Used by Community Shaders Dynamic Snow and season shader packs. "
+        "Generated by this tool from diffuse luminance and surface brightness analysis.",
+    ),
     "_msn": (
         "complex_material",
         "Complex Parallax Material (ENBSeries only)",
@@ -2798,25 +5139,27 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
         "NOT a vanilla Skyrim SE texture. Channel-packed complex material output for Community Shaders Extended Materials. "
         "Texture Slot 5 in the NIF. "
         "RGBA channel layout: R=Environment reflection amount, "
-        "G=Glossiness (0=matte, 255=glossy), "
+        "G=Glossiness (0=matte, 255=glossy; must be above ~2% or the shader disables complex material entirely), "
         "B=Metallic proxy (0=dielectric, 255=full metal), "
-        "A=Height / mode-control alpha. "
+        "A=Height / mode-control alpha (127=flat, >127=raised, <127=depressed; "
+        "all-white alpha disables complex material mode so the texture behaves as a vanilla greyscale _m). "
         "Requires Community Shaders Extended Materials. "
-        "Typically paired with a standard _n.dds (normal map, Slot 1) and optional _p.dds (parallax, Slot 3). "
+        "Typically paired with a standard _n.dds (normal map, Slot 1); a separate _p.dds is optional "
+        "since parallax is already encoded in the alpha channel. "
         "_c.dds is a naming alias with the identical channel layout — use _cm for new mods unless the pack explicitly uses _c. "
         "Do not mix this format with ENB _msn/_m workflows.",
     ),
     "_c": (
         "complex_material_cm",
-        "Complex Material Packed — Community Shaders Extended Materials (_c / _C naming alias)",
+        "Complex Material Packed — Community Shaders Extended Materials (_cm / _c naming)",
         "Alternative naming for the Community Shaders Extended Materials packed map (_cm). "
         "Identical RGBA channel layout to _cm: R=Environment reflection amount, "
-        "G=Glossiness (0=matte, 255=glossy), "
+        "G=Glossiness (0=matte, 255=glossy; must be above ~2% or the shader disables complex material entirely), "
         "B=Metallic proxy (0=dielectric, 255=full metal), "
-        "A=Height / mode-control alpha. "
+        "A=Height / mode-control alpha (127=flat, >127=raised, <127=depressed; "
+        "all-white alpha disables complex material mode so the texture behaves as a vanilla greyscale _m). "
         "Texture Slot 5 in the NIF. Requires Community Shaders Extended Materials. "
-        "_C.dds (uppercase C) is treated identically on Windows (case-insensitive filesystem) and by this tool. "
-        "Prefer _cm.dds for new mods unless the target shader pack specifically expects _c naming. "
+        "Prefer _cm.dds for new mods; use _c.dds only when a specific shader setup expects it. "
         "Do not mix this format with ENB _msn/_m workflows.",
     ),
 }
@@ -2847,6 +5190,8 @@ _SKYRIM_ROLE_PRIMARY_SUFFIX: dict[str, str] = {
     "environment_mask": "_m",
     "subsurface": "_s",
     "skin_specular": "_sk",
+    "wetness_mask": "_wt",
+    "snow_mask": "_sm",
     "complex_material": "_msn",
     "complex_material_cm": "_cm",
 }
@@ -2858,8 +5203,35 @@ _SKYRIM_ROLE_TOKEN_HINTS: dict[str, tuple[str, ...]] = {
     "environment_mask": ("env", "envmask", "cubemask", "reflectionmask", "specmask", "rmaos", "ramos"),
     "subsurface": ("subsurface", "sss"),
     "skin_specular": ("skinspec", "skinspecular"),
+    "wetness_mask": ("wetness", "wet", "puddle", "moisture"),
+    "snow_mask": ("snowmask", "snowcoverage", "frostmask"),
     "complex_material": ("complex", "complexmaterial", "msn"),
     "complex_material_cm": ("complexcm", "cmaterial", "complexgray"),
+}
+
+_SKYRIM_SE_SUFFIX_ALIASES: dict[str, str] = {
+    "_parallax": "_p",
+    "_height": "_p",
+    "_heightmap": "_p",
+    "_emission": "_g",
+    "_env": "_m",
+    "_envmask": "_m",
+    "_cubemask": "_m",
+    "_spec": "_m",
+    "_specular": "_m",
+    "_ao": "_m",
+    "_ambientocclusion": "_m",
+    "_rough": "_m",
+    "_roughness": "_m",
+    "_metal": "_m",
+    "_metallic": "_m",
+    "_metalness": "_m",
+    "_orm": "_rmaos",
+    "_orms": "_rmaos",
+    "_mrao": "_rmaos",
+    "_mra": "_rmaos",
+    "_wetness": "_wt",
+    "_snow": "_sm",
 }
 
 
@@ -2902,6 +5274,18 @@ def identify_skyrim_texture_role(path: Path) -> dict[str, str]:
                 "notes": notes,
                 "hint": _get_skyrim_path_hint(path),
             }
+    for alias_suffix in sorted(_SKYRIM_SE_SUFFIX_ALIASES, key=len, reverse=True):
+        if not stem.endswith(alias_suffix):
+            continue
+        canonical_suffix = _SKYRIM_SE_SUFFIX_ALIASES[alias_suffix]
+        role, description, notes = _SKYRIM_SE_SUFFIX_INFO[canonical_suffix]
+        return {
+            "role": role,
+            "suffix": alias_suffix,
+            "description": f"{description} ({alias_suffix} alias)",
+            "notes": notes,
+            "hint": _get_skyrim_path_hint(path),
+        }
     inferred_role = _infer_skyrim_role_from_name_tokens(stem)
     if inferred_role is not None:
         primary_suffix = _SKYRIM_ROLE_PRIMARY_SUFFIX[inferred_role]
@@ -2940,11 +5324,15 @@ def get_generation_warnings(
     env_mask_mode: str,
     env_mask_strength: float,
     include_parallax: bool,
+    parallax_strength: float | None = None,
     include_complex: bool,
     complex_format: str = "msn",
     parallax_mode: str = "standard",
     emboss_mode: bool = False,
     relief_mode: bool = False,
+    include_wetness_mask: bool = False,
+    include_snow_mask: bool = False,
+    source_size: tuple[int, int] | None = None,
 ) -> list[tuple[str, str]]:
     """Return a list of (warning_id, human-readable message) pairs for suspicious generation choices.
 
@@ -3029,6 +5417,80 @@ def get_generation_warnings(
             "Tip: Disable parallax unless the source has clear embossed depth detail.",
         ))
 
+    if include_parallax and material_type == "glass":
+        warnings.append((
+            "parallax_flat_glass",
+            "Parallax height map enabled for a glass/crystal texture.\n\n"
+            "Glass and crystal surfaces in Skyrim (windows, bottles, gems) are transparent flat polygons — "
+            "parallax depth maps have no visible effect on them and only increase file size.\n\n"
+            "Tip: Disable parallax for glass and crystal textures. Use environment mask "
+            "strength to control reflectivity instead.",
+        ))
+
+    if include_parallax and material_type == "skin":
+        warnings.append((
+            "parallax_character_skin",
+            "Parallax height map enabled for a skin/character texture.\n\n"
+            "Skin and character face textures are applied to animated meshes — parallax depth "
+            "maps can cause visible shading seams, lighting artefacts, and flickering at the "
+            "neck/wrist transition areas.\n\n"
+            "Tip: Disable parallax for skin and character textures. The Characters render "
+            "profile disables it automatically to avoid these issues.",
+        ))
+
+    resolved_parallax_strength = parallax_strength if parallax_strength is not None else 0.0
+
+    if include_parallax and material_type == "terrain":
+        warnings.append((
+            "parallax_landscape_shimmer",
+            "Parallax on a landscape/terrain texture may cause horizon shimmer.\n\n"
+            "Skyrim SE's terrain mesh has lower polygon density than objects — "
+            "parallax height maps on landscape textures can produce visible wavering "
+            "artefacts at medium-to-far distances, especially near the horizon.\n\n"
+            "Tip: Keep parallax strength below 1.3 for landscape/terrain textures, "
+            "or use 'occlusion' parallax mode (POM) which handles terrain gradients better.",
+        ))
+
+    if include_parallax and material_type == "terrain" and resolved_parallax_strength > 1.0:
+        warnings.append((
+            "parallax_high_strength_terrain",
+            f"High parallax strength ({resolved_parallax_strength:.2f}) on a terrain/landscape texture.\n\n"
+            "Terrain parallax should remain very subtle — values above 1.0 cause texture swimming, "
+            "horizon shimmer, and shadow instability on landscape meshes.  The effect is most "
+            "severe at medium-to-far view distances where the low polygon density of the terrain "
+            "mesh is most visible.\n\n"
+            "Tip: Keep terrain parallax strength at or below 1.0.  For deeper perceived depth, "
+            "prefer height map pre-processing (larger macro forms) over a high strength value.",
+        ))
+
+    if include_parallax and material_type == "snow" and resolved_parallax_strength > 1.5:
+        warnings.append((
+            "parallax_high_strength_snow",
+            f"High parallax strength ({resolved_parallax_strength:.2f}) on a snow/ice texture.\n\n"
+            "Snow and ice surfaces have low-frequency height variation — strong parallax values "
+            "amplify microdetail noise and cause mipmap instability at mid-to-far distances.\n\n"
+            "Tip: Keep parallax strength at or below 1.5 for snow and ice textures.",
+        ))
+
+    if include_parallax and material_type in {"dirt", "sand"} and resolved_parallax_strength > 2.0:
+        warnings.append((
+            "parallax_high_strength_ground",
+            f"High parallax strength ({resolved_parallax_strength:.2f}) on a '{material_type}' texture.\n\n"
+            "Ground-cover textures (dirt, mud, sand) tile aggressively — very high parallax values "
+            "amplify per-pixel noise and can produce distracting depth artefacts at close range.\n\n"
+            "Tip: Keep parallax strength at or below 2.0 for ground-cover materials.",
+        ))
+
+    if include_environment_mask and material_type == "architecture" and env_mask_strength > 1.8:
+        warnings.append((
+            "high_env_mask_architecture",
+            f"High environment mask strength ({env_mask_strength:.2f}) on an architecture texture.\n\n"
+            "Nordic/Imperial stone and woodwork surfaces are rough rather than polished — "
+            "very high cubemap reflections will make city walls look like wet metal.\n\n"
+            "Tip: Use environment mask strength between 1.0–1.5 for architecture textures. "
+            "Reserve values above 1.6 for polished materials like Dwemer brass.",
+        ))
+
     resolved_source_role = source_role or "diffuse"
     derived_roles = {
         "normal",
@@ -3045,7 +5507,7 @@ def get_generation_warnings(
             "diffuse_from_derived_source",
             f"The selected input appears to be a '{resolved_source_role}' texture, not a diffuse/albedo source.\n\n"
             "Generating a diffuse output from an already derived map usually produces incorrect colours/shading in-game.\n\n"
-            "Tip: Use an albedo/diffuse source texture (no _n/_p/_g/_m/_rmaos/_ramos/_msn/_cm/_c suffix) for best results.",
+            "Tip: Use an albedo/diffuse source texture (no _n/_msn/_p/_g/_m/_cm/_c/_rmaos/_ramos suffix) for best results.",
         ))
     if include_normal and resolved_source_role == "normal":
         warnings.append((
@@ -3082,12 +5544,12 @@ def get_generation_warnings(
             "Regenerating complex material from packed complex inputs often damages channel meaning.\n\n"
             "Tip: Start from diffuse/albedo source when creating new complex materials.",
         ))
-    if normalized_source_suffix in {"_rmaos", "_ramos"}:
+    if normalized_source_suffix in TRUEPBR_ENV_MASK_SUFFIXES or normalized_source_suffix in LEGACY_TRUEPBR_ENV_MASK_SUFFIXES:
         warnings.append((
             "rmaos_source_requires_renderer_check",
-            "Input uses the '_rmaos' or '_ramos' suffix.\n\n"
-            "_rmaos/_ramos is used for Community Shaders TruePBR JSON workflows and is NOT the same as Community Shaders _cm/_c Extended Materials.\n\n"
-            "Tip: Use the TruePBR renderer/profile path for _rmaos/_ramos generation and avoid mixing this map into ENB complex-material setups.",
+            "Input uses a TruePBR packed-map suffix (_rmaos/_ramos, or legacy _orm/_orms/_mrao/_mra aliases).\n\n"
+            "These suffixes are used for Community Shaders TruePBR JSON workflows and are NOT the same as Community Shaders _cm/_c Extended Materials.\n\n"
+            "Tip: Use the TruePBR renderer/profile path for these packed maps, normalize legacy aliases to _rmaos/_ramos, and avoid mixing them into ENB complex-material setups.",
         ))
     hint_text = (source_hint or "").lower()
     if "ui/interface texture" in hint_text and (include_parallax or include_environment_mask or include_complex):
@@ -3117,12 +5579,29 @@ def get_generation_warnings(
             "Tip: Enable 'Normal map' output to use depth mode, or disable the depth mode toggle.",
         ))
 
+    _emboss_inappropriate_types = {
+        "stone", "terrain", "metal", "wood", "skin", "plants",
+        "cloth", "snow", "dirt", "sand", "glass", "fur", "ice",
+        "architecture",
+    }
+    if emboss_mode and material_type in _emboss_inappropriate_types:
+        warnings.append((
+            "emboss_non_paper_material",
+            f"Emboss depth mode is enabled for a '{material_type}' texture.\n\n"
+            "Emboss depth is designed for flat printed surfaces (books, scrolls, cards, signs) — "
+            "it generates normals from ink/edge ridges rather than smooth surface gradients. "
+            f"On '{material_type}' surfaces this produces artificial-looking normals and may break "
+            "in-game lighting response.\n\n"
+            "Tip: Use Emboss depth only for paper/card/printed artwork. For all other materials "
+            "leave both depth modes disabled.",
+        ))
+
     if include_environment_mask and include_complex and not is_enb_complex_combo:
         warnings.append((
             "env_mask_with_complex_material",
             "Both 'Environment mask' and 'Complex material' outputs are enabled.\n\n"
             "This combination is often redundant outside ENB complex-material workflows and can produce double-specular artefacts.\n\n"
-            "Tip: For ENB-style complex workflows use the renderer-specific profile/settings; for Community Shaders use _cm/_c/_C or TruePBR JSON "
+            "Tip: For ENB-style complex workflows use the renderer-specific profile/settings; for Community Shaders use _cm/_c or TruePBR JSON "
             "workflows separately instead of mixing paths.",
         ))
 
@@ -3130,8 +5609,8 @@ def get_generation_warnings(
         warnings.append((
             "cm_with_complex_env_mode",
             "Complex material format is set to '_cm' while environment mask mode is set to 'complex'.\n\n"
-            "_cm/_c/_C is the Community Shaders Extended Materials packed map, while complex env mode is renderer-specific packed env-mask output.\n\n"
-            "Tip: Switch env mask mode to 'standard' for _cm/_c/_C, or switch complex format to '_msn' for ENB-style complex workflows. Community Shaders and ENB should not be mixed.",
+            "_cm/_c is the Community Shaders Extended Materials packed map, while complex env mode is renderer-specific packed env-mask output.\n\n"
+            "Tip: Switch env mask mode to 'standard' for _cm/_c, or switch complex format to '_msn' for ENB-style complex workflows. Community Shaders and ENB should not be mixed.",
         ))
 
     if include_complex and normalized_complex_format == "msn" and env_mask_mode == "standard":
@@ -3145,9 +5624,9 @@ def get_generation_warnings(
     if include_complex and normalized_complex_format == "cm" and not include_normal:
         warnings.append((
             "cm_without_normal_map",
-            "Community Shaders '_cm/_c/_C' output is enabled but normal-map output is disabled.\n\n"
+            "Community Shaders '_cm/_c' output is enabled but normal-map output is disabled.\n\n"
             "Community Shaders Extended Materials expects a standard '_n.dds' alongside the packed Slot 5 map.\n\n"
-            "Tip: Enable normal-map generation when using '_cm/_c/_C'.",
+            "Tip: Enable normal-map generation when using '_cm/_c'.",
         ))
 
     if include_rmaos and not include_normal:
@@ -3174,6 +5653,16 @@ def get_generation_warnings(
             "Tip: For ENB use '_msn' workflow outputs; for TruePBR use '_n + _rmaos/_ramos' with the generated JSON sidecar.",
         ))
 
+    if include_rmaos and include_environment_mask:
+        warnings.append((
+            "rmaos_with_env_mask",
+            "Both 'RMAOS (_rmaos/_ramos)' and 'Environment mask (_m)' outputs are enabled.\n\n"
+            "RMAOS is the TruePBR/Community Shaders PBR map; the vanilla _m environment mask is for standard Skyrim SE or ENB "
+            "reflections. Generating both together is only useful when producing files for two separate renderer installs at once.\n\n"
+            "Tip: For a single renderer, use only the output that matches your target: "
+            "vanilla/ENB → Environment mask (_m), TruePBR → RMAOS (_rmaos/_ramos).",
+        ))
+
     if include_environment_mask and env_mask_mode == "complex" and not include_complex:
         warnings.append((
             "complex_env_without_msn",
@@ -3185,10 +5674,57 @@ def get_generation_warnings(
     if include_parallax and normalized_parallax_mode == "occlusion" and normalized_complex_format == "cm":
         warnings.append((
             "cm_with_enb_pom",
-            "Parallax mode is set to 'occlusion (ENB/POM)' while complex format is '_cm/_c/_C'.\n\n"
+            "Parallax mode is set to 'occlusion (ENB/POM)' while complex format is '_cm/_c'.\n\n"
             "ENB POM and Community Shaders Extended Materials are different workflows. This setup mixes ENB-only parallax with Community Shaders packed materials.\n\n"
-            "Tip: Use standard parallax mode for '_cm/_c/_C', or switch the complex format to '_msn' for an ENB workflow.",
+            "Tip: Use standard parallax mode for '_cm/_c', or switch the complex format to '_msn' for an ENB workflow.",
         ))
+
+    # --- Wetness and snow mask warnings ---
+    snow_incompatible_types = {"glass", "metal", "skin", "cloth", "plants"}
+    if include_snow_mask and material_type in snow_incompatible_types:
+        warnings.append((
+            "snow_mask_on_non_accumulating_material",
+            f"Snow mask enabled for a '{material_type}' texture.\n\n"
+            "Dynamic snow shaders accumulate snow on rough, horizontal surfaces. "
+            "Glass, polished metal, skin, cloth, and plant textures are unlikely to accumulate "
+            "visible snow — the mask will produce unexpected brightening on non-snow-covered surfaces.\n\n"
+            "Tip: Reserve snow masks for terrain, stone, wood, and architecture textures.",
+        ))
+
+    if include_snow_mask and material_type == "terrain":
+        warnings.append((
+            "snow_mask_terrain_check",
+            "Snow mask enabled for a terrain/landscape texture.\n\n"
+            "Terrain snow masks can cause horizon shimmer when used at high strengths. "
+            "Make sure the target shader pack supports terrain-space snow masking.\n\n"
+            "Tip: Keep snow mask strength at or below 1.2 for landscape/terrain textures.",
+        ))
+
+    wetness_incompatible_types = {"glass", "metal"}
+    if include_wetness_mask and material_type in wetness_incompatible_types:
+        warnings.append((
+            "wetness_mask_on_reflective_material",
+            f"Wetness mask enabled for a '{material_type}' texture.\n\n"
+            "Wet-surface effects on glass or polished metal surfaces are typically "
+            "driven by cubemap reflection intensity, not by a separate wetness mask. "
+            "A standard wetness mask on these materials may produce double-wet visual artefacts.\n\n"
+            "Tip: Use environment mask strength instead of a wetness mask for glass and polished metal.",
+        ))
+
+    # --- Source resolution warning ---
+    if source_size is not None:
+        src_w, src_h = int(source_size[0]), int(source_size[1])
+        if src_w > 0 and src_h > 0:
+            max_dim, res_reason = recommend_output_resolution(src_w, src_h, material_type)
+            if max(src_w, src_h) > max_dim:
+                warnings.append((
+                    "source_resolution_excessive",
+                    f"Source texture is {src_w}×{src_h} px — larger than the recommended "
+                    f"{max_dim}×{max_dim} px maximum for '{material_type}' assets in Skyrim SE.\n\n"
+                    f"{res_reason}\n\n"
+                    "Tip: Consider resizing the source to the recommended maximum before generation "
+                    "to reduce VRAM usage and file size without a visible quality loss.",
+                ))
 
     return warnings
 
@@ -3263,13 +5799,13 @@ def collect_source_textures(input_path: Path) -> list[Path]:
 
     source_files = sorted(
         path
-        for path in input_path.rglob(f"*{DDS_EXTENSION}")
+        for path in input_path.rglob("*")
         if path.is_file() and path.suffix.lower() == DDS_EXTENSION and not _is_generated_texture(path)
     )
     if not source_files:
         raise ValueError(
             f"No source DDS textures found in {input_path}. "
-            "Folder mode scans subfolders, processes original DDS files, and skips generated *_n, *_p, *_g, *_m, *_rmaos, *_ramos, *_msn, *_cm, *_c, and *_C variants."
+            "Folder mode scans subfolders, processes original DDS files, and skips generated *_n, *_p, *_g, *_glow, *_em, *_emit, *_emissive, *_m, *_s, *_sk, *_wt, *_sm, *_rmaos, *_ramos, *_msn, *_cm, *_c, and *_C variants."
         )
     return source_files
 
@@ -3282,6 +5818,75 @@ def select_generation_context_source(input_path: Path, selected_inputs: list[Pat
 def _dds_pixel_format_uses_alpha(pixel_format: str) -> bool:
     normalized = pixel_format.strip().upper()
     return normalized not in {"DXT1", "BC1", "BC1_UNORM"}
+
+
+def _prefilter_for_mipmap_stability(image: Image.Image, output_kind: str) -> Image.Image:
+    """Apply a lightweight pre-filter that reduces shimmer in GPU-generated mipmaps.
+
+    Pillow's built-in DDS writer does not generate custom mipmap chains.  When
+    Skyrim's renderer builds the mip pyramid from the saved base-level texture it
+    uses a simple box/bilinear filter.  High-frequency noise (fine grain in normal
+    maps, repetitive micro-detail in parallax maps) survives into mid-level mipmaps
+    and produces shimmering or moiré patterns at medium-to-far view distances.
+
+    This function applies a subtle frequency-reduction pass that "pre-bakes" some of
+    the mipmap quality work into the base texture, making the GPU-generated mip
+    chain more stable without visibly softening the full-resolution view.
+
+    Rules per output kind:
+    * ``"normal"`` — Gently blend toward a flat neutral (128, 128, 255) normal so
+      high-frequency micro-bumps don't create shimmer at distance.  The blend is
+      very subtle (≈ 8 %) and the directional information is fully preserved at 1:1.
+    * ``"parallax"`` — Apply a very light Gaussian pass to suppress random noise
+      spikes that cause flickering under POM ray-marching at distance.
+    * ``"glow"`` — Apply a very gentle Gaussian blur to reduce high-frequency emissive
+      noise that produces shimmer in distant mip levels.  The radius is kept tight
+      (0.35) so the emissive pattern remains sharp at 1:1 viewing distance.
+    * ``"rmaos"`` / ``"complex_material"`` — No pre-filtering; packed channels are
+      left untouched to avoid channel cross-contamination.
+    * All other kinds — Pass through unchanged.
+    """
+    normalized_kind = str(output_kind or "").strip().lower()
+
+    if normalized_kind == "normal":
+        if image.mode not in {"RGB", "RGBA"}:
+            return image
+        has_alpha = image.mode == "RGBA"
+        rgb = image.convert("RGB")
+        r, g, b = rgb.split()
+        # Gentle directional smoothing — preserve the blue channel (hemisphere normal)
+        # but lightly smooth R and G (XY tangent directions) to reduce micro-detail shimmer.
+        smooth_radius = 0.5
+        r_smoothed = r.filter(ImageFilter.GaussianBlur(radius=smooth_radius))
+        g_smoothed = g.filter(ImageFilter.GaussianBlur(radius=smooth_radius))
+        # Blue channel: blend toward 255 (flat-up vector) to reduce shimmer from noisy normals.
+        b_arr = np.frombuffer(b.tobytes(), dtype=np.uint8).astype(np.float32)
+        b_stabilised = np.clip(b_arr * 0.92 + 255.0 * 0.08, 0.0, 255.0).astype(np.uint8)
+        b_new = Image.fromarray(b_stabilised.reshape(b.size[1], b.size[0]), mode="L")
+        stable_rgb = Image.merge("RGB", (r_smoothed, g_smoothed, b_new))
+        if has_alpha:
+            alpha = image.getchannel("A")
+            return Image.merge("RGBA", (*stable_rgb.split(), alpha))
+        return stable_rgb
+
+    if normalized_kind == "parallax":
+        if image.mode != "L":
+            return image
+        # Very light Gaussian smoothing to damp random noise spikes.
+        # Radius 0.4 at base resolution is nearly invisible at 1:1 but meaningfully
+        # stabilises mid-level GPU mipmaps and reduces POM stair-stepping artefacts.
+        return image.filter(ImageFilter.GaussianBlur(radius=0.4))
+
+    if normalized_kind == "glow":
+        # Glow/emissive maps with sharp high-frequency spots produce shimmer at distance
+        # because Skyrim's bilinear mip-filter amplifies the abrupt luminance transitions.
+        # A very tight Gaussian (radius 0.35) is imperceptible at full resolution but
+        # softens the mip-transition boundary enough to eliminate distant shimmer.
+        if image.mode not in {"L", "RGB", "RGBA"}:
+            return image
+        return image.filter(ImageFilter.GaussianBlur(radius=0.35))
+
+    return image
 
 
 def _to_dds_compatible_image(image: Image.Image, *, pixel_format: str) -> Image.Image:
@@ -3307,11 +5912,54 @@ def _normalise_preferred_dds_formats(preferred_pixel_formats: tuple[str, ...]) -
     return tuple(normalized)
 
 
+def _image_has_visible_alpha(image: Image.Image) -> bool:
+    if image.mode not in {"RGBA", "LA", "PA"}:
+        return False
+    alpha = image.getchannel("A")
+    alpha_min, alpha_max = alpha.getextrema()
+    return alpha_min < alpha_max or alpha_max < 255
+
+
+def _preferred_dds_formats_for_output(
+    output_kind: str,
+    image: Image.Image,
+    *,
+    complex_format: str = "msn",
+    env_mask_mode: str = "standard",
+) -> tuple[str, ...]:
+    normalized_kind = str(output_kind or "").strip().lower()
+    normalized_complex_format = _normalize_complex_format(complex_format)
+    normalized_env_mask_mode = _normalize_env_mask_mode(env_mask_mode)
+
+    if normalized_kind == "diffuse":
+        if _image_has_visible_alpha(image):
+            return ("BC7", "DXT5", "DXT3")
+        return ("BC7", "DXT1", "DXT5")
+    if normalized_kind == "normal":
+        return ("BC5", "DXT5", "DXT3")
+    if normalized_kind == "parallax":
+        return ("DXT1", "DXT5")
+    if normalized_kind == "glow":
+        return ("DXT5", "DXT3") if _image_has_visible_alpha(image) else ("DXT1", "DXT5")
+    if normalized_kind == "environment_mask":
+        if normalized_env_mask_mode == "standard":
+            return ("DXT1", "DXT5")
+        return ("BC7", "DXT5", "DXT3")
+    if normalized_kind == "rmaos":
+        return ("BC7", "DXT5", "DXT3")
+    if normalized_kind == "complex_material":
+        return ("BC7", "DXT5", "DXT3") if normalized_complex_format == "cm" else ("DXT5", "DXT3")
+    if normalized_kind in {"ao", "roughness"}:
+        return ("DXT1", "DXT5")
+    return ("DXT5",)
+
+
 def _save_with_dds_fallback(
     image: Image.Image,
     output_path: Path,
     *,
     preferred_pixel_formats: tuple[str, ...] = ("DXT5",),
+    output_kind: str = "",
 ) -> Path:
     def _atomic_save(target: Path, image_to_save: Image.Image, **save_kwargs: object) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -3322,6 +5970,10 @@ def _save_with_dds_fallback(
         finally:
             if temp_path.exists():
                 temp_path.unlink(missing_ok=True)
+
+    # Apply mipmap-stability pre-filter for normal and parallax outputs.
+    # This reduces shimmer caused by GPU bilinear box-filter mip generation.
+    image = _prefilter_for_mipmap_stability(image, output_kind)
 
     normalized_formats = _normalise_preferred_dds_formats(preferred_pixel_formats)
     dds_target = output_path.with_suffix(DDS_EXTENSION)
@@ -3396,11 +6048,75 @@ def run_with_options(
     include_rmaos: bool = False,
     include_complex: bool = False,
     render_profile: str = "auto",
+    include_wetness_mask: bool = False,
+    wetness_mask_strength: float | None = None,
+    wetness_name: str | None = None,
+    include_snow_mask: bool = False,
+    snow_mask_strength: float | None = None,
+    snow_name: str | None = None,
+    include_ao: bool = False,
+    ao_strength: float | None = None,
+    ao_name: str | None = None,
+    include_roughness: bool = False,
+    roughness_strength: float | None = None,
+    roughness_name: str | None = None,
 ) -> dict[str, Path]:
-    if not any((include_diffuse, include_normal, include_parallax, include_glow, include_environment_mask, include_rmaos, include_complex)):
+    if include_environment_mask and include_rmaos:
+        raise ValueError(
+            "Environment mask (_m) and Community Shaders PBR (_rmaos/_ramos) are different workflows and cannot be generated together in one run."
+        )
+    if not any((
+        include_diffuse,
+        include_normal,
+        include_parallax,
+        include_glow,
+        include_environment_mask,
+        include_rmaos,
+        include_complex,
+        include_wetness_mask,
+        include_snow_mask,
+        include_ao,
+        include_roughness,
+    )):
         raise ValueError("Select at least one output.")
     if parallax_mode not in {"standard", "occlusion"}:
         raise ValueError("parallax_mode must be 'standard' or 'occlusion'.")
+    planned_paths = _collect_planned_output_paths(
+        input_file=input_file,
+        output_dir=output_dir,
+        diffuse_name=diffuse_name,
+        normal_name=normal_name,
+        parallax_name=parallax_name,
+        glow_name=glow_name,
+        environment_mask_name=environment_mask_name,
+        rmaos_name=rmaos_name,
+        complex_name=complex_name,
+        wetness_name=wetness_name,
+        snow_name=snow_name,
+        ao_name=ao_name,
+        roughness_name=roughness_name,
+        complex_format=complex_format,
+        env_mask_mode=env_mask_mode,
+        render_profile=render_profile,
+        include_diffuse=include_diffuse,
+        include_normal=include_normal,
+        include_parallax=include_parallax,
+        include_glow=include_glow,
+        include_environment_mask=include_environment_mask,
+        include_rmaos=include_rmaos,
+        include_complex=include_complex,
+        include_wetness_mask=include_wetness_mask,
+        include_snow_mask=include_snow_mask,
+        include_ao=include_ao,
+        include_roughness=include_roughness,
+    )
+    _validate_output_path_conflicts(planned_paths)
+    resolved_env_complex_workflow = resolve_env_mask_complex_workflow(
+        env_mask_mode=env_mask_mode,
+        complex_format=complex_format,
+        render_profile=render_profile,
+        include_complex=include_complex,
+    )
 
     outputs: dict[str, Path] = {}
 
@@ -3414,6 +6130,8 @@ def run_with_options(
             analysis_source.thumbnail((512, 512), Image.Resampling.NEAREST)
         recommended = recommend_generation_settings(analysis_source, input_path=input_file)
         del analysis_source
+        # Derive material type for material-aware outputs (e.g. TruePBR JSON sidecar).
+        resolved_material_type = classify_material_type(input_file)
         resolved_normal_strength = normal_strength if normal_strength is not None else float(recommended["normal_strength"])
         resolved_parallax_strength = parallax_strength if parallax_strength is not None else float(recommended["parallax_strength"])
         resolved_glow_threshold = glow_threshold if glow_threshold is not None else int(recommended["glow_threshold"])
@@ -3423,6 +6141,10 @@ def run_with_options(
         resolved_rmaos_strength = (
             rmaos_strength if rmaos_strength is not None else float(recommended["rmaos_strength"])
         )
+        resolved_wetness_mask_strength = wetness_mask_strength if wetness_mask_strength is not None else 1.0
+        resolved_snow_mask_strength = snow_mask_strength if snow_mask_strength is not None else 1.0
+        resolved_ao_strength = ao_strength if ao_strength is not None else float(recommended["ao_strength"])
+        resolved_roughness_strength = roughness_strength if roughness_strength is not None else float(recommended["roughness_strength"])
         resolved_complex_strength = complex_strength if complex_strength is not None else float(recommended["complex_strength"])
         resolved_specular_strength = specular_strength if specular_strength is not None else float(recommended["specular_strength"])
 
@@ -3434,7 +6156,11 @@ def run_with_options(
                 diffuse_name=diffuse_name,
                 parallax_name=parallax_name,
             )
-            outputs["diffuse"] = _save_with_dds_fallback(diffuse, diffuse_path)
+            outputs["diffuse"] = _save_with_dds_fallback(
+                diffuse,
+                diffuse_path,
+                preferred_pixel_formats=_preferred_dds_formats_for_output("diffuse", diffuse),
+            )
 
         if include_normal:
             normal = enforce_skyrim_output_profile(
@@ -3445,7 +6171,12 @@ def run_with_options(
                 output_dir=output_dir,
                 normal_name=normal_name,
             )
-            outputs["normal"] = _save_with_dds_fallback(normal, normal_path)
+            outputs["normal"] = _save_with_dds_fallback(
+                normal,
+                normal_path,
+                preferred_pixel_formats=_preferred_dds_formats_for_output("normal", normal),
+                output_kind="normal",
+            )
 
         if include_parallax:
             if parallax_mode == "occlusion":
@@ -3462,7 +6193,12 @@ def run_with_options(
                 diffuse_name=diffuse_name,
                 parallax_name=parallax_name,
             )
-            outputs["parallax"] = _save_with_dds_fallback(parallax, parallax_path)
+            outputs["parallax"] = _save_with_dds_fallback(
+                parallax,
+                parallax_path,
+                preferred_pixel_formats=_preferred_dds_formats_for_output("parallax", parallax),
+                output_kind="parallax",
+            )
 
         if include_glow:
             glow = enforce_skyrim_output_profile("glow", generate_glow(source, threshold=resolved_glow_threshold))
@@ -3471,7 +6207,11 @@ def run_with_options(
                 output_dir=output_dir,
                 glow_name=glow_name,
             )
-            outputs["glow"] = _save_with_dds_fallback(glow, glow_path)
+            outputs["glow"] = _save_with_dds_fallback(
+                glow,
+                glow_path,
+                preferred_pixel_formats=_preferred_dds_formats_for_output("glow", glow),
+            )
 
         if include_environment_mask:
             environment_mask = enforce_skyrim_output_profile(
@@ -3480,7 +6220,7 @@ def run_with_options(
                     source,
                     strength=resolved_environment_mask_strength,
                     mode=env_mask_mode,
-                    complex_workflow="enb" if _normalize_env_mask_mode(env_mask_mode) == "complex" else "standard",
+                    complex_workflow=resolved_env_complex_workflow,
                 ),
                 env_mask_mode=env_mask_mode,
             )
@@ -3493,11 +6233,14 @@ def run_with_options(
                 render_profile=render_profile,
                 include_complex=include_complex,
             )
-            env_formats = ("DXT1", "DXT5") if env_mask_mode == "standard" else ("DXT5",)
             outputs["environment_mask"] = _save_with_dds_fallback(
                 environment_mask,
                 environment_mask_path,
-                preferred_pixel_formats=env_formats,
+                preferred_pixel_formats=_preferred_dds_formats_for_output(
+                    "environment_mask",
+                    environment_mask,
+                    env_mask_mode=env_mask_mode,
+                ),
             )
 
         if include_rmaos:
@@ -3519,9 +6262,79 @@ def run_with_options(
             outputs["rmaos"] = _save_with_dds_fallback(
                 rmaos_map,
                 rmaos_path,
-                preferred_pixel_formats=("DXT5",),
+                preferred_pixel_formats=_preferred_dds_formats_for_output("rmaos", rmaos_map),
             )
-            outputs["rmaos_json"] = write_rmaos_json_sidecar(outputs["rmaos"], parallax_enabled=include_parallax)
+            outputs["rmaos_json"] = write_rmaos_json_sidecar(
+                outputs["rmaos"],
+                parallax_enabled=include_parallax,
+                material_type=resolved_material_type,
+                glow_enabled=include_glow,
+            )
+
+        if include_wetness_mask:
+            wetness_map = enforce_skyrim_output_profile(
+                "parallax", generate_wetness_mask(source, strength=resolved_wetness_mask_strength)
+            )
+            wetness_path = build_wetness_mask_output_path(
+                input_path=input_file,
+                output_dir=output_dir,
+                wetness_name=wetness_name,
+            )
+            outputs["wetness_mask"] = _save_with_dds_fallback(
+                wetness_map,
+                wetness_path,
+                preferred_pixel_formats=_preferred_dds_formats_for_output("parallax", wetness_map),
+                output_kind="parallax",
+            )
+
+        if include_snow_mask:
+            snow_map = enforce_skyrim_output_profile(
+                "parallax", generate_snow_mask(source, strength=resolved_snow_mask_strength)
+            )
+            snow_path = build_snow_mask_output_path(
+                input_path=input_file,
+                output_dir=output_dir,
+                snow_name=snow_name,
+            )
+            outputs["snow_mask"] = _save_with_dds_fallback(
+                snow_map,
+                snow_path,
+                preferred_pixel_formats=_preferred_dds_formats_for_output("parallax", snow_map),
+                output_kind="parallax",
+            )
+
+        if include_ao:
+            ao_map = enforce_skyrim_output_profile(
+                "parallax", generate_ambient_occlusion(source, strength=resolved_ao_strength)
+            )
+            ao_path = build_ao_output_path(
+                input_path=input_file,
+                output_dir=output_dir,
+                ao_name=ao_name,
+            )
+            outputs["ao"] = _save_with_dds_fallback(
+                ao_map,
+                ao_path,
+                preferred_pixel_formats=_preferred_dds_formats_for_output("ao", ao_map),
+                output_kind="ao",
+            )
+
+        if include_roughness:
+            roughness_map = enforce_skyrim_output_profile(
+                "parallax",
+                generate_roughness(source, strength=resolved_roughness_strength, material_type=resolved_material_type),
+            )
+            roughness_path = build_roughness_output_path(
+                input_path=input_file,
+                output_dir=output_dir,
+                roughness_name=roughness_name,
+            )
+            outputs["roughness"] = _save_with_dds_fallback(
+                roughness_map,
+                roughness_path,
+                preferred_pixel_formats=_preferred_dds_formats_for_output("roughness", roughness_map),
+                output_kind="roughness",
+            )
 
         if include_complex:
             if complex_format == "msn":
@@ -3548,11 +6361,14 @@ def run_with_options(
                 complex_name=complex_name,
                 complex_format=complex_format,
             )
-            complex_formats = ("BC7", "DXT5", "DXT3") if complex_format == "cm" else ("DXT5", "DXT3")
             outputs["complex_material"] = _save_with_dds_fallback(
                 complex_material,
                 complex_path,
-                preferred_pixel_formats=complex_formats,
+                preferred_pixel_formats=_preferred_dds_formats_for_output(
+                    "complex_material",
+                    complex_material,
+                    complex_format=complex_format,
+                ),
             )
 
     gc.collect()
@@ -3589,6 +6405,18 @@ def run_batch_with_options(
     include_rmaos: bool = False,
     include_complex: bool = False,
     render_profile: str = "auto",
+    include_wetness_mask: bool = False,
+    wetness_mask_strength: float | None = None,
+    wetness_name: str | None = None,
+    include_snow_mask: bool = False,
+    snow_mask_strength: float | None = None,
+    snow_name: str | None = None,
+    include_ao: bool = False,
+    ao_strength: float | None = None,
+    ao_name: str | None = None,
+    include_roughness: bool = False,
+    roughness_strength: float | None = None,
+    roughness_name: str | None = None,
     progress_callback: Callable[[int, int, Path], None] | None = None,
     error_callback: Callable[[int, int, Path, Exception], None] | None = None,
     continue_on_error: bool = False,
@@ -3634,6 +6462,18 @@ def run_batch_with_options(
                     include_rmaos=include_rmaos,
                     include_complex=include_complex,
                     render_profile=render_profile,
+                    include_wetness_mask=include_wetness_mask,
+                    wetness_mask_strength=wetness_mask_strength,
+                    wetness_name=wetness_name,
+                    include_snow_mask=include_snow_mask,
+                    snow_mask_strength=snow_mask_strength,
+                    snow_name=snow_name,
+                    include_ao=include_ao,
+                    ao_strength=ao_strength,
+                    ao_name=ao_name,
+                    include_roughness=include_roughness,
+                    roughness_strength=roughness_strength,
+                    roughness_name=roughness_name,
                 )
             except Exception as exc:
                 if error_callback is not None:
@@ -3673,6 +6513,18 @@ def run_batch_with_options(
             include_rmaos=include_rmaos,
             include_complex=include_complex,
             render_profile=render_profile,
+            include_wetness_mask=include_wetness_mask,
+            wetness_mask_strength=wetness_mask_strength,
+            wetness_name=wetness_name,
+            include_snow_mask=include_snow_mask,
+            snow_mask_strength=snow_mask_strength,
+            snow_name=snow_name,
+            include_ao=include_ao,
+            ao_strength=ao_strength,
+            ao_name=ao_name,
+            include_roughness=include_roughness,
+            roughness_strength=roughness_strength,
+            roughness_name=roughness_name,
         )
 
     completed = 0
@@ -3769,6 +6621,14 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="RMAOS channel packing strength factor (auto if omitted).",
     )
+    parser.add_argument("--wetness-mask", action="store_true", default=False, help="Generate a wetness mask (_wt.dds) for Community Shaders wet surface support.")
+    parser.add_argument("--wetness-mask-strength", type=float, default=None, metavar="STRENGTH", help="Wetness mask strength (0.1–3.0). Default: 1.0.")
+    parser.add_argument("--snow-mask", action="store_true", default=False, help="Generate a dynamic snow mask (_sm.dds) for Community Shaders Dynamic Snow.")
+    parser.add_argument("--snow-mask-strength", type=float, default=None, metavar="STRENGTH", help="Snow mask strength (0.1–3.0). Default: 1.0.")
+    parser.add_argument("--ao-map", action="store_true", default=False, help="Generate a standalone ambient occlusion map (_ao.dds) for TruePBR / Community Shaders workflows.")
+    parser.add_argument("--ao-strength", type=float, default=None, metavar="STRENGTH", help="AO map strength (0.1–8.0). Auto-recommended if omitted.")
+    parser.add_argument("--roughness-map", action="store_true", default=False, help="Generate a standalone roughness map (_rough.dds) for TruePBR / Community Shaders workflows.")
+    parser.add_argument("--roughness-strength", type=float, default=None, metavar="STRENGTH", help="Roughness map strength (0.1–8.0). Auto-recommended if omitted.")
     parser.add_argument(
         "--specular-strength",
         type=float,
@@ -3847,6 +6707,16 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--render-profile",
+        choices=_RENDER_PROFILE_CLI_VALUES,
+        default="auto",
+        help=(
+            "Target renderer/output profile. "
+            "'auto' (default) infers workflow from file path/mod-manager context; "
+            "other presets force profile-specific format/mode/output defaults."
+        ),
+    )
+    parser.add_argument(
         "--batch-workers",
         type=int,
         default=0,
@@ -3868,6 +6738,7 @@ def _apply_cli_pbr_overrides(args: argparse.Namespace) -> argparse.Namespace:
 
 
 PATREON_URL = "https://www.patreon.com/cw/DeadOnTheInside"
+MODDING_WIKI_SKYRIM_URL = "https://modding.wiki/en/skyrim"
 
 
 def _create_panda_icon_image(size: int = 128) -> Image.Image:
@@ -3987,6 +6858,8 @@ if GUI_AVAILABLE:
             self.glow_threshold_var = tk.DoubleVar(value=190.0)
             self.environment_mask_strength_var = tk.DoubleVar(value=1.2)
             self.rmaos_strength_var = tk.DoubleVar(value=1.2)
+            self.ao_strength_var = tk.DoubleVar(value=1.2)
+            self.roughness_strength_var = tk.DoubleVar(value=1.0)
             self.normal_strength_display_var = tk.StringVar()
             self.parallax_strength_display_var = tk.StringVar()
             self.glow_threshold_display_var = tk.StringVar()
@@ -3994,6 +6867,8 @@ if GUI_AVAILABLE:
             self.rmaos_strength_display_var = tk.StringVar()
             self.complex_strength_display_var = tk.StringVar()
             self.specular_strength_display_var = tk.StringVar()
+            self.ao_strength_display_var = tk.StringVar()
+            self.roughness_strength_display_var = tk.StringVar()
             self.complex_format_var = tk.StringVar(value="msn")
             self.env_mask_mode_var = tk.StringVar(value="standard")
             self.emboss_mode_var = tk.BooleanVar(value=False)
@@ -4003,8 +6878,9 @@ if GUI_AVAILABLE:
             self.parallax_mode_var = tk.StringVar(value="standard")
             self.render_profile_var = tk.StringVar(value="custom")
             self.render_profile_suggestion_var = tk.StringVar(
-                value=build_render_profile_brief_message("vanilla")
+                value=build_render_profile_brief_message("custom")
             )
+            self.mode_controls_hint_var = tk.StringVar(value="")
             self.render_profile_help_window: tk.Toplevel | None = None
             self.auto_suggestions_var = tk.BooleanVar(value=True)
             self.auto_normal_suggestion_var = tk.BooleanVar(value=True)
@@ -4014,6 +6890,8 @@ if GUI_AVAILABLE:
             self.auto_rmaos_suggestion_var = tk.BooleanVar(value=True)
             self.auto_complex_suggestion_var = tk.BooleanVar(value=True)
             self.auto_specular_suggestion_var = tk.BooleanVar(value=True)
+            self.auto_ao_suggestion_var = tk.BooleanVar(value=True)
+            self.auto_roughness_suggestion_var = tk.BooleanVar(value=True)
             self.theme_mode_label_var = tk.StringVar(value="☀ Light mode")
             self.include_diffuse_var = tk.BooleanVar(value=True)
             self.include_normal_var = tk.BooleanVar(value=True)
@@ -4021,6 +6899,10 @@ if GUI_AVAILABLE:
             self.include_glow_var = tk.BooleanVar(value=False)
             self.include_environment_mask_var = tk.BooleanVar(value=False)
             self.include_rmaos_var = tk.BooleanVar(value=False)
+            self.include_wetness_mask_var = tk.BooleanVar(value=False)
+            self.include_snow_mask_var = tk.BooleanVar(value=False)
+            self.include_ao_var = tk.BooleanVar(value=False)
+            self.include_roughness_var = tk.BooleanVar(value=False)
             self.include_complex_var = tk.BooleanVar(value=False)
             self.status_var = tk.StringVar(
                 value=self.manager_context.summary if self.manager_context.manager is not None else "Select a DDS file to begin."
@@ -4068,6 +6950,12 @@ if GUI_AVAILABLE:
                 command=lambda: webbrowser.open(PATREON_URL),
             )
             _patreon_button.pack(side=tk.RIGHT, padx=4)
+            _wiki_button = ttk.Button(
+                top_bar,
+                text="Skyrim Wiki",
+                command=lambda: webbrowser.open(MODDING_WIKI_SKYRIM_URL),
+            )
+            _wiki_button.pack(side=tk.RIGHT, padx=4)
             _help_button = ttk.Button(
                 top_bar,
                 text="Help",
@@ -4088,9 +6976,14 @@ if GUI_AVAILABLE:
                 "Your support buys bug-fixing time, feature upgrades, and enough caffeine to keep the texture goblin alive.",
             )
             self._add_tooltip(
+                _wiki_button,
+                "📚 Open the Skyrim modding wiki reference.\n"
+                "Handy when you need the authoritative TruePBR workflow, slot, and feature-compatibility notes.",
+            )
+            self._add_tooltip(
                 _help_button,
                 "❓ Open the full renderer/channel guide.\n"
-                "Includes ENB vs Community Shaders channel mappings and workflow do/don't notes.",
+                "Includes ENB vs Community Shaders channel mappings, corrected TruePBR workflow notes, and a link back to the Skyrim modding wiki.",
             )
 
             file_frame = ttk.LabelFrame(wrapper, text="Files", padding=10)
@@ -4146,72 +7039,123 @@ if GUI_AVAILABLE:
             options_frame = ttk.LabelFrame(wrapper, text="Generation Options", padding=10)
             options_frame.pack(fill=tk.X, padx=4, pady=4)
 
-            _diffuse_check = ttk.Checkbutton(options_frame, text="Diffuse", variable=self.include_diffuse_var, command=self._refresh_preview)
+            # --- Workflow-separated output checkboxes ---
+            _workflow_frame = ttk.Frame(options_frame)
+            _workflow_frame.grid(row=0, column=0, columnspan=5, sticky=tk.EW, pady=(0, 4))
+            _workflow_frame.columnconfigure(0, weight=1)
+            _workflow_frame.columnconfigure(1, weight=1)
+            _workflow_frame.columnconfigure(2, weight=1)
+
+            # --- Vanilla / ENB Workflow section ---
+            _enb_section = ttk.LabelFrame(_workflow_frame, text="Vanilla / ENB Workflow", padding=6)
+            _enb_section.grid(row=0, column=0, sticky=tk.NSEW, padx=(0, 4), pady=2)
+            _diffuse_check = ttk.Checkbutton(_enb_section, text="Diffuse", variable=self.include_diffuse_var, command=self._refresh_preview)
             _diffuse_check.grid(row=0, column=0, sticky=tk.W)
             self._add_tooltip(_diffuse_check, "🎨 Generate the diffuse (colour) texture.\nThis is the one that makes your rock look like a rock and not a void of existential dread.")
-            _normal_check = ttk.Checkbutton(options_frame, text="Normal / _n", variable=self.include_normal_var, command=self._refresh_preview)
-            _normal_check.grid(row=0, column=1, sticky=tk.W)
+            _normal_check = ttk.Checkbutton(_enb_section, text="Normal / _n", variable=self.include_normal_var, command=self._refresh_preview)
+            _normal_check.grid(row=1, column=0, sticky=tk.W)
             self._add_tooltip(_normal_check, "🗻 Generate a normal map for fake 3D depth.\nSkyrim's favourite optical illusion since 2011.")
-            _parallax_check = ttk.Checkbutton(options_frame, text="Parallax / _p", variable=self.include_parallax_var, command=self._refresh_preview)
-            _parallax_check.grid(row=0, column=2, sticky=tk.W)
-            self._add_tooltip(_parallax_check, "🌊 Generate a parallax (height) map.\nMakes surfaces look EXTRA bumpy. Your GPU will feel it, but it's worth it.")
-            _glow_check = ttk.Checkbutton(options_frame, text="Glow / _g", variable=self.include_glow_var, command=self._refresh_preview)
-            _glow_check.grid(row=1, column=0, sticky=tk.W)
+            _env_mask_check = ttk.Checkbutton(_enb_section, text="Environment Mask / _m", variable=self.include_environment_mask_var, command=self._on_environment_mask_output_toggled)
+            _env_mask_check.grid(row=2, column=0, sticky=tk.W)
+            self._add_tooltip(_env_mask_check, "🪞 Generate classic _m environment mask for vanilla/ENB reflection workflows.\nMutually exclusive with Community Shaders PBR _rmaos — these are different material systems, do not combine.")
+            _parallax_check = ttk.Checkbutton(_enb_section, text="Height/Parallax (_p) — optional", variable=self.include_parallax_var, command=self._on_output_selection_changed)
+            _parallax_check.grid(row=3, column=0, sticky=tk.W)
+            self._add_tooltip(_parallax_check, "🌊 Generate a height/parallax map (_p).\nFor vanilla Skyrim SE use 'standard' parallax mode; for ENBSeries POM use 'occlusion' mode.\nNot a universal format — match your workflow before enabling.")
+            _glow_check = ttk.Checkbutton(_enb_section, text="Glow / _g", variable=self.include_glow_var, command=self._refresh_preview)
+            _glow_check.grid(row=4, column=0, sticky=tk.W)
             self._add_tooltip(_glow_check, "✨ Generate a glow map. Bright pixels glow in the dark.\nPerfect for making your cave look like a disco.")
-            _env_mask_check = ttk.Checkbutton(options_frame, text="Environment mask / _m", variable=self.include_environment_mask_var, command=self._refresh_preview)
-            _env_mask_check.grid(row=1, column=1, sticky=tk.W)
-            self._add_tooltip(_env_mask_check, "🪞 Generate an environment mask for reflections.\nTells Skyrim which parts of a surface are shiny. Science!")
-            _rmaos_check = ttk.Checkbutton(options_frame, text="RMAOS / _rmaos", variable=self.include_rmaos_var, command=self._refresh_preview)
-            _rmaos_check.grid(row=1, column=2, sticky=tk.W)
-            self._add_tooltip(_rmaos_check, "🧩 Generate a dedicated TruePBR RMAOS map (_rmaos/_ramos) plus JSON sidecar in PBRNifPatcher/. Separate from vanilla/ENB _m environment masks.")
-            _complex_check = ttk.Checkbutton(options_frame, text="Complex/PBR material", variable=self.include_complex_var, command=self._refresh_preview)
-            _complex_check.grid(row=1, column=3, sticky=tk.W)
+            _complex_check = ttk.Checkbutton(_enb_section, text="ENB Complex Material", variable=self.include_complex_var, command=self._on_output_selection_changed)
+            _complex_check.grid(row=5, column=0, sticky=tk.W)
             self._add_tooltip(
                 _complex_check,
-                "🔮 Generate complex/PBR material output.\n"
-                "For Community Shaders Extended Materials use format 'cm' (or custom name ending with _c/_C).\n"
-                "For ENB complex material workflows use format 'msn'.\n"
-                "Do not mix Community Shaders and ENB outputs in the same install.",
+                "🔮 Generate ENB complex material output (typically _msn).\n"
+                "ENB Complex Material ≠ Community Shaders PBR — these are separate renderer workflows.\n"
+                "Community Shaders TruePBR uses _rmaos (in the CS PBR section), not this toggle.",
             )
+
+            # --- Community Shaders PBR Workflow section ---
+            _pbr_section = ttk.LabelFrame(_workflow_frame, text="Community Shaders PBR Workflow", padding=6)
+            _pbr_section.grid(row=0, column=1, sticky=tk.NSEW, padx=4, pady=2)
+            _pbr_note = ttk.Label(
+                _pbr_section,
+                text="Shares Diffuse + Normal with Vanilla/ENB",
+                foreground="gray",
+                font=("TkDefaultFont", 8),
+            )
+            _pbr_note.grid(row=0, column=0, sticky=tk.W, pady=(0, 2))
+            self._add_tooltip(_pbr_note, "ℹ Base color and normal map are shared with Vanilla/ENB workflow outputs.\nEnable them in the Vanilla/ENB section above.")
+            _rmaos_check = ttk.Checkbutton(_pbr_section, text="RMAOS / _rmaos", variable=self.include_rmaos_var, command=self._on_rmaos_output_toggled)
+            _rmaos_check.grid(row=1, column=0, sticky=tk.W)
+            self._add_tooltip(_rmaos_check, "🧩 Generate Community Shaders TruePBR _rmaos/_ramos plus JSON sidecar.\nRMAOS channels: R=roughness, G=metallic, B=AO, A=config-driven spec/height.\nRequires TruePBR-enabled mesh/patch config; _rmaos ≠ _m.\nMutually exclusive with Vanilla/ENB _m environment mask.")
+            _roughness_check = ttk.Checkbutton(_pbr_section, text="Roughness / _rough", variable=self.include_roughness_var, command=self._refresh_preview)
+            _roughness_check.grid(row=2, column=0, sticky=tk.W)
+            self._add_tooltip(_roughness_check, "🪨 Generate a standalone roughness map (_rough.dds).\nControls how rough vs. glossy the surface looks. Material-aware: stone goes rough, glass goes smooth.")
+            _ao_check = ttk.Checkbutton(_pbr_section, text="Standalone AO (optional) / _ao", variable=self.include_ao_var, command=self._refresh_preview)
+            _ao_check.grid(row=3, column=0, sticky=tk.W)
+            self._add_tooltip(_ao_check, "🌑 Generate an optional standalone AO map (_ao.dds).\nStandalone AO maps are uncommon in traditional Skyrim workflows — AO is usually packed into _rmaos or baked into diffuse.\nTreat this as optional/non-standard.")
+
+            # --- Community Shaders workflow-specific maps section ---
+            _custom_section = ttk.LabelFrame(_workflow_frame, text="Community Shaders / Workflow-Specific Maps", padding=6)
+            _custom_section.grid(row=0, column=2, sticky=tk.NSEW, padx=(4, 0), pady=2)
+            _wetness_mask_check = ttk.Checkbutton(_custom_section, text="Wetness Mask / _wt (Community Shaders)", variable=self.include_wetness_mask_var, command=self._refresh_preview)
+            _wetness_mask_check.grid(row=0, column=0, sticky=tk.W)
+            self._add_tooltip(_wetness_mask_check, "💧 Generate a Community Shaders wetness mask (_wt.dds).\nUseful in supported shader/mod setups, but not part of vanilla Skyrim's standard texture slot set.")
+            _snow_mask_check = ttk.Checkbutton(_custom_section, text="Snow Mask / _sm (Community Shaders)", variable=self.include_snow_mask_var, command=self._refresh_preview)
+            _snow_mask_check.grid(row=1, column=0, sticky=tk.W)
+            self._add_tooltip(_snow_mask_check, "❄ Generate a Community Shaders Dynamic Snow mask (_sm.dds).\nMarks where snow accumulates in supported shader/mod setups; this is workflow-specific, not a universal vanilla slot.")
+
+            self._render_profile_managed_output_widgets = [
+                _diffuse_check,
+                _normal_check,
+                _parallax_check,
+                _glow_check,
+                _env_mask_check,
+                _rmaos_check,
+                _wetness_mask_check,
+                _snow_mask_check,
+                _complex_check,
+                _ao_check,
+                _roughness_check,
+            ]
             _auto_sugg_check = ttk.Checkbutton(
                 options_frame,
                 text="Automatic suggestions (master switch: enables per-slider Auto toggles)",
                 variable=self.auto_suggestions_var,
                 command=self._toggle_auto_suggestions,
             )
-            _auto_sugg_check.grid(row=2, column=0, columnspan=4, sticky=tk.W, pady=(6, 2))
+            _auto_sugg_check.grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(6, 2))
             self._add_tooltip(_auto_sugg_check, "🤖 Let the AI™ (actually just math) pick slider values.\nUncheck if you think YOU know better than the algorithm. Spoiler: maybe you do.")
 
             _render_profile_label = ttk.Label(options_frame, text="Target renderer")
-            _render_profile_label.grid(row=3, column=0, sticky=tk.W, pady=8)
+            _render_profile_label.grid(row=2, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(
                 _render_profile_label,
                 "🎯 Select target renderer preset.\n"
-                "custom = blank manual mode (nothing auto-enforced).\n"
                 "vanilla = safest stock Skyrim SE setup.\n"
-                "community_shaders = Community Shaders Extended Materials _cm/_c/_C workflow.\n"
-                "truepbr = Community Shaders TruePBR JSON-driven _rmaos/_ramos workflow.\n"
-                "enb = tool ENB preset (_msn + complex env-mask mode + optional POM).\n"
-                "Render-profile guidance is experimental and some info may be inaccurate for your setup.\n"
-                "Community Shaders and ENB are separate workflows and should not be combined.\n"
+                "community_shaders = Community Shaders Extended Materials _cm/_c workflow.\n"
+                "truepbr = Community Shaders PBR JSON-driven _rmaos/_ramos workflow.\n"
+                "enb = tool ENB preset (_msn + complex env-mask default + optional POM).\n"
+                "Presets keep format/mode/output defaults aligned to avoid conflicting combinations.\n"
+                "Community Shaders and ENB can both be installed, but each mesh/material should use one workflow at a time.\n"
                 "Changing this is the only thing that should auto-switch the mode combos.",
             )
             _render_profile_combo = ttk.Combobox(
                 options_frame,
                 textvariable=self.render_profile_var,
-                values=("custom", "auto", "vanilla", "community_shaders", "truepbr", "enb"),
+                values=_RENDER_PROFILE_GUI_VALUES,
                 state="readonly",
                 width=20,
             )
-            _render_profile_combo.grid(row=3, column=1, sticky=tk.W)
+            _render_profile_combo.grid(row=2, column=1, sticky=tk.W)
             _render_profile_combo.bind("<<ComboboxSelected>>", self._on_render_profile_changed)
             self._add_tooltip(
                 _render_profile_combo,
-                "🎯 custom = blank manual mode.\n"
-                "auto = pick the best renderer preset for the current texture, but only when you change this control.\n"
-                "vanilla = safest defaults; community_shaders = _cm/_c/_C; truepbr = _n + _rmaos/_ramos + JSON path; enb = tool ENB preset _msn + complex env + optional POM.\n"
-                "Render-profile guidance is experimental and may be inaccurate for some stacks.\n"
-                "Community Shaders and ENB are separate workflows and should not be mixed.",
+                "🎯 Pick one renderer workflow for this texture set.\n"
+                "vanilla = safest defaults; "
+                "community_shaders = _cm/_c; truepbr = _n + _rmaos/_ramos + JSON path; enb = tool ENB preset _msn + complex env default + optional POM.\n"
+                "Prefer canonical TruePBR names (_rmaos/_ramos), not generic _orm/_mrao aliases from Blender-style exports.\n"
+                "Presets keep format/mode/output defaults aligned to avoid conflicting combinations.\n"
+                "Community Shaders and ENB can coexist, but each mesh/material should follow one workflow at a time.",
             )
             self.render_profile_hint_label = ttk.Label(
                 options_frame,
@@ -4221,138 +7165,162 @@ if GUI_AVAILABLE:
                 anchor=tk.W,
                 wraplength=520,
             )
-            self.render_profile_hint_label.grid(row=3, column=2, columnspan=3, sticky=tk.EW, padx=(4, 0))
+            self.render_profile_hint_label.grid(row=2, column=2, columnspan=3, sticky=tk.EW, padx=(4, 0))
 
-            _complex_fmt_label = ttk.Label(options_frame, text="Complex/PBR format")
-            _complex_fmt_label.grid(row=4, column=0, sticky=tk.W, pady=8)
+            _complex_fmt_label = ttk.Label(options_frame, text="Complex material format")
+            _complex_fmt_label.grid(row=3, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(
                 _complex_fmt_label,
-                "🏷 Output format for complex/PBR maps.\n"
+                "🏷 Output format for complex-material maps.\n"
                 "'cm' = Community Shaders Extended Materials packed map (env reflection / glossiness / metallic / height; _cm default, _c/_C via custom name).\n"
                 "'msn' = ENB complex material (normal RGB + specular alpha).",
             )
-            complex_format = ttk.Combobox(
+            self.complex_format_combo = ttk.Combobox(
                 options_frame,
                 textvariable=self.complex_format_var,
                 values=("msn", "cm"),
                 state="readonly",
                 width=20,
             )
-            complex_format.grid(row=4, column=1, sticky=tk.W)
-            complex_format.bind("<<ComboboxSelected>>", self._on_complex_format_changed)
+            self.complex_format_combo.grid(row=3, column=1, sticky=tk.W)
+            self.complex_format_combo.bind("<<ComboboxSelected>>", self._on_complex_format_changed)
             self._add_tooltip(
-                complex_format,
+                self.complex_format_combo,
                 "🏷 Choose map type:\n"
                 "'cm' for Community Shaders Extended Materials setups (_cm default, _c/_C optional via custom naming).\n"
                 "'msn' for ENB complex material setups.\n"
-                "Quick start for Community Shaders: set Target renderer=community_shaders, enable Complex/PBR material, keep format=cm.\n"
+                "Quick start for Community Shaders: set Target renderer=community_shaders and keep format=cm.\n"
                 "Do not use 'cm' together with ENB _m/_msn outputs.",
             )
 
             _env_mode_row = ttk.Frame(options_frame)
-            _env_mode_row.grid(row=4, column=2, columnspan=2, sticky=tk.W, padx=(20, 4), pady=8)
+            _env_mode_row.grid(row=3, column=2, columnspan=2, sticky=tk.W, padx=(20, 4), pady=8)
             _env_mode_label = ttk.Label(_env_mode_row, text="Env mask mode")
             _env_mode_label.pack(side=tk.LEFT)
-            self._add_tooltip(_env_mode_label, "🌍 How to encode the environment mask.\n'standard' = vanilla Skyrim.\n'complex' = packed RGBA (ENB and TruePBR interpret channels differently).\nUse Target renderer + Help for the correct channel mapping.")
-            env_mask_mode_combo = ttk.Combobox(
+            self._add_tooltip(_env_mode_label, "🌍 How to encode slot 5 data.\n'standard' = vanilla/ENB-style _m greyscale reflection mask.\n'complex' = packed RGBA data map (ENB _m RGBA, or renderer-specific packed workflows).\nCommunity Shaders Extended Materials usually uses _cm/_c, and TruePBR uses _rmaos/_ramos + JSON.\nUse Target renderer + Help for exact channel mapping.")
+            self.env_mask_mode_combo = ttk.Combobox(
                 _env_mode_row,
                 textvariable=self.env_mask_mode_var,
                 values=("standard", "complex"),
                 state="readonly",
                 width=20,
             )
-            env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
-            env_mask_mode_combo.bind("<<ComboboxSelected>>", self._on_env_mask_mode_changed)
-            self._add_tooltip(env_mask_mode_combo, "🌍 'standard' = vanilla Skyrim SE reflections.\n'complex' = packed RGBA for ENB/TruePBR workflows.\nAlways match this with your selected Target renderer.")
+            self.env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
+            self.env_mask_mode_combo.bind("<<ComboboxSelected>>", self._on_env_mask_mode_changed)
+            self._add_tooltip(self.env_mask_mode_combo, "🌍 'standard' = greyscale _m for vanilla-style reflection masks.\n'complex' = packed RGBA map data (ENB _m RGBA or renderer-specific packed paths).\nCS Extended Materials usually uses _cm/_c; TruePBR usually uses _rmaos/_ramos (+ JSON), not generic _orm/_mrao aliases.\nAlways match this with your selected Target renderer.")
             ttk.Label(
                 options_frame,
                 text="standard = vanilla Skyrim SE  |  complex = packed RGBA (renderer-specific channels)",
                 foreground="gray",
-            ).grid(row=4, column=4, sticky=tk.W, padx=(4, 0))
+            ).grid(row=3, column=4, sticky=tk.W, padx=(4, 0))
 
             _normal_label = ttk.Label(options_frame, text="Normal strength")
-            _normal_label.grid(row=5, column=0, sticky=tk.W, pady=8)
+            _normal_label.grid(row=4, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_normal_label, "💪 Controls normal-map intensity.\nHigher = sharper fake detail. Lower = smooth potato mode.")
             self.normal_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.normal_strength_var, command=lambda _: self._on_slider_changed())
-            self.normal_scale.grid(row=5, column=1, columnspan=2, sticky=tk.EW)
+            self.normal_scale.grid(row=4, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.normal_scale, "💪 Drag right for epic bumps, left for subtle detail.\nLive value is shown next to the slider so you can stop guessing.")
             self.normal_strength_display_label = ttk.Label(options_frame, textvariable=self.normal_strength_display_var)
-            self.normal_strength_display_label.grid(row=5, column=3, sticky=tk.W, padx=8)
+            self.normal_strength_display_label.grid(row=4, column=3, sticky=tk.W, padx=8)
             self.auto_normal_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_normal_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_normal_check.grid(row=5, column=4, sticky=tk.W)
+            self.auto_normal_check.grid(row=4, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_normal_check, "🤖 Let the app analyse the image and choose this value.\nUncheck to manually control, as the control freak you truly are.")
 
             _parallax_label = ttk.Label(options_frame, text="Parallax strength")
-            _parallax_label.grid(row=6, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_parallax_label, "🏔 Controls parallax depth contrast.\nToo high and your pebble becomes a canyon. Too low and your canyon becomes toast.")
+            _parallax_label.grid(row=5, column=0, sticky=tk.W, pady=8)
+            self._add_tooltip(_parallax_label, "🏔 Controls height-map (parallax/_p) depth contrast.\nSets the height data written to the _p texture.\nFor CS TruePBR the depth of the in-game effect is controlled by 'displacement_scale' in the JSON sidecar — this slider sets the source height strength, not the TruePBR displacement scale directly.")
             self.parallax_scale = ttk.Scale(options_frame, from_=0.1, to=6.0, variable=self.parallax_strength_var, command=lambda _: self._on_slider_changed())
-            self.parallax_scale.grid(row=6, column=1, columnspan=2, sticky=tk.EW)
-            self._add_tooltip(self.parallax_scale, "🏔 Slide right for deeper depth illusion, left for subtle relief.\nYes, this can absolutely make stones look dramatic.")
+            self.parallax_scale.grid(row=5, column=1, columnspan=2, sticky=tk.EW)
+            self._add_tooltip(self.parallax_scale, "🏔 Slide right for deeper height data in the _p file, left for subtle relief.\nFor TruePBR, tune displacement_scale in the generated JSON sidecar to control in-game POM depth.\nYes, this can absolutely make stones look dramatic.")
             self.parallax_strength_display_label = ttk.Label(options_frame, textvariable=self.parallax_strength_display_var)
-            self.parallax_strength_display_label.grid(row=6, column=3, sticky=tk.W, padx=8)
+            self.parallax_strength_display_label.grid(row=5, column=3, sticky=tk.W, padx=8)
             self.auto_parallax_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_parallax_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_parallax_check.grid(row=6, column=4, sticky=tk.W)
+            self.auto_parallax_check.grid(row=5, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_parallax_check, "🤖 Automatic parallax strength suggestion.\nBased on actual image analysis, not a horoscope.")
 
             _glow_label = ttk.Label(options_frame, text="Glow threshold")
-            _glow_label.grid(row=7, column=0, sticky=tk.W, pady=8)
+            _glow_label.grid(row=6, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_glow_label, "💡 Brightness cutoff for glow.\nLower = more glow. Higher = only brightest bits glow like tiny supernovas.")
             self.glow_scale = ttk.Scale(options_frame, from_=0, to=255, variable=self.glow_threshold_var, command=lambda _: self._on_slider_changed())
-            self.glow_scale.grid(row=7, column=1, columnspan=2, sticky=tk.EW)
+            self.glow_scale.grid(row=6, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.glow_scale, "💡 0 means everything glows like a rave. 255 means almost nothing glows.\nUse the live value display to tune precisely.")
             self.glow_threshold_display_label = ttk.Label(options_frame, textvariable=self.glow_threshold_display_var)
-            self.glow_threshold_display_label.grid(row=7, column=3, sticky=tk.W, padx=8)
+            self.glow_threshold_display_label.grid(row=6, column=3, sticky=tk.W, padx=8)
             self.auto_glow_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_glow_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_glow_check.grid(row=7, column=4, sticky=tk.W)
+            self.auto_glow_check.grid(row=6, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_glow_check, "🤖 Auto-detect the ideal glow threshold.\nBased on luminance analysis. The computer is trying its best.")
 
             _env_mask_label = ttk.Label(options_frame, text="Environment mask strength")
-            _env_mask_label.grid(row=8, column=0, sticky=tk.W, pady=8)
+            _env_mask_label.grid(row=7, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_env_mask_label, "🪞 Controls environment-mask contrast.\nHigher = stronger shiny-vs-matte separation. Great for dramatic materials.")
             self.environment_mask_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.environment_mask_strength_var, command=lambda _: self._on_slider_changed())
-            self.environment_mask_scale.grid(row=8, column=1, columnspan=2, sticky=tk.EW)
+            self.environment_mask_scale.grid(row=7, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.environment_mask_scale, "🪞 Slide right for stronger reflection contrast.\nSlide left for chill, less dramatic materials.")
             self.environment_mask_strength_display_label = ttk.Label(options_frame, textvariable=self.environment_mask_strength_display_var)
-            self.environment_mask_strength_display_label.grid(row=8, column=3, sticky=tk.W, padx=8)
+            self.environment_mask_strength_display_label.grid(row=7, column=3, sticky=tk.W, padx=8)
             self.auto_environment_mask_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_environment_mask_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_environment_mask_check.grid(row=8, column=4, sticky=tk.W)
+            self.auto_environment_mask_check.grid(row=7, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_environment_mask_check, "🤖 Auto-select environment mask strength.\nThe machine will judge your texture's reflective potential.")
 
             _rmaos_label = ttk.Label(options_frame, text="RMAOS strength")
-            _rmaos_label.grid(row=9, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_rmaos_label, "🧩 Controls TruePBR _rmaos channel contrast/intensity packing.")
+            _rmaos_label.grid(row=8, column=0, sticky=tk.W, pady=8)
+            self._add_tooltip(_rmaos_label, "🧩 Controls TruePBR _rmaos channel contrast/intensity packing.\nNote: for CS TruePBR the 'parallax' flag (POM on/off) and 'displacement_scale' (POM depth) in the generated JSON sidecar are separate controls — see the JSON sidecar for material-specific defaults.")
             self.rmaos_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.rmaos_strength_var, command=lambda _: self._on_slider_changed())
-            self.rmaos_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
+            self.rmaos_scale.grid(row=8, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.rmaos_scale, "🧩 Higher values push stronger channel separation for _rmaos output.")
             self.rmaos_strength_display_label = ttk.Label(options_frame, textvariable=self.rmaos_strength_display_var)
-            self.rmaos_strength_display_label.grid(row=9, column=3, sticky=tk.W, padx=8)
+            self.rmaos_strength_display_label.grid(row=8, column=3, sticky=tk.W, padx=8)
             self.auto_rmaos_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_rmaos_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_rmaos_check.grid(row=9, column=4, sticky=tk.W)
+            self.auto_rmaos_check.grid(row=8, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_rmaos_check, "🤖 Auto-select dedicated RMAOS strength.")
 
             _complex_label = ttk.Label(options_frame, text="Complex strength")
-            _complex_label.grid(row=10, column=0, sticky=tk.W, pady=8)
+            _complex_label.grid(row=9, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_complex_label, "🔮 Controls complex-material contrast.\nHigher = punchier ENB material response. Lower = subtle, civilized vibes.")
             self.complex_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.complex_strength_var, command=lambda _: self._on_slider_changed())
-            self.complex_scale.grid(row=10, column=1, columnspan=2, sticky=tk.EW)
+            self.complex_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.complex_scale, "🔮 Right = louder material definition.\nLeft = quieter output for restrained legends.")
             self.complex_strength_display_label = ttk.Label(options_frame, textvariable=self.complex_strength_display_var)
-            self.complex_strength_display_label.grid(row=10, column=3, sticky=tk.W, padx=8)
+            self.complex_strength_display_label.grid(row=9, column=3, sticky=tk.W, padx=8)
             self.auto_complex_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_complex_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_complex_check.grid(row=10, column=4, sticky=tk.W)
+            self.auto_complex_check.grid(row=9, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_complex_check, "🤖 Auto-set complex strength. Let the algorithm\nscrutinise your texture's material complexity.")
 
             _specular_label = ttk.Label(options_frame, text="Specular strength (_msn alpha)")
-            _specular_label.grid(row=11, column=0, sticky=tk.W, pady=8)
+            _specular_label.grid(row=10, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_specular_label, "✨ Controls specular highlight intensity in _msn alpha.\nHigher = shinier. Lower = dusty realism.")
             self.specular_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.specular_strength_var, command=lambda _: self._on_slider_changed())
-            self.specular_scale.grid(row=11, column=1, columnspan=2, sticky=tk.EW)
+            self.specular_scale.grid(row=10, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.specular_scale, "✨ Turn it up for glorious shine, down for ancient weathered stone.\nLive value shown beside slider.")
             self.specular_strength_display_label = ttk.Label(options_frame, textvariable=self.specular_strength_display_var)
-            self.specular_strength_display_label.grid(row=11, column=3, sticky=tk.W, padx=8)
+            self.specular_strength_display_label.grid(row=10, column=3, sticky=tk.W, padx=8)
             self.auto_specular_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_specular_suggestion_var, command=self._on_auto_slider_preference_changed)
-            self.auto_specular_check.grid(row=11, column=4, sticky=tk.W)
+            self.auto_specular_check.grid(row=10, column=4, sticky=tk.W)
             self._add_tooltip(self.auto_specular_check, "🤖 Auto-set specular strength. The AI ponders how shiny\nyour texture DESERVES to be.")
+
+            _ao_label = ttk.Label(options_frame, text="AO strength")
+            _ao_label.grid(row=11, column=0, sticky=tk.W, pady=8)
+            self._add_tooltip(_ao_label, "🌑 Controls ambient occlusion (cavity/self-shadowing) contrast.\nHigher = deeper shadows in crevices.")
+            self.ao_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.ao_strength_var, command=lambda _: self._on_slider_changed())
+            self.ao_scale.grid(row=11, column=1, columnspan=2, sticky=tk.EW)
+            self._add_tooltip(self.ao_scale, "🌑 Right = stronger AO bake, left = subtle cavity hints.")
+            self.ao_strength_display_label = ttk.Label(options_frame, textvariable=self.ao_strength_display_var)
+            self.ao_strength_display_label.grid(row=11, column=3, sticky=tk.W, padx=8)
+            self.auto_ao_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_ao_suggestion_var, command=self._on_auto_slider_preference_changed)
+            self.auto_ao_check.grid(row=11, column=4, sticky=tk.W)
+            self._add_tooltip(self.auto_ao_check, "🤖 Auto-recommend AO strength based on surface contrast.")
+
+            _roughness_label = ttk.Label(options_frame, text="Roughness strength")
+            _roughness_label.grid(row=12, column=0, sticky=tk.W, pady=8)
+            self._add_tooltip(_roughness_label, "🪨 Controls roughness map contrast. Material-aware: stone=rougher, glass=smoother.")
+            self.roughness_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.roughness_strength_var, command=lambda _: self._on_slider_changed())
+            self.roughness_scale.grid(row=12, column=1, columnspan=2, sticky=tk.EW)
+            self._add_tooltip(self.roughness_scale, "🪨 Right = higher contrast roughness, left = uniform surface.")
+            self.roughness_strength_display_label = ttk.Label(options_frame, textvariable=self.roughness_strength_display_var)
+            self.roughness_strength_display_label.grid(row=12, column=3, sticky=tk.W, padx=8)
+            self.auto_roughness_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_roughness_suggestion_var, command=self._on_auto_slider_preference_changed)
+            self.auto_roughness_check.grid(row=12, column=4, sticky=tk.W)
+            self._add_tooltip(self.auto_roughness_check, "🤖 Auto-recommend roughness strength — material-aware so stone gets gritty and glass gets smooth.")
 
             # --- Emboss depth + relief depth + parallax mode options ---
             _emboss_check = ttk.Checkbutton(
@@ -4361,7 +7329,7 @@ if GUI_AVAILABLE:
                 variable=self.emboss_mode_var,
                 command=self._on_emboss_mode_changed,
             )
-            _emboss_check.grid(row=12, column=0, columnspan=4, sticky=tk.W, pady=(8, 2))
+            _emboss_check.grid(row=13, column=0, columnspan=4, sticky=tk.W, pady=(8, 2))
             self._add_tooltip(
                 _emboss_check,
                 "📜 Emboss mode generates normals from edge ridges instead of smooth gradients.\n"
@@ -4375,35 +7343,35 @@ if GUI_AVAILABLE:
                 variable=self.relief_mode_var,
                 command=self._on_relief_mode_changed,
             )
-            _relief_check.grid(row=12, column=4, columnspan=4, sticky=tk.W, pady=(8, 2))
+            _relief_check.grid(row=13, column=4, columnspan=4, sticky=tk.W, pady=(8, 2))
             self._add_tooltip(
                 _relief_check,
                 "🖼 Relief mode uses the image's own luminosity as a height field so that\n"
                 "bright subjects (painted figures, murals, heraldic signs, decorative plaques)\n"
                 "physically protrude from the surface in game — a bas-relief effect.\n"
-                "Takes priority over Emboss depth when both are enabled.\n"
+                "Relief and Emboss are mutually exclusive; enabling one disables the other.\n"
                 "Best combined with parallax output for full 3-D pop-out depth.",
             )
 
             _parallax_mode_label = ttk.Label(options_frame, text="Parallax mode")
-            _parallax_mode_label.grid(row=13, column=0, sticky=tk.W, pady=(2, 8))
+            _parallax_mode_label.grid(row=14, column=0, sticky=tk.W, pady=(2, 8))
             self._add_tooltip(
                 _parallax_mode_label,
                 "🏔 Heightmap style for _p.dds output.\n"
                 "'standard' = micro-detail for vanilla Skyrim SE parallax.\n"
                 "'occlusion (ENB/POM)' = smooth gradient for ENBSeries Parallax Occlusion Mapping.",
             )
-            _parallax_mode_combo = ttk.Combobox(
+            self.parallax_mode_combo = ttk.Combobox(
                 options_frame,
                 textvariable=self.parallax_mode_var,
                 values=("standard", "occlusion (ENB/POM)"),
                 state="readonly",
                 width=24,
             )
-            _parallax_mode_combo.grid(row=13, column=1, columnspan=2, sticky=tk.W)
-            _parallax_mode_combo.bind("<<ComboboxSelected>>", self._on_parallax_mode_changed)
+            self.parallax_mode_combo.grid(row=14, column=1, columnspan=2, sticky=tk.W)
+            self.parallax_mode_combo.bind("<<ComboboxSelected>>", self._on_parallax_mode_changed)
             self._add_tooltip(
-                _parallax_mode_combo,
+                self.parallax_mode_combo,
                 "🏔 'standard' = vanilla/community-shaders-friendly heightmap for the normal Skyrim parallax setup.\n"
                 "'occlusion (ENB/POM)' = ENB-only smooth POM heightmap — use this only when the mesh/material is actually set up for ENB parallax occlusion.",
             )
@@ -4411,7 +7379,22 @@ if GUI_AVAILABLE:
                 options_frame,
                 text="standard = vanilla  |  occlusion = ENBSeries POM",
                 foreground="gray",
-            ).grid(row=13, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
+            ).grid(row=14, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
+            self.mode_controls_hint_label = ttk.Label(
+                options_frame,
+                textvariable=self.mode_controls_hint_var,
+                foreground="gray",
+                justify=tk.LEFT,
+                anchor=tk.W,
+                wraplength=520,
+            )
+            self.mode_controls_hint_label.grid(row=15, column=0, columnspan=5, sticky=tk.W, pady=(0, 6))
+            self._add_tooltip(
+                self.mode_controls_hint_label,
+                "Heads-up line for mode-selector availability.\n"
+                "If a selector is disabled in Custom mode, enable the matching output checkbox first.",
+            )
+            self._render_profile_mode_widgets = [self.complex_format_combo, self.env_mask_mode_combo, self.parallax_mode_combo]
 
             options_frame.columnconfigure(2, weight=1)
             options_frame.columnconfigure(3, weight=1)
@@ -4583,6 +7566,10 @@ if GUI_AVAILABLE:
                 ("glow", "Glow"),
                 ("environment_mask", "Environment Mask"),
                 ("rmaos", "RMAOS"),
+                ("wetness_mask", "Wetness Mask"),
+                ("snow_mask", "Snow Mask"),
+                ("ao", "Ambient Occlusion"),
+                ("roughness", "Roughness"),
                 ("complex_material", "Complex Material"),
             )
             _output_tooltips = {
@@ -4592,6 +7579,10 @@ if GUI_AVAILABLE:
                 "glow": "✨ Emissive/glow preview.\nBright pixels glow in darkness; dark pixels mind their own business like respectable citizens.",
                 "environment_mask": "🪞 Reflection mask preview.\nBrighter = shinier, darker = matte. Basically a \"where may I sparkle\" permit.",
                 "rmaos": "🧩 TruePBR RMAOS preview (_rmaos/_ramos).\nPacked grayscale channels (not purple normal-map colors). Generator also writes a JSON sidecar in PBRNifPatcher/.",
+                "wetness_mask": "🌧 Wetness-mask preview (_wt).\nDarker areas are more rain-friendly; lighter areas stay less puddly.",
+                "snow_mask": "❄ Dynamic-snow mask preview (_sm).\nBrighter areas collect more snow; darker zones stay more sheltered.",
+                "ao": "🕳 Ambient-occlusion preview (_ao).\nDarker crevices, brighter open surfaces. Cheap fake shadows that make things look pleasingly real.",
+                "roughness": "🪵 Roughness/microsurface preview (_rough).\nBrighter = rougher (matte), darker = smoother (glossy). Controls how blurry reflections look.",
                 "complex_material": "🔮 Complex-material preview.\nFor MSN format this pane is split: LEFT = RGB normal channels, RIGHT = alpha/specular channel.\nFor CM format it shows the packed texture directly. Not a bug — just advanced wizard math.",
             }
             for index, (output_key, output_label) in enumerate(output_specs):
@@ -4613,6 +7604,7 @@ if GUI_AVAILABLE:
 
             self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
             self._apply_theme()
+            self._on_render_profile_changed()
             self._restore_startup_selection()
 
         def _set_app_icon(self) -> None:
@@ -4761,7 +7753,10 @@ if GUI_AVAILABLE:
             self.complex_format_var.set(str(state["complex_format"]))
             self.env_mask_mode_var.set(str(state["env_mask_mode"]))
             self.parallax_mode_var.set(str(state["parallax_mode"]))
-            self.render_profile_var.set(str(state["render_profile"]))
+            persisted_profile = _normalize_render_profile(str(state["render_profile"]))
+            if persisted_profile not in _RENDER_PROFILE_GUI_VALUES:
+                persisted_profile = "custom"
+            self.render_profile_var.set(persisted_profile)
             self.emboss_mode_var.set(bool(state["emboss_mode"]))
             self.relief_mode_var.set(bool(state["relief_mode"]))
             self.include_diffuse_var.set(bool(state["include_diffuse"]))
@@ -4770,6 +7765,10 @@ if GUI_AVAILABLE:
             self.include_glow_var.set(bool(state["include_glow"]))
             self.include_environment_mask_var.set(bool(state["include_environment_mask"]))
             self.include_rmaos_var.set(bool(state["include_rmaos"]))
+            self.include_wetness_mask_var.set(bool(state["include_wetness_mask"]))
+            self.include_snow_mask_var.set(bool(state["include_snow_mask"]))
+            self.include_ao_var.set(bool(state["include_ao"]))
+            self.include_roughness_var.set(bool(state["include_roughness"]))
             self.include_complex_var.set(bool(state["include_complex"]))
             self.auto_suggestions_var.set(bool(state["auto_suggestions"]))
             self.auto_normal_suggestion_var.set(bool(state["auto_normal"]))
@@ -4779,6 +7778,8 @@ if GUI_AVAILABLE:
             self.auto_rmaos_suggestion_var.set(bool(state["auto_rmaos"]))
             self.auto_complex_suggestion_var.set(bool(state["auto_complex"]))
             self.auto_specular_suggestion_var.set(bool(state["auto_specular"]))
+            self.auto_ao_suggestion_var.set(bool(state["auto_ao"]))
+            self.auto_roughness_suggestion_var.set(bool(state["auto_roughness"]))
             self.normal_strength_var.set(float(state["normal_strength"]))
             self.parallax_strength_var.set(float(state["parallax_strength"]))
             self.glow_threshold_var.set(float(state["glow_threshold"]))
@@ -4786,6 +7787,8 @@ if GUI_AVAILABLE:
             self.rmaos_strength_var.set(float(state["rmaos_strength"]))
             self.complex_strength_var.set(float(state["complex_strength"]))
             self.specular_strength_var.set(float(state["specular_strength"]))
+            self.ao_strength_var.set(float(state["ao_strength"]))
+            self.roughness_strength_var.set(float(state["roughness_strength"]))
             dismissed = state.get("dismissed_warnings", [])
             if isinstance(dismissed, list):
                 self.dismissed_warnings = set(str(w) for w in dismissed if isinstance(w, str))
@@ -4811,6 +7814,10 @@ if GUI_AVAILABLE:
                 "include_glow": self.include_glow_var.get(),
                 "include_environment_mask": self.include_environment_mask_var.get(),
                 "include_rmaos": self.include_rmaos_var.get(),
+                "include_wetness_mask": self.include_wetness_mask_var.get(),
+                "include_snow_mask": self.include_snow_mask_var.get(),
+                "include_ao": self.include_ao_var.get(),
+                "include_roughness": self.include_roughness_var.get(),
                 "include_complex": self.include_complex_var.get(),
                 "auto_suggestions": self.auto_suggestions_var.get(),
                 "auto_normal": self.auto_normal_suggestion_var.get(),
@@ -4820,6 +7827,8 @@ if GUI_AVAILABLE:
                 "auto_rmaos": self.auto_rmaos_suggestion_var.get(),
                 "auto_complex": self.auto_complex_suggestion_var.get(),
                 "auto_specular": self.auto_specular_suggestion_var.get(),
+                "auto_ao": self.auto_ao_suggestion_var.get(),
+                "auto_roughness": self.auto_roughness_suggestion_var.get(),
                 "normal_strength": self.normal_strength_var.get(),
                 "parallax_strength": self.parallax_strength_var.get(),
                 "glow_threshold": int(round(self.glow_threshold_var.get())),
@@ -4827,6 +7836,10 @@ if GUI_AVAILABLE:
                 "rmaos_strength": self.rmaos_strength_var.get(),
                 "complex_strength": self.complex_strength_var.get(),
                 "specular_strength": self.specular_strength_var.get(),
+                "wetness_mask_strength": float(_GUI_STATE_DEFAULTS["wetness_mask_strength"]),
+                "snow_mask_strength": float(_GUI_STATE_DEFAULTS["snow_mask_strength"]),
+                "ao_strength": self.ao_strength_var.get(),
+                "roughness_strength": self.roughness_strength_var.get(),
                 "dismissed_warnings": sorted(self.dismissed_warnings),
             }
 
@@ -5041,6 +8054,8 @@ if GUI_AVAILABLE:
                 "glow": bool(generation_kwargs["include_glow"]),
                 "environment_mask": bool(generation_kwargs["include_environment_mask"]),
                 "rmaos": bool(generation_kwargs["include_rmaos"]),
+                "ao": bool(generation_kwargs.get("include_ao", False)),
+                "roughness": bool(generation_kwargs.get("include_roughness", False)),
                 "complex_material": bool(generation_kwargs["include_complex"]),
             }
             for input_file in input_files:
@@ -5097,6 +8112,20 @@ if GUI_AVAILABLE:
                 if includes["rmaos"]:
                     expected_paths.append(
                         build_rmaos_output_path(
+                            input_path=input_file,
+                            output_dir=generation_kwargs["output_dir"],
+                        )
+                    )
+                if includes["ao"]:
+                    expected_paths.append(
+                        build_ao_output_path(
+                            input_path=input_file,
+                            output_dir=generation_kwargs["output_dir"],
+                        )
+                    )
+                if includes["roughness"]:
+                    expected_paths.append(
+                        build_roughness_output_path(
                             input_path=input_file,
                             output_dir=generation_kwargs["output_dir"],
                         )
@@ -5282,6 +8311,8 @@ if GUI_AVAILABLE:
             )
             self.complex_strength_display_var.set(_fmt(f"{float(self.complex_strength_var.get()):.2f} (0.1–8.0)", self.auto_complex_suggestion_var))
             self.specular_strength_display_var.set(_fmt(f"{float(self.specular_strength_var.get()):.2f} (0.1–8.0)", self.auto_specular_suggestion_var))
+            self.ao_strength_display_var.set(_fmt(f"{float(self.ao_strength_var.get()):.2f} (0.1–8.0)", self.auto_ao_suggestion_var))
+            self.roughness_strength_display_var.set(_fmt(f"{float(self.roughness_strength_var.get()):.2f} (0.1–8.0)", self.auto_roughness_suggestion_var))
 
         def _on_batch_preview_toggle(self) -> None:
             if self.show_batch_preview_var.get():
@@ -5305,6 +8336,8 @@ if GUI_AVAILABLE:
             self.auto_rmaos_suggestion_var.set(value)
             self.auto_complex_suggestion_var.set(value)
             self.auto_specular_suggestion_var.set(value)
+            self.auto_ao_suggestion_var.set(value)
+            self.auto_roughness_suggestion_var.set(value)
             self._update_slider_auto_states()
 
         def _on_auto_slider_preference_changed(self) -> None:
@@ -5317,7 +8350,10 @@ if GUI_AVAILABLE:
         def _on_emboss_mode_changed(self) -> None:
             self.emboss_mode_manual_override = True
             if self.emboss_mode_var.get():
-                self.status_var.set("Emboss depth mode enabled for flat printed surfaces (books/cards/scrolls).")
+                if self.relief_mode_var.get():
+                    self.relief_mode_var.set(False)
+                    self.relief_mode_manual_override = True
+                self.status_var.set("Emboss depth mode enabled (relief mode disabled). For flat printed surfaces like books/cards/scrolls.")
             else:
                 self.status_var.set("Emboss depth mode disabled; using standard normal-map generation.")
             self._request_preview_refresh()
@@ -5325,7 +8361,10 @@ if GUI_AVAILABLE:
         def _on_relief_mode_changed(self) -> None:
             self.relief_mode_manual_override = True
             if self.relief_mode_var.get():
-                self.status_var.set("Relief depth mode enabled — paintings/signs/murals will pop out as bas-relief.")
+                if self.emboss_mode_var.get():
+                    self.emboss_mode_var.set(False)
+                    self.emboss_mode_manual_override = True
+                self.status_var.set("Relief depth mode enabled (emboss mode disabled) — paintings/signs/murals will pop out as bas-relief.")
             else:
                 self.status_var.set("Relief depth mode disabled; using standard normal-map generation.")
             self._request_preview_refresh()
@@ -5348,6 +8387,7 @@ if GUI_AVAILABLE:
                 detected_suffix=role_info["suffix"] if role_info is not None else None,
                 material_type=material_type,
                 workflow_profile=workflow_profile,
+                manager_context=self.manager_context,
             )
 
         def _apply_render_profile_modes(
@@ -5389,7 +8429,11 @@ if GUI_AVAILABLE:
             self.include_glow_var.set(bool(resolved["include_glow"]))
             self.include_environment_mask_var.set(bool(resolved["include_environment_mask"]))
             self.include_rmaos_var.set(bool(resolved["include_rmaos"]))
+            self.include_wetness_mask_var.set(bool(resolved.get("include_wetness_mask", False)))
+            self.include_snow_mask_var.set(bool(resolved.get("include_snow_mask", False)))
             self.include_complex_var.set(bool(resolved["include_complex"]))
+            self.include_ao_var.set(bool(resolved["include_ao"]))
+            self.include_roughness_var.set(bool(resolved["include_roughness"]))
             return str(resolved["effective_profile"])
 
         def _update_render_profile_recommendation(self, *, apply_auto: bool) -> str:
@@ -5418,9 +8462,31 @@ if GUI_AVAILABLE:
             else:
                 selected_label = _RENDER_PROFILE_LABELS.get(selected_profile, selected_profile.replace("_", " ").title())
                 self.render_profile_suggestion_var.set(
-                    f"Target renderer locked to {selected_label}. Auto suggestions are disabled for locked presets."
+                    f"Target renderer locked to {selected_label}. Mode and mapped-output controls are locked to prevent conflicting GUI combinations."
                 )
             return recommended_profile
+
+        def _update_render_profile_control_states(self) -> None:
+            mode_states = resolve_render_profile_mode_control_states(
+                selected_profile=self.render_profile_var.get(),
+                include_complex=bool(self.include_complex_var.get()),
+                include_environment_mask=bool(self.include_environment_mask_var.get()),
+                include_parallax=bool(self.include_parallax_var.get()),
+            )
+            self.mode_controls_hint_var.set(build_render_profile_mode_controls_hint(mode_states))
+            mode_widget_states = (
+                ("complex_format", getattr(self, "complex_format_combo", None)),
+                ("env_mask_mode", getattr(self, "env_mask_mode_combo", None)),
+                ("parallax_mode", getattr(self, "parallax_mode_combo", None)),
+            )
+            for key, widget in mode_widget_states:
+                if widget is None:
+                    continue
+                widget.configure(state=str(mode_states.get(key, "disabled")))
+            locked = bool(mode_states.get("locked"))
+            output_state = tk.DISABLED if locked else tk.NORMAL
+            for widget in getattr(self, "_render_profile_managed_output_widgets", []):
+                widget.configure(state=output_state)
 
         def _open_render_profile_help(self) -> None:
             preview_path = self._current_preview_path()
@@ -5449,7 +8515,7 @@ if GUI_AVAILABLE:
             container.pack(fill=tk.BOTH, expand=True)
             ttk.Label(
                 container,
-                text="Renderer/channel guidance [Experimental] (ENB vs Community Shaders)",
+                text="Renderer/channel guidance (Vanilla vs Community Shaders vs ENB)",
                 justify=tk.LEFT,
                 anchor=tk.W,
             ).pack(fill=tk.X, pady=(0, 8))
@@ -5473,9 +8539,8 @@ if GUI_AVAILABLE:
             self.render_profile_var.set(selected)
             recommended_profile = self._update_render_profile_recommendation(apply_auto=False)
             if selected == "custom":
-                self.status_var.set(
-                    "Target renderer set to Custom. Leaving all toggles/sliders/modes unchanged for manual control."
-                )
+                self._update_render_profile_control_states()
+                self.status_var.set("Custom mode: outputs stay manual; mode selectors unlock only for enabled outputs.")
                 self._request_preview_refresh()
                 return
             effective = self._apply_render_profile_modes(
@@ -5487,17 +8552,45 @@ if GUI_AVAILABLE:
                 selected,
                 recommended_profile=recommended_profile,
             )
+            effective_label = _RENDER_PROFILE_LABELS.get(effective, effective)
             if selected == "auto":
                 self.status_var.set(
-                    f"Target renderer set to auto-detect; applied the current {_RENDER_PROFILE_LABELS.get(effective, effective)} preset and matching output checkboxes."
+                    f"Auto-detect: applied {effective_label} preset. "
+                    f"{describe_render_profile_files_to_create(effective)}"
                 )
             else:
                 self.status_var.set(
-                    f"Target renderer set to {_RENDER_PROFILE_LABELS.get(effective, effective)}. "
-                    f"Complex naming, env mask mode, parallax mode, and output checkboxes were updated to match that renderer. "
-                    f"{describe_render_profile_output_recommendation(effective)}"
+                    f"Renderer set to {effective_label}. Modes and outputs updated. "
+                    f"{describe_render_profile_files_to_create(effective)}"
                 )
+            self._update_render_profile_control_states()
             self._request_preview_refresh()
+
+        def _on_output_selection_changed(self) -> None:
+            self._update_render_profile_control_states()
+            self._request_preview_refresh()
+
+        def _enforce_material_workflow_output_exclusivity(self, changed_output: str) -> None:
+            if not (self.include_environment_mask_var.get() and self.include_rmaos_var.get()):
+                return
+            if changed_output == "environment_mask":
+                self.include_rmaos_var.set(False)
+                self.status_var.set(
+                    "Disabled Community Shaders PBR (_rmaos) because Environment Mask (_m) is enabled. Use one workflow per output set."
+                )
+            else:
+                self.include_environment_mask_var.set(False)
+                self.status_var.set(
+                    "Disabled Environment Mask (_m) because Community Shaders PBR (_rmaos) is enabled. Use one workflow per output set."
+                )
+
+        def _on_environment_mask_output_toggled(self) -> None:
+            self._enforce_material_workflow_output_exclusivity("environment_mask")
+            self._on_output_selection_changed()
+
+        def _on_rmaos_output_toggled(self) -> None:
+            self._enforce_material_workflow_output_exclusivity("rmaos")
+            self._on_output_selection_changed()
 
         def _on_parallax_mode_changed(self, _event: object | None = None) -> None:
             if "occlusion" in self.parallax_mode_var.get():
@@ -5524,7 +8617,7 @@ if GUI_AVAILABLE:
                 self.env_mask_mode_var.set(selected)
             if selected == "complex":
                 self.status_var.set(
-                    "Environment mask mode: complex — RGBA packed output (ENB and TruePBR use different channel meanings; use the renderer preset + Help guide)."
+                    "Environment mask mode: complex — RGBA packed output for renderer-specific workflows (ENB preset in this tool). TruePBR usually uses _rmaos/_ramos."
                 )
             else:
                 self.status_var.set("Environment mask mode: standard — vanilla Skyrim SE grayscale reflection mask.")
@@ -5553,6 +8646,8 @@ if GUI_AVAILABLE:
                 ),
                 (self.complex_scale, self.auto_complex_suggestion_var, self.complex_strength_display_label, self.auto_complex_check),
                 (self.specular_scale, self.auto_specular_suggestion_var, self.specular_strength_display_label, self.auto_specular_check),
+                (self.ao_scale, self.auto_ao_suggestion_var, self.ao_strength_display_label, self.auto_ao_check),
+                (self.roughness_scale, self.auto_roughness_suggestion_var, self.roughness_strength_display_label, self.auto_roughness_check),
             )
             for slider, auto_var, display_label, auto_check in slider_specs:
                 is_auto = auto_enabled and auto_var.get()
@@ -5586,6 +8681,8 @@ if GUI_AVAILABLE:
                 "rmaos_strength": float(self.rmaos_strength_var.get()),
                 "complex_strength": float(self.complex_strength_var.get()),
                 "specular_strength": float(self.specular_strength_var.get()),
+                "ao_strength": float(self.ao_strength_var.get()),
+                "roughness_strength": float(self.roughness_strength_var.get()),
             }
             auto_flags = {
                 "normal_strength": self.auto_normal_suggestion_var.get(),
@@ -5595,6 +8692,8 @@ if GUI_AVAILABLE:
                 "rmaos_strength": self.auto_rmaos_suggestion_var.get(),
                 "complex_strength": self.auto_complex_suggestion_var.get(),
                 "specular_strength": self.auto_specular_suggestion_var.get(),
+                "ao_strength": self.auto_ao_suggestion_var.get(),
+                "roughness_strength": self.auto_roughness_suggestion_var.get(),
             }
             resolved = apply_recommendations_by_auto_flags(current=current, recommended=recommended, auto_flags=auto_flags)
             self.normal_strength_var.set(float(resolved["normal_strength"]))
@@ -5604,6 +8703,8 @@ if GUI_AVAILABLE:
             self.rmaos_strength_var.set(float(resolved["rmaos_strength"]))
             self.complex_strength_var.set(float(resolved["complex_strength"]))
             self.specular_strength_var.set(float(resolved["specular_strength"]))
+            self.ao_strength_var.set(float(resolved["ao_strength"]))
+            self.roughness_strength_var.set(float(resolved["roughness_strength"]))
             if update_toggles:
                 self._update_render_profile_recommendation(apply_auto=False)
                 # Auto-suggest emboss/relief mode based on material type and image content.
@@ -5624,7 +8725,10 @@ if GUI_AVAILABLE:
                                 and bg_uniformity >= 0.35
                                 and not self.relief_mode_manual_override
                             ):
+                                # Relief takes priority over emboss — clear emboss to keep
+                                # the two mutually exclusive modes visually consistent.
                                 self.relief_mode_var.set(True)
+                                self.emboss_mode_var.set(False)
             self._update_slider_auto_states()
 
         def _photo_image(self, image: Image.Image, max_size: int = 260) -> ImageTk.PhotoImage:
@@ -5773,6 +8877,14 @@ if GUI_AVAILABLE:
                     include_glow=self.include_glow_var.get(),
                     include_environment_mask=self.include_environment_mask_var.get(),
                     include_rmaos=self.include_rmaos_var.get(),
+                    include_wetness_mask=self.include_wetness_mask_var.get(),
+                    wetness_mask_strength=float(_GUI_STATE_DEFAULTS["wetness_mask_strength"]),
+                    include_snow_mask=self.include_snow_mask_var.get(),
+                    snow_mask_strength=float(_GUI_STATE_DEFAULTS["snow_mask_strength"]),
+                    include_ao=self.include_ao_var.get(),
+                    ao_strength=float(self.ao_strength_var.get()),
+                    include_roughness=self.include_roughness_var.get(),
+                    roughness_strength=float(self.roughness_strength_var.get()),
                     include_complex=self.include_complex_var.get(),
                     render_profile=self.render_profile_var.get(),
                 )
@@ -5798,6 +8910,62 @@ if GUI_AVAILABLE:
             except Exception as exc:
                 self.status_var.set(f"Preview update failed: {exc}")
 
+        def _show_dismissible_warning_dialog(
+            self,
+            title: str,
+            warning_id: str,
+            message: str,
+        ) -> bool:
+            """Show a dismissible warning dialog. Returns False if the user chose to abort."""
+            if warning_id in self.dismissed_warnings:
+                return True
+            dismiss_var = tk.BooleanVar(value=False)
+            dialog = tk.Toplevel(self.root)
+            dialog.title(title)
+            dialog.transient(self.root)
+            dialog.resizable(False, False)
+            dialog_result: list[bool] = [True]
+            colors = _DARK_THEME if self.dark_mode_var.get() else _LIGHT_THEME
+            dialog.configure(background=colors["bg"])
+            tk.Label(
+                dialog,
+                text=f"⚠ {message}",
+                justify=tk.LEFT,
+                wraplength=420,
+                padx=14,
+                pady=10,
+                background=colors["bg"],
+                foreground=colors["fg"],
+            ).pack(anchor=tk.W)
+            check_frame = tk.Frame(dialog, background=colors["bg"])
+            check_frame.pack(anchor=tk.W, padx=14, pady=(0, 6))
+            tk.Checkbutton(
+                check_frame,
+                text="Don't show this warning again",
+                variable=dismiss_var,
+                background=colors["bg"],
+                foreground=colors["fg"],
+                activebackground=colors["bg"],
+                selectcolor=colors["field_bg"],
+            ).pack(side=tk.LEFT)
+            btn_frame = tk.Frame(dialog, background=colors["bg"])
+            btn_frame.pack(pady=(4, 12), padx=14, anchor=tk.E)
+
+            def _continue(d: tk.Toplevel = dialog, wid: str = warning_id) -> None:
+                if dismiss_var.get():
+                    self.dismissed_warnings.add(wid)
+                d.destroy()
+
+            def _abort(d: tk.Toplevel = dialog) -> None:
+                dialog_result[0] = False
+                d.destroy()
+
+            ttk.Button(btn_frame, text="Continue anyway", command=_continue).pack(side=tk.LEFT, padx=(0, 8))
+            ttk.Button(btn_frame, text="Cancel generation", command=_abort).pack(side=tk.LEFT)
+            dialog.grab_set()
+            self.root.wait_window(dialog)
+            return dialog_result[0]
+
         def _check_and_show_generation_warnings(
             self,
             material_type: str,
@@ -5809,6 +8977,8 @@ if GUI_AVAILABLE:
             include_glow: bool,
             include_environment_mask: bool,
             include_rmaos: bool,
+            include_wetness_mask: bool,
+            include_snow_mask: bool,
             env_mask_mode: str,
             env_mask_strength: float,
             include_parallax: bool,
@@ -5816,6 +8986,7 @@ if GUI_AVAILABLE:
             parallax_mode: str,
             emboss_mode: bool = False,
             relief_mode: bool = False,
+            parallax_strength: float | None = None,
         ) -> bool:
             """Show any applicable sanity warnings. Returns False if user chose to abort."""
             warnings = get_generation_warnings(
@@ -5826,11 +8997,14 @@ if GUI_AVAILABLE:
                 include_diffuse=include_diffuse,
                 include_normal=include_normal,
                 include_glow=include_glow,
-                include_environment_mask=(include_environment_mask or include_rmaos),
+                include_environment_mask=include_environment_mask,
                 include_rmaos=include_rmaos,
+                include_wetness_mask=include_wetness_mask,
+                include_snow_mask=include_snow_mask,
                 env_mask_mode=env_mask_mode,
                 env_mask_strength=env_mask_strength,
                 include_parallax=include_parallax,
+                parallax_strength=parallax_strength,
                 include_complex=include_complex,
                 complex_format=self.complex_format_var.get(),
                 parallax_mode=self.parallax_mode_var.get(),
@@ -5838,54 +9012,7 @@ if GUI_AVAILABLE:
                 relief_mode=relief_mode,
             )
             for warning_id, message in warnings:
-                if warning_id in self.dismissed_warnings:
-                    continue
-                dismiss_var = tk.BooleanVar(value=False)
-                dialog = tk.Toplevel(self.root)
-                dialog.title("Generation Warning")
-                dialog.transient(self.root)
-                dialog.resizable(False, False)
-                dialog_result: list[bool] = [True]
-                colors = _DARK_THEME if self.dark_mode_var.get() else _LIGHT_THEME
-                dialog.configure(background=colors["bg"])
-                tk.Label(
-                    dialog,
-                    text=f"⚠ {message}",
-                    justify=tk.LEFT,
-                    wraplength=420,
-                    padx=14,
-                    pady=10,
-                    background=colors["bg"],
-                    foreground=colors["fg"],
-                ).pack(anchor=tk.W)
-                check_frame = tk.Frame(dialog, background=colors["bg"])
-                check_frame.pack(anchor=tk.W, padx=14, pady=(0, 6))
-                tk.Checkbutton(
-                    check_frame,
-                    text="Don't show this warning again",
-                    variable=dismiss_var,
-                    background=colors["bg"],
-                    foreground=colors["fg"],
-                    activebackground=colors["bg"],
-                    selectcolor=colors["field_bg"],
-                ).pack(side=tk.LEFT)
-                btn_frame = tk.Frame(dialog, background=colors["bg"])
-                btn_frame.pack(pady=(4, 12), padx=14, anchor=tk.E)
-
-                def _continue(d: tk.Toplevel = dialog, wid: str = warning_id) -> None:
-                    if dismiss_var.get():
-                        self.dismissed_warnings.add(wid)
-                    d.destroy()
-
-                def _abort(d: tk.Toplevel = dialog) -> None:
-                    dialog_result[0] = False
-                    d.destroy()
-
-                ttk.Button(btn_frame, text="Continue anyway", command=_continue).pack(side=tk.LEFT, padx=(0, 8))
-                ttk.Button(btn_frame, text="Cancel generation", command=_abort).pack(side=tk.LEFT)
-                dialog.grab_set()
-                self.root.wait_window(dialog)
-                if not dialog_result[0]:
+                if not self._show_dismissible_warning_dialog("Generation Warning", warning_id, message):
                     return False
             return True
 
@@ -5910,8 +9037,24 @@ if GUI_AVAILABLE:
                 include_glow = self.include_glow_var.get()
                 include_environment_mask = self.include_environment_mask_var.get()
                 include_rmaos = self.include_rmaos_var.get()
+                include_wetness_mask = bool(self.include_wetness_mask_var.get())
+                include_snow_mask = bool(self.include_snow_mask_var.get())
+                include_ao = bool(self.include_ao_var.get())
+                include_roughness = bool(self.include_roughness_var.get())
                 include_complex = self.include_complex_var.get()
-                if not any((include_diffuse, include_normal, include_parallax, include_glow, include_environment_mask, include_rmaos, include_complex)):
+                if not any((
+                    include_diffuse,
+                    include_normal,
+                    include_parallax,
+                    include_glow,
+                    include_environment_mask,
+                    include_rmaos,
+                    include_wetness_mask,
+                    include_snow_mask,
+                    include_ao,
+                    include_roughness,
+                    include_complex,
+                )):
                     messagebox.showwarning("No outputs selected", "Select at least one output type.", parent=self.root)
                     return
 
@@ -5923,6 +9066,7 @@ if GUI_AVAILABLE:
                     return
 
                 output_dir: Path | None = None
+                state = load_gui_state()
                 if self.use_custom_output_var.get():
                     output_value = self.output_var.get().strip()
                     if not output_value:
@@ -5940,6 +9084,28 @@ if GUI_AVAILABLE:
                 _source_role = _role_info["role"] if _role_info is not None else None
                 _source_hint = _role_info["hint"] if _role_info is not None else None
                 _source_suffix = _role_info["suffix"] if _role_info is not None else None
+                _recommended_profile = self._recommended_render_profile_for_preview(_context_source)
+                _guardrails = resolve_render_profile_guardrails(
+                    selected_profile=self.render_profile_var.get(),
+                    recommended_profile=_recommended_profile,
+                    complex_format=self.complex_format_var.get(),
+                    env_mask_mode=self.env_mask_mode_var.get(),
+                    parallax_mode=self.parallax_mode_var.get(),
+                )
+                _guardrail_changes = list(_guardrails["changes"])
+                if _guardrail_changes:
+                    self.complex_format_var.set(str(_guardrails["complex_format"]))
+                    self.env_mask_mode_var.set(str(_guardrails["env_mask_mode"]))
+                    self.parallax_mode_var.set(
+                        "occlusion (ENB/POM)" if str(_guardrails["parallax_mode"]) == "occlusion" else "standard"
+                    )
+                    _effective_label = _RENDER_PROFILE_LABELS.get(
+                        str(_guardrails["effective_profile"]),
+                        str(_guardrails["effective_profile"]).replace("_", " ").title(),
+                    )
+                    self.status_var.set(
+                        f"Renderer guardrails applied for {_effective_label}: " + "; ".join(_guardrail_changes) + "."
+                    )
                 if not self._check_and_show_generation_warnings(
                     _material_type,
                     source_role=_source_role,
@@ -5950,9 +9116,12 @@ if GUI_AVAILABLE:
                     include_glow=include_glow,
                     include_environment_mask=include_environment_mask,
                     include_rmaos=include_rmaos,
+                    include_wetness_mask=include_wetness_mask,
+                    include_snow_mask=include_snow_mask,
                     env_mask_mode=self.env_mask_mode_var.get(),
                     env_mask_strength=float(self.environment_mask_strength_var.get()),
                     include_parallax=include_parallax,
+                    parallax_strength=float(self.parallax_strength_var.get()),
                     include_complex=include_complex,
                     parallax_mode=self.parallax_mode_var.get(),
                     emboss_mode=self.emboss_mode_var.get(),
@@ -5971,54 +9140,7 @@ if GUI_AVAILABLE:
                         complex_format=self.complex_format_var.get(),
                     )
                     for warning_id, message in folder_warnings:
-                        if warning_id in self.dismissed_warnings:
-                            continue
-                        dismiss_var = tk.BooleanVar(value=False)
-                        dialog = tk.Toplevel(self.root)
-                        dialog.title("Output Folder Warning")
-                        dialog.transient(self.root)
-                        dialog.resizable(False, False)
-                        dialog_result: list[bool] = [True]
-                        colors = _DARK_THEME if self.dark_mode_var.get() else _LIGHT_THEME
-                        dialog.configure(background=colors["bg"])
-                        tk.Label(
-                            dialog,
-                            text=f"⚠ {message}",
-                            justify=tk.LEFT,
-                            wraplength=420,
-                            padx=14,
-                            pady=10,
-                            background=colors["bg"],
-                            foreground=colors["fg"],
-                        ).pack(anchor=tk.W)
-                        check_frame = tk.Frame(dialog, background=colors["bg"])
-                        check_frame.pack(anchor=tk.W, padx=14, pady=(0, 6))
-                        tk.Checkbutton(
-                            check_frame,
-                            text="Don't show this warning again",
-                            variable=dismiss_var,
-                            background=colors["bg"],
-                            foreground=colors["fg"],
-                            activebackground=colors["bg"],
-                            selectcolor=colors["field_bg"],
-                        ).pack(side=tk.LEFT)
-                        btn_frame = tk.Frame(dialog, background=colors["bg"])
-                        btn_frame.pack(pady=(4, 12), padx=14, anchor=tk.E)
-
-                        def _fw_continue(d: tk.Toplevel = dialog, wid: str = warning_id) -> None:
-                            if dismiss_var.get():
-                                self.dismissed_warnings.add(wid)
-                            d.destroy()
-
-                        def _fw_abort(d: tk.Toplevel = dialog) -> None:
-                            dialog_result[0] = False
-                            d.destroy()
-
-                        ttk.Button(btn_frame, text="Continue anyway", command=_fw_continue).pack(side=tk.LEFT, padx=(0, 8))
-                        ttk.Button(btn_frame, text="Cancel generation", command=_fw_abort).pack(side=tk.LEFT)
-                        dialog.grab_set()
-                        self.root.wait_window(dialog)
-                        if not dialog_result[0]:
+                        if not self._show_dismissible_warning_dialog("Output Folder Warning", warning_id, message):
                             return
 
                 _pm_raw = self.parallax_mode_var.get()
@@ -6046,6 +9168,12 @@ if GUI_AVAILABLE:
                     "specular_strength": self._resolve_generation_value(
                         self.specular_strength_var.get(), self.auto_specular_suggestion_var
                     ),
+                    "ao_strength": self._resolve_generation_value(
+                        self.ao_strength_var.get(), self.auto_ao_suggestion_var
+                    ),
+                    "roughness_strength": self._resolve_generation_value(
+                        self.roughness_strength_var.get(), self.auto_roughness_suggestion_var
+                    ),
                     "complex_format": self.complex_format_var.get(),
                     "env_mask_mode": self.env_mask_mode_var.get(),
                     "emboss_mode": self.emboss_mode_var.get(),
@@ -6060,6 +9188,12 @@ if GUI_AVAILABLE:
                     "include_glow": include_glow,
                     "include_environment_mask": include_environment_mask,
                     "include_rmaos": include_rmaos,
+                    "include_wetness_mask": include_wetness_mask,
+                    "wetness_mask_strength": float(state.get("wetness_mask_strength", 1.0)),
+                    "include_snow_mask": include_snow_mask,
+                    "snow_mask_strength": float(state.get("snow_mask_strength", 1.0)),
+                    "include_ao": include_ao,
+                    "include_roughness": include_roughness,
                     "include_complex": include_complex,
                 }
                 self.batch_failures = []
@@ -6130,15 +9264,16 @@ if GUI_AVAILABLE:
             if not NIF_PATCHER_AVAILABLE:
                 messagebox.showerror(
                     "NIF Editor unavailable",
-                    "nif_patcher.py was not found alongside generate_textures.py.\n"
-                    "Make sure nif_patcher.py is in the same folder.",
+                    "The NIF patcher could not be loaded from the bundled app or beside generate_textures.exe.\n"
+                    "Reinstall/update the package so nif_patcher.py is included, or use the source package.\n\n"
+                    f"Details: {NIF_PATCHER_IMPORT_ERROR}",
                 )
                 return
 
             win = tk.Toplevel(self.root)
-            win.title(f"NIF Editor [Experimental] — Skyrim Texture Generator v{APP_VERSION}")
-            win.geometry("1200x900")
-            win.minsize(960, 720)
+            win.title(f"NIF Editor — Skyrim Texture Generator v{APP_VERSION}")
+            win.geometry("1120x820")
+            win.minsize(760, 620)
             win.resizable(True, True)
             win.grab_set()
             try:
@@ -6148,8 +9283,31 @@ if GUI_AVAILABLE:
                 entry_bg = _DARK_THEME["field_bg"] if dark else _LIGHT_THEME["field_bg"]
                 win.configure(bg=bg)
 
-                tk.Label(
-                    win,
+                outer = ttk.Frame(win)
+                outer.pack(fill="both", expand=True)
+                content_pane = ttk.Panedwindow(outer, orient="vertical")
+                content_pane.pack(fill="both", expand=True, padx=10, pady=(8, 0))
+                controls_container = ttk.Frame(content_pane)
+                controls_canvas = tk.Canvas(controls_container, highlightthickness=0, background=bg)
+                controls_scrollbar = ttk.Scrollbar(controls_container, orient="vertical", command=controls_canvas.yview)
+                controls_wrapper = ttk.Frame(controls_canvas, padding=(0, 0, 0, 8))
+                controls_canvas.configure(yscrollcommand=controls_scrollbar.set)
+                controls_canvas.pack(side="left", fill="both", expand=True)
+                controls_scrollbar.pack(side="right", fill="y")
+                controls_window = controls_canvas.create_window((0, 0), window=controls_wrapper, anchor="nw")
+
+                def _sync_controls_scroll_region(_: object | None = None) -> None:
+                    controls_canvas.configure(scrollregion=controls_canvas.bbox("all"))
+
+                def _resize_controls_window(event: tk.Event[tk.Misc]) -> None:
+                    controls_canvas.itemconfigure(controls_window, width=event.width)
+
+                controls_wrapper.bind("<Configure>", _sync_controls_scroll_region)
+                controls_canvas.bind("<Configure>", _resize_controls_window)
+                content_pane.add(controls_container, weight=5)
+
+                intro_label = tk.Label(
+                    controls_wrapper,
                     text=(
                         "⚠ Experimental feature — always keep backups of your NIF files before patching.\n\n"
                         "Patch Skyrim SE NIF files so generated textures work in-game.\n"
@@ -6163,10 +9321,12 @@ if GUI_AVAILABLE:
                     pady=8,
                     background=bg,
                     foreground=fg,
-                ).pack(fill="x")
+                )
+                intro_label.pack(fill="x")
+                self._bind_responsive_wrap(controls_wrapper, intro_label, horizontal_padding=60, min_wrap=280)
 
-                path_frame = ttk.LabelFrame(win, text="NIF Target", padding=6)
-                path_frame.pack(fill="x", padx=10, pady=(2, 4))
+                path_frame = ttk.LabelFrame(controls_wrapper, text="NIF Target", padding=6)
+                path_frame.pack(fill="x", pady=(2, 4))
 
                 nif_path_var = tk.StringVar()
                 nif_scan_mode = tk.StringVar(value="file")
@@ -6207,21 +9367,28 @@ if GUI_AVAILABLE:
                 self._add_tooltip(nif_path_entry, "⌨ Paste a full path here. Yes, even that scary MO2 path with 400 folders.")
                 self._add_tooltip(browse_nif_button, "🧭 Opens file/folder picker so your fingers don’t have to type all that.")
 
-                opt_frame = ttk.LabelFrame(win, text="Patch Options (what to enable)", padding=6)
-                opt_frame.pack(fill="x", padx=10, pady=4)
+                opt_frame = ttk.LabelFrame(controls_wrapper, text="Patch Options (what to enable)", padding=6)
+                opt_frame.pack(fill="x", pady=4)
                 renderer_profile_var = tk.StringVar(value=_normalize_render_profile(self.render_profile_var.get()))
-                if renderer_profile_var.get() not in _RENDER_PROFILE_LABELS:
-                    renderer_profile_var.set("auto")
+                if renderer_profile_var.get() not in _RENDER_PROFILE_GUI_VALUES:
+                    renderer_profile_var.set("custom")
                 enable_parallax_var = tk.BooleanVar(value=True)
                 enable_pom_var = tk.BooleanVar(value=False)
                 enable_env_var = tk.BooleanVar(value=False)
+                enable_glow_var = tk.BooleanVar(value=False)
+                enable_pbr_var = tk.BooleanVar(value=False)
                 force_type3_var = tk.BooleanVar(value=False)
                 disable_parallax_var = tk.BooleanVar(value=False)
                 disable_pom_var = tk.BooleanVar(value=False)
                 disable_env_var = tk.BooleanVar(value=False)
+                disable_glow_var = tk.BooleanVar(value=False)
+                disable_pbr_var = tk.BooleanVar(value=False)
                 clear_parallax_var = tk.BooleanVar(value=False)
                 clear_normal_var = tk.BooleanVar(value=False)
                 clear_env_var = tk.BooleanVar(value=False)
+                clear_glow_var = tk.BooleanVar(value=False)
+                clear_diffuse_var = tk.BooleanVar(value=False)
+                clear_cubemap_var = tk.BooleanVar(value=False)
                 backup_var = tk.BooleanVar(value=True)
                 dry_run_var = tk.BooleanVar(value=False)
                 option_warning_var = tk.StringVar(value="")
@@ -6233,7 +9400,7 @@ if GUI_AVAILABLE:
                 renderer_combo = ttk.Combobox(
                     render_row,
                     textvariable=renderer_profile_var,
-                    values=("custom", "auto", "vanilla", "community_shaders", "truepbr", "enb"),
+                    values=_RENDER_PROFILE_GUI_VALUES,
                     state="readonly",
                     width=20,
                 )
@@ -6268,6 +9435,20 @@ if GUI_AVAILABLE:
                     variable=force_type3_var,
                 )
                 force_type3_check.pack(side="left", padx=(12, 0))
+                flag_row3 = ttk.Frame(opt_frame)
+                flag_row3.pack(fill="x", pady=(2, 0))
+                enable_glow_check = ttk.Checkbutton(
+                    flag_row3,
+                    text="Enable glow-map flag (_g slot)",
+                    variable=enable_glow_var,
+                )
+                enable_glow_check.pack(side="left")
+                enable_pbr_check = ttk.Checkbutton(
+                    flag_row3,
+                    text="Enable TruePBR / PBR flag (CS only)",
+                    variable=enable_pbr_var,
+                )
+                enable_pbr_check.pack(side="left", padx=(12, 0))
 
                 misc_row = ttk.Frame(opt_frame)
                 misc_row.pack(fill="x", pady=(4, 0))
@@ -6278,15 +9459,22 @@ if GUI_AVAILABLE:
                 guide_label = ttk.Label(
                     opt_frame,
                     text=(
-                        "Option guide: Slot 0=diffuse/albedo, 1=normal/_n or _msn, 2=glow/_g, "
-                        "3=parallax/_p, 4=cubemap, 5=environment mask/_m or _rmaos. "
-                        "Enable standard parallax for vanilla/community shaders/truepbr workflows. Enable ENB POM only for ENB setups. "
-                        "Enable environment mapping only when using slot 5 (_m/_rmaos). Force shader type 3 lets the tool write stronger parallax scale values."
+                        "Slot guide — Skyrim SE texture naming (NOT Blender defaults):\n"
+                        "  Slot 0: diffuse — vanilla Skyrim uses just <stem>.dds (no _d/_diffuse/_albedo suffix; those are Blender exports, not Skyrim).\n"
+                        "  Slot 1: normal — _n.dds for vanilla/CS/TruePBR, or _msn.dds for ENB complex material (MSN = Model Space Normal).\n"
+                        "  Slot 2: glow/emissive — prefer _g.dds. Legacy aliases such as _em/_emit/_glow may exist in older pipelines, but this tool normalizes guidance toward _g.\n"
+                        "  Slot 3: parallax height — _p.dds (greyscale height map). Used by all parallax workflows.\n"
+                        "  Slot 4: cubemap/reflection — _e.dds, _env.dds, or _cube.dds.\n"
+                        "  Slot 5: env mask / packed data — _m.dds (vanilla greyscale or ENB RGBA), _cm/_c.dds (CS Extended Materials), _rmaos/_ramos.dds (TruePBR under textures\\pbr\\); not standalone _rough/_metallic/_ao exports.\n"
+                        "Enable standard parallax for vanilla/community shaders/truepbr. Enable ENB POM only for ENB setups. "
+                        "Enable the TruePBR/PBR flag when using Community Shaders TruePBR _rmaos + JSON workflows. "
+                        "Enable environment mapping only when slot 5 has a texture. Force shader type 3 to write stronger parallax scale."
                     ),
                     justify=tk.LEFT,
                     wraplength=860,
                 )
                 guide_label.pack(fill="x", pady=(4, 0))
+                self._bind_responsive_wrap(opt_frame, guide_label, horizontal_padding=40, min_wrap=260)
                 option_warning_label = ttk.Label(
                     opt_frame,
                     textvariable=option_warning_var,
@@ -6295,9 +9483,10 @@ if GUI_AVAILABLE:
                     foreground="#b44",
                 )
                 option_warning_label.pack(fill="x", pady=(2, 0))
+                self._bind_responsive_wrap(opt_frame, option_warning_label, horizontal_padding=40, min_wrap=220)
 
-                unpatch_frame = ttk.LabelFrame(win, text="Remove Features (what to disable)", padding=6)
-                unpatch_frame.pack(fill="x", padx=10, pady=(2, 4))
+                unpatch_frame = ttk.LabelFrame(controls_wrapper, text="Remove Features (what to disable)", padding=6)
+                unpatch_frame.pack(fill="x", pady=(2, 4))
                 unpatch_row = ttk.Frame(unpatch_frame)
                 unpatch_row.pack(fill="x")
                 disable_parallax_check = ttk.Checkbutton(
@@ -6318,60 +9507,134 @@ if GUI_AVAILABLE:
                     variable=disable_env_var,
                 )
                 disable_env_check.pack(side="left", padx=(12, 0))
+                disable_glow_check = ttk.Checkbutton(
+                    unpatch_row,
+                    text="Disable glow-map flag",
+                    variable=disable_glow_var,
+                )
+                disable_glow_check.pack(side="left", padx=(12, 0))
+                disable_pbr_check = ttk.Checkbutton(
+                    unpatch_row,
+                    text="Disable TruePBR / PBR flag",
+                    variable=disable_pbr_var,
+                )
+                disable_pbr_check.pack(side="left", padx=(12, 0))
                 unpatch_row2 = ttk.Frame(unpatch_frame)
                 unpatch_row2.pack(fill="x", pady=(2, 0))
                 clear_parallax_check = ttk.Checkbutton(unpatch_row2, text="Clear slot 3 (_p)", variable=clear_parallax_var)
                 clear_parallax_check.pack(side="left")
                 clear_normal_check = ttk.Checkbutton(unpatch_row2, text="Clear slot 1 (_n/_msn)", variable=clear_normal_var)
                 clear_normal_check.pack(side="left", padx=(12, 0))
-                clear_env_check = ttk.Checkbutton(unpatch_row2, text="Clear slot 5 (_m/_rmaos)", variable=clear_env_var)
+                clear_env_check = ttk.Checkbutton(unpatch_row2, text="Clear slot 5 (_m/_cm/_rmaos)", variable=clear_env_var)
                 clear_env_check.pack(side="left", padx=(12, 0))
+                unpatch_row3 = ttk.Frame(unpatch_frame)
+                unpatch_row3.pack(fill="x", pady=(2, 0))
+                clear_glow_check = ttk.Checkbutton(unpatch_row3, text="Clear slot 2 (_g)", variable=clear_glow_var)
+                clear_glow_check.pack(side="left")
+                clear_diffuse_check = ttk.Checkbutton(unpatch_row3, text="Clear slot 0 (diffuse)", variable=clear_diffuse_var)
+                clear_diffuse_check.pack(side="left", padx=(12, 0))
+                clear_cubemap_check = ttk.Checkbutton(unpatch_row3, text="Clear slot 4 (cubemap)", variable=clear_cubemap_var)
+                clear_cubemap_check.pack(side="left", padx=(12, 0))
+
+                def _recommended_nif_editor_profile() -> str:
+                    selected = _normalize_render_profile(renderer_profile_var.get())
+                    if selected != "auto":
+                        return selected
+                    path_value = nif_path_var.get().strip()
+                    input_path = Path(path_value) if path_value else None
+                    return recommend_render_profile(
+                        input_path,
+                        manager_context=self.manager_context,
+                    )
+
+                def _preferred_env_mask_suffix_for_profile() -> str:
+                    effective = _normalize_render_profile(_recommended_nif_editor_profile())
+                    if effective == "truepbr":
+                        return "_rmaos.dds"
+                    if effective == "community_shaders":
+                        return "_cm.dds"
+                    return "_m.dds"
 
                 def _apply_renderer_defaults(*_: object) -> None:
+                    recommended_profile = _recommended_nif_editor_profile()
                     defaults = resolve_nif_patch_defaults_for_render_profile(
                         renderer_profile_var.get(),
-                        recommended_profile="vanilla",
+                        recommended_profile=recommended_profile,
                     )
-                    effective_profile = str(defaults["effective_profile"])
                     enable_parallax_var.set(bool(defaults["enable_parallax"]))
                     enable_pom_var.set(bool(defaults["enable_pom"]))
                     enable_env_var.set(bool(defaults["enable_env_mapping"]))
+                    enable_glow_var.set(False)
+                    enable_pbr_var.set(bool(defaults.get("enable_pbr", False)))
                     force_type3_var.set(bool(defaults["force_shader_type_3"]))
                     option_warning_var.set("")
 
                 def _update_checkbox_warnings(*_: object) -> None:
+                    recommended_profile = _recommended_nif_editor_profile()
                     warnings = get_nif_patch_option_warnings(
                         selected_profile=str(renderer_profile_var.get() or "auto"),
+                        recommended_profile=recommended_profile,
                         enable_parallax=enable_parallax_var.get(),
                         enable_pom=enable_pom_var.get(),
                         enable_env_mapping=enable_env_var.get(),
+                        enable_pbr=enable_pbr_var.get(),
                         force_shader_type_3=force_type3_var.get(),
+                        diffuse_texture_path=diffuse_tex_var.get(),
                         parallax_texture_path=parallax_tex_var.get(),
                         normal_texture_path=normal_tex_var.get(),
+                        glow_texture_path=glow_tex_var.get(),
                         env_mask_texture_path=env_mask_tex_var.get(),
+                        cubemap_texture_path=cubemap_tex_var.get(),
                         disable_parallax=disable_parallax_var.get(),
                         disable_pom=disable_pom_var.get(),
                         disable_env_mapping=disable_env_var.get(),
+                        disable_glow_map=disable_glow_var.get(),
+                        disable_pbr=disable_pbr_var.get(),
                         clear_parallax_texture_path=clear_parallax_var.get(),
                         clear_normal_texture_path=clear_normal_var.get(),
                         clear_env_mask_texture_path=clear_env_var.get(),
+                        clear_glow_texture_path=clear_glow_var.get(),
+                        clear_diffuse_texture_path=clear_diffuse_var.get(),
+                        clear_cubemap_texture_path=clear_cubemap_var.get(),
                     )
-                    option_warning_var.set("⚠ " + " ".join(warnings[:3]) if warnings else "")
+                    option_warning_var.set("⚠ " + " | ".join(warnings[:3]) if warnings else "")
 
                 _apply_renderer_defaults()
                 renderer_combo.bind("<<ComboboxSelected>>", _apply_renderer_defaults)
                 renderer_combo.bind("<<ComboboxSelected>>", _update_checkbox_warnings, add="+")
+
+                def _on_pom_toggled(*_: object) -> None:
+                    """Auto-enable standard parallax when ENB POM is checked (mirrors nif_patcher logic)."""
+                    if enable_pom_var.get():
+                        enable_parallax_var.set(True)
+
+                enable_pom_var.trace_add("write", _on_pom_toggled)
+
+                def _on_nif_target_changed(*_: object) -> None:
+                    if _normalize_render_profile(renderer_profile_var.get()) == "auto":
+                        _apply_renderer_defaults()
+                    _update_checkbox_warnings()
+
+                nif_path_var.trace_add("write", _on_nif_target_changed)
+                nif_scan_mode.trace_add("write", _on_nif_target_changed)
                 for watch_var in (
                     enable_parallax_var,
                     enable_pom_var,
                     enable_env_var,
+                    enable_glow_var,
+                    enable_pbr_var,
                     force_type3_var,
                     disable_parallax_var,
                     disable_pom_var,
                     disable_env_var,
+                    disable_glow_var,
+                    disable_pbr_var,
                     clear_parallax_var,
                     clear_normal_var,
                     clear_env_var,
+                    clear_glow_var,
+                    clear_diffuse_var,
+                    clear_cubemap_var,
                 ):
                     watch_var.trace_add("write", _update_checkbox_warnings)
                 self._add_tooltip(
@@ -6380,11 +9643,13 @@ if GUI_AVAILABLE:
                 )
                 self._add_tooltip(
                     renderer_combo,
-                    "🎯 Renderer preset helper.\nAuto applies patch options for Vanilla, Community Shaders, or ENB.",
+                    "🎯 Renderer preset helper.\nAuto applies patch options for Vanilla, Community Shaders, TruePBR, or ENB.",
                 )
-                self._add_tooltip(enable_parallax_check, "🪨 Enables Skyrim parallax shader flag and slot-3 _p usage.")
-                self._add_tooltip(enable_pom_check, "🌊 ENB-only parallax occlusion mode. Leave off for vanilla workflows.")
+                self._add_tooltip(enable_parallax_check, "🪨 Enables Skyrim parallax shader flag and slot-3 _p usage.\nNote: auto-checked when ENB POM is enabled (both flags are required for POM).")
+                self._add_tooltip(enable_pom_check, "🌊 ENB-only parallax occlusion mode. Also auto-enables standard parallax (required). Leave off for vanilla workflows.")
                 self._add_tooltip(enable_env_check, "🪞 Enables environment-mapping shader flag for reflective materials.")
+                self._add_tooltip(enable_glow_check, "✨ Enables glow/emissive flag so slot 2 _g textures render in-game.")
+                self._add_tooltip(enable_pbr_check, "🧪 Enables the Community Shaders TruePBR flag on the mesh so _rmaos + JSON workflows can render.")
                 self._add_tooltip(force_type3_check, "💪 Upgrades shader type so stronger parallax scale can be written.")
                 self._add_tooltip(backup_check, "🧷 Writes .nif.bak safety copies before patching.")
                 self._add_tooltip(dry_run_check, "🧪 Scan and simulate changes without writing file edits.")
@@ -6393,16 +9658,21 @@ if GUI_AVAILABLE:
                 self._add_tooltip(disable_parallax_check, "🚫 Removes parallax and POM flags from BSLightingShaderProperty.")
                 self._add_tooltip(disable_pom_check, "🚫 Removes only ENB POM flag while keeping standard parallax if desired.")
                 self._add_tooltip(disable_env_check, "🚫 Removes environment-mapping flag from BSLightingShaderProperty.")
+                self._add_tooltip(disable_glow_check, "🚫 Removes emissive/glow shader flag from BSLightingShaderProperty.")
+                self._add_tooltip(disable_pbr_check, "🚫 Removes the Community Shaders TruePBR/PBR flag from BSLightingShaderProperty.")
                 self._add_tooltip(clear_parallax_check, "🧹 Clears texture slot 3 path from BSShaderTextureSet.")
                 self._add_tooltip(clear_normal_check, "🧹 Clears texture slot 1 path from BSShaderTextureSet.")
                 self._add_tooltip(clear_env_check, "🧹 Clears texture slot 5 path from BSShaderTextureSet.")
+                self._add_tooltip(clear_glow_check, "🧹 Clears texture slot 2 path from BSShaderTextureSet.")
+                self._add_tooltip(clear_diffuse_check, "🧹 Clears texture slot 0 path from BSShaderTextureSet.")
+                self._add_tooltip(clear_cubemap_check, "🧹 Clears texture slot 4 path from BSShaderTextureSet.")
 
                 scale_frame = ttk.LabelFrame(
-                    win,
+                    controls_wrapper,
                     text="Parallax Scale (0.1 – 10.0 · higher = deeper / more extreme)",
                     padding=6,
                 )
-                scale_frame.pack(fill="x", padx=10, pady=4)
+                scale_frame.pack(fill="x", pady=4)
                 pscale_var = tk.DoubleVar(value=1.5)
                 pscale_label_var = tk.StringVar(value="1.50")
 
@@ -6423,28 +9693,26 @@ if GUI_AVAILABLE:
                 )
 
                 tex_frame = ttk.LabelFrame(
-                    win,
+                    controls_wrapper,
                     text="Texture Paths (Skyrim-relative textures\\... ; blank keeps current NIF slot)",
                     padding=6,
                 )
-                tex_frame.pack(fill="x", padx=10, pady=4)
+                tex_frame.pack(fill="x", pady=4)
+                diffuse_tex_var = tk.StringVar()
                 parallax_tex_var = tk.StringVar()
                 normal_tex_var = tk.StringVar()
+                glow_tex_var = tk.StringVar()
+                cubemap_tex_var = tk.StringVar()
                 env_mask_tex_var = tk.StringVar()
+                diffuse_tex_var.trace_add("write", _update_checkbox_warnings)
                 parallax_tex_var.trace_add("write", _update_checkbox_warnings)
                 normal_tex_var.trace_add("write", _update_checkbox_warnings)
+                glow_tex_var.trace_add("write", _update_checkbox_warnings)
+                cubemap_tex_var.trace_add("write", _update_checkbox_warnings)
                 env_mask_tex_var.trace_add("write", _update_checkbox_warnings)
 
                 def _normalize_nif_texture_input_path(raw_path: str) -> str:
-                    normalized = raw_path.strip().replace("/", "\\")
-                    lowered = normalized.lower()
-                    marker = "\\textures\\"
-                    marker_index = lowered.rfind(marker)
-                    if marker_index != -1:
-                        normalized = "textures\\" + normalized[marker_index + len(marker):]
-                    elif lowered.startswith("data\\textures\\"):
-                        normalized = "textures\\" + normalized[len("data\\textures\\"):]
-                    return _coerce_generated_resource_path_to_dds(normalized)
+                    return _normalize_nif_editor_texture_input_path(raw_path) or ""
 
                 def _browse_texture_path(target_var: tk.StringVar, title: str) -> None:
                     selected = filedialog.askopenfilename(
@@ -6473,6 +9741,13 @@ if GUI_AVAILABLE:
 
                 _tex_row(
                     tex_frame,
+                    "Diffuse / base:",
+                    diffuse_tex_var,
+                    "Select diffuse texture",
+                    "🧾 Slot 0 diffuse/albedo texture path. Usually the base <stem>.dds texture.",
+                )
+                _tex_row(
+                    tex_frame,
                     "Parallax / _p.dds:",
                     parallax_tex_var,
                     "Select parallax texture",
@@ -6487,10 +9762,24 @@ if GUI_AVAILABLE:
                 )
                 _tex_row(
                     tex_frame,
-                    "Env mask / _m.dds:",
+                    "Glow / _g.dds:",
+                    glow_tex_var,
+                    "Select glow texture",
+                    "✨ Slot 2 emissive/glow texture path for Skyrim SE. Use _g.dds.",
+                )
+                _tex_row(
+                    tex_frame,
+                    "Cubemap / _e/_env:",
+                    cubemap_tex_var,
+                    "Select cubemap texture",
+                    "🧊 Slot 4 cubemap/environment texture path (often _e/_env/_cube naming).",
+                )
+                _tex_row(
+                    tex_frame,
+                    "Env mask / _m/_cm/_rmaos:",
                     env_mask_tex_var,
                     "Select environment mask texture",
-                    "🪞 Slot 5 environment mask path. Usually _m.dds (standard) or _rmaos.dds (complex workflows).",
+                    "🪞 Slot 5 environment mask path. Usually _m.dds (standard), _cm.dds (CS complex), or _rmaos.dds (TruePBR; usually under textures\\pbr\\...).",
                 )
 
                 def _auto_fill_paths() -> None:
@@ -6498,13 +9787,21 @@ if GUI_AVAILABLE:
                     if not path_value:
                         status_var.set("Pick a NIF file or folder first, then use Auto-fill.")
                         return
-                    defaults = resolve_nif_patch_defaults_for_render_profile(renderer_profile_var.get(), recommended_profile="vanilla")
+                    recommended_profile = _recommended_nif_editor_profile()
+                    defaults = resolve_nif_patch_defaults_for_render_profile(
+                        renderer_profile_var.get(),
+                        recommended_profile=recommended_profile,
+                    )
                     prefer_msn = bool(defaults.get("prefer_msn_normal"))
+                    env_mask_suffix = _preferred_env_mask_suffix_for_profile()
                     selected_path = Path(path_value)
-                    nifs = list(selected_path.rglob("*.nif")) if selected_path.is_dir() else [selected_path]
+                    nifs = find_nif_files(selected_path) if selected_path.is_dir() else [selected_path]
                     guessed_from: Path | None = None
+                    guessed_diffuse = ""
                     guessed_parallax = ""
                     guessed_normal = ""
+                    guessed_glow = ""
+                    guessed_cubemap = ""
                     guessed_env = ""
                     for nif_candidate in nifs:
                         if not nif_candidate.exists():
@@ -6524,8 +9821,15 @@ if GUI_AVAILABLE:
                                 candidate_normal = str(texture_paths.get(1, "")).strip()
                             if not candidate_env:
                                 candidate_env = str(texture_paths.get(5, "")).strip()
+                            candidate_glow = str(texture_paths.get(2, "")).strip()
+                            candidate_cubemap = str(texture_paths.get(4, "")).strip()
+                            if not guessed_glow and candidate_glow:
+                                guessed_glow = candidate_glow
+                            if not guessed_cubemap and candidate_cubemap:
+                                guessed_cubemap = candidate_cubemap
                             diffuse_path = str(texture_paths.get(0, "")).strip()
                             if diffuse_path:
+                                guessed_diffuse = guessed_diffuse or diffuse_path
                                 diffuse_like = Path(diffuse_path.replace("\\", "/"))
                                 diffuse_stem = _normalize_texture_family_stem(diffuse_like)
                                 if not candidate_parallax:
@@ -6533,14 +9837,29 @@ if GUI_AVAILABLE:
                                 if not candidate_normal:
                                     normal_suffix = "_msn.dds" if prefer_msn else "_n.dds"
                                     candidate_normal = str(diffuse_like.parent / f"{diffuse_stem}{normal_suffix}").replace("/", "\\")
+                                if not guessed_glow:
+                                    guessed_glow = str(diffuse_like.parent / f"{diffuse_stem}_g.dds").replace("/", "\\")
                                 if not candidate_env:
-                                    candidate_env = str(diffuse_like.parent / f"{diffuse_stem}_m.dds").replace("/", "\\")
+                                    candidate_env = str(diffuse_like.parent / f"{diffuse_stem}{env_mask_suffix}").replace("/", "\\")
                             if candidate_parallax and candidate_normal and candidate_env:
                                 break
+                        if not candidate_env:
+                            candidate_env = (
+                                guess_env_mask_path_for_nif(
+                                    nif_candidate,
+                                    preferred_suffix=env_mask_suffix,
+                                )
+                                or ""
+                            )
+                        if not guessed_cubemap:
+                            guessed_cubemap = guess_cubemap_path_for_nif(nif_candidate) or ""
                         candidate_parallax = candidate_parallax.replace("/", "\\")
                         candidate_normal = candidate_normal.replace("/", "\\")
                         candidate_env = candidate_env.replace("/", "\\")
-                        if candidate_parallax or candidate_normal or candidate_env:
+                        guessed_glow = guessed_glow.replace("/", "\\")
+                        guessed_cubemap = guessed_cubemap.replace("/", "\\")
+                        guessed_diffuse = guessed_diffuse.replace("/", "\\")
+                        if candidate_parallax or candidate_normal or candidate_env or guessed_diffuse or guessed_glow or guessed_cubemap:
                             guessed_from = nif_candidate
                             guessed_parallax = candidate_parallax
                             guessed_normal = candidate_normal
@@ -6549,7 +9868,17 @@ if GUI_AVAILABLE:
                     if not guessed_from:
                         status_var.set("Auto-fill could not find any usable diffuse/normal texture slots in the selected NIF(s).")
                         return
+                    guessed_parallax = _normalize_nif_texture_input_path(guessed_parallax) if guessed_parallax else ""
+                    guessed_normal = _normalize_nif_texture_input_path(guessed_normal) if guessed_normal else ""
+                    guessed_env = _normalize_nif_texture_input_path(guessed_env) if guessed_env else ""
+                    guessed_glow = _normalize_nif_texture_input_path(guessed_glow) if guessed_glow else ""
+                    guessed_cubemap = _normalize_nif_texture_input_path(guessed_cubemap) if guessed_cubemap else ""
+                    guessed_diffuse = _normalize_nif_texture_input_path(guessed_diffuse) if guessed_diffuse else ""
                     changed = 0
+                    if guessed_diffuse:
+                        if diffuse_tex_var.get().strip() != guessed_diffuse:
+                            changed += 1
+                        diffuse_tex_var.set(guessed_diffuse)
                     if guessed_parallax:
                         if parallax_tex_var.get().strip() != guessed_parallax:
                             changed += 1
@@ -6558,9 +9887,17 @@ if GUI_AVAILABLE:
                         if normal_tex_var.get().strip() != guessed_normal:
                             changed += 1
                         normal_tex_var.set(guessed_normal)
+                    if guessed_glow:
+                        if glow_tex_var.get().strip() != guessed_glow:
+                            changed += 1
+                        glow_tex_var.set(guessed_glow)
+                    if guessed_cubemap:
+                        if cubemap_tex_var.get().strip() != guessed_cubemap:
+                            changed += 1
+                        cubemap_tex_var.set(guessed_cubemap)
                     env_mask_guess = guessed_env
                     if not env_mask_guess and guessed_parallax.lower().endswith("_p.dds"):
-                        env_mask_guess = guessed_parallax[:-6] + "_m.dds"
+                        env_mask_guess = _normalize_nif_texture_input_path(guessed_parallax[:-6] + env_mask_suffix)
                     if env_mask_guess:
                         if env_mask_tex_var.get().strip() != env_mask_guess:
                             changed += 1
@@ -6581,26 +9918,40 @@ if GUI_AVAILABLE:
                     "Use textures\\... paths for slots. Browsing a file auto-converts Data\\Textures picks into Skyrim-relative paths.",
                 )
 
-                btn_frame = ttk.Frame(win)
-                btn_frame.pack(fill="x", padx=10, pady=(4, 2))
+                footer_frame = ttk.Frame(outer)
+                footer_frame.pack(fill="x", padx=10, pady=(6, 8))
+                btn_frame = ttk.Frame(footer_frame)
+                btn_frame.pack(fill="x", pady=(0, 2))
                 status_var = tk.StringVar(value="Ready. Pick a NIF file/folder, then Scan or Patch.")
-                ttk.Label(win, textvariable=status_var, wraplength=860).pack(fill="x", padx=10, pady=(0, 4))
+                status_label = ttk.Label(footer_frame, textvariable=status_var, wraplength=860, justify=tk.LEFT)
+                status_label.pack(fill="x", pady=(0, 4))
                 progress_var = tk.DoubleVar(value=0.0)
-                progress_bar = ttk.Progressbar(win, orient="horizontal", mode="determinate", variable=progress_var, maximum=100)
-                progress_bar.pack(fill="x", padx=10, pady=(0, 6))
+                progress_bar = ttk.Progressbar(
+                    footer_frame,
+                    orient="horizontal",
+                    mode="determinate",
+                    variable=progress_var,
+                    maximum=100,
+                )
+                progress_bar.pack(fill="x")
+                self._bind_responsive_wrap(footer_frame, status_label, horizontal_padding=40, min_wrap=240)
 
                 res_frame = ttk.LabelFrame(
-                    win,
-                    text="Results Log (resizable; right-click rows to copy)",
+                    content_pane,
+                    text="Results / log",
                     padding=6,
                 )
-                res_frame.pack(fill="both", expand=True, padx=10, pady=(0, 8))
-                results_pane = ttk.Panedwindow(res_frame, orient="vertical")
-                results_pane.pack(fill="both", expand=True)
-                results_list_frame = ttk.Frame(results_pane)
-                results_details_frame = ttk.LabelFrame(results_pane, text="Selected row details", padding=6)
-                results_pane.add(results_list_frame, weight=4)
-                results_pane.add(results_details_frame, weight=3)
+                res_frame.configure(height=220)
+                content_pane.add(res_frame, weight=2)
+                results_hint_label = ttk.Label(
+                    res_frame,
+                    text="⇳ Drag the divider above to resize this log. Right-click rows or use the copy buttons for full text.",
+                    justify=tk.LEFT,
+                    wraplength=860,
+                )
+                results_hint_label.pack(fill="x", pady=(0, 6))
+                results_list_frame = ttk.Frame(res_frame)
+                results_list_frame.pack(fill="both", expand=True)
                 style = ttk.Style(win)
                 tree_style_name = "NifEditor.Treeview"
                 tree_select_bg = "#5a7fd6" if dark else "#c8dafc"
@@ -6636,38 +9987,16 @@ if GUI_AVAILABLE:
                 results_scroll.pack(side="right", fill="y")
                 results_scroll_x.pack(side="bottom", fill="x")
                 results_tree.pack(fill="both", expand=True, side="left")
-                result_details_text = tk.Text(
-                    results_details_frame,
-                    wrap="word",
-                    height=8,
-                    background=entry_bg,
-                    foreground=fg,
-                    insertbackground=fg,
-                    relief="flat",
-                    borderwidth=0,
-                )
-                result_details_scroll = ttk.Scrollbar(results_details_frame, command=result_details_text.yview)
-                result_details_text.configure(yscrollcommand=result_details_scroll.set)
-                result_details_scroll.pack(side="right", fill="y")
-                result_details_text.pack(fill="both", expand=True, side="left")
                 self._add_tooltip(
                     results_tree,
-                    "Results log for scan/patch/restore actions. Resize the window or drag the splitter to inspect everything.",
+                    "Single results log for scan/patch/restore actions. Use the Details column or copy actions for the full text.",
                 )
                 self._add_tooltip(
-                    result_details_text,
-                    "Full untruncated details for the selected row.",
+                    results_hint_label,
+                    "⇳ The divider above this panel is draggable, so the log does not have to take over the whole window.",
                 )
 
                 full_row_details: dict[str, str] = {}
-
-                def _set_result_details_text(text: str) -> None:
-                    result_details_text.configure(state="normal")
-                    result_details_text.delete("1.0", "end")
-                    result_details_text.insert("1.0", text)
-                    result_details_text.configure(state="disabled")
-
-                _set_result_details_text("Select a row to inspect full multi-line details without truncation.")
 
                 def _add_result_row(status: str, file_name: str, details: str) -> None:
                     normalized_details = _normalize_nif_result_details(details)
@@ -6676,15 +10005,13 @@ if GUI_AVAILABLE:
                     full_row_details[str(item_id)] = normalized_details
                     results_tree.selection_set(item_id)
                     results_tree.focus(item_id)
-                    _set_result_details_text(f"[{status}] {file_name}\n\n{normalized_details}")
-                    status_var.set(f"{status}: {file_name} — {normalized_details}")
+                    status_var.set(f"{status}: {file_name} — {row_preview}")
                     results_tree.yview_moveto(1.0)
 
                 def _clear_log() -> None:
                     for item in results_tree.get_children():
                         results_tree.delete(item)
                     full_row_details.clear()
-                    _set_result_details_text("Select a row to inspect full multi-line details without truncation.")
                     status_var.set("Results cleared.")
                     progress_var.set(0.0)
 
@@ -6696,8 +10023,7 @@ if GUI_AVAILABLE:
                     if not row_values:
                         return
                     full_details = full_row_details.get(str(selected[0]), str(row_values[2]))
-                    _set_result_details_text(f"[{row_values[0]}] {row_values[1]}\n\n{full_details}")
-                    status_var.set(f"[{row_values[0]}] {row_values[1]} — {full_details}")
+                    status_var.set(f"[{row_values[0]}] {row_values[1]} — {_format_nif_result_row_details(full_details)}")
 
                 def _copy_selected_result() -> None:
                     selected = results_tree.selection()
@@ -6744,13 +10070,51 @@ if GUI_AVAILABLE:
                 results_tree.bind("<<TreeviewSelect>>", _on_result_selected)
                 results_tree.bind("<Button-3>", _show_tree_context_menu)
 
+                # ---- Threading helpers -----------------------------------------------
+                # Scan/patch/restore operations run in daemon threads so the UI stays
+                # responsive.  All tkinter mutations are posted back via win.after(0, ...)
+                # rather than called directly from the worker thread.
+                _is_running = [False]
+                _action_buttons_ref: list[Any] = []  # populated after button creation
+
+                def _set_ops_active(active: bool) -> None:
+                    state = tk.NORMAL if active else tk.DISABLED
+                    for _btn in _action_buttons_ref:
+                        try:
+                            _btn.configure(state=state)
+                        except Exception:
+                            pass
+
+                def _finish_op() -> None:
+                    _is_running[0] = False
+                    _set_ops_active(True)
+
+                def _queue_ui_update(callback: Callable[[], None]) -> None:
+                    try:
+                        if not win.winfo_exists():
+                            return
+                        win.after(0, callback)
+                    except Exception:
+                        return
+
+                def _safe_add_row(status: str, file_name: str, details: str) -> None:
+                    _queue_ui_update(lambda s=status, fn=file_name, d=details: _add_result_row(s, fn, d))
+
+                def _safe_status(msg: str) -> None:
+                    _queue_ui_update(lambda m=msg: status_var.set(m))
+
+                def _safe_progress(val: float) -> None:
+                    _queue_ui_update(lambda v=val: progress_var.set(v))
+
+                # ---- end threading helpers -------------------------------------------
+
                 def _resolve_nifs() -> list[Path]:
                     path_value = nif_path_var.get().strip()
                     if not path_value:
                         return []
                     root_path = Path(path_value)
                     if root_path.is_dir():
-                        return list(root_path.rglob("*.nif"))
+                        return find_nif_files(root_path)
                     if root_path.suffix.lower() == ".nif":
                         return [root_path]
                     return []
@@ -6761,39 +10125,75 @@ if GUI_AVAILABLE:
                     if not nifs:
                         _add_result_row("WARN", "—", "No NIF files found.")
                         return
+                    if _is_running[0]:
+                        status_var.set("Another operation is in progress. Please wait.")
+                        return
+                    _is_running[0] = True
+                    _set_ops_active(False)
                     status_var.set(f"Scanning {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
-                    win.update_idletasks()
-                    for index, nif in enumerate(nifs, start=1):
-                        try:
-                            validation = validate_nif_for_parallax(nif)
-                            combined_detail_lines = list(validation.issues[:4])
-                            if validation.suggestions:
-                                combined_detail_lines.extend(f"Suggestion: {text}" for text in validation.suggestions[:2])
-                            if validation.ready_count == validation.shader_count and validation.shader_count > 0:
-                                _add_result_row(
-                                    "OK",
-                                    nif.name,
-                                    f"{validation.ready_count}/{validation.shader_count} shader(s) already parallax-ready",
-                                )
-                            elif validation.shader_count == 0:
-                                if combined_detail_lines:
-                                    _add_result_row("SKIP", nif.name, "\n".join(combined_detail_lines))
+
+                    def _worker() -> None:
+                        for index, nif in enumerate(nifs, start=1):
+                            try:
+                                validation = validate_nif_for_parallax(nif)
+                                combined_detail_lines: list[str] = []
+                                if validation.has_havok:
+                                    combined_detail_lines.append("⚠ Havok animation graph detected — parallax patching on this NIF can crash in-game.")
+                                if validation.skip_reasons:
+                                    combined_detail_lines.append("Skip reasons:")
+                                    combined_detail_lines.extend(f"- {text}" for text in validation.skip_reasons)
+                                if validation.issues:
+                                    combined_detail_lines.append("Issues:")
+                                    combined_detail_lines.extend(f"- {text}" for text in validation.issues)
+                                if validation.suggestions:
+                                    combined_detail_lines.append("Suggestions:")
+                                    combined_detail_lines.extend(f"- {text}" for text in validation.suggestions)
+                                if getattr(validation, "renderer_verdicts", None):
+                                    combined_detail_lines.append("In-game renderer verdicts:")
+                                    for renderer_key, renderer_label in (
+                                        ("vanilla", "Vanilla"),
+                                        ("enb", "ENB"),
+                                        ("community_shaders", "Community Shaders"),
+                                        ("truepbr", "TruePBR"),
+                                    ):
+                                        verdict = validation.renderer_verdicts.get(renderer_key, "")
+                                        if verdict:
+                                            combined_detail_lines.append(f"- {renderer_label}: {verdict}")
+                                if validation.renderer_notes:
+                                    combined_detail_lines.append("Renderer compatibility details:")
+                                    for renderer_key, renderer_label in (
+                                        ("vanilla", "Vanilla"),
+                                        ("enb", "ENB"),
+                                        ("community_shaders", "Community Shaders"),
+                                        ("truepbr", "TruePBR"),
+                                    ):
+                                        renderer_lines = validation.renderer_notes.get(renderer_key, [])
+                                        if renderer_lines:
+                                            combined_detail_lines.append(f"{renderer_label}:")
+                                            combined_detail_lines.extend(f"  - {line}" for line in renderer_lines)
+                                if validation.ready_count == validation.shader_count and validation.shader_count > 0 and validation.skip_count == 0:
+                                    row_args = ("OK", nif.name, f"{validation.ready_count}/{validation.shader_count} shader(s) already parallax-ready")
+                                elif validation.shader_count == 0:
+                                    detail = "\n".join(combined_detail_lines) if combined_detail_lines else "No BSLightingShaderProperty found."
+                                    row_args = ("SKIP", nif.name, detail)
+                                elif validation.skip_count == validation.shader_count:
+                                    skip_summary = f"{validation.skip_count}/{validation.shader_count} shader(s) skipped (incompatible)."
+                                    detail = f"{skip_summary}\n" + "\n".join(combined_detail_lines)
+                                    row_args = ("SKIP", nif.name, detail.strip())
                                 else:
-                                    _add_result_row("SKIP", nif.name, "No BSLightingShaderProperty found.")
-                            else:
-                                issue_text = "\n".join(combined_detail_lines[:6]) if combined_detail_lines else "Needs patching."
-                                _add_result_row(
-                                    "WARN",
-                                    nif.name,
-                                    f"{validation.ready_count}/{validation.shader_count} ready.\n{issue_text}",
-                                )
-                        except Exception as exc:
-                            _add_result_row("FAIL", nif.name, f"Scan failed: {exc}")
-                        progress_var.set(float(index))
-                        win.update_idletasks()
-                    status_var.set(f"Scan complete: {len(nifs)} file(s) reviewed.")
+                                    skip_info = f" ({validation.skip_count} skipped)" if validation.skip_count else ""
+                                    issue_text = "\n".join(combined_detail_lines) if combined_detail_lines else "Needs patching."
+                                    row_args = ("WARN", nif.name, f"{validation.ready_count}/{validation.shader_count} ready{skip_info}.\n{issue_text}")
+                            except Exception as exc:
+                                row_args = ("FAIL", nif.name, f"Scan failed: {exc}")
+                            _safe_add_row(*row_args)
+                            _safe_progress(float(index))
+                        _safe_status(f"Scan complete: {len(nifs)} file(s) reviewed.")
+                        win.after(0, _finish_op)
+
+                    threading.Thread(target=_worker, daemon=True).start()
 
                 def _run_patch() -> None:
                     nifs = _resolve_nifs()
@@ -6803,19 +10203,29 @@ if GUI_AVAILABLE:
                         return
                     warnings_to_confirm = get_nif_patch_option_warnings(
                         selected_profile=str(renderer_profile_var.get() or "auto"),
+                        recommended_profile=_recommended_nif_editor_profile(),
                         enable_parallax=enable_parallax_var.get(),
                         enable_pom=enable_pom_var.get(),
                         enable_env_mapping=enable_env_var.get(),
+                        enable_pbr=enable_pbr_var.get(),
                         force_shader_type_3=force_type3_var.get(),
+                        diffuse_texture_path=diffuse_tex_var.get(),
                         parallax_texture_path=parallax_tex_var.get(),
                         normal_texture_path=normal_tex_var.get(),
+                        glow_texture_path=glow_tex_var.get(),
                         env_mask_texture_path=env_mask_tex_var.get(),
+                        cubemap_texture_path=cubemap_tex_var.get(),
                         disable_parallax=disable_parallax_var.get(),
                         disable_pom=disable_pom_var.get(),
                         disable_env_mapping=disable_env_var.get(),
+                        disable_glow_map=disable_glow_var.get(),
+                        disable_pbr=disable_pbr_var.get(),
                         clear_parallax_texture_path=clear_parallax_var.get(),
                         clear_normal_texture_path=clear_normal_var.get(),
                         clear_env_mask_texture_path=clear_env_var.get(),
+                        clear_glow_texture_path=clear_glow_var.get(),
+                        clear_diffuse_texture_path=clear_diffuse_var.get(),
+                        clear_cubemap_texture_path=clear_cubemap_var.get(),
                     )
                     if warnings_to_confirm:
                         proceed = messagebox.askyesno(
@@ -6828,44 +10238,84 @@ if GUI_AVAILABLE:
                         if not proceed:
                             status_var.set("Patch cancelled so options can be adjusted.")
                             return
-                    options = NifPatchOptions(
+                    if _is_running[0]:
+                        status_var.set("Another operation is in progress. Please wait.")
+                        return
+                    recommended_profile = _recommended_nif_editor_profile()
+                    resolved_defaults = resolve_nif_patch_defaults_for_render_profile(
+                        renderer_profile_var.get(),
+                        recommended_profile=recommended_profile,
+                    )
+                    preferred_env_mask_suffix = _preferred_env_mask_suffix_for_profile()
+                    options = build_nif_patch_options_for_nif_editor(
                         enable_parallax=enable_parallax_var.get(),
                         enable_pom=enable_pom_var.get(),
                         enable_env_mapping=enable_env_var.get(),
-                        parallax_scale=pscale_var.get() if (enable_parallax_var.get() or enable_pom_var.get()) else None,
+                        enable_glow_map=enable_glow_var.get(),
+                        enable_pbr=enable_pbr_var.get(),
+                        parallax_scale=pscale_var.get(),
                         force_shader_type_3=force_type3_var.get(),
-                        parallax_texture_path=parallax_tex_var.get().strip() or None,
-                        normal_texture_path=normal_tex_var.get().strip() or None,
-                        env_mask_texture_path=env_mask_tex_var.get().strip() or None,
+                        diffuse_texture_path=diffuse_tex_var.get(),
+                        parallax_texture_path=parallax_tex_var.get(),
+                        normal_texture_path=normal_tex_var.get(),
+                        glow_texture_path=glow_tex_var.get(),
+                        env_mask_texture_path=env_mask_tex_var.get(),
+                        cubemap_texture_path=cubemap_tex_var.get(),
                         backup=backup_var.get(),
                         dry_run=dry_run_var.get(),
+                        disable_parallax=disable_parallax_var.get(),
+                        disable_pom=disable_pom_var.get(),
+                        disable_env_mapping=disable_env_var.get(),
+                        disable_glow_map=disable_glow_var.get(),
+                        disable_pbr=disable_pbr_var.get(),
+                        clear_parallax_texture_path=clear_parallax_var.get(),
+                        clear_normal_texture_path=clear_normal_var.get(),
+                        clear_env_mask_texture_path=clear_env_var.get(),
+                        clear_glow_texture_path=clear_glow_var.get(),
+                        clear_diffuse_texture_path=clear_diffuse_var.get(),
+                        clear_cubemap_texture_path=clear_cubemap_var.get(),
                     )
+                    _is_running[0] = True
+                    _set_ops_active(False)
                     mode_label = "dry-run patching" if options.dry_run else "patching"
                     status_var.set(f"Starting {mode_label} for {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
-                    win.update_idletasks()
-                    ok = skip = fail = 0
-                    for index, nif in enumerate(nifs, start=1):
-                        try:
-                            result = patch_nif(nif, options)
-                            if result.already_up_to_date:
-                                skip += 1
-                                _add_result_row("SKIP", nif.name, "Already up-to-date.")
-                            elif result.success:
-                                ok += 1
-                                _add_result_row("OK", nif.name, result.message)
-                            else:
+
+                    def _patch_worker(nif_list=nifs, opts=options) -> None:
+                        ok = skip = fail = 0
+                        for index, nif in enumerate(nif_list, start=1):
+                            try:
+                                resolved_options, autofill_notes = resolve_nif_editor_patch_options_for_target(
+                                    nif,
+                                    opts,
+                                    prefer_msn_normal=bool(resolved_defaults.get("prefer_msn_normal", False)),
+                                    preferred_env_mask_suffix=preferred_env_mask_suffix,
+                                )
+                                result = patch_nif(nif, resolved_options)
+                                detail_lines = [*autofill_notes, result.message]
+                                if result.warnings:
+                                    detail_lines.extend(f"Warning: {warning}" for warning in result.warnings[:3])
+                                detail_text = "\n".join(line for line in detail_lines if line)
+                                if result.already_up_to_date:
+                                    skip += 1
+                                    _safe_add_row("SKIP", nif.name, detail_text or "Already up-to-date.")
+                                elif result.success:
+                                    ok += 1
+                                    _safe_add_row("OK", nif.name, detail_text or "Patched.")
+                                else:
+                                    fail += 1
+                                    _safe_add_row("FAIL", nif.name, detail_text or "Patch failed.")
+                                    for err in result.errors:
+                                        _safe_add_row("FAIL", nif.name, err)
+                            except Exception as exc:
                                 fail += 1
-                                _add_result_row("FAIL", nif.name, result.message)
-                                for err in result.errors:
-                                    _add_result_row("FAIL", nif.name, err)
-                        except Exception as exc:
-                            fail += 1
-                            _add_result_row("FAIL", nif.name, f"Patch failed: {exc}")
-                        progress_var.set(float(index))
-                        win.update_idletasks()
-                    status_var.set(f"Done — {ok} patched, {skip} skipped, {fail} failed.")
+                                _safe_add_row("FAIL", nif.name, f"Patch failed: {exc}")
+                            _safe_progress(float(index))
+                        _safe_status(f"Done — {ok} patched, {skip} skipped, {fail} failed.")
+                        win.after(0, _finish_op)
+
+                    threading.Thread(target=_patch_worker, daemon=True).start()
 
                 def _run_unpatch() -> None:
                     nifs = _resolve_nifs()
@@ -6877,49 +10327,67 @@ if GUI_AVAILABLE:
                         disable_parallax_var.get(),
                         disable_pom_var.get(),
                         disable_env_var.get(),
+                        disable_glow_var.get(),
+                        disable_pbr_var.get(),
                         clear_parallax_var.get(),
                         clear_normal_var.get(),
                         clear_env_var.get(),
+                        clear_glow_var.get(),
+                        clear_diffuse_var.get(),
+                        clear_cubemap_var.get(),
                     ]
                     if not any(selected_unpatch_actions):
                         _add_result_row("WARN", "—", "Pick at least one Remove Features checkbox before unpatching.")
+                        return
+                    if _is_running[0]:
+                        status_var.set("Another operation is in progress. Please wait.")
                         return
                     options = NifPatchOptions(
                         disable_parallax=disable_parallax_var.get(),
                         disable_pom=disable_pom_var.get(),
                         disable_env_mapping=disable_env_var.get(),
+                        disable_glow_map=disable_glow_var.get(),
+                        disable_pbr=disable_pbr_var.get(),
                         clear_parallax_texture_path=clear_parallax_var.get(),
                         clear_normal_texture_path=clear_normal_var.get(),
                         clear_env_mask_texture_path=clear_env_var.get(),
+                        clear_glow_texture_path=clear_glow_var.get(),
+                        clear_diffuse_texture_path=clear_diffuse_var.get(),
+                        clear_cubemap_texture_path=clear_cubemap_var.get(),
                         backup=backup_var.get(),
                         dry_run=dry_run_var.get(),
                     )
+                    _is_running[0] = True
+                    _set_ops_active(False)
                     mode_label = "dry-run unpatching" if options.dry_run else "unpatching"
                     status_var.set(f"Starting {mode_label} for {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
-                    win.update_idletasks()
-                    ok = skip = fail = 0
-                    for index, nif in enumerate(nifs, start=1):
-                        try:
-                            result = patch_nif(nif, options)
-                            if result.already_up_to_date:
-                                skip += 1
-                                _add_result_row("SKIP", nif.name, "Already up-to-date.")
-                            elif result.success:
-                                ok += 1
-                                _add_result_row("OK", nif.name, result.message)
-                            else:
+
+                    def _unpatch_worker(nif_list=nifs, opts=options) -> None:
+                        ok = skip = fail = 0
+                        for index, nif in enumerate(nif_list, start=1):
+                            try:
+                                result = patch_nif(nif, opts)
+                                if result.already_up_to_date:
+                                    skip += 1
+                                    _safe_add_row("SKIP", nif.name, "Already up-to-date.")
+                                elif result.success:
+                                    ok += 1
+                                    _safe_add_row("OK", nif.name, result.message)
+                                else:
+                                    fail += 1
+                                    _safe_add_row("FAIL", nif.name, result.message)
+                                    for err in result.errors:
+                                        _safe_add_row("FAIL", nif.name, err)
+                            except Exception as exc:
                                 fail += 1
-                                _add_result_row("FAIL", nif.name, result.message)
-                                for err in result.errors:
-                                    _add_result_row("FAIL", nif.name, err)
-                        except Exception as exc:
-                            fail += 1
-                            _add_result_row("FAIL", nif.name, f"Unpatch failed: {exc}")
-                        progress_var.set(float(index))
-                        win.update_idletasks()
-                    status_var.set(f"Done — {ok} unpatched, {skip} skipped, {fail} failed.")
+                                _safe_add_row("FAIL", nif.name, f"Unpatch failed: {exc}")
+                            _safe_progress(float(index))
+                        _safe_status(f"Done — {ok} unpatched, {skip} skipped, {fail} failed.")
+                        win.after(0, _finish_op)
+
+                    threading.Thread(target=_unpatch_worker, daemon=True).start()
 
                 def _run_restore_backups() -> None:
                     nifs = _resolve_nifs()
@@ -6936,22 +10404,30 @@ if GUI_AVAILABLE:
                     if not proceed:
                         status_var.set("Restore cancelled.")
                         return
+                    if _is_running[0]:
+                        status_var.set("Another operation is in progress. Please wait.")
+                        return
+                    _is_running[0] = True
+                    _set_ops_active(False)
                     status_var.set(f"Restoring backups for {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
-                    win.update_idletasks()
-                    ok = skip = fail = 0
-                    for index, (row_status, file_name, details) in enumerate(restore_nif_backups(nifs), start=1):
-                        _add_result_row(row_status, file_name, details)
-                        if row_status == "OK":
-                            ok += 1
-                        elif row_status == "SKIP":
-                            skip += 1
-                        else:
-                            fail += 1
-                        progress_var.set(float(index))
-                        win.update_idletasks()
-                    status_var.set(f"Restore complete — {ok} restored, {skip} skipped, {fail} failed.")
+
+                    def _restore_worker(nif_list=nifs) -> None:
+                        ok = skip = fail = 0
+                        for index, (row_status, file_name, details) in enumerate(restore_nif_backups(nif_list), start=1):
+                            _safe_add_row(row_status, file_name, details)
+                            if row_status == "OK":
+                                ok += 1
+                            elif row_status == "SKIP":
+                                skip += 1
+                            else:
+                                fail += 1
+                            _safe_progress(float(index))
+                        _safe_status(f"Restore complete — {ok} restored, {skip} skipped, {fail} failed.")
+                        win.after(0, _finish_op)
+
+                    threading.Thread(target=_restore_worker, daemon=True).start()
 
                 scan_button = ttk.Button(btn_frame, text="Scan NIFs", command=_scan_nifs)
                 scan_button.pack(side="left", padx=(0, 6))
@@ -6969,6 +10445,8 @@ if GUI_AVAILABLE:
                 copy_all_button.pack(side="left", padx=(6, 0))
                 close_button = ttk.Button(btn_frame, text="Close", command=win.destroy)
                 close_button.pack(side="right")
+                # Register action buttons so _set_ops_active can disable them during ops
+                _action_buttons_ref.extend([scan_button, patch_button, unpatch_button, restore_button])
                 self._add_tooltip(scan_button, "🔍 Read-only analysis pass. No file changes, just receipts.")
                 self._add_tooltip(patch_button, "🛠 Actually writes patch changes. This is the button with consequences.")
                 self._add_tooltip(unpatch_button, "↩ Removes selected flags/slots so you can undo or simplify prior NIF patching.")
@@ -6977,7 +10455,22 @@ if GUI_AVAILABLE:
                 self._add_tooltip(copy_selected_button, "📎 Copies only the selected row — ideal for Discord bragging or bug reports.")
                 self._add_tooltip(copy_all_button, "📦 Copies every row in one go for logs/changelists.")
                 self._add_tooltip(close_button, "🚪 Closes this window. Your NIFs will not feel abandoned.")
-                win.update_idletasks()
+
+                def _apply_nif_editor_initial_pane_layout() -> None:
+                    try:
+                        if not win.winfo_exists():
+                            return
+                        win.update_idletasks()
+                        controls_height = _compute_nif_editor_controls_pane_height(
+                            window_height=max(content_pane.winfo_height(), win.winfo_height()),
+                            controls_requested_height=controls_wrapper.winfo_reqheight() + 24,
+                            footer_height=footer_frame.winfo_reqheight(),
+                        )
+                        content_pane.sashpos(0, controls_height)
+                    except Exception:
+                        pass
+
+                win.after_idle(_apply_nif_editor_initial_pane_layout)
             except Exception as exc:
                 try:
                     win.destroy()
@@ -7007,6 +10500,42 @@ def main() -> int:
                 ) from exc
             raise
         return 0
+
+    if getattr(args, "pbr_material", False):
+        cli_recommended_profile: str | None = None
+    elif args.input_file.is_dir():
+        cli_recommended_profile: str | None = None
+    else:
+        role_info = identify_skyrim_texture_role(args.input_file)
+        workflow_profile = detect_workflow_profile(args.input_file)
+        material_type = classify_material_type(args.input_file)
+        cli_recommended_profile = recommend_render_profile(
+            args.input_file,
+            detected_role=role_info["role"] if role_info is not None else None,
+            detected_suffix=role_info["suffix"] if role_info is not None else None,
+            material_type=material_type,
+            workflow_profile=workflow_profile,
+        )
+    cli_guardrails = resolve_render_profile_guardrails(
+        selected_profile=getattr(args, "render_profile", "auto"),
+        recommended_profile=cli_recommended_profile,
+        complex_format=args.complex_format,
+        env_mask_mode=args.environment_mask_mode,
+        parallax_mode=args.parallax_mode,
+    )
+    cli_guardrail_changes = list(cli_guardrails["changes"])
+    args.complex_format = str(cli_guardrails["complex_format"])
+    args.environment_mask_mode = str(cli_guardrails["env_mask_mode"])
+    args.parallax_mode = str(cli_guardrails["parallax_mode"])
+    if cli_guardrail_changes:
+        effective_label = _RENDER_PROFILE_LABELS.get(
+            str(cli_guardrails["effective_profile"]),
+            str(cli_guardrails["effective_profile"]).replace("_", " ").title(),
+        )
+        print(
+            f"[renderer guardrails] Applied {effective_label}: " + "; ".join(cli_guardrail_changes),
+            file=sys.stderr,
+        )
 
     if args.input_file.is_dir():
         failures: list[tuple[Path, str]] = []
@@ -7038,8 +10567,16 @@ def main() -> int:
             include_glow=args.glow_map,
             include_environment_mask=args.environment_mask,
             include_rmaos=args.rmaos,
+            include_wetness_mask=args.wetness_mask,
+            wetness_mask_strength=args.wetness_mask_strength,
+            include_snow_mask=args.snow_mask,
+            snow_mask_strength=args.snow_mask_strength,
+            include_ao=args.ao_map,
+            ao_strength=args.ao_strength,
+            include_roughness=args.roughness_map,
+            roughness_strength=args.roughness_strength,
             include_complex=args.complex_material,
-            render_profile="auto",
+            render_profile=getattr(args, "render_profile", "auto"),
             continue_on_error=True,
             batch_workers=args.batch_workers,
             error_callback=lambda _index, _total, current, exc: failures.append((current, str(exc))),
@@ -7083,8 +10620,16 @@ def main() -> int:
         include_glow=args.glow_map,
         include_environment_mask=args.environment_mask,
         include_rmaos=args.rmaos,
+        include_wetness_mask=args.wetness_mask,
+        wetness_mask_strength=args.wetness_mask_strength,
+        include_snow_mask=args.snow_mask,
+        snow_mask_strength=args.snow_mask_strength,
+        include_ao=args.ao_map,
+        ao_strength=args.ao_strength,
+        include_roughness=args.roughness_map,
+        roughness_strength=args.roughness_strength,
         include_complex=args.complex_material,
-        render_profile="auto",
+        render_profile=getattr(args, "render_profile", "auto"),
     )
     for output_type, path in outputs.items():
         print(f"{output_type.replace('_', ' ').title()} texture: {path}")

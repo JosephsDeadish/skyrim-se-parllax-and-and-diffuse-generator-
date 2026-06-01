@@ -59,7 +59,7 @@ jobs:
       - name: Create application zip
         run: |
           Copy-Item dist\generate_textures.exe generate_textures.exe
-          Compress-Archive -Path generate_textures.exe, README.md, requirements.txt, assets, fomod -DestinationPath skyrim-texture-generator.zip
+          Compress-Archive -Path generate_textures.exe, generate_textures.py, nif_patcher.py, README.md, requirements.txt, assets, fomod -DestinationPath skyrim-texture-generator.zip
         shell: pwsh
 
       - name: Create source zip
