@@ -54,10 +54,12 @@ _NIF_VERSION_20_2_0_7: int = 0x14020007
 _SKYRIM_USER_VERSION: int = 12
 _SKYRIM_SE_USER_VERSION_2: int = 83
 _SKYRIM_SE_USER_VERSION_2_ALT: int = 100
+_SKYRIM_SE_USER_VERSION_2_CK: int = 130
 _SKYRIM_LE_USER_VERSION_2: int = 34
 _SUPPORTED_USER_VERSION_2: tuple[int, ...] = (
     _SKYRIM_SE_USER_VERSION_2,
     _SKYRIM_SE_USER_VERSION_2_ALT,
+    _SKYRIM_SE_USER_VERSION_2_CK,
     _SKYRIM_LE_USER_VERSION_2,
 )
 
@@ -997,11 +999,29 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
 
     num_blocks = buf.read_u32()
 
+    # Bethesda stream header (BSStreamHeader):
+    #   bs_version (u32)
+    #   author (ExportString/u8 sized string)
+    #   unknown_int (u32)              if bs_version > 130
+    #   process_script (ExportString)  if bs_version < 131
+    #   export_script (ExportString)
+    #   max_filepath (ExportString)    if bs_version >= 103
+    #
+    # Older revisions of this parser assumed a fixed 3-string layout. That
+    # misaligned blocks_start for valid Skyrim meshes using bs_version >= 103
+    # (notably CK-style 130 headers), causing real blocks to be misread and
+    # skipped during patching.
     user_version_2 = buf.read_u32()
     if user_version_2 not in _SUPPORTED_USER_VERSION_2:
         return None
-    for _ in range(3):
-        buf.read_sstring_u8()  # export strings
+    buf.read_sstring_u8()  # author
+    if user_version_2 > 130:
+        buf.read_u32()  # unknown int
+    if user_version_2 < 131:
+        buf.read_sstring_u8()  # process script
+    buf.read_sstring_u8()  # export script
+    if user_version_2 >= 103:
+        buf.read_sstring_u8()  # max filepath
 
     num_block_types = buf.read_u16()
     block_types = [buf.read_sstring_u32() for _ in range(num_block_types)]
@@ -1015,11 +1035,9 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
     strings = [buf.read_sstring_u32() for _ in range(num_strings)]
 
     # Per the NIF 20.2.0.7 format specification, a num_groups u32 field
-    # follows the string table when user_version_2 < 130.  Skyrim SE uses
-    # user_version_2 = 83 or 100 (both < 130), so this field is always
-    # present in real game meshes.  It is always 0 for Skyrim SE NIFs, but
-    # must be consumed here so that blocks_start is positioned correctly.
-    # Omitting this read shifts every block offset 4 bytes early, which
+    # follows the string table. It is usually 0 for Skyrim meshes, but must
+    # be consumed so that blocks_start is positioned correctly. Omitting this
+    # read shifts every block offset 4 bytes early, which
     # causes _upgrade_block_to_type3 to insert type-3 fields at the wrong
     # position and corrupts the block — producing exactly the kind of
     # EXCEPTION_ACCESS_VIOLATION crash seen in game.

@@ -222,7 +222,16 @@ def _build_minimal_nif(
     user_ver = struct.pack("<I", 12)
     num_blocks_bytes = struct.pack("<I", num_blks)
     user_ver2 = struct.pack("<I", user_ver2)
-    export = _sstring_u8("") + _sstring_u8("") + _sstring_u8("")
+    # BSStreamHeader export strings depend on BS version (user_ver2 field).
+    # Skyrim SE commonly uses 83/100; CK-style exports can use 130.
+    export = _sstring_u8("")  # author
+    if user_ver2 > 130:
+        export += struct.pack("<I", 0)  # unknown int (FO4+ style)
+    if user_ver2 < 131:
+        export += _sstring_u8("")  # process script
+    export += _sstring_u8("")  # export script
+    if user_ver2 >= 103:
+        export += _sstring_u8("")  # max filepath
     num_block_types = struct.pack("<H", len(block_type_names))
     btypes = b"".join(_sstring_u32(t) for t in block_type_names)
     string_table = struct.pack("<II", 0, 0)
@@ -276,6 +285,11 @@ class TestScanNif(unittest.TestCase):
 
     def test_scan_accepts_user_version_2_100(self) -> None:
         nif = _write_nif(self.tmp, user_ver2=100)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+
+    def test_scan_accepts_user_version_2_130(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
         infos = scan_nif(nif)
         self.assertEqual(len(infos), 1)
 
