@@ -9305,7 +9305,6 @@ if GUI_AVAILABLE:
                 controls_wrapper.bind("<Configure>", _sync_controls_scroll_region)
                 controls_canvas.bind("<Configure>", _resize_controls_window)
                 content_pane.add(controls_container, weight=5)
-                content_pane.pane(controls_container, minsize=340)
 
                 intro_label = tk.Label(
                     controls_wrapper,
