@@ -9943,7 +9943,6 @@ if GUI_AVAILABLE:
                 )
                 res_frame.configure(height=220)
                 content_pane.add(res_frame, weight=2)
-                content_pane.pane(res_frame, minsize=180)
                 results_hint_label = ttk.Label(
                     res_frame,
                     text="⇳ Drag the divider above to resize this log. Right-click rows or use the copy buttons for full text.",

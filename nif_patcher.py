@@ -1136,16 +1136,39 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
     if block_start + _OFFSET_CONTROLLER + 4 > block_end:
         return None
 
-    num_extra = buf.read_u32_at(block_start + _OFFSET_NUM_EXTRA)
+    raw_num_extra = buf.read_u32_at(block_start + _OFFSET_NUM_EXTRA)
     max_extra_refs = max((block_size - (_REAL_OFFSET_FLAGS1 + 4)) // 4, 0)
-    if num_extra > max_extra_refs:
-        return None
-    controller_offset = block_start + _OFFSET_CONTROLLER + num_extra * 4
-    if controller_offset + 4 > block_end:
-        return None
-    controller_ref = struct.unpack_from("<i", buf._b, controller_offset)[0]
-    if controller_ref != -1 and not (0 <= controller_ref < num_blocks):
-        return None
+
+    # Try to resolve num_extra: prefer the declared value when plausible, but
+    # fall back to 0 so that blocks whose NiObjectNET header reads unexpectedly
+    # (e.g. from tools that write a non-standard or slightly offset header) can
+    # still be parsed.  The first candidate whose controller_ref also validates
+    # is used; if none work we raise with diagnostic details.
+    num_extra_candidates: list[int] = []
+    if raw_num_extra <= max_extra_refs:
+        num_extra_candidates.append(raw_num_extra)
+    if 0 not in num_extra_candidates:
+        num_extra_candidates.append(0)
+
+    num_extra: int | None = None
+    controller_ref: int = -1
+    for _try_extra in num_extra_candidates:
+        _ctrl_off = block_start + _OFFSET_CONTROLLER + _try_extra * 4
+        if _ctrl_off + 4 > block_end:
+            continue
+        _ctrl = struct.unpack_from("<i", buf._b, _ctrl_off)[0]
+        if _ctrl == -1 or (0 <= _ctrl < num_blocks):
+            num_extra = _try_extra
+            controller_ref = _ctrl
+            break
+
+    if num_extra is None:
+        raise ValueError(
+            f"NiObjectNET header unresolvable "
+            f"(raw_num_extra={raw_num_extra}, max_extra_refs={max_extra_refs}, "
+            f"block_size={block_size}, block_start=0x{block_start:X}, "
+            f"num_blocks={num_blocks})"
+        )
 
     extra_shift = num_extra * 4
     raw_shader_type = buf.read_u32_at(block_start + _OFFSET_SHADER_TYPE + extra_shift)
