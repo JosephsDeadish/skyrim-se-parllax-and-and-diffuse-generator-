@@ -1024,6 +1024,15 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         self.assertEqual(detect_render_profile_from_mod_manager_context(context), "characters")
 
+    def test_detect_render_profile_from_mod_manager_context_ignores_fsmp_mcm_helper_mod(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            loaded_mods=("FSMPM - The FSMP MCM",),
+            enabled_plugins=("FSMPM - The FSMP MCM.esp",),
+            load_order=("FSMPM - The FSMP MCM.esp",),
+        )
+        self.assertIsNone(detect_render_profile_from_mod_manager_context(context))
+
     def test_recommend_render_profile_uses_character_fallback_for_mod_manager_body_hints(self) -> None:
         context = ModManagerContext(
             manager="MO2",
@@ -1036,6 +1045,20 @@ class GenerateTexturesTests(unittest.TestCase):
                 manager_context=context,
             ),
             "characters",
+        )
+
+    def test_recommend_render_profile_ignores_fsmp_mcm_helper_mod(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            loaded_mods=("FSMPM - The FSMP MCM",),
+            enabled_plugins=("FSMPM - The FSMP MCM.esp",),
+        )
+        self.assertEqual(
+            recommend_render_profile(
+                Path("textures/misc/neutral_asset.dds"),
+                manager_context=context,
+            ),
+            "vanilla",
         )
 
     def test_resolve_render_profile_options_returns_expected_modes(self) -> None:

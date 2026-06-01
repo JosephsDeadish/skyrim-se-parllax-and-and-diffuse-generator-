@@ -638,6 +638,23 @@ def _normalize_profile_hint_source(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
 
+def _hint_token_matches_source(source: str, token: str) -> bool:
+    normalized_source = _normalize_profile_hint_source(source)
+    normalized_token = _normalize_profile_hint_source(token)
+    if not normalized_source or not normalized_token:
+        return False
+    if " " in normalized_token:
+        collapsed_source = normalized_source.replace(" ", "")
+        collapsed_token = normalized_token.replace(" ", "")
+        return normalized_token in normalized_source or collapsed_token in collapsed_source
+    source_words = normalized_source.split()
+    if normalized_token in source_words:
+        return True
+    if len(normalized_token) <= 3:
+        return False
+    return normalized_token in normalized_source.replace(" ", "")
+
+
 def _detect_profile_hints(
     sources: tuple[str, ...], hint_map: tuple[tuple[str, tuple[str, ...]], ...]
 ) -> tuple[str, ...]:
@@ -646,7 +663,7 @@ def _detect_profile_hints(
     normalized_sources = tuple(_normalize_profile_hint_source(source) for source in sources if source)
     detected: list[str] = []
     for profile, hints in hint_map:
-        if any(any(hint in source for hint in hints) for source in normalized_sources):
+        if any(any(_hint_token_matches_source(source, hint) for hint in hints) for source in normalized_sources):
             detected.append(profile)
     return tuple(detected)
 
@@ -2428,17 +2445,17 @@ def detect_render_profile_from_mod_manager_context(context: ModManagerContext | 
         if parent_name:
             candidates.append(parent_name)
     has_truepbr = any(
-        token in candidate
+        _hint_token_matches_source(candidate, token)
         for candidate in candidates
         for token in _RENDER_PROFILE_MANAGER_HINT_TOKENS["truepbr"]
     )
     has_cs = any(
-        token in candidate
+        _hint_token_matches_source(candidate, token)
         for candidate in candidates
         for token in _RENDER_PROFILE_MANAGER_HINT_TOKENS["community_shaders"]
     )
     has_enb = any(
-        token in candidate
+        _hint_token_matches_source(candidate, token)
         for candidate in candidates
         for token in _RENDER_PROFILE_MANAGER_HINT_TOKENS["enb"]
     )
@@ -9921,17 +9938,13 @@ if GUI_AVAILABLE:
 
                 res_frame = ttk.LabelFrame(
                     content_pane,
-                    text="Results Log (resizable; right-click rows to copy)",
+                    text="Results (single log view; right-click rows to copy)",
                     padding=6,
                 )
                 res_frame.configure(height=320)
                 content_pane.add(res_frame, weight=4)
-                results_pane = ttk.Panedwindow(res_frame, orient="vertical")
-                results_pane.pack(fill="both", expand=True)
-                results_list_frame = ttk.Frame(results_pane)
-                results_details_frame = ttk.LabelFrame(results_pane, text="Selected row details", padding=6)
-                results_pane.add(results_list_frame, weight=4)
-                results_pane.add(results_details_frame, weight=3)
+                results_list_frame = ttk.Frame(res_frame)
+                results_list_frame.pack(fill="both", expand=True)
                 style = ttk.Style(win)
                 tree_style_name = "NifEditor.Treeview"
                 tree_select_bg = "#5a7fd6" if dark else "#c8dafc"
@@ -9967,38 +9980,12 @@ if GUI_AVAILABLE:
                 results_scroll.pack(side="right", fill="y")
                 results_scroll_x.pack(side="bottom", fill="x")
                 results_tree.pack(fill="both", expand=True, side="left")
-                result_details_text = tk.Text(
-                    results_details_frame,
-                    wrap="word",
-                    height=8,
-                    background=entry_bg,
-                    foreground=fg,
-                    insertbackground=fg,
-                    relief="flat",
-                    borderwidth=0,
-                )
-                result_details_scroll = ttk.Scrollbar(results_details_frame, command=result_details_text.yview)
-                result_details_text.configure(yscrollcommand=result_details_scroll.set)
-                result_details_scroll.pack(side="right", fill="y")
-                result_details_text.pack(fill="both", expand=True, side="left")
                 self._add_tooltip(
                     results_tree,
-                    "Results log for scan/patch/restore actions. Resize the window or drag the splitter to inspect everything.",
-                )
-                self._add_tooltip(
-                    result_details_text,
-                    "Full untruncated details for the selected row.",
+                    "Single results log for scan/patch/restore actions. Use the Details column or copy actions for the full text.",
                 )
 
                 full_row_details: dict[str, str] = {}
-
-                def _set_result_details_text(text: str) -> None:
-                    result_details_text.configure(state="normal")
-                    result_details_text.delete("1.0", "end")
-                    result_details_text.insert("1.0", text)
-                    result_details_text.configure(state="disabled")
-
-                _set_result_details_text("Select a row to inspect full multi-line details without truncation.")
 
                 def _add_result_row(status: str, file_name: str, details: str) -> None:
                     normalized_details = _normalize_nif_result_details(details)
@@ -10007,15 +9994,13 @@ if GUI_AVAILABLE:
                     full_row_details[str(item_id)] = normalized_details
                     results_tree.selection_set(item_id)
                     results_tree.focus(item_id)
-                    _set_result_details_text(f"[{status}] {file_name}\n\n{normalized_details}")
-                    status_var.set(f"{status}: {file_name} — {normalized_details}")
+                    status_var.set(f"{status}: {file_name} — {row_preview}")
                     results_tree.yview_moveto(1.0)
 
                 def _clear_log() -> None:
                     for item in results_tree.get_children():
                         results_tree.delete(item)
                     full_row_details.clear()
-                    _set_result_details_text("Select a row to inspect full multi-line details without truncation.")
                     status_var.set("Results cleared.")
                     progress_var.set(0.0)
 
@@ -10027,8 +10012,7 @@ if GUI_AVAILABLE:
                     if not row_values:
                         return
                     full_details = full_row_details.get(str(selected[0]), str(row_values[2]))
-                    _set_result_details_text(f"[{row_values[0]}] {row_values[1]}\n\n{full_details}")
-                    status_var.set(f"[{row_values[0]}] {row_values[1]} — {full_details}")
+                    status_var.set(f"[{row_values[0]}] {row_values[1]} — {_format_nif_result_row_details(full_details)}")
 
                 def _copy_selected_result() -> None:
                     selected = results_tree.selection()
@@ -10472,13 +10456,6 @@ if GUI_AVAILABLE:
                             footer_height=footer_frame.winfo_reqheight(),
                         )
                         content_pane.sashpos(0, controls_height)
-                        results_height = max(results_pane.winfo_height(), res_frame.winfo_height())
-                        if results_height > 0:
-                            details_height = _compute_nif_editor_result_details_height(
-                                results_height=results_height,
-                                details_requested_height=result_details_text.winfo_reqheight() + 36,
-                            )
-                            results_pane.sashpos(0, max(140, results_height - details_height))
                     except Exception:
                         pass
 
