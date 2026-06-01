@@ -262,6 +262,19 @@ _LEGACY_TRUEPBR_ENV_MASK_SUFFIXES: tuple[str, ...] = (
     "_mrao.dds",
     "_mra.dds",
 )
+_GENERIC_AUTHORING_PACKED_SUFFIXES: tuple[str, ...] = (
+    "_orm.dds",
+    "_orms.dds",
+    "_mrao.dds",
+    "_mra.dds",
+    "_rough.dds",
+    "_roughness.dds",
+    "_metal.dds",
+    "_metallic.dds",
+    "_metalness.dds",
+    "_ao.dds",
+    "_ambientocclusion.dds",
+)
 
 # BSLightingShaderPropertyShaderType values
 SHADER_TYPE_DEFAULT: int = 0
@@ -1478,6 +1491,28 @@ def _normalise_slot_path(path: str) -> str:
     return path.strip().lower().replace("/", "\\")
 
 
+def _shader_type_mesh_hint(shader_type: int) -> str | None:
+    """Return a concise mesh-context hint for a shader type."""
+    if shader_type == SHADER_TYPE_FACE_TINT:
+        return "Face Tint (4) is for head/face tint materials; parallax workflows are generally incompatible."
+    if shader_type == SHADER_TYPE_SKIN_TINT:
+        return "Skin Tint (5) is for skin/body tint materials; parallax and complex material flags are usually unsafe."
+    if shader_type == SHADER_TYPE_HAIR_TINT:
+        return "Hair Tint (6) is a dedicated hair shader path; parallax/complex workflows are not typically used."
+    if shader_type == SHADER_TYPE_GLOW:
+        return "Glow (2) shader type is emissive-focused and is not a standard parallax mesh workflow."
+    if shader_type == SHADER_TYPE_PARALLAX_OCC:
+        return "Parallax Occlusion (7) is uncommon; most Skyrim setups use Heightmap (3) + flags instead."
+    if shader_type == SHADER_TYPE_MULTILAYER:
+        return "MultiLayer Parallax (11) is a specialized landscape/terrain-oriented path."
+    return None
+
+
+def _path_has_dds_extension(path: str) -> bool:
+    normalized = _normalise_slot_path(path)
+    return normalized.endswith(".dds")
+
+
 def _build_block_map(
     data: bytes,
     header: _NifHeader,
@@ -2074,7 +2109,7 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
         diagnostics.extend(_summarize_non_patchable_block_types(header))
 
     # Build shape map so we can annotate each NifShaderInfo with its mesh context.
-    shader_to_shape: dict[int, _ShapeBlock] = _build_shape_map(data, header)
+    shader_to_shape, _has_havok = _build_shape_map(data, header)
 
     results: list[NifShaderInfo] = []
     for sp in shader_props:
@@ -2122,6 +2157,10 @@ def _renderer_compatibility(info: NifShaderInfo) -> dict[str, list[str]]:
         "truepbr": [],
     }
     bname = f"Block {info.block_index}"
+    mesh_hint = _shader_type_mesh_hint(info.shader_type)
+    if mesh_hint:
+        for renderer_notes in notes.values():
+            renderer_notes.append(f"{bname}: mesh-type note — {mesh_hint}")
 
     # ------------------------------------------------------------------ vanilla
     # Requirements: shader_type Default(0) or Heightmap(3),
@@ -2186,10 +2225,22 @@ def _renderer_compatibility(info: NifShaderInfo) -> dict[str, list[str]]:
     else:
         e.append(f"{bname}: slot 1 normal {slot1!r} ✓")
     slot5 = info.texture_paths.get(5, "")
-    if not (slot5.lower().endswith("_m.dds") or "_m." in slot5.lower()):
-        e.append(f"{bname}: slot 5 (env-mask) needs a _m.dds complex material map, got {slot5!r}")
-    else:
+    slot5_normalized = slot5.lower()
+    if not slot5:
+        e.append(f"{bname}: slot 5 (env-mask) is empty — ENB Complex Material needs an _m.dds map")
+    elif slot5_normalized.endswith(("_m.dds", "_mask.dds", "_envmask.dds")):
         e.append(f"{bname}: slot 5 env-mask {slot5!r} ✓")
+    elif slot5_normalized.endswith(_TRUEPBR_ENV_MASK_SUFFIXES + _LEGACY_TRUEPBR_ENV_MASK_SUFFIXES):
+        e.append(f"{bname}: slot 5 (env-mask) needs a _m.dds complex material map, got {slot5!r}")
+        e.append(
+            f"{bname}: slot 5 looks TruePBR/generic-packed ({slot5!r}); ENB Complex Material expects ENB-style _m.dds data."
+        )
+    elif slot5_normalized.endswith(("_cm.dds", "_c.dds")):
+        e.append(
+            f"{bname}: slot 5 uses Community Shaders Extended Materials naming ({slot5!r}); ENB expects _m.dds."
+        )
+    else:
+        e.append(f"{bname}: slot 5 (env-mask) needs a _m.dds complex material map, got {slot5!r}")
     if info.has_parallax_flag:
         e.append(
             f"{bname}: SLSF1_Parallax flag set — for pure ENB Complex Material, clear this; "
@@ -2223,8 +2274,13 @@ def _renderer_compatibility(info: NifShaderInfo) -> dict[str, list[str]]:
             f"internally; this flag is unnecessary but harmless"
         )
     cpm_slot5 = info.texture_paths.get(5, "")
-    if cpm_slot5.lower().endswith("_cm.dds"):
-        cs.append(f"{bname}: slot 5 _cm.dds detected — Community Shaders Complex Material (CPM) active ✓")
+    cpm_slot5_normalized = cpm_slot5.lower()
+    if cpm_slot5_normalized.endswith(("_cm.dds", "_c.dds")):
+        cs.append(f"{bname}: slot 5 CM map {cpm_slot5!r} detected — Community Shaders Extended Materials active ✓")
+    elif cpm_slot5_normalized.endswith(("_m.dds", "_mask.dds", "_envmask.dds")):
+        cs.append(
+            f"{bname}: slot 5 uses ENB/vanilla-style _m naming ({cpm_slot5!r}); CS Extended Materials expects _cm/_c."
+        )
     if info.has_pbr_flag:
         cs.append(f"{bname}: SLSF2_Unused01 (TruePBR) flag present — this overrides standard parallax in CS")
     if info.is_skinned:
@@ -2251,10 +2307,19 @@ def _renderer_compatibility(info: NifShaderInfo) -> dict[str, list[str]]:
     rmaos = info.texture_paths.get(5, "")
     if not rmaos:
         pb.append(f"{bname}: slot 5 (roughness/metallic/AO/specular) is empty — TruePBR needs _rmaos.dds")
-    elif not rmaos.lower().endswith("_rmaos.dds"):
-        pb.append(f"{bname}: slot 5 {rmaos!r} — TruePBR expects _rmaos.dds")
-    else:
+    elif rmaos.lower().endswith(_TRUEPBR_ENV_MASK_SUFFIXES):
         pb.append(f"{bname}: slot 5 {rmaos!r} ✓")
+    elif rmaos.lower().endswith(_LEGACY_TRUEPBR_ENV_MASK_SUFFIXES):
+        pb.append(
+            f"{bname}: slot 5 {rmaos!r} uses a generic packed alias (_orm/_mrao) commonly exported by Blender/Substance; "
+            f"rename/repack to canonical _rmaos for clearer TruePBR handling."
+        )
+    elif rmaos.lower().endswith(("_cm.dds", "_c.dds")):
+        pb.append(f"{bname}: slot 5 {rmaos!r} looks like Community Shaders Extended Materials (_cm/_c), not TruePBR.")
+    elif rmaos.lower().endswith(("_m.dds", "_mask.dds", "_envmask.dds")):
+        pb.append(f"{bname}: slot 5 {rmaos!r} looks like ENB/vanilla _m workflow, not TruePBR _rmaos.")
+    else:
+        pb.append(f"{bname}: slot 5 {rmaos!r} — TruePBR expects _rmaos.dds")
     pb.append(
         f"{bname}: TruePBR also requires a .json nif entry alongside the mesh — "
         f"this patcher cannot generate that file"
@@ -2333,10 +2398,13 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
             block_skipped = True
 
         if info.shader_type not in (SHADER_TYPE_DEFAULT, SHADER_TYPE_HEIGHTMAP, SHADER_TYPE_ENVMAP):
+            mesh_hint = _shader_type_mesh_hint(info.shader_type)
+            hint_text = f" {mesh_hint}" if mesh_hint else ""
             reason = (
                 f"{bname}: incompatible shader type {info.shader_type_name!r} "
                 f"({info.shader_type}) — patcher only supports Default (0), "
                 f"Heightmap/Parallax (3), and EnvMap (1)"
+                f"{hint_text}"
             )
             _append_unique(result.skip_reasons, reason)
             block_skipped = True
@@ -2455,6 +2523,15 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
 
         if diffuse_path:
             normalized_diffuse = _normalise_slot_path(diffuse_path)
+            if not _path_has_dds_extension(diffuse_path):
+                _append_unique(
+                    result.issues,
+                    f"{bname}: slot 0 diffuse path '{diffuse_path}' is not a .dds texture path."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Convert/export diffuse textures to .dds for Skyrim; Blender/Substance authoring extensions (.png/.tga/.exr) are source assets, not final game paths."
+                )
             if normalized_diffuse.endswith(_DIFFUSE_SLOT_DISALLOWED_SUFFIXES):
                 _append_unique(
                     result.issues,
@@ -2466,6 +2543,15 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                 )
         if parallax_path:
             normalized_parallax = _normalise_slot_path(parallax_path)
+            if not _path_has_dds_extension(parallax_path):
+                _append_unique(
+                    result.issues,
+                    f"{bname}: slot 3 parallax path '{parallax_path}' is not a .dds texture path."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Convert parallax/height textures to .dds before patching NIF slot 3."
+                )
             if not normalized_parallax.startswith("textures\\"):
                 _append_unique(
                     result.issues,
@@ -2505,6 +2591,15 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                 )
         if normal_path:
             normalized_normal = _normalise_slot_path(normal_path)
+            if not _path_has_dds_extension(normal_path):
+                _append_unique(
+                    result.issues,
+                    f"{bname}: slot 1 normal path '{normal_path}' is not a .dds texture path."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Use a .dds normal map in slot 1 (_n.dds or _msn.dds). Generic Blender source files should be converted first."
+                )
             if normalized_normal.endswith(_NORMAL_SLOT_DISALLOWED_SUFFIXES):
                 _append_unique(
                     result.issues,
@@ -2536,6 +2631,15 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
         env_mask_path = info.texture_paths.get(TEXTURE_SLOT_ENV_MASK, "").strip()
         if env_mask_path:
             normalized_env_mask = _normalise_slot_path(env_mask_path)
+            if not _path_has_dds_extension(env_mask_path):
+                _append_unique(
+                    result.issues,
+                    f"{bname}: slot 5 environment-mask path '{env_mask_path}' is not a .dds texture path."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Convert packed masks to .dds before assigning slot 5; source authoring files are not valid Skyrim runtime paths."
+                )
             if not normalized_env_mask.endswith(_ENV_MASK_SLOT_EXPECTED_SUFFIXES):
                 _append_unique(
                     result.issues,
@@ -2545,6 +2649,11 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
                     result.suggestions,
                     "Use slot 5 for _m.dds (vanilla/ENB), _cm/_c (Community Shaders Extended Materials), or _rmaos (TruePBR)."
                 )
+                if normalized_env_mask.endswith(_GENERIC_AUTHORING_PACKED_SUFFIXES):
+                    _append_unique(
+                        result.suggestions,
+                        "This suffix looks like a generic Blender/Substance packed map naming; do not assume it is ENB/CS/TruePBR-ready until it is repacked into the target workflow format."
+                    )
             if normalized_env_mask.endswith(_TRUEPBR_ENV_MASK_SUFFIXES + _LEGACY_TRUEPBR_ENV_MASK_SUFFIXES) and not normalized_env_mask.startswith("textures\\pbr\\"):
                 _append_unique(
                     result.suggestions,
@@ -2553,7 +2662,7 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
             if normalized_env_mask.endswith(_LEGACY_TRUEPBR_ENV_MASK_SUFFIXES):
                 _append_unique(
                     result.suggestions,
-                    "Slot 5 uses a legacy generic packed suffix (_orm/_mrao). Prefer canonical _rmaos/_ramos naming for Skyrim Community Shaders TruePBR workflows."
+                    "Slot 5 uses a generic packed alias suffix (_orm/_mrao) often exported by DCC tools; for explicit TruePBR workflows prefer canonical _rmaos/_ramos naming."
                 )
             if normalized_env_mask.endswith(("_cm.dds", "_c.dds")):
                 _append_unique(
@@ -2582,6 +2691,15 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
         glow_path = info.texture_paths.get(TEXTURE_SLOT_GLOW, "").strip()
         if glow_path:
             normalized_glow = _normalise_slot_path(glow_path)
+            if not _path_has_dds_extension(glow_path):
+                _append_unique(
+                    result.issues,
+                    f"{bname}: slot 2 glow path '{glow_path}' is not a .dds texture path."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Convert emissive textures to .dds for Skyrim slot 2 usage."
+                )
             if not normalized_glow.endswith(("_g.dds", "_sk.dds")):
                 _append_unique(
                     result.issues,
@@ -2608,6 +2726,15 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
         cubemap_path = info.texture_paths.get(TEXTURE_SLOT_CUBEMAP, "").strip()
         if cubemap_path:
             normalized_cubemap = _normalise_slot_path(cubemap_path)
+            if not _path_has_dds_extension(cubemap_path):
+                _append_unique(
+                    result.issues,
+                    f"{bname}: slot 4 cubemap path '{cubemap_path}' is not a .dds texture path."
+                )
+                _append_unique(
+                    result.suggestions,
+                    "Use .dds cubemap textures for slot 4."
+                )
             if normalized_cubemap.endswith(_CUBEMAP_SLOT_WRONG_SUFFIXES):
                 _append_unique(
                     result.issues,

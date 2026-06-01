@@ -39,6 +39,7 @@ from nif_patcher import (
     validate_nif_for_parallax,
     _Buf,
     _build_block_map,
+    _renderer_compatibility,
     _read_header,
 )
 
@@ -557,8 +558,28 @@ class TestValidateNifForParallax(unittest.TestCase):
         joined = "\n".join(v.issues + v.suggestions).lower()
         self.assertIn("textures\\pbr\\", joined)
         self.assertIn("pbrnifpatcher json", joined)
-        self.assertIn("legacy generic packed suffix", joined)
+        self.assertIn("generic packed alias suffix", joined)
         self.assertIn("_rmaos/_ramos", joined)
+
+    def test_reports_non_dds_extension_in_parallax_slot(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\architecture\\stone_p.png"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 3 parallax path", joined)
+        self.assertIn("not a .dds texture path", joined)
+        self.assertIn("convert parallax/height textures to .dds", joined)
+
+    def test_truepbr_renderer_notes_distinguish_generic_orm_alias(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\architecture\\stone_orm.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        infos = scan_nif(nif)
+        notes = _renderer_compatibility(infos[0])
+        joined = "\n".join(notes["truepbr"]).lower()
+        self.assertIn("generic packed alias", joined)
+        self.assertIn("blender/substance", joined)
 
     def test_reports_blender_style_env_mask_suffix_in_slot_five(self) -> None:
         paths = [""] * 9

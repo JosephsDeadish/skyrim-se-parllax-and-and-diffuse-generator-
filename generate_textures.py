@@ -10116,13 +10116,30 @@ if GUI_AVAILABLE:
                         for index, nif in enumerate(nifs, start=1):
                             try:
                                 validation = validate_nif_for_parallax(nif)
-                                combined_detail_lines = list(validation.issues[:4])
-                                if validation.suggestions:
-                                    combined_detail_lines.extend(f"Suggestion: {text}" for text in validation.suggestions[:2])
-                                if validation.skip_reasons:
-                                    combined_detail_lines.extend(f"Skip: {text}" for text in validation.skip_reasons[:2])
+                                combined_detail_lines: list[str] = []
                                 if validation.has_havok:
-                                    combined_detail_lines.insert(0, "⚠ Havok animation graph — parallax will crash in-game")
+                                    combined_detail_lines.append("⚠ Havok animation graph detected — parallax patching on this NIF can crash in-game.")
+                                if validation.skip_reasons:
+                                    combined_detail_lines.append("Skip reasons:")
+                                    combined_detail_lines.extend(f"- {text}" for text in validation.skip_reasons)
+                                if validation.issues:
+                                    combined_detail_lines.append("Issues:")
+                                    combined_detail_lines.extend(f"- {text}" for text in validation.issues)
+                                if validation.suggestions:
+                                    combined_detail_lines.append("Suggestions:")
+                                    combined_detail_lines.extend(f"- {text}" for text in validation.suggestions)
+                                if validation.renderer_notes:
+                                    combined_detail_lines.append("Renderer compatibility details:")
+                                    for renderer_key, renderer_label in (
+                                        ("vanilla", "Vanilla"),
+                                        ("enb", "ENB"),
+                                        ("community_shaders", "Community Shaders"),
+                                        ("truepbr", "TruePBR"),
+                                    ):
+                                        renderer_lines = validation.renderer_notes.get(renderer_key, [])
+                                        if renderer_lines:
+                                            combined_detail_lines.append(f"{renderer_label}:")
+                                            combined_detail_lines.extend(f"  - {line}" for line in renderer_lines)
                                 if validation.ready_count == validation.shader_count and validation.shader_count > 0 and validation.skip_count == 0:
                                     row_args = ("OK", nif.name, f"{validation.ready_count}/{validation.shader_count} shader(s) already parallax-ready")
                                 elif validation.shader_count == 0:
@@ -10130,11 +10147,11 @@ if GUI_AVAILABLE:
                                     row_args = ("SKIP", nif.name, detail)
                                 elif validation.skip_count == validation.shader_count:
                                     skip_summary = f"{validation.skip_count}/{validation.shader_count} shader(s) skipped (incompatible)."
-                                    detail = f"{skip_summary}\n" + "\n".join(combined_detail_lines[:4])
+                                    detail = f"{skip_summary}\n" + "\n".join(combined_detail_lines)
                                     row_args = ("SKIP", nif.name, detail.strip())
                                 else:
                                     skip_info = f" ({validation.skip_count} skipped)" if validation.skip_count else ""
-                                    issue_text = "\n".join(combined_detail_lines[:6]) if combined_detail_lines else "Needs patching."
+                                    issue_text = "\n".join(combined_detail_lines) if combined_detail_lines else "Needs patching."
                                     row_args = ("WARN", nif.name, f"{validation.ready_count}/{validation.shader_count} ready{skip_info}.\n{issue_text}")
                             except Exception as exc:
                                 row_args = ("FAIL", nif.name, f"Scan failed: {exc}")
