@@ -1114,7 +1114,7 @@ class _TextureSetBlock:
 
 
 def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
-                       block_size: int, num_blocks: int) -> _ShaderPropBlock | None:
+                       block_size: int, num_blocks: int) -> _ShaderPropBlock:
     """Parse a BSLightingShaderProperty block.
 
     Layout for Skyrim/SE BSLightingShaderProperty (NIF 20.2.0.7 / user_version=12):
@@ -1131,10 +1131,23 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
       [type-3 only] parallax_max_passes 4 B + parallax_scale 4 B
     """
     block_end = block_start + block_size
-    if block_size < _REAL_COMMON_FIELDS_SIZE or block_end > len(buf._b):
-        return None
+    if block_size < _REAL_COMMON_FIELDS_SIZE:
+        raise ValueError(
+            f"block too small for BSLightingShaderProperty: "
+            f"size={block_size} < {_REAL_COMMON_FIELDS_SIZE} "
+            f"(block_start=0x{block_start:X})"
+        )
+    if block_end > len(buf._b):
+        raise ValueError(
+            f"block extends past end of file: "
+            f"block_end=0x{block_end:X} > file_size={len(buf._b)} "
+            f"(block_start=0x{block_start:X}, block_size={block_size})"
+        )
     if block_start + _OFFSET_CONTROLLER + 4 > block_end:
-        return None
+        raise ValueError(
+            f"NiObjectNET header truncated at controller field: "
+            f"block_size={block_size}, block_start=0x{block_start:X}"
+        )
 
     raw_num_extra = buf.read_u32_at(block_start + _OFFSET_NUM_EXTRA)
     max_extra_refs = max((block_size - (_REAL_OFFSET_FLAGS1 + 4)) // 4, 0)
@@ -1850,12 +1863,12 @@ def _build_block_map(
         if btype == "BSLightingShaderProperty":
             try:
                 sp = _parse_shader_prop(buf, bi, bstart, bsize, header.num_blocks)
-                if sp is not None:
-                    shader_props.append(sp)
-                else:
-                    errors.append(f"Block {bi}: failed to parse BSLightingShaderProperty.")
+                shader_props.append(sp)
             except (ValueError, struct.error, IndexError) as exc:
-                errors.append(f"Block {bi}: shader parse error: {exc}")
+                errors.append(
+                    f"Block {bi}: failed to parse BSLightingShaderProperty"
+                    f" — {type(exc).__name__}: {exc}"
+                )
         elif btype == "BSShaderTextureSet":
             try:
                 ts = _parse_texture_set(buf, bi, bstart, bsize)
