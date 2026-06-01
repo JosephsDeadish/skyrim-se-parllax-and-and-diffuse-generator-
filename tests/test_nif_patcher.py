@@ -519,7 +519,7 @@ class TestValidateNifForParallax(unittest.TestCase):
         joined = "\n".join(v.issues + v.suggestions).lower()
         self.assertNotIn("slot 5 environment-mask path", joined)
 
-    def test_accepts_orm_suffix_in_env_mask_slot(self) -> None:
+    def test_reports_generic_orm_suffix_in_env_mask_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_orm.dds"
         nif = _write_nif(
@@ -530,7 +530,8 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         v = validate_nif_for_parallax(nif)
         joined = "\n".join(v.issues + v.suggestions).lower()
-        self.assertNotIn("slot 5 environment-mask path", joined)
+        self.assertIn("generic packed alias suffix", joined)
+        self.assertIn("target workflow is unambiguous", joined)
 
     def test_truepbr_rmaos_path_warns_when_not_in_textures_pbr(self) -> None:
         paths = [""] * 9
