@@ -594,6 +594,7 @@ class NifShaderInfo:
     flags2: int
     parallax_scale: float | None   # None if block is not shader-type 3
     texture_paths: dict[int, str]  # slot → path
+    env_map_scale: float | None = None
 
     # Shape-context fields — populated by scan_nif_diagnostics when a parent
     # BSTriShape-family block can be matched to this shader property.
@@ -1153,8 +1154,6 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
             return SHADER_TYPE_HEIGHTMAP
         if payload_size == 24:
             return SHADER_TYPE_MULTILAYER
-        if (flags1 & SLSF1_GLOW_MAP) and payload_size == 0:
-            return SHADER_TYPE_GLOW
         return None
 
     def _build_candidate(
@@ -2398,6 +2397,7 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
             flags2=sp.flags2,
             parallax_scale=sp.parallax_scale,
             texture_paths=tex_paths,
+            env_map_scale=sp.env_map_scale,
         )
         if shape is not None:
             info.parent_block_type = shape.block_type
