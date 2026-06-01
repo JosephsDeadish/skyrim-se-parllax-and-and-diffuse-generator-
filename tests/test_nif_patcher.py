@@ -494,6 +494,24 @@ class TestScanNif(unittest.TestCase):
             "textures\\dungeons\\barrels\\barrel01_p.dds",
         )
 
+    def test_scan_reports_unknown_shader_fallback(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=0x12345678)
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
+        self.assertTrue(any("0x12345678" in d for d in diagnostics), diagnostics)
+
+    def test_scan_uses_texture_suffix_inference_for_unknown_shader(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_type=0x12345678,
+            texture_paths=["textures\\dungeons\\barrels\\barrel01.dds", "", "", "textures\\dungeons\\barrels\\barrel01_p.dds"] + [""] * 5,
+        )
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+        self.assertTrue(any("texture_suffix_parallax" in d for d in diagnostics), diagnostics)
+
     def test_patch_nif_with_u16_count_texture_set(self) -> None:
         """patch_nif must work correctly on a NIF whose texture set uses a u16 count."""
         paths = ["textures\\dungeons\\barrels\\barrel01_d.dds"] + [""] * 8
@@ -930,6 +948,20 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertTrue(result.success, result.errors)
         infos = scan_nif(nif)
         self.assertFalse(infos[0].has_env_mapping_flag)
+
+    def test_strict_unknown_shader_types_fails_patch(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=0x12345678)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                backup=False,
+            ),
+        )
+        self.assertFalse(result.success)
+        self.assertIn("Strict unknown-shader check failed", result.message)
+        self.assertTrue(any("0x12345678" in e for e in result.errors), result.errors)
 
 
 # ---------------------------------------------------------------------------

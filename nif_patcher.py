@@ -582,6 +582,10 @@ class NifPatchOptions:
     ``(1.0, 1.0, 1.0)`` (white) for complex-material textures that contain
     metalness data (non-black blue channel)."""
 
+    strict_unknown_shader_types: bool = False
+    """When True, fail patching if any shader block uses a non-sentinel unknown
+    raw shader-type field value.  Default remains permissive/fallback-friendly."""
+
 
 
 
@@ -600,6 +604,8 @@ class NifShaderInfo:
     parallax_scale: float | None   # None if block is not shader-type 3
     texture_paths: dict[int, str]  # slot → path
     env_map_scale: float | None = None
+    raw_shader_type: int | None = None
+    shader_type_resolution: str = "exact"
 
     # Shape-context fields — populated by scan_nif_diagnostics when a parent
     # BSTriShape-family block can be matched to this shader property.
@@ -1086,6 +1092,8 @@ class _ShaderPropBlock:
     flags1: int
     flags2: int
     shader_type: int
+    raw_shader_type: int
+    shader_type_resolution: str
     texture_set_ref: int       # block index of linked BSShaderTextureSet
     layout_shift: int
     common_end_offset: int
@@ -1194,45 +1202,45 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
     extra_shift = num_extra * 4
     raw_shader_type = buf.read_u32_at(block_start + _OFFSET_SHADER_TYPE + extra_shift)
 
-    def _decode_shader_type(raw_value: int) -> int:
+    def _decode_shader_type(raw_value: int) -> tuple[int | None, str]:
         if raw_value in _KNOWN_SHADER_TYPES:
-            return raw_value
+            return raw_value, "exact"
         # 0xFFFFFFFF is Bethesda's universal null/unset sentinel (-1 as i32).
         # Treat it as the default shader type rather than an unknown value so
         # that vanilla clutter NIFs (barrel, chest, coin, …) whose shader_type
         # field was left as 0xFFFFFFFF can still be parsed and patched.
         if raw_value == 0xFFFFFFFF:
-            return SHADER_TYPE_DEFAULT
+            return SHADER_TYPE_DEFAULT, "sentinel_default"
         low8 = raw_value & 0xFF
         if low8 in _KNOWN_SHADER_TYPES:
-            return low8
+            return low8, "masked_low8"
         low16 = raw_value & 0xFFFF
         if low16 in _KNOWN_SHADER_TYPES:
-            return low16
-        return raw_value
+            return low16, "masked_low16"
+        return None, "unknown"
 
-    def _infer_real_shader_type(flags1: int, payload_size: int) -> int | None:
+    def _infer_real_shader_type(flags1: int, payload_size: int) -> tuple[int | None, str]:
         if payload_size < 0:
-            return None
+            return None, "unknown"
         if payload_size == 0:
-            return SHADER_TYPE_DEFAULT
+            return SHADER_TYPE_DEFAULT, "real_payload_default"
         if payload_size == 4:
-            return SHADER_TYPE_ENVMAP
+            return SHADER_TYPE_ENVMAP, "real_payload_envmap"
         if payload_size == 8:
-            return SHADER_TYPE_HEIGHTMAP
+            return SHADER_TYPE_HEIGHTMAP, "real_payload_heightmap"
         if payload_size == 24:
-            return SHADER_TYPE_MULTILAYER
+            return SHADER_TYPE_MULTILAYER, "real_payload_multilayer"
         if payload_size >= 8:
             if flags1 & SLSF1_PARALLAX_OCCLUSION:
-                return SHADER_TYPE_PARALLAX_OCC
+                return SHADER_TYPE_PARALLAX_OCC, "semantic_flag_parallax_occ"
             if flags1 & SLSF1_PARALLAX:
-                return SHADER_TYPE_HEIGHTMAP
+                return SHADER_TYPE_HEIGHTMAP, "semantic_flag_parallax"
         if payload_size % 4 == 0 and payload_size <= 64:
             # Real-world Skyrim SE meshes sometimes carry additional shader
             # payload bytes we do not decode yet. Keep the block parseable so
             # scan/patch flows can still operate on flags and texture slots.
-            return SHADER_TYPE_DEFAULT
-        return None
+            return SHADER_TYPE_DEFAULT, "real_payload_default_fallback"
+        return None, "unknown"
 
     def _build_candidate(
         *,
@@ -1246,6 +1254,7 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         common_size: int,
         shader_type_offset: int | None,
         shader_type_value: int | None,
+        shader_type_resolution: str,
     ) -> tuple[int, _ShaderPropBlock] | None:
         flags1_offset = block_start + flags1_base + extra_shift
         flags2_offset = block_start + flags2_base + extra_shift
@@ -1269,6 +1278,7 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
             # that _decode_shader_type did not map to a known type).  This keeps
             # vanilla NIFs with non-standard shader_type values parseable.
             shader_type = SHADER_TYPE_DEFAULT
+            shader_type_resolution = "fallback_default"
 
         common_end = block_start + common_size + extra_shift
         payload_size = block_size - (common_size + extra_shift)
@@ -1315,7 +1325,7 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         else:
             if raw_shader_type in _KNOWN_SHADER_TYPES:
                 score += 20
-            elif _decode_shader_type(raw_shader_type) in _KNOWN_SHADER_TYPES:
+            elif (_decode_shader_type(raw_shader_type)[0] or -1) in _KNOWN_SHADER_TYPES:
                 score += 8
             if payload_size in (0, 4, 8):
                 score += 2
@@ -1331,6 +1341,8 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
             flags1=flags1,
             flags2=flags2,
             shader_type=shader_type,
+            raw_shader_type=raw_shader_type,
+            shader_type_resolution=shader_type_resolution,
             texture_set_ref=texture_set_ref,
             layout_shift=0,
             common_end_offset=common_end,
@@ -1350,7 +1362,7 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
 
     candidates: list[tuple[int, _ShaderPropBlock]] = []
     real_payload_size = block_size - (_REAL_COMMON_FIELDS_SIZE + extra_shift)
-    real_shader_type = _infer_real_shader_type(
+    real_shader_type, real_resolution = _infer_real_shader_type(
         buf.read_u32_at(block_start + _REAL_OFFSET_FLAGS1 + extra_shift),
         real_payload_size,
     )
@@ -1365,10 +1377,12 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         common_size=_REAL_COMMON_FIELDS_SIZE,
         shader_type_offset=None,
         shader_type_value=real_shader_type,
+        shader_type_resolution=real_resolution,
     )
     if real_candidate is not None:
         candidates.append(real_candidate)
 
+    legacy_shader_type, legacy_resolution = _decode_shader_type(raw_shader_type)
     legacy_candidate = _build_candidate(
         layout_name="legacy",
         flags1_base=_OFFSET_FLAGS1,
@@ -1379,7 +1393,8 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         light_eff1_base=_OFFSET_LIGHT_EFF1,
         common_size=_COMMON_FIELDS_SIZE,
         shader_type_offset=block_start + _OFFSET_SHADER_TYPE + extra_shift,
-        shader_type_value=_decode_shader_type(raw_shader_type),
+        shader_type_value=legacy_shader_type,
+        shader_type_resolution=legacy_resolution,
     )
     if legacy_candidate is not None:
         candidates.append(legacy_candidate)
@@ -1859,6 +1874,94 @@ def _build_renderer_verdicts(
     return verdicts
 
 
+def _infer_shader_type_from_semantics(flags1: int, flags2: int) -> tuple[int | None, str]:
+    """Infer shader type from flag semantics when raw shader type is unknown."""
+    if flags2 & SLSF2_GLOW_MAP:
+        return SHADER_TYPE_GLOW, "semantic_flag_glow"
+    if flags1 & SLSF1_PARALLAX_OCCLUSION:
+        return SHADER_TYPE_PARALLAX_OCC, "semantic_flag_parallax_occ"
+    if flags1 & SLSF1_PARALLAX:
+        return SHADER_TYPE_HEIGHTMAP, "semantic_flag_parallax"
+    if flags1 & SLSF1_ENVIRONMENT_MAPPING:
+        return SHADER_TYPE_ENVMAP, "semantic_flag_envmap"
+    return None, "unknown"
+
+
+def _infer_shader_type_from_textures(slot_paths: dict[int, str]) -> tuple[int | None, str]:
+    """Infer shader type from common Skyrim texture suffix patterns."""
+    slot2 = _normalise_slot_path(slot_paths.get(TEXTURE_SLOT_GLOW, ""))
+    if slot2.endswith(("_g.dds", "_sk.dds")) or slot2.endswith(_GENERIC_GLOW_ALIAS_SUFFIXES):
+        return SHADER_TYPE_GLOW, "texture_suffix_glow"
+
+    slot3 = _normalise_slot_path(slot_paths.get(TEXTURE_SLOT_PARALLAX, ""))
+    if slot3.endswith("_p.dds"):
+        return SHADER_TYPE_HEIGHTMAP, "texture_suffix_parallax"
+
+    slot5 = _normalise_slot_path(slot_paths.get(TEXTURE_SLOT_ENV_MASK, ""))
+    if slot5.endswith(_ENV_MASK_SLOT_EXPECTED_SUFFIXES):
+        return SHADER_TYPE_ENVMAP, "texture_suffix_envmask"
+
+    slot4 = _normalise_slot_path(slot_paths.get(TEXTURE_SLOT_CUBEMAP, ""))
+    if slot4.endswith(".dds"):
+        return SHADER_TYPE_ENVMAP, "texture_slot_cubemap"
+
+    slot1 = _normalise_slot_path(slot_paths.get(TEXTURE_SLOT_NORMAL, ""))
+    if slot1.endswith(("_n.dds", "_msn.dds")):
+        return SHADER_TYPE_DEFAULT, "texture_suffix_normal"
+    return None, "unknown"
+
+
+def _resolve_unknown_shader_types(
+    shader_props: list[_ShaderPropBlock],
+    texture_sets: dict[int, _TextureSetBlock],
+) -> None:
+    """Apply a permissive fallback chain for unknown raw shader types."""
+    for sp in shader_props:
+        if sp.raw_shader_type in _KNOWN_SHADER_TYPES or sp.raw_shader_type == 0xFFFFFFFF:
+            continue
+        if sp.shader_type_resolution != "fallback_default":
+            continue
+
+        shader_type, resolution = _infer_shader_type_from_semantics(sp.flags1, sp.flags2)
+        if shader_type is None:
+            ts = texture_sets.get(sp.texture_set_ref)
+            slots = {i: p for i, p in enumerate(ts.slot_paths)} if ts else {}
+            shader_type, resolution = _infer_shader_type_from_textures(slots)
+        if shader_type is None:
+            shader_type = SHADER_TYPE_DEFAULT
+            resolution = "default_fallback"
+        sp.shader_type = shader_type
+        sp.shader_type_resolution = resolution
+
+
+def _shader_resolution_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
+    notes: list[str] = []
+    for sp in shader_props:
+        if sp.raw_shader_type in _KNOWN_SHADER_TYPES:
+            continue
+        note = (
+            f"Block {sp.block_index}: raw shader_type 0x{sp.raw_shader_type:08X} "
+            f"resolved to {SHADER_TYPE_NAMES.get(sp.shader_type, sp.shader_type)} "
+            f"via {sp.shader_type_resolution}."
+        )
+        if note not in notes:
+            notes.append(note)
+    return notes
+
+
+def _strict_unknown_shader_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
+    """Return strict-mode violations for unknown non-sentinel raw shader values."""
+    violations: list[str] = []
+    for sp in shader_props:
+        if sp.raw_shader_type in _KNOWN_SHADER_TYPES or sp.raw_shader_type == 0xFFFFFFFF:
+            continue
+        violations.append(
+            f"Block {sp.block_index}: unknown raw shader_type 0x{sp.raw_shader_type:08X} "
+            f"(resolved via {sp.shader_type_resolution})."
+        )
+    return violations
+
+
 def _build_block_map(
     data: bytes,
     header: _NifHeader,
@@ -1894,6 +1997,7 @@ def _build_block_map(
             except (ValueError, struct.error, IndexError) as exc:
                 errors.append(f"Block {bi}: texture-set parse error: {exc}")
 
+    _resolve_unknown_shader_types(shader_props, texture_sets)
     return shader_props, texture_sets, errors
 
 
@@ -2366,6 +2470,12 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
 
     shader_props, texture_sets, parse_errors = _build_block_map(original_data, header)
     result.errors.extend(parse_errors)
+    result.warnings.extend(_shader_resolution_notes(shader_props))
+    strict_unknowns = _strict_unknown_shader_notes(shader_props)
+    if opts.strict_unknown_shader_types and strict_unknowns:
+        result.errors.extend(strict_unknowns)
+        result.message = "Strict unknown-shader check failed."
+        return result
     result.shader_properties_found = len(shader_props)
 
     if not shader_props:
@@ -2457,6 +2567,7 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
         )
     shader_props, texture_sets, parse_errors = _build_block_map(data, header)
     diagnostics.extend(parse_errors)
+    diagnostics.extend(_shader_resolution_notes(shader_props))
     if not shader_props:
         diagnostics.extend(_summarize_non_patchable_block_types(header))
 
@@ -2480,6 +2591,8 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
             parallax_scale=sp.parallax_scale,
             texture_paths=tex_paths,
             env_map_scale=sp.env_map_scale,
+            raw_shader_type=sp.raw_shader_type,
+            shader_type_resolution=sp.shader_type_resolution,
         )
         if shape is not None:
             info.parent_block_type = shape.block_type
@@ -3436,6 +3549,8 @@ def _main() -> None:  # pragma: no cover
                         help="Preview changes without writing.")
     parser.add_argument("--validate", action="store_true",
                         help="Just validate and report, do not patch.")
+    parser.add_argument("--strict-unknown-shader-types", action="store_true",
+                        help="Fail patching when non-sentinel unknown raw shader_type values are detected.")
 
     # ---- Safety skip options ----
     parser.add_argument("--no-skip-incompatible", action="store_true",
@@ -3557,6 +3672,7 @@ def _main() -> None:  # pragma: no cover
         env_map_scale=args.env_map_scale,
         spec_strength=args.spec_strength,
         spec_color=parsed_spec_color,
+        strict_unknown_shader_types=args.strict_unknown_shader_types,
     )
 
     ok = 0
@@ -3566,6 +3682,8 @@ def _main() -> None:  # pragma: no cover
         print(f"[{status}] {nif.name}: {res.message}")
         for err in res.errors:
             print(f"       {err}", file=sys.stderr)
+        for warning in res.warnings:
+            print(f"       warning: {warning}")
         if res.success and not res.already_up_to_date:
             ok += 1
 
