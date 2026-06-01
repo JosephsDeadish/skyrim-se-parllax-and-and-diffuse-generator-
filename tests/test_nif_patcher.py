@@ -40,8 +40,12 @@ from nif_patcher import (
     validate_nif_for_parallax,
     _Buf,
     _build_block_map,
+    _classify_shader_type_resolution,
     _renderer_compatibility,
     _read_header,
+    RESOLUTION_RESOLVED,
+    RESOLUTION_UNRESOLVED,
+    RESOLUTION_WEAK,
 )
 
 
@@ -511,6 +515,19 @@ class TestScanNif(unittest.TestCase):
         self.assertEqual(len(infos), 1)
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
         self.assertTrue(any("texture_suffix_parallax" in d for d in diagnostics), diagnostics)
+
+    def test_mapping_table_does_not_override_existing_weak_classification(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=0x12340003)
+        data = nif.read_bytes()
+        header = _read_header(_Buf(data))
+        self.assertIsNotNone(header)
+        shader_props, _, _ = _build_block_map(
+            data,
+            header,  # type: ignore[arg-type]
+            mapping_table={0x12340003: SHADER_TYPE_DEFAULT},
+        )
+        self.assertEqual(shader_props[0].shader_type_resolution, "masked_low8")
+        self.assertEqual(shader_props[0].shader_type, SHADER_TYPE_HEIGHTMAP)
 
     def test_patch_nif_with_u16_count_texture_set(self) -> None:
         """patch_nif must work correctly on a NIF whose texture set uses a u16 count."""
@@ -1046,6 +1063,49 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertTrue(
             any("WEAK_RESOLUTION" in warning and "texture_slot_cubemap" in warning for warning in result.warnings),
             result.warnings,
+        )
+
+    def test_strict_unknown_shader_texture_suffix_guess_is_weak(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_type=0x12345678,
+            texture_paths=[
+                "textures\\dungeons\\barrels\\barrel01.dds",
+                "",
+                "",
+                "textures\\dungeons\\barrels\\barrel01_p.dds",
+            ] + [""] * 5,
+        )
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertTrue(
+            any("WEAK_RESOLUTION" in warning and "texture_suffix_parallax" in warning for warning in result.warnings),
+            result.warnings,
+        )
+
+    def test_resolution_classifier_boundaries(self) -> None:
+        self.assertEqual(
+            _classify_shader_type_resolution("mapping_table").type,
+            RESOLUTION_RESOLVED,
+        )
+        self.assertEqual(
+            _classify_shader_type_resolution("texture_suffix_parallax").type,
+            RESOLUTION_WEAK,
+        )
+        self.assertEqual(
+            _classify_shader_type_resolution("default_fallback").type,
+            RESOLUTION_UNRESOLVED,
+        )
+        self.assertEqual(
+            _classify_shader_type_resolution("future_unknown_resolution").type,
+            RESOLUTION_UNRESOLVED,
         )
 
 

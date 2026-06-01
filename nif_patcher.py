@@ -585,7 +585,7 @@ class NifPatchOptions:
     strict_unknown_shader_types: bool = False
     """When True, require every unknown raw shader-type value to be explicitly
     classified via a confidence model:
-    ``RESOLVED`` (mapping table / semantic flags / validated texture signature),
+    ``RESOLVED`` (mapping table / semantic flags / validated payload inference),
     ``WEAK_RESOLUTION`` (ambiguous fallback heuristics), or ``UNRESOLVED``.
     Strict mode rejects only ``UNRESOLVED`` blocks and keeps weak resolutions as
     warnings so legacy meshes can still be patched with visibility."""
@@ -1943,22 +1943,48 @@ def _classify_shader_type_resolution(resolution: str) -> ShaderTypeResolutionRes
     if resolution.startswith("semantic_flag_"):
         return ShaderTypeResolutionResult(RESOLUTION_RESOLVED, 0.95, "semantic")
     if resolution in {
+        "real_payload_default",
+        "real_payload_envmap",
+        "real_payload_heightmap",
+        "real_payload_multilayer",
+    }:
+        return ShaderTypeResolutionResult(RESOLUTION_RESOLVED, 0.92, "payload")
+    if resolution in {
         "texture_suffix_glow",
         "texture_suffix_parallax",
         "texture_suffix_envmask",
         "texture_suffix_normal",
-    }:
-        return ShaderTypeResolutionResult(RESOLUTION_RESOLVED, 0.9, "texture")
-    if resolution in {
         "masked_low8",
         "masked_low16",
         "texture_slot_cubemap",
-        "real_payload_default",
     }:
-        return ShaderTypeResolutionResult(RESOLUTION_WEAK, 0.6, "fallback")
+        return ShaderTypeResolutionResult(RESOLUTION_WEAK, 0.65, "heuristic")
     if resolution in {"fallback_default", "default_fallback", "unknown", "real_payload_default_fallback"}:
         return ShaderTypeResolutionResult(RESOLUTION_UNRESOLVED, 0.0, "fallback")
-    return ShaderTypeResolutionResult(RESOLUTION_RESOLVED, 0.85, "fallback")
+    return ShaderTypeResolutionResult(RESOLUTION_UNRESOLVED, 0.0, "fallback")
+
+
+def _try_assign_shader_type_resolution(
+    sp: _ShaderPropBlock,
+    *,
+    shader_type: int,
+    resolution: str,
+) -> bool:
+    """Assign shader classification only if it does not downgrade confidence."""
+    current = _classify_shader_type_resolution(sp.shader_type_resolution)
+    proposed = _classify_shader_type_resolution(resolution)
+    rank = {
+        RESOLUTION_UNRESOLVED: 0,
+        RESOLUTION_WEAK: 1,
+        RESOLUTION_RESOLVED: 2,
+    }
+    if rank[proposed.type] < rank[current.type]:
+        return False
+    if rank[proposed.type] == rank[current.type] and sp.shader_type_resolution != "fallback_default":
+        return False
+    sp.shader_type = shader_type
+    sp.shader_type_resolution = resolution
+    return True
 
 
 def _resolve_unknown_shader_types(
@@ -1974,21 +2000,24 @@ def _resolve_unknown_shader_types(
     3. Texture-slot suffix inference
     4. Default fallback (``SHADER_TYPE_DEFAULT``) — sets ``"default_fallback"``
 
-    Only blocks whose ``shader_type_resolution`` is still ``"fallback_default"``
-    (i.e. not yet resolved at parse time via masked-bit decoding) are processed.
+    Only blocks still classified as ``UNRESOLVED`` are processed. Any existing
+    ``WEAK_RESOLUTION`` or ``RESOLVED`` classification is treated as immutable.
     """
     for sp in shader_props:
         if sp.raw_shader_type in _KNOWN_SHADER_TYPES or sp.raw_shader_type == 0xFFFFFFFF:
             continue
-        if sp.shader_type_resolution != "fallback_default":
+        if _classify_shader_type_resolution(sp.shader_type_resolution).type != RESOLUTION_UNRESOLVED:
             continue
 
         # 1. User-provided mapping table
         if mapping_table and sp.raw_shader_type in mapping_table:
             mapped = mapping_table[sp.raw_shader_type]
             if mapped in _KNOWN_SHADER_TYPES:
-                sp.shader_type = mapped
-                sp.shader_type_resolution = "mapping_table"
+                _try_assign_shader_type_resolution(
+                    sp,
+                    shader_type=mapped,
+                    resolution="mapping_table",
+                )
                 continue
 
         # 2. Semantic-flag inference
@@ -2005,8 +2034,11 @@ def _resolve_unknown_shader_types(
             shader_type = SHADER_TYPE_DEFAULT
             resolution = "default_fallback"
 
-        sp.shader_type = shader_type
-        sp.shader_type_resolution = resolution
+        _try_assign_shader_type_resolution(
+            sp,
+            shader_type=shader_type,
+            resolution=resolution,
+        )
 
 
 def _shader_resolution_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
@@ -2029,7 +2061,8 @@ def _shader_resolution_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
 def _strict_unknown_shader_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
     """Return strict-mode violations for unknown raw shader values with no resolution.
 
-    A block is a violation only when its normalized resolution type is
+    A block is a violation only when, after all resolution strategies complete,
+    its normalized resolution type is
     ``UNRESOLVED``. ``WEAK_RESOLUTION`` paths (e.g. masked low-byte decoding or
     cubemap-slot-only guesses) are accepted but surfaced as warnings by
     diagnostics so strict mode can avoid hard-failing legacy meshes.
