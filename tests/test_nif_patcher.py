@@ -963,6 +963,63 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertIn("Strict unknown-shader check failed", result.message)
         self.assertTrue(any("0x12345678" in e for e in result.errors), result.errors)
 
+    def test_strict_unknown_shader_resolved_by_semantic_flag_passes(self) -> None:
+        # Unknown raw shader_type but SLSF1_PARALLAX set → resolves via
+        # semantic inference → strict mode must NOT reject this block.
+        nif = _write_nif(self.tmp, shader_type=0x12345678, flags1=SLSF1_PARALLAX)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+
+    def test_strict_unknown_shader_resolved_by_envmap_flag_passes(self) -> None:
+        # Unknown raw shader_type but SLSF1_ENVIRONMENT_MAPPING set → resolves
+        # via semantic inference → strict mode must NOT reject this.
+        nif = _write_nif(self.tmp, shader_type=0x12345678, flags1=SLSF1_ENVIRONMENT_MAPPING)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+
+    def test_strict_unknown_shader_resolved_by_mapping_table_passes(self) -> None:
+        # Unknown raw shader_type with no flags, but a user mapping table entry
+        # → resolved via mapping_table → strict mode must NOT reject this.
+        nif = _write_nif(self.tmp, shader_type=0x12345678)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                unknown_shader_type_map={0x12345678: SHADER_TYPE_DEFAULT},
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+
+    def test_strict_unknown_shader_mapping_table_without_strict_also_works(self) -> None:
+        # The mapping table should also work in non-strict mode to guide resolution.
+        nif = _write_nif(self.tmp, shader_type=0x12345678)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=False,
+                unknown_shader_type_map={0x12345678: SHADER_TYPE_DEFAULT},
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+
 
 # ---------------------------------------------------------------------------
 # Tests: texture path patching

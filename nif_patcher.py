@@ -583,8 +583,19 @@ class NifPatchOptions:
     metalness data (non-black blue channel)."""
 
     strict_unknown_shader_types: bool = False
-    """When True, fail patching if any shader block uses a non-sentinel unknown
-    raw shader-type field value.  Default remains permissive/fallback-friendly."""
+    """When True, require every unknown raw shader-type value to be explicitly
+    resolved via the mapping table, semantic-flag inference, or texture-slot
+    inference.  A block that falls through all resolution strategies to the bare
+    ``"default_fallback"`` path is an error.  Blocks that *are* resolved by any
+    of those strategies (including the user-supplied ``unknown_shader_type_map``)
+    are accepted — unknown does not mean invalid in Skyrim SE data."""
+
+    unknown_shader_type_map: dict[int, int] | None = None
+    """Optional mapping from raw (unknown) shader-type integer values to known
+    ``SHADER_TYPE_*`` constants.  Applied as the highest-priority resolution
+    step, before semantic-flag or texture-slot inference.  Only consulted for
+    raw values that are not already in ``_KNOWN_SHADER_TYPES`` and are not the
+    ``0xFFFFFFFF`` sentinel.  Example: ``{0x12345678: SHADER_TYPE_DEFAULT}``."""
 
 
 
@@ -1914,22 +1925,47 @@ def _infer_shader_type_from_textures(slot_paths: dict[int, str]) -> tuple[int | 
 def _resolve_unknown_shader_types(
     shader_props: list[_ShaderPropBlock],
     texture_sets: dict[int, _TextureSetBlock],
+    mapping_table: dict[int, int] | None = None,
 ) -> None:
-    """Apply a permissive fallback chain for unknown raw shader types."""
+    """Apply a resolution chain for unknown raw shader types.
+
+    Resolution priority (highest to lowest):
+    1. User-supplied *mapping_table* (``raw_value → known SHADER_TYPE_*``)
+    2. Semantic-flag inference (parallax / env-map / glow flags)
+    3. Texture-slot suffix inference
+    4. Default fallback (``SHADER_TYPE_DEFAULT``) — sets ``"default_fallback"``
+
+    Only blocks whose ``shader_type_resolution`` is still ``"fallback_default"``
+    (i.e. not yet resolved at parse time via masked-bit decoding) are processed.
+    """
     for sp in shader_props:
         if sp.raw_shader_type in _KNOWN_SHADER_TYPES or sp.raw_shader_type == 0xFFFFFFFF:
             continue
         if sp.shader_type_resolution != "fallback_default":
             continue
 
+        # 1. User-provided mapping table
+        if mapping_table and sp.raw_shader_type in mapping_table:
+            mapped = mapping_table[sp.raw_shader_type]
+            if mapped in _KNOWN_SHADER_TYPES:
+                sp.shader_type = mapped
+                sp.shader_type_resolution = "mapping_table"
+                continue
+
+        # 2. Semantic-flag inference
         shader_type, resolution = _infer_shader_type_from_semantics(sp.flags1, sp.flags2)
+
+        # 3. Texture-slot suffix inference
         if shader_type is None:
             ts = texture_sets.get(sp.texture_set_ref)
             slots = {i: p for i, p in enumerate(ts.slot_paths)} if ts else {}
             shader_type, resolution = _infer_shader_type_from_textures(slots)
+
+        # 4. Final fallback
         if shader_type is None:
             shader_type = SHADER_TYPE_DEFAULT
             resolution = "default_fallback"
+
         sp.shader_type = shader_type
         sp.shader_type_resolution = resolution
 
@@ -1950,14 +1986,27 @@ def _shader_resolution_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
 
 
 def _strict_unknown_shader_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
-    """Return strict-mode violations for unknown non-sentinel raw shader values."""
+    """Return strict-mode violations for unknown raw shader values with no resolution.
+
+    A block is a violation only when its ``shader_type_resolution`` is
+    ``"default_fallback"``, meaning every resolution strategy (mapping table,
+    semantic-flag inference, and texture-slot inference) failed to identify the
+    type.  Blocks that are explicitly resolved — even from an unknown raw value
+    — are *not* violations, because unknown does not mean invalid in Skyrim SE.
+    """
     violations: list[str] = []
     for sp in shader_props:
         if sp.raw_shader_type in _KNOWN_SHADER_TYPES or sp.raw_shader_type == 0xFFFFFFFF:
             continue
+        if sp.shader_type_resolution != "default_fallback":
+            # Resolved via mapping_table / semantic inference / texture suffixes:
+            # not a strict-mode violation.
+            continue
         violations.append(
             f"Block {sp.block_index}: unknown raw shader_type 0x{sp.raw_shader_type:08X} "
-            f"(resolved via {sp.shader_type_resolution})."
+            f"could not be resolved (no mapping table entry, no semantic flag match, "
+            f"no texture-slot match). Add an explicit entry to unknown_shader_type_map "
+            f"or check the NIF for corruption."
         )
     return violations
 
@@ -1965,6 +2014,7 @@ def _strict_unknown_shader_notes(shader_props: list[_ShaderPropBlock]) -> list[s
 def _build_block_map(
     data: bytes,
     header: _NifHeader,
+    mapping_table: dict[int, int] | None = None,
 ) -> tuple[list[_ShaderPropBlock], dict[int, _TextureSetBlock], list[str]]:
     """Return (shader_props, texture_sets, errors)."""
     block_starts = _compute_block_starts(header.blocks_start, header.block_sizes)
@@ -1997,7 +2047,7 @@ def _build_block_map(
             except (ValueError, struct.error, IndexError) as exc:
                 errors.append(f"Block {bi}: texture-set parse error: {exc}")
 
-    _resolve_unknown_shader_types(shader_props, texture_sets)
+    _resolve_unknown_shader_types(shader_props, texture_sets, mapping_table)
     return shader_props, texture_sets, errors
 
 
@@ -2468,7 +2518,9 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         result.message = header_diagnostics[0]
         return result
 
-    shader_props, texture_sets, parse_errors = _build_block_map(original_data, header)
+    shader_props, texture_sets, parse_errors = _build_block_map(
+        original_data, header, opts.unknown_shader_type_map
+    )
     result.errors.extend(parse_errors)
     result.warnings.extend(_shader_resolution_notes(shader_props))
     strict_unknowns = _strict_unknown_shader_notes(shader_props)
@@ -3550,7 +3602,19 @@ def _main() -> None:  # pragma: no cover
     parser.add_argument("--validate", action="store_true",
                         help="Just validate and report, do not patch.")
     parser.add_argument("--strict-unknown-shader-types", action="store_true",
-                        help="Fail patching when non-sentinel unknown raw shader_type values are detected.")
+                        help="Fail patching only when an unknown raw shader_type value "
+                             "cannot be resolved by any strategy (mapping table, "
+                             "semantic-flag inference, or texture-slot inference). "
+                             "Unknown types that ARE resolved by one of those strategies "
+                             "are accepted — use --unknown-shader-type-map for explicit "
+                             "overrides.")
+    parser.add_argument("--unknown-shader-type-map", nargs="*", default=None,
+                        metavar="RAW:TYPE",
+                        help="Explicit mapping from unknown raw shader-type values to "
+                             "known SHADER_TYPE_* constants. Provide one or more "
+                             "RAW:TYPE pairs where both values are integers (decimal or "
+                             "0x-prefixed hex). Example: "
+                             "--unknown-shader-type-map 0x12345678:0 305419896:3")
 
     # ---- Safety skip options ----
     parser.add_argument("--no-skip-incompatible", action="store_true",
@@ -3610,6 +3674,32 @@ def _main() -> None:  # pragma: no cover
                 file=sys.stderr,
             )
             sys.exit(1)
+
+    # Parse --unknown-shader-type-map
+    parsed_shader_map: dict[int, int] | None = None
+    if args.unknown_shader_type_map is not None:
+        parsed_shader_map = {}
+        for pair in args.unknown_shader_type_map:
+            try:
+                raw_str, type_str = pair.split(":", 1)
+                raw_val = int(raw_str, 0)
+                type_val = int(type_str, 0)
+                if type_val not in _KNOWN_SHADER_TYPES:
+                    print(
+                        f"Error: --unknown-shader-type-map target {type_val!r} is not a "
+                        f"known SHADER_TYPE_* constant. Known values: "
+                        f"{sorted(_KNOWN_SHADER_TYPES)}",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                parsed_shader_map[raw_val] = type_val
+            except (ValueError, TypeError):
+                print(
+                    f"Error: --unknown-shader-type-map entry {pair!r} is not a valid "
+                    f"RAW:TYPE pair. Use decimal or 0x-prefixed hex, e.g. 0x12345678:0",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
     nif_files: list[Path] = []
     for p in args.nif:
@@ -3673,6 +3763,7 @@ def _main() -> None:  # pragma: no cover
         spec_strength=args.spec_strength,
         spec_color=parsed_spec_color,
         strict_unknown_shader_types=args.strict_unknown_shader_types,
+        unknown_shader_type_map=parsed_shader_map,
     )
 
     ok = 0
