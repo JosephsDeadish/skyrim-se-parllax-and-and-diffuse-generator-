@@ -40,8 +40,12 @@ from nif_patcher import (
     validate_nif_for_parallax,
     _Buf,
     _build_block_map,
+    _classify_shader_type_resolution,
     _renderer_compatibility,
     _read_header,
+    RESOLUTION_RESOLVED,
+    RESOLUTION_UNRESOLVED,
+    RESOLUTION_WEAK,
 )
 
 
@@ -294,6 +298,11 @@ class TestScanNif(unittest.TestCase):
         infos = scan_nif(nif)
         self.assertEqual(len(infos), 1)
 
+    def test_scan_accepts_user_version_2_155(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=155)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+
     def test_scan_accepts_crlf_header_line(self) -> None:
         nif = _write_nif(self.tmp, header_line_ending=b"\r\n")
         infos = scan_nif(nif)
@@ -340,6 +349,34 @@ class TestScanNif(unittest.TestCase):
         self.assertEqual(len(infos), 1)
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
         self.assertAlmostEqual(infos[0].env_map_scale or 0.0, 2.5, places=3)
+
+    def test_scan_real_layout_tolerates_extended_shader_payload(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            flags1=SLSF1_PARALLAX,
+        )
+        raw = bytearray(nif.read_bytes())
+        header = _read_header(_Buf(bytes(raw)))
+        self.assertIsNotNone(header)
+        assert header is not None
+        block_starts = [header.blocks_start]
+        for size in header.block_sizes[:-1]:
+            block_starts.append(block_starts[-1] + size)
+        shader_block_index = 1
+        shader_start = block_starts[shader_block_index]
+        shader_end = shader_start + header.block_sizes[shader_block_index]
+        raw[shader_end:shader_end] = struct.pack("<III", 1, 2, 3)
+        shader_size_offset = header.block_sizes_offset + shader_block_index * 4
+        struct.pack_into("<I", raw, shader_size_offset, header.block_sizes[shader_block_index] + 12)
+        nif.write_bytes(bytes(raw))
+
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertFalse(
+            any("failed to parse BSLightingShaderProperty" in line for line in diagnostics),
+            diagnostics,
+        )
 
     def test_scan_reads_texture_paths(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8
@@ -391,10 +428,106 @@ class TestScanNif(unittest.TestCase):
         self.assertNotEqual(shader_start, -1)
         struct.pack_into("<I", raw, shader_start + 4, 0xFFFFFFFF)
         nif.write_bytes(raw)
-        infos, diagnostics = scan_nif_diagnostics(nif)
-        self.assertEqual(infos, [])
+        # Must not crash and must not produce a "u32 read out of range" error.
+        # The block may be parsed successfully via the num_extra=0 fallback
+        # (because the underlying data is still valid) or rejected with a
+        # descriptive diagnostic — both outcomes are acceptable.
+        _infos, diagnostics = scan_nif_diagnostics(nif)
         self.assertFalse(any("u32 read out of range" in d.lower() for d in diagnostics))
-        self.assertTrue(any("failed to parse bslightingshaderproperty" in d.lower() for d in diagnostics))
+
+    def test_scan_parses_legacy_block_with_null_shader_type(self) -> None:
+        """Legacy BSLightingShaderProperty blocks where shader_type=0xFFFFFFFF
+        (Bethesda null/unset sentinel) must be parsed successfully, not rejected
+        with 'unsupported BSLightingShaderProperty layout'.
+
+        This reproduces vanilla clutter assets like barrel01.nif / chest01.nif
+        that use 0xFFFFFFFF as a null shader-type field.
+        """
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=["textures\\dungeons\\barrels\\barrel01_d.dds"] + [""] * 8,
+        )
+        raw = bytearray(nif.read_bytes())
+        # Find the shader_type field in the legacy block (NiObjectNET header is
+        # 12 bytes, so shader_type is at block_start+12) and overwrite it.
+        shader_header = struct.pack("<IIiI", 0, 0, -1, SHADER_TYPE_DEFAULT)
+        shader_start = raw.find(shader_header)
+        self.assertNotEqual(shader_start, -1, "could not locate legacy shader block")
+        # Overwrite shader_type (offset +12 from block start) with 0xFFFFFFFF
+        struct.pack_into("<I", raw, shader_start + 12, 0xFFFFFFFF)
+        nif.write_bytes(bytes(raw))
+
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        layout_errors = [d for d in diagnostics if "unsupported bslightingshaderproperty" in d.lower()]
+        self.assertEqual(
+            layout_errors, [],
+            msg=f"Parser rejected 0xFFFFFFFF shader_type: {layout_errors}",
+        )
+        self.assertEqual(len(infos), 1, f"Expected 1 shader info, diagnostics: {diagnostics}")
+        self.assertEqual(
+            infos[0].texture_paths.get(TEXTURE_SLOT_DIFFUSE),
+            "textures\\dungeons\\barrels\\barrel01_d.dds",
+        )
+
+    def test_patch_succeeds_on_legacy_block_with_null_shader_type(self) -> None:
+        """patch_nif must be able to write texture paths on a legacy block
+        whose shader_type was left as the 0xFFFFFFFF null sentinel (e.g. vanilla
+        clutter NIFs such as barrel01.nif / coin01.nif).
+        """
+        nif = _write_nif(self.tmp)
+        raw = bytearray(nif.read_bytes())
+        shader_header = struct.pack("<IIiI", 0, 0, -1, SHADER_TYPE_DEFAULT)
+        shader_start = raw.find(shader_header)
+        self.assertNotEqual(shader_start, -1)
+        struct.pack_into("<I", raw, shader_start + 12, 0xFFFFFFFF)
+        nif.write_bytes(bytes(raw))
+
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_texture_path="textures\\dungeons\\barrels\\barrel01_p.dds",
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(
+            infos[0].texture_paths.get(TEXTURE_SLOT_PARALLAX),
+            "textures\\dungeons\\barrels\\barrel01_p.dds",
+        )
+
+    def test_scan_reports_unknown_shader_fallback(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=0x12345678)
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
+        self.assertTrue(any("0x12345678" in d for d in diagnostics), diagnostics)
+
+    def test_scan_uses_texture_suffix_inference_for_unknown_shader(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_type=0x12345678,
+            texture_paths=["textures\\dungeons\\barrels\\barrel01.dds", "", "", "textures\\dungeons\\barrels\\barrel01_p.dds"] + [""] * 5,
+        )
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+        self.assertTrue(any("texture_suffix_parallax" in d for d in diagnostics), diagnostics)
+
+    def test_mapping_table_does_not_override_existing_weak_classification(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=0x12340003)
+        data = nif.read_bytes()
+        header = _read_header(_Buf(data))
+        self.assertIsNotNone(header)
+        shader_props, _, _ = _build_block_map(
+            data,
+            header,  # type: ignore[arg-type]
+            mapping_table={0x12340003: SHADER_TYPE_DEFAULT},
+        )
+        self.assertEqual(shader_props[0].shader_type_resolution, "masked_low8")
+        self.assertEqual(shader_props[0].shader_type, SHADER_TYPE_HEIGHTMAP)
 
     def test_patch_nif_with_u16_count_texture_set(self) -> None:
         """patch_nif must work correctly on a NIF whose texture set uses a u16 count."""
@@ -832,6 +965,148 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertTrue(result.success, result.errors)
         infos = scan_nif(nif)
         self.assertFalse(infos[0].has_env_mapping_flag)
+
+    def test_strict_unknown_shader_types_fails_patch(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=0x12345678)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                backup=False,
+            ),
+        )
+        self.assertFalse(result.success)
+        self.assertIn("Strict unknown-shader check failed", result.message)
+        self.assertTrue(any("0x12345678" in e for e in result.errors), result.errors)
+
+    def test_strict_unknown_shader_resolved_by_semantic_flag_passes(self) -> None:
+        # Unknown raw shader_type but SLSF1_PARALLAX set → resolves via
+        # semantic inference → strict mode must NOT reject this block.
+        nif = _write_nif(self.tmp, shader_type=0x12345678, flags1=SLSF1_PARALLAX)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+
+    def test_strict_unknown_shader_resolved_by_envmap_flag_passes(self) -> None:
+        # Unknown raw shader_type but SLSF1_ENVIRONMENT_MAPPING set → resolves
+        # via semantic inference → strict mode must NOT reject this.
+        nif = _write_nif(self.tmp, shader_type=0x12345678, flags1=SLSF1_ENVIRONMENT_MAPPING)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+
+    def test_strict_unknown_shader_resolved_by_mapping_table_passes(self) -> None:
+        # Unknown raw shader_type with no flags, but a user mapping table entry
+        # → resolved via mapping_table → strict mode must NOT reject this.
+        nif = _write_nif(self.tmp, shader_type=0x12345678)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                unknown_shader_type_map={0x12345678: SHADER_TYPE_DEFAULT},
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+
+    def test_strict_unknown_shader_mapping_table_without_strict_also_works(self) -> None:
+        # The mapping table should also work in non-strict mode to guide resolution.
+        nif = _write_nif(self.tmp, shader_type=0x12345678)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=False,
+                unknown_shader_type_map={0x12345678: SHADER_TYPE_DEFAULT},
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+
+    def test_strict_unknown_shader_weak_texture_guess_warns_but_passes(self) -> None:
+        # Slot-4-only cubemap inference is intentionally weak; strict mode should
+        # still pass while surfacing WEAK_RESOLUTION in diagnostics.
+        nif = _write_nif(
+            self.tmp,
+            shader_type=0x12345678,
+            texture_paths=[
+                "textures\\dungeons\\barrels\\barrel01.dds",
+                "",
+                "",
+                "",
+                "textures\\cubemaps\\custom_cube.dds",
+            ] + [""] * 4,
+        )
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertTrue(
+            any("WEAK_RESOLUTION" in warning and "texture_slot_cubemap" in warning for warning in result.warnings),
+            result.warnings,
+        )
+
+    def test_strict_unknown_shader_texture_suffix_guess_is_weak(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_type=0x12345678,
+            texture_paths=[
+                "textures\\dungeons\\barrels\\barrel01.dds",
+                "",
+                "",
+                "textures\\dungeons\\barrels\\barrel01_p.dds",
+            ] + [""] * 5,
+        )
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertTrue(
+            any("WEAK_RESOLUTION" in warning and "texture_suffix_parallax" in warning for warning in result.warnings),
+            result.warnings,
+        )
+
+    def test_resolution_classifier_boundaries(self) -> None:
+        self.assertEqual(
+            _classify_shader_type_resolution("mapping_table").type,
+            RESOLUTION_RESOLVED,
+        )
+        self.assertEqual(
+            _classify_shader_type_resolution("texture_suffix_parallax").type,
+            RESOLUTION_WEAK,
+        )
+        self.assertEqual(
+            _classify_shader_type_resolution("default_fallback").type,
+            RESOLUTION_UNRESOLVED,
+        )
+        self.assertEqual(
+            _classify_shader_type_resolution("future_unknown_resolution").type,
+            RESOLUTION_UNRESOLVED,
+        )
 
 
 # ---------------------------------------------------------------------------

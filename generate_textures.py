@@ -10456,16 +10456,22 @@ if GUI_AVAILABLE:
                 self._add_tooltip(copy_all_button, "📦 Copies every row in one go for logs/changelists.")
                 self._add_tooltip(close_button, "🚪 Closes this window. Your NIFs will not feel abandoned.")
 
-                def _apply_nif_editor_initial_pane_layout() -> None:
+                def _apply_nif_editor_initial_pane_layout(attempt: int = 0) -> None:
                     try:
                         if not win.winfo_exists():
                             return
                         win.update_idletasks()
+                        pane_height = content_pane.winfo_height()
+                        if pane_height <= 1 and attempt < 6:
+                            win.after(80, lambda: _apply_nif_editor_initial_pane_layout(attempt + 1))
+                            return
                         controls_height = _compute_nif_editor_controls_pane_height(
                             window_height=max(content_pane.winfo_height(), win.winfo_height()),
                             controls_requested_height=controls_wrapper.winfo_reqheight() + 24,
                             footer_height=footer_frame.winfo_reqheight(),
                         )
+                        max_sash = max(340, pane_height - 180)
+                        controls_height = min(controls_height, max_sash)
                         content_pane.sashpos(0, controls_height)
                     except Exception:
                         pass

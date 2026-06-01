@@ -1,7 +1,8 @@
-"""Skyrim SE NIF file patcher (v0.8).
+"""Skyrim NIF file patcher (v0.8).
 
-Reads Skyrim SE NIF files (format 20.2.0.7, user_version=12,
-user_version_2=83/100) and patches ``BSLightingShaderProperty`` shader flags and
+Reads Skyrim NIF files (format 20.2.0.7, user_version=12,
+covering LE/SE/AE/VR/CK ``user_version_2`` variants) and patches
+``BSLightingShaderProperty`` shader flags and
 ``BSShaderTextureSet`` texture paths to enable parallax, environment
 mapping, and ENB complex-material effects on meshes that shipped without
 those flags.
@@ -56,12 +57,14 @@ _SKYRIM_SE_USER_VERSION_2: int = 83
 _SKYRIM_SE_USER_VERSION_2_ALT: int = 100
 _SKYRIM_SE_USER_VERSION_2_CK: int = 130
 _SKYRIM_LE_USER_VERSION_2: int = 34
-_SUPPORTED_USER_VERSION_2: tuple[int, ...] = (
+_KNOWN_SKYRIM_USER_VERSION_2: tuple[int, ...] = (
     _SKYRIM_SE_USER_VERSION_2,
     _SKYRIM_SE_USER_VERSION_2_ALT,
     _SKYRIM_SE_USER_VERSION_2_CK,
     _SKYRIM_LE_USER_VERSION_2,
 )
+_SKYRIM_USER_VERSION_2_MIN: int = _SKYRIM_LE_USER_VERSION_2
+_SKYRIM_USER_VERSION_2_MAX: int = 255
 
 _HEADER_PREFIXES: tuple[bytes, ...] = (
     b"Gamebryo File Format, Version 20.2.0.7",
@@ -579,6 +582,21 @@ class NifPatchOptions:
     ``(1.0, 1.0, 1.0)`` (white) for complex-material textures that contain
     metalness data (non-black blue channel)."""
 
+    strict_unknown_shader_types: bool = False
+    """When True, require every unknown raw shader-type value to be explicitly
+    classified via a confidence model:
+    ``RESOLVED`` (mapping table / semantic flags / validated payload inference),
+    ``WEAK_RESOLUTION`` (ambiguous fallback heuristics), or ``UNRESOLVED``.
+    Strict mode rejects only ``UNRESOLVED`` blocks and keeps weak resolutions as
+    warnings so legacy meshes can still be patched with visibility."""
+
+    unknown_shader_type_map: dict[int, int] | None = None
+    """Optional mapping from raw (unknown) shader-type integer values to known
+    ``SHADER_TYPE_*`` constants.  Applied as the highest-priority resolution
+    step, before semantic-flag or texture-slot inference.  Only consulted for
+    raw values that are not already in ``_KNOWN_SHADER_TYPES`` and are not the
+    ``0xFFFFFFFF`` sentinel.  Example: ``{0x12345678: SHADER_TYPE_DEFAULT}``."""
+
 
 
 
@@ -597,6 +615,8 @@ class NifShaderInfo:
     parallax_scale: float | None   # None if block is not shader-type 3
     texture_paths: dict[int, str]  # slot → path
     env_map_scale: float | None = None
+    raw_shader_type: int | None = None
+    shader_type_resolution: str = "exact"
 
     # Shape-context fields — populated by scan_nif_diagnostics when a parent
     # BSTriShape-family block can be matched to this shader property.
@@ -699,6 +719,20 @@ class NifShaderInfo:
     def shader_type_name(self) -> str:
         """Human-readable name of the shader type (e.g. ``'Heightmap (Parallax)'``)."""
         return SHADER_TYPE_NAMES.get(self.shader_type, f"Unknown ({self.shader_type})")
+
+
+RESOLUTION_RESOLVED: str = "RESOLVED"
+RESOLUTION_WEAK: str = "WEAK_RESOLUTION"
+RESOLUTION_UNRESOLVED: str = "UNRESOLVED"
+
+
+@dataclass(frozen=True)
+class ShaderTypeResolutionResult:
+    """Normalized confidence metadata for shader-type resolution paths."""
+
+    type: str
+    confidence: float
+    method: str
 
 
 @dataclass
@@ -913,9 +947,7 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
             return diagnostics
         user_version = struct.unpack_from("<I", data, version_offset + 5)[0]
         user_version_2 = struct.unpack_from("<I", data, version_offset + 13)[0]
-        if user_version_2 == _SKYRIM_LE_USER_VERSION_2:
-            diagnostics.append("This looks like a Skyrim Legendary Edition / Oldrim NIF. Convert it to SSE before patching.")
-        elif user_version != _SKYRIM_USER_VERSION or user_version_2 not in _SUPPORTED_USER_VERSION_2:
+        if user_version != _SKYRIM_USER_VERSION or not _is_supported_skyrim_user_version_2(user_version_2):
             diagnostics.append(
                 f"Unexpected user version values ({user_version}, {user_version_2}). The file may use a different game/export format."
             )
@@ -939,6 +971,13 @@ def _has_supported_header_prefix(header_line: bytes) -> bool:
     """Return True when the header line starts with a known Skyrim NIF prefix."""
     normalized = header_line.rstrip(b"\r\n\x00 ")
     return any(normalized.startswith(prefix) for prefix in _HEADER_PREFIXES)
+
+
+def _is_supported_skyrim_user_version_2(user_version_2: int) -> bool:
+    """Return True when *user_version_2* matches Skyrim LE/SE/AE/VR/CK exports."""
+    if user_version_2 in _KNOWN_SKYRIM_USER_VERSION_2:
+        return True
+    return _SKYRIM_USER_VERSION_2_MIN <= user_version_2 <= _SKYRIM_USER_VERSION_2_MAX
 
 
 def _summarize_non_patchable_block_types(header: _NifHeader) -> list[str]:
@@ -973,7 +1012,7 @@ def _summarize_non_patchable_block_types(header: _NifHeader) -> list[str]:
 
 
 def _read_header(buf: _Buf) -> _NifHeader | None:
-    """Parse the NIF header; return ``None`` if not a supported Skyrim SE NIF."""
+    """Parse the NIF header; return ``None`` if not a supported Skyrim NIF."""
     header_line: bytearray = bytearray()
     while buf.remaining() > 0:
         b = buf.read_u8()
@@ -1012,7 +1051,7 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
     # (notably CK-style 130 headers), causing real blocks to be misread and
     # skipped during patching.
     user_version_2 = buf.read_u32()
-    if user_version_2 not in _SUPPORTED_USER_VERSION_2:
+    if not _is_supported_skyrim_user_version_2(user_version_2):
         return None
     buf.read_sstring_u8()  # author
     if user_version_2 > 130:
@@ -1078,6 +1117,8 @@ class _ShaderPropBlock:
     flags1: int
     flags2: int
     shader_type: int
+    raw_shader_type: int
+    shader_type_resolution: str
     texture_set_ref: int       # block index of linked BSShaderTextureSet
     layout_shift: int
     common_end_offset: int
@@ -1114,7 +1155,7 @@ class _TextureSetBlock:
 
 
 def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
-                       block_size: int, num_blocks: int) -> _ShaderPropBlock | None:
+                       block_size: int, num_blocks: int) -> _ShaderPropBlock:
     """Parse a BSLightingShaderProperty block.
 
     Layout for Skyrim/SE BSLightingShaderProperty (NIF 20.2.0.7 / user_version=12):
@@ -1131,48 +1172,100 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
       [type-3 only] parallax_max_passes 4 B + parallax_scale 4 B
     """
     block_end = block_start + block_size
-    if block_size < _REAL_COMMON_FIELDS_SIZE or block_end > len(buf._b):
-        return None
+    if block_size < _REAL_COMMON_FIELDS_SIZE:
+        raise ValueError(
+            f"block too small for BSLightingShaderProperty: "
+            f"size={block_size} < {_REAL_COMMON_FIELDS_SIZE} "
+            f"(block_start=0x{block_start:X})"
+        )
+    if block_end > len(buf._b):
+        raise ValueError(
+            f"block extends past end of file: "
+            f"block_end=0x{block_end:X} > file_size={len(buf._b)} "
+            f"(block_start=0x{block_start:X}, block_size={block_size})"
+        )
     if block_start + _OFFSET_CONTROLLER + 4 > block_end:
-        return None
+        raise ValueError(
+            f"NiObjectNET header truncated at controller field: "
+            f"block_size={block_size}, block_start=0x{block_start:X}"
+        )
 
-    num_extra = buf.read_u32_at(block_start + _OFFSET_NUM_EXTRA)
+    raw_num_extra = buf.read_u32_at(block_start + _OFFSET_NUM_EXTRA)
     max_extra_refs = max((block_size - (_REAL_OFFSET_FLAGS1 + 4)) // 4, 0)
-    if num_extra > max_extra_refs:
-        return None
-    controller_offset = block_start + _OFFSET_CONTROLLER + num_extra * 4
-    if controller_offset + 4 > block_end:
-        return None
-    controller_ref = struct.unpack_from("<i", buf._b, controller_offset)[0]
-    if controller_ref != -1 and not (0 <= controller_ref < num_blocks):
-        return None
+
+    # Try to resolve num_extra: prefer the declared value when plausible, but
+    # fall back to 0 so that blocks whose NiObjectNET header reads unexpectedly
+    # (e.g. from tools that write a non-standard or slightly offset header) can
+    # still be parsed.  The first candidate whose controller_ref also validates
+    # is used; if none work we raise with diagnostic details.
+    num_extra_candidates: list[int] = []
+    if raw_num_extra <= max_extra_refs:
+        num_extra_candidates.append(raw_num_extra)
+    if 0 not in num_extra_candidates:
+        num_extra_candidates.append(0)
+
+    num_extra: int | None = None
+    controller_ref: int = -1
+    for _try_extra in num_extra_candidates:
+        _ctrl_off = block_start + _OFFSET_CONTROLLER + _try_extra * 4
+        if _ctrl_off + 4 > block_end:
+            continue
+        _ctrl = struct.unpack_from("<i", buf._b, _ctrl_off)[0]
+        if _ctrl == -1 or (0 <= _ctrl < num_blocks):
+            num_extra = _try_extra
+            controller_ref = _ctrl
+            break
+
+    if num_extra is None:
+        raise ValueError(
+            f"NiObjectNET header unresolvable "
+            f"(raw_num_extra={raw_num_extra}, max_extra_refs={max_extra_refs}, "
+            f"block_size={block_size}, block_start=0x{block_start:X}, "
+            f"num_blocks={num_blocks})"
+        )
 
     extra_shift = num_extra * 4
     raw_shader_type = buf.read_u32_at(block_start + _OFFSET_SHADER_TYPE + extra_shift)
 
-    def _decode_shader_type(raw_value: int) -> int:
+    def _decode_shader_type(raw_value: int) -> tuple[int | None, str]:
         if raw_value in _KNOWN_SHADER_TYPES:
-            return raw_value
+            return raw_value, "exact"
+        # 0xFFFFFFFF is Bethesda's universal null/unset sentinel (-1 as i32).
+        # Treat it as the default shader type rather than an unknown value so
+        # that vanilla clutter NIFs (barrel, chest, coin, …) whose shader_type
+        # field was left as 0xFFFFFFFF can still be parsed and patched.
+        if raw_value == 0xFFFFFFFF:
+            return SHADER_TYPE_DEFAULT, "sentinel_default"
         low8 = raw_value & 0xFF
         if low8 in _KNOWN_SHADER_TYPES:
-            return low8
+            return low8, "masked_low8"
         low16 = raw_value & 0xFFFF
         if low16 in _KNOWN_SHADER_TYPES:
-            return low16
-        return raw_value
+            return low16, "masked_low16"
+        return None, "unknown"
 
-    def _infer_real_shader_type(flags1: int, payload_size: int) -> int | None:
+    def _infer_real_shader_type(flags1: int, payload_size: int) -> tuple[int | None, str]:
         if payload_size < 0:
-            return None
+            return None, "unknown"
         if payload_size == 0:
-            return SHADER_TYPE_DEFAULT
+            return SHADER_TYPE_DEFAULT, "real_payload_default"
         if payload_size == 4:
-            return SHADER_TYPE_ENVMAP
+            return SHADER_TYPE_ENVMAP, "real_payload_envmap"
         if payload_size == 8:
-            return SHADER_TYPE_HEIGHTMAP
+            return SHADER_TYPE_HEIGHTMAP, "real_payload_heightmap"
         if payload_size == 24:
-            return SHADER_TYPE_MULTILAYER
-        return None
+            return SHADER_TYPE_MULTILAYER, "real_payload_multilayer"
+        if payload_size >= 8:
+            if flags1 & SLSF1_PARALLAX_OCCLUSION:
+                return SHADER_TYPE_PARALLAX_OCC, "semantic_flag_parallax_occ"
+            if flags1 & SLSF1_PARALLAX:
+                return SHADER_TYPE_HEIGHTMAP, "semantic_flag_parallax"
+        if payload_size % 4 == 0 and payload_size <= 64:
+            # Real-world Skyrim SE meshes sometimes carry additional shader
+            # payload bytes we do not decode yet. Keep the block parseable so
+            # scan/patch flows can still operate on flags and texture slots.
+            return SHADER_TYPE_DEFAULT, "real_payload_default_fallback"
+        return None, "unknown"
 
     def _build_candidate(
         *,
@@ -1186,6 +1279,7 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         common_size: int,
         shader_type_offset: int | None,
         shader_type_value: int | None,
+        shader_type_resolution: str,
     ) -> tuple[int, _ShaderPropBlock] | None:
         flags1_offset = block_start + flags1_base + extra_shift
         flags2_offset = block_start + flags2_base + extra_shift
@@ -1204,7 +1298,12 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
 
         shader_type = shader_type_value
         if shader_type is None or shader_type not in _KNOWN_SHADER_TYPES:
-            return None
+            # For both "real" and "legacy" layouts, fall back to DEFAULT when
+            # the shader type is unrecognised (e.g. another null-sentinel value
+            # that _decode_shader_type did not map to a known type).  This keeps
+            # vanilla NIFs with non-standard shader_type values parseable.
+            shader_type = SHADER_TYPE_DEFAULT
+            shader_type_resolution = "fallback_default"
 
         common_end = block_start + common_size + extra_shift
         payload_size = block_size - (common_size + extra_shift)
@@ -1251,7 +1350,7 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         else:
             if raw_shader_type in _KNOWN_SHADER_TYPES:
                 score += 20
-            elif _decode_shader_type(raw_shader_type) in _KNOWN_SHADER_TYPES:
+            elif (_decode_shader_type(raw_shader_type)[0] or -1) in _KNOWN_SHADER_TYPES:
                 score += 8
             if payload_size in (0, 4, 8):
                 score += 2
@@ -1267,6 +1366,8 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
             flags1=flags1,
             flags2=flags2,
             shader_type=shader_type,
+            raw_shader_type=raw_shader_type,
+            shader_type_resolution=shader_type_resolution,
             texture_set_ref=texture_set_ref,
             layout_shift=0,
             common_end_offset=common_end,
@@ -1286,7 +1387,7 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
 
     candidates: list[tuple[int, _ShaderPropBlock]] = []
     real_payload_size = block_size - (_REAL_COMMON_FIELDS_SIZE + extra_shift)
-    real_shader_type = _infer_real_shader_type(
+    real_shader_type, real_resolution = _infer_real_shader_type(
         buf.read_u32_at(block_start + _REAL_OFFSET_FLAGS1 + extra_shift),
         real_payload_size,
     )
@@ -1301,10 +1402,12 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         common_size=_REAL_COMMON_FIELDS_SIZE,
         shader_type_offset=None,
         shader_type_value=real_shader_type,
+        shader_type_resolution=real_resolution,
     )
     if real_candidate is not None:
         candidates.append(real_candidate)
 
+    legacy_shader_type, legacy_resolution = _decode_shader_type(raw_shader_type)
     legacy_candidate = _build_candidate(
         layout_name="legacy",
         flags1_base=_OFFSET_FLAGS1,
@@ -1315,7 +1418,8 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         light_eff1_base=_OFFSET_LIGHT_EFF1,
         common_size=_COMMON_FIELDS_SIZE,
         shader_type_offset=block_start + _OFFSET_SHADER_TYPE + extra_shift,
-        shader_type_value=_decode_shader_type(raw_shader_type),
+        shader_type_value=legacy_shader_type,
+        shader_type_resolution=legacy_resolution,
     )
     if legacy_candidate is not None:
         candidates.append(legacy_candidate)
@@ -1795,9 +1899,194 @@ def _build_renderer_verdicts(
     return verdicts
 
 
+def _infer_shader_type_from_semantics(flags1: int, flags2: int) -> tuple[int | None, str]:
+    """Infer shader type from flag semantics when raw shader type is unknown."""
+    if flags2 & SLSF2_GLOW_MAP:
+        return SHADER_TYPE_GLOW, "semantic_flag_glow"
+    if flags1 & SLSF1_PARALLAX_OCCLUSION:
+        return SHADER_TYPE_PARALLAX_OCC, "semantic_flag_parallax_occ"
+    if flags1 & SLSF1_PARALLAX:
+        return SHADER_TYPE_HEIGHTMAP, "semantic_flag_parallax"
+    if flags1 & SLSF1_ENVIRONMENT_MAPPING:
+        return SHADER_TYPE_ENVMAP, "semantic_flag_envmap"
+    return None, "unknown"
+
+
+def _infer_shader_type_from_textures(slot_paths: dict[int, str]) -> tuple[int | None, str]:
+    """Infer shader type from common Skyrim texture suffix patterns."""
+    slot2 = _normalise_slot_path(slot_paths.get(TEXTURE_SLOT_GLOW, ""))
+    if slot2.endswith(("_g.dds", "_sk.dds")) or slot2.endswith(_GENERIC_GLOW_ALIAS_SUFFIXES):
+        return SHADER_TYPE_GLOW, "texture_suffix_glow"
+
+    slot3 = _normalise_slot_path(slot_paths.get(TEXTURE_SLOT_PARALLAX, ""))
+    if slot3.endswith("_p.dds"):
+        return SHADER_TYPE_HEIGHTMAP, "texture_suffix_parallax"
+
+    slot5 = _normalise_slot_path(slot_paths.get(TEXTURE_SLOT_ENV_MASK, ""))
+    if slot5.endswith(_ENV_MASK_SLOT_EXPECTED_SUFFIXES):
+        return SHADER_TYPE_ENVMAP, "texture_suffix_envmask"
+
+    slot4 = _normalise_slot_path(slot_paths.get(TEXTURE_SLOT_CUBEMAP, ""))
+    if slot4.endswith(".dds"):
+        return SHADER_TYPE_ENVMAP, "texture_slot_cubemap"
+
+    slot1 = _normalise_slot_path(slot_paths.get(TEXTURE_SLOT_NORMAL, ""))
+    if slot1.endswith(("_n.dds", "_msn.dds")):
+        return SHADER_TYPE_DEFAULT, "texture_suffix_normal"
+    return None, "unknown"
+
+
+def _classify_shader_type_resolution(resolution: str) -> ShaderTypeResolutionResult:
+    """Classify a resolution path as resolved/weak/unresolved with confidence."""
+    if resolution == "mapping_table":
+        return ShaderTypeResolutionResult(RESOLUTION_RESOLVED, 1.0, "mapping")
+    if resolution.startswith("semantic_flag_"):
+        return ShaderTypeResolutionResult(RESOLUTION_RESOLVED, 0.95, "semantic")
+    if resolution in {
+        "real_payload_default",
+        "real_payload_envmap",
+        "real_payload_heightmap",
+        "real_payload_multilayer",
+    }:
+        return ShaderTypeResolutionResult(RESOLUTION_RESOLVED, 0.92, "payload")
+    if resolution in {
+        "texture_suffix_glow",
+        "texture_suffix_parallax",
+        "texture_suffix_envmask",
+        "texture_suffix_normal",
+        "masked_low8",
+        "masked_low16",
+        "texture_slot_cubemap",
+    }:
+        return ShaderTypeResolutionResult(RESOLUTION_WEAK, 0.65, "heuristic")
+    if resolution in {"fallback_default", "default_fallback", "unknown", "real_payload_default_fallback"}:
+        return ShaderTypeResolutionResult(RESOLUTION_UNRESOLVED, 0.0, "fallback")
+    return ShaderTypeResolutionResult(RESOLUTION_UNRESOLVED, 0.0, "fallback")
+
+
+def _try_assign_shader_type_resolution(
+    sp: _ShaderPropBlock,
+    *,
+    shader_type: int,
+    resolution: str,
+) -> bool:
+    """Assign shader classification only if it does not downgrade confidence."""
+    current = _classify_shader_type_resolution(sp.shader_type_resolution)
+    proposed = _classify_shader_type_resolution(resolution)
+    rank = {
+        RESOLUTION_UNRESOLVED: 0,
+        RESOLUTION_WEAK: 1,
+        RESOLUTION_RESOLVED: 2,
+    }
+    if rank[proposed.type] < rank[current.type]:
+        return False
+    if rank[proposed.type] == rank[current.type] and sp.shader_type_resolution != "fallback_default":
+        return False
+    sp.shader_type = shader_type
+    sp.shader_type_resolution = resolution
+    return True
+
+
+def _resolve_unknown_shader_types(
+    shader_props: list[_ShaderPropBlock],
+    texture_sets: dict[int, _TextureSetBlock],
+    mapping_table: dict[int, int] | None = None,
+) -> None:
+    """Apply a resolution chain for unknown raw shader types.
+
+    Resolution priority (highest to lowest):
+    1. User-supplied *mapping_table* (``raw_value → known SHADER_TYPE_*``)
+    2. Semantic-flag inference (parallax / env-map / glow flags)
+    3. Texture-slot suffix inference
+    4. Default fallback (``SHADER_TYPE_DEFAULT``) — sets ``"default_fallback"``
+
+    Only blocks still classified as ``UNRESOLVED`` are processed. Any existing
+    ``WEAK_RESOLUTION`` or ``RESOLVED`` classification is treated as immutable.
+    """
+    for sp in shader_props:
+        if sp.raw_shader_type in _KNOWN_SHADER_TYPES or sp.raw_shader_type == 0xFFFFFFFF:
+            continue
+        if _classify_shader_type_resolution(sp.shader_type_resolution).type != RESOLUTION_UNRESOLVED:
+            continue
+
+        # 1. User-provided mapping table
+        if mapping_table and sp.raw_shader_type in mapping_table:
+            mapped = mapping_table[sp.raw_shader_type]
+            if mapped in _KNOWN_SHADER_TYPES:
+                _try_assign_shader_type_resolution(
+                    sp,
+                    shader_type=mapped,
+                    resolution="mapping_table",
+                )
+                continue
+
+        # 2. Semantic-flag inference
+        shader_type, resolution = _infer_shader_type_from_semantics(sp.flags1, sp.flags2)
+
+        # 3. Texture-slot suffix inference
+        if shader_type is None:
+            ts = texture_sets.get(sp.texture_set_ref)
+            slots = {i: p for i, p in enumerate(ts.slot_paths)} if ts else {}
+            shader_type, resolution = _infer_shader_type_from_textures(slots)
+
+        # 4. Final fallback
+        if shader_type is None:
+            shader_type = SHADER_TYPE_DEFAULT
+            resolution = "default_fallback"
+
+        _try_assign_shader_type_resolution(
+            sp,
+            shader_type=shader_type,
+            resolution=resolution,
+        )
+
+
+def _shader_resolution_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
+    notes: list[str] = []
+    for sp in shader_props:
+        if sp.raw_shader_type in _KNOWN_SHADER_TYPES:
+            continue
+        resolution = _classify_shader_type_resolution(sp.shader_type_resolution)
+        note = (
+            f"Block {sp.block_index}: raw shader_type 0x{sp.raw_shader_type:08X} "
+            f"resolved to {SHADER_TYPE_NAMES.get(sp.shader_type, sp.shader_type)} "
+            f"via {sp.shader_type_resolution} "
+            f"({resolution.type}, confidence={resolution.confidence:.2f}, method={resolution.method})."
+        )
+        if note not in notes:
+            notes.append(note)
+    return notes
+
+
+def _strict_unknown_shader_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
+    """Return strict-mode violations for unknown raw shader values with no resolution.
+
+    A block is a violation only when, after all resolution strategies complete,
+    its normalized resolution type is
+    ``UNRESOLVED``. ``WEAK_RESOLUTION`` paths (e.g. masked low-byte decoding or
+    cubemap-slot-only guesses) are accepted but surfaced as warnings by
+    diagnostics so strict mode can avoid hard-failing legacy meshes.
+    """
+    violations: list[str] = []
+    for sp in shader_props:
+        if sp.raw_shader_type in _KNOWN_SHADER_TYPES or sp.raw_shader_type == 0xFFFFFFFF:
+            continue
+        resolution = _classify_shader_type_resolution(sp.shader_type_resolution)
+        if resolution.type != RESOLUTION_UNRESOLVED:
+            continue
+        violations.append(
+            f"Block {sp.block_index}: unknown raw shader_type 0x{sp.raw_shader_type:08X} "
+            f"could not be resolved (no mapping table entry, no semantic flag match, "
+            f"no texture-slot match). Add an explicit entry to unknown_shader_type_map "
+            f"or check the NIF for corruption."
+        )
+    return violations
+
+
 def _build_block_map(
     data: bytes,
     header: _NifHeader,
+    mapping_table: dict[int, int] | None = None,
 ) -> tuple[list[_ShaderPropBlock], dict[int, _TextureSetBlock], list[str]]:
     """Return (shader_props, texture_sets, errors)."""
     block_starts = _compute_block_starts(header.blocks_start, header.block_sizes)
@@ -1814,12 +2103,12 @@ def _build_block_map(
         if btype == "BSLightingShaderProperty":
             try:
                 sp = _parse_shader_prop(buf, bi, bstart, bsize, header.num_blocks)
-                if sp is not None:
-                    shader_props.append(sp)
-                else:
-                    errors.append(f"Block {bi}: failed to parse BSLightingShaderProperty.")
+                shader_props.append(sp)
             except (ValueError, struct.error, IndexError) as exc:
-                errors.append(f"Block {bi}: shader parse error: {exc}")
+                errors.append(
+                    f"Block {bi}: failed to parse BSLightingShaderProperty"
+                    f" — {type(exc).__name__}: {exc}"
+                )
         elif btype == "BSShaderTextureSet":
             try:
                 ts = _parse_texture_set(buf, bi, bstart, bsize)
@@ -1830,6 +2119,7 @@ def _build_block_map(
             except (ValueError, struct.error, IndexError) as exc:
                 errors.append(f"Block {bi}: texture-set parse error: {exc}")
 
+    _resolve_unknown_shader_types(shader_props, texture_sets, mapping_table)
     return shader_props, texture_sets, errors
 
 
@@ -2300,8 +2590,16 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         result.message = header_diagnostics[0]
         return result
 
-    shader_props, texture_sets, parse_errors = _build_block_map(original_data, header)
+    shader_props, texture_sets, parse_errors = _build_block_map(
+        original_data, header, opts.unknown_shader_type_map
+    )
     result.errors.extend(parse_errors)
+    result.warnings.extend(_shader_resolution_notes(shader_props))
+    strict_unknowns = _strict_unknown_shader_notes(shader_props)
+    if opts.strict_unknown_shader_types and strict_unknowns:
+        result.errors.extend(strict_unknowns)
+        result.message = "Strict unknown-shader check failed."
+        return result
     result.shader_properties_found = len(shader_props)
 
     if not shader_props:
@@ -2393,6 +2691,7 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
         )
     shader_props, texture_sets, parse_errors = _build_block_map(data, header)
     diagnostics.extend(parse_errors)
+    diagnostics.extend(_shader_resolution_notes(shader_props))
     if not shader_props:
         diagnostics.extend(_summarize_non_patchable_block_types(header))
 
@@ -2416,6 +2715,8 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
             parallax_scale=sp.parallax_scale,
             texture_paths=tex_paths,
             env_map_scale=sp.env_map_scale,
+            raw_shader_type=sp.raw_shader_type,
+            shader_type_resolution=sp.shader_type_resolution,
         )
         if shape is not None:
             info.parent_block_type = shape.block_type
@@ -3372,6 +3673,19 @@ def _main() -> None:  # pragma: no cover
                         help="Preview changes without writing.")
     parser.add_argument("--validate", action="store_true",
                         help="Just validate and report, do not patch.")
+    parser.add_argument("--strict-unknown-shader-types", action="store_true",
+                        help="Fail patching only when an unknown raw shader_type value "
+                             "is classified as UNRESOLVED after mapping, semantic, and "
+                             "texture-signature checks. Weak heuristic resolutions are "
+                             "kept as warnings; use --unknown-shader-type-map for explicit "
+                             "overrides.")
+    parser.add_argument("--unknown-shader-type-map", nargs="*", default=None,
+                        metavar="RAW:TYPE",
+                        help="Explicit mapping from unknown raw shader-type values to "
+                             "known SHADER_TYPE_* constants. Provide one or more "
+                             "RAW:TYPE pairs where both values are integers (decimal or "
+                             "0x-prefixed hex). Example: "
+                             "--unknown-shader-type-map 0x12345678:0 305419896:3")
 
     # ---- Safety skip options ----
     parser.add_argument("--no-skip-incompatible", action="store_true",
@@ -3431,6 +3745,32 @@ def _main() -> None:  # pragma: no cover
                 file=sys.stderr,
             )
             sys.exit(1)
+
+    # Parse --unknown-shader-type-map
+    parsed_shader_map: dict[int, int] | None = None
+    if args.unknown_shader_type_map is not None:
+        parsed_shader_map = {}
+        for pair in args.unknown_shader_type_map:
+            try:
+                raw_str, type_str = pair.split(":", 1)
+                raw_val = int(raw_str, 0)
+                type_val = int(type_str, 0)
+                if type_val not in _KNOWN_SHADER_TYPES:
+                    print(
+                        f"Error: --unknown-shader-type-map target {type_val!r} is not a "
+                        f"known SHADER_TYPE_* constant. Known values: "
+                        f"{sorted(_KNOWN_SHADER_TYPES)}",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                parsed_shader_map[raw_val] = type_val
+            except (ValueError, TypeError):
+                print(
+                    f"Error: --unknown-shader-type-map entry {pair!r} is not a valid "
+                    f"RAW:TYPE pair. Use decimal or 0x-prefixed hex, e.g. 0x12345678:0",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
     nif_files: list[Path] = []
     for p in args.nif:
@@ -3493,6 +3833,8 @@ def _main() -> None:  # pragma: no cover
         env_map_scale=args.env_map_scale,
         spec_strength=args.spec_strength,
         spec_color=parsed_spec_color,
+        strict_unknown_shader_types=args.strict_unknown_shader_types,
+        unknown_shader_type_map=parsed_shader_map,
     )
 
     ok = 0
@@ -3502,6 +3844,8 @@ def _main() -> None:  # pragma: no cover
         print(f"[{status}] {nif.name}: {res.message}")
         for err in res.errors:
             print(f"       {err}", file=sys.stderr)
+        for warning in res.warnings:
+            print(f"       warning: {warning}")
         if res.success and not res.already_up_to_date:
             ok += 1
 
