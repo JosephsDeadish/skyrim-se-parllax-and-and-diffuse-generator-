@@ -355,8 +355,8 @@ _DEFAULT_PARALLAX_SCALE: float = 1.0
 # zero extra-data entries.  For each extra-data entry, add 4 bytes.
 #
 # Breakdown (Skyrim/SE BSLightingShaderProperty per nifxml):
-#   NiObjectNET : shader_type(4) + name_ref(4) + num_extra(4)
-#                 + controller_ref(4)                            = 16
+#   NiObjectNET : name_ref(4) + num_extra(4) + controller_ref(4) = 12
+#   BSLighting  : shader_type(4)                                  =  4
 #   BSShaderProp: flags1(4) + flags2(4)                          =  8
 #   uv_offset   : (8)  uv_scale: (8)                            = 16
 #   texture_set : (4)                                            =  4
@@ -369,9 +369,9 @@ _DEFAULT_PARALLAX_SCALE: float = 1.0
 _COMMON_FIELDS_SIZE: int = 100
 
 # Offsets within the common section (from block_start, 0 extra-data)
-_OFFSET_SHADER_TYPE: int = 0
-_OFFSET_NUM_EXTRA: int = 8
-_OFFSET_CONTROLLER: int = 12
+_OFFSET_NUM_EXTRA: int = 4
+_OFFSET_CONTROLLER: int = 8
+_OFFSET_SHADER_TYPE: int = 12
 _OFFSET_FLAGS1: int = 16        # block_start + 16 + 4*num_extra
 _OFFSET_FLAGS2: int = 20
 _OFFSET_TEXTURE_SET: int = 40   # after shader_type + uv_offset + uv_scale
@@ -1085,7 +1085,8 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
     """Parse a BSLightingShaderProperty block.
 
     Layout for Skyrim/SE BSLightingShaderProperty (NIF 20.2.0.7 / user_version=12):
-      NiObjectNET  16 B   shader_type + name_ref + num_extra + controller_ref
+      NiObjectNET  12 B   name_ref + num_extra + [extra_data_refs...] + controller_ref
+      shader_type   4 B
       flags1/2      8 B
       uv_offset/scale 16 B
       texture_set   4 B   (Ref — block index, i32)
@@ -1102,7 +1103,6 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
     if block_start + _OFFSET_CONTROLLER + 4 > block_end:
         return None
 
-    raw_shader_type = buf.read_u32_at(block_start + _OFFSET_SHADER_TYPE)
     num_extra = buf.read_u32_at(block_start + _OFFSET_NUM_EXTRA)
     max_extra_refs = max((block_size - (_OFFSET_FLAGS1 + 4)) // 4, 0)
     if num_extra > max_extra_refs:
@@ -1115,6 +1115,7 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         return None
 
     extra_shift = num_extra * 4
+    raw_shader_type = buf.read_u32_at(block_start + _OFFSET_SHADER_TYPE + extra_shift)
 
     def _decode_shader_type(raw_value: int) -> int:
         if raw_value in _KNOWN_SHADER_TYPES:

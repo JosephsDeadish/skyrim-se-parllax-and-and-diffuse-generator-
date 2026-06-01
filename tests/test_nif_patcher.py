@@ -70,8 +70,10 @@ def _build_shader_block(
     texture_set_ref: int = 0,
 ) -> bytes:
     """Build a single BSLightingShaderProperty block body."""
-    # Skyrim/SE BSLightingShaderProperty starts with shader_type in NiObjectNET.
-    nio = struct.pack("<IIIi", shader_type, 0, 0, -1)
+    # Skyrim/SE BSLightingShaderProperty starts with NiObjectNET, then shader_type.
+    # NiObjectNET: name_ref + num_extra + controller_ref
+    nio = struct.pack("<IIi", 0, 0, -1)
+    shader_type_field = struct.pack("<I", shader_type)
     flags = struct.pack("<II", flags1, flags2)
     uv = struct.pack("<ffff", 0.0, 0.0, 1.0, 1.0)
     tsref = struct.pack("<i", texture_set_ref)
@@ -80,7 +82,7 @@ def _build_shader_block(
     spec = struct.pack("<ffff", 1.0, 1.0, 1.0, 1.0)
     light = struct.pack("<ff", 0.3, 2.0)
 
-    body = nio + flags + uv + tsref + emit + misc + spec + light
+    body = nio + shader_type_field + flags + uv + tsref + emit + misc + spec + light
     if shader_type == SHADER_TYPE_HEIGHTMAP:
         scale = parallax_scale if parallax_scale is not None else 1.0
         body += struct.pack("<ff", 4.0, scale)
@@ -313,10 +315,10 @@ class TestScanNif(unittest.TestCase):
     def test_scan_does_not_raise_out_of_range_for_invalid_num_extra(self) -> None:
         nif = _write_nif(self.tmp)
         raw = bytearray(nif.read_bytes())
-        shader_header = struct.pack("<IIIi", SHADER_TYPE_DEFAULT, 0, 0, -1)
+        shader_header = struct.pack("<IIiI", 0, 0, -1, SHADER_TYPE_DEFAULT)
         shader_start = raw.find(shader_header)
         self.assertNotEqual(shader_start, -1)
-        struct.pack_into("<I", raw, shader_start + 8, 0xFFFFFFFF)
+        struct.pack_into("<I", raw, shader_start + 4, 0xFFFFFFFF)
         nif.write_bytes(raw)
         infos, diagnostics = scan_nif_diagnostics(nif)
         self.assertEqual(infos, [])
