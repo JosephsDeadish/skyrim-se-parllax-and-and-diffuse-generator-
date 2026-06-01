@@ -10128,6 +10128,17 @@ if GUI_AVAILABLE:
                                 if validation.suggestions:
                                     combined_detail_lines.append("Suggestions:")
                                     combined_detail_lines.extend(f"- {text}" for text in validation.suggestions)
+                                if getattr(validation, "renderer_verdicts", None):
+                                    combined_detail_lines.append("In-game renderer verdicts:")
+                                    for renderer_key, renderer_label in (
+                                        ("vanilla", "Vanilla"),
+                                        ("enb", "ENB"),
+                                        ("community_shaders", "Community Shaders"),
+                                        ("truepbr", "TruePBR"),
+                                    ):
+                                        verdict = validation.renderer_verdicts.get(renderer_key, "")
+                                        if verdict:
+                                            combined_detail_lines.append(f"- {renderer_label}: {verdict}")
                                 if validation.renderer_notes:
                                     combined_detail_lines.append("Renderer compatibility details:")
                                     for renderer_key, renderer_label in (

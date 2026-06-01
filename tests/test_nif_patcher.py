@@ -12,6 +12,7 @@ from nif_patcher import (
     SLSF1_PARALLAX,
     SLSF1_PARALLAX_OCCLUSION,
     SLSF2_GLOW_MAP,
+    SLSF2_UNUSED01,
     SLSF2_VERTEX_COLORS,
     SHADER_TYPE_DEFAULT,
     SHADER_TYPE_ENVMAP,
@@ -561,6 +562,15 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertIn("generic packed alias suffix", joined)
         self.assertIn("_rmaos/_ramos", joined)
 
+    def test_reports_blender_style_diffuse_suffix(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_DIFFUSE] = "textures\\architecture\\stone_albedo.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("blender/authoring suffix naming", joined)
+        self.assertIn("bare diffuse name", joined)
+
     def test_reports_non_dds_extension_in_parallax_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_PARALLAX] = "textures\\architecture\\stone_p.png"
@@ -580,6 +590,35 @@ class TestValidateNifForParallax(unittest.TestCase):
         joined = "\n".join(notes["truepbr"]).lower()
         self.assertIn("generic packed alias", joined)
         self.assertIn("blender/substance", joined)
+
+    def test_renderer_verdicts_explain_vanilla_ready_but_enb_not_ready(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_NORMAL] = "textures\\architecture\\stone_n.dds"
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\architecture\\stone_p.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=SLSF1_PARALLAX,
+            shader_type=SHADER_TYPE_HEIGHTMAP,
+        )
+        v = validate_nif_for_parallax(nif)
+        self.assertIn("mesh-side setup looks ready", v.renderer_verdicts["vanilla"].lower())
+        enb_verdict = v.renderer_verdicts["enb"].lower()
+        self.assertIn("won't work yet", enb_verdict)
+        self.assertIn("envmap", enb_verdict)
+        self.assertIn("model_space_normals", enb_verdict)
+
+    def test_renderer_verdicts_flag_generic_truepbr_aliases(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_NORMAL] = "textures\\pbr\\architecture\\stone_n.dds"
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\pbr\\architecture\\stone_orm.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths, flags2=SLSF2_UNUSED01)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("generic packed alias suffix", joined)
+        truepbr_verdict = v.renderer_verdicts["truepbr"].lower()
+        self.assertIn("won't work yet", truepbr_verdict)
+        self.assertIn("generic packed alias", truepbr_verdict)
 
     def test_reports_blender_style_env_mask_suffix_in_slot_five(self) -> None:
         paths = [""] * 9
