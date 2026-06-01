@@ -1197,6 +1197,12 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
     def _decode_shader_type(raw_value: int) -> int:
         if raw_value in _KNOWN_SHADER_TYPES:
             return raw_value
+        # 0xFFFFFFFF is Bethesda's universal null/unset sentinel (-1 as i32).
+        # Treat it as the default shader type rather than an unknown value so
+        # that vanilla clutter NIFs (barrel, chest, coin, …) whose shader_type
+        # field was left as 0xFFFFFFFF can still be parsed and patched.
+        if raw_value == 0xFFFFFFFF:
+            return SHADER_TYPE_DEFAULT
         low8 = raw_value & 0xFF
         if low8 in _KNOWN_SHADER_TYPES:
             return low8
@@ -1258,10 +1264,11 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
 
         shader_type = shader_type_value
         if shader_type is None or shader_type not in _KNOWN_SHADER_TYPES:
-            if layout_name == "real":
-                shader_type = SHADER_TYPE_DEFAULT
-            else:
-                return None
+            # For both "real" and "legacy" layouts, fall back to DEFAULT when
+            # the shader type is unrecognised (e.g. another null-sentinel value
+            # that _decode_shader_type did not map to a known type).  This keeps
+            # vanilla NIFs with non-standard shader_type values parseable.
+            shader_type = SHADER_TYPE_DEFAULT
 
         common_end = block_start + common_size + extra_shift
         payload_size = block_size - (common_size + extra_shift)

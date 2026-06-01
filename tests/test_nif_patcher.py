@@ -431,6 +431,68 @@ class TestScanNif(unittest.TestCase):
         _infos, diagnostics = scan_nif_diagnostics(nif)
         self.assertFalse(any("u32 read out of range" in d.lower() for d in diagnostics))
 
+    def test_scan_parses_legacy_block_with_null_shader_type(self) -> None:
+        """Legacy BSLightingShaderProperty blocks where shader_type=0xFFFFFFFF
+        (Bethesda null/unset sentinel) must be parsed successfully, not rejected
+        with 'unsupported BSLightingShaderProperty layout'.
+
+        This reproduces vanilla clutter assets like barrel01.nif / chest01.nif
+        that use 0xFFFFFFFF as a null shader-type field.
+        """
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=["textures\\dungeons\\barrels\\barrel01_d.dds"] + [""] * 8,
+        )
+        raw = bytearray(nif.read_bytes())
+        # Find the shader_type field in the legacy block (NiObjectNET header is
+        # 12 bytes, so shader_type is at block_start+12) and overwrite it.
+        shader_header = struct.pack("<IIiI", 0, 0, -1, SHADER_TYPE_DEFAULT)
+        shader_start = raw.find(shader_header)
+        self.assertNotEqual(shader_start, -1, "could not locate legacy shader block")
+        # Overwrite shader_type (offset +12 from block start) with 0xFFFFFFFF
+        struct.pack_into("<I", raw, shader_start + 12, 0xFFFFFFFF)
+        nif.write_bytes(bytes(raw))
+
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        layout_errors = [d for d in diagnostics if "unsupported bslightingshaderproperty" in d.lower()]
+        self.assertEqual(
+            layout_errors, [],
+            msg=f"Parser rejected 0xFFFFFFFF shader_type: {layout_errors}",
+        )
+        self.assertEqual(len(infos), 1, f"Expected 1 shader info, diagnostics: {diagnostics}")
+        self.assertEqual(
+            infos[0].texture_paths.get(TEXTURE_SLOT_DIFFUSE),
+            "textures\\dungeons\\barrels\\barrel01_d.dds",
+        )
+
+    def test_patch_succeeds_on_legacy_block_with_null_shader_type(self) -> None:
+        """patch_nif must be able to write texture paths on a legacy block
+        whose shader_type was left as the 0xFFFFFFFF null sentinel (e.g. vanilla
+        clutter NIFs such as barrel01.nif / coin01.nif).
+        """
+        nif = _write_nif(self.tmp)
+        raw = bytearray(nif.read_bytes())
+        shader_header = struct.pack("<IIiI", 0, 0, -1, SHADER_TYPE_DEFAULT)
+        shader_start = raw.find(shader_header)
+        self.assertNotEqual(shader_start, -1)
+        struct.pack_into("<I", raw, shader_start + 12, 0xFFFFFFFF)
+        nif.write_bytes(bytes(raw))
+
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_texture_path="textures\\dungeons\\barrels\\barrel01_p.dds",
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(
+            infos[0].texture_paths.get(TEXTURE_SLOT_PARALLAX),
+            "textures\\dungeons\\barrels\\barrel01_p.dds",
+        )
 
     def test_patch_nif_with_u16_count_texture_set(self) -> None:
         """patch_nif must work correctly on a NIF whose texture set uses a u16 count."""
