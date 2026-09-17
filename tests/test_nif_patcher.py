@@ -936,6 +936,16 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
         self.assertTrue(infos[0].has_parallax_flag)
 
+    def test_enable_parallax_preserves_unknown_raw_shader_value(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=0x12345678)
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(infos[0].raw_shader_type, 0x12345678)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+        self.assertTrue(infos[0].has_parallax_flag)
+        self.assertTrue(any("0x12345678" in d for d in diagnostics), diagnostics)
+
     def test_enable_env_mapping_sets_flag(self) -> None:
         nif = _write_nif(self.tmp)
         result = patch_nif(nif, NifPatchOptions(enable_env_mapping=True, backup=False))

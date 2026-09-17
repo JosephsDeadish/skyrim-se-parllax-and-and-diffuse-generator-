@@ -2325,6 +2325,10 @@ def _apply_patches(
                 sp.shader_type_offset is not None
                 and sp.shader_type == SHADER_TYPE_DEFAULT
                 and not (sp.flags1 & SLSF1_PARALLAX)
+                and (
+                    sp.raw_shader_type in (SHADER_TYPE_DEFAULT, 0xFFFFFFFF)
+                    or sp.shader_type_resolution in {"exact", "sentinel_default"}
+                )
             ):
                 # Align legacy-layout behavior with common patchers: when
                 # enabling parallax on default shaders, set shader type
