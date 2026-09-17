@@ -928,6 +928,14 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
         self.assertTrue(infos[0].has_parallax_flag)
 
+    def test_enable_parallax_does_not_retype_envmap_block(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP)
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
+        self.assertTrue(infos[0].has_parallax_flag)
+
     def test_enable_env_mapping_sets_flag(self) -> None:
         nif = _write_nif(self.tmp)
         result = patch_nif(nif, NifPatchOptions(enable_env_mapping=True, backup=False))

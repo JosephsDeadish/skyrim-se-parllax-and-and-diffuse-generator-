@@ -2323,7 +2323,7 @@ def _apply_patches(
         if enabling_parallax:
             if (
                 sp.shader_type_offset is not None
-                and sp.shader_type in (SHADER_TYPE_DEFAULT, SHADER_TYPE_ENVMAP)
+                and sp.shader_type == SHADER_TYPE_DEFAULT
                 and not (sp.flags1 & SLSF1_PARALLAX)
             ):
                 # Align legacy-layout behavior with common patchers: when
@@ -2651,8 +2651,9 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
                 fallback_shader_props, fallback_texture_sets, fallback_parse_errors = _build_block_map(
                     original_data, header, fallback_opts.unknown_shader_type_map
                 )
-                result.errors.extend(fallback_parse_errors)
                 if not fallback_shader_props:
+                    if fallback_parse_errors:
+                        result.errors.extend(fallback_parse_errors)
                     if fallback_parse_errors:
                         result.message = f"No patchable BSLightingShaderProperty blocks found ({fallback_parse_errors[0]})."
                     else:
