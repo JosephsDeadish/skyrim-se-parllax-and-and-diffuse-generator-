@@ -384,6 +384,33 @@ class TestScanNif(unittest.TestCase):
             diagnostics,
         )
 
+    def test_scan_real_layout_extended_envmap_payload_keeps_envmap(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            env_map_scale=1.0,
+        )
+        raw = bytearray(nif.read_bytes())
+        header = _read_header(_Buf(bytes(raw)))
+        self.assertIsNotNone(header)
+        assert header is not None
+        block_starts = [header.blocks_start]
+        for size in header.block_sizes[:-1]:
+            block_starts.append(block_starts[-1] + size)
+        shader_block_index = 1
+        shader_start = block_starts[shader_block_index]
+        shader_end = shader_start + header.block_sizes[shader_block_index]
+        raw[shader_end:shader_end] = struct.pack("<I", 1234)
+        shader_size_offset = header.block_sizes_offset + shader_block_index * 4
+        struct.pack_into("<I", raw, shader_size_offset, header.block_sizes[shader_block_index] + 4)
+        nif.write_bytes(bytes(raw))
+
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
+
     def test_scan_reads_texture_paths(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8
         nif = _write_nif(self.tmp, texture_paths=paths)

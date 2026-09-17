@@ -1244,6 +1244,12 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
     def _infer_real_shader_type(flags1: int, payload_size: int) -> tuple[int | None, str]:
         if payload_size < 0:
             return None, "unknown"
+        if payload_size >= 8 and (flags1 & SLSF1_PARALLAX_OCCLUSION):
+            return SHADER_TYPE_PARALLAX_OCC, "semantic_flag_parallax_occ"
+        if payload_size >= 8 and (flags1 & SLSF1_PARALLAX):
+            return SHADER_TYPE_HEIGHTMAP, "semantic_flag_parallax"
+        if payload_size >= 4 and (flags1 & SLSF1_ENVIRONMENT_MAPPING):
+            return SHADER_TYPE_ENVMAP, "semantic_flag_envmap"
         if payload_size == 0:
             return SHADER_TYPE_DEFAULT, "real_payload_default"
         if payload_size == 4:
@@ -1252,11 +1258,6 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
             return SHADER_TYPE_HEIGHTMAP, "real_payload_heightmap"
         if payload_size == 24:
             return SHADER_TYPE_MULTILAYER, "real_payload_multilayer"
-        if payload_size >= 8:
-            if flags1 & SLSF1_PARALLAX_OCCLUSION:
-                return SHADER_TYPE_PARALLAX_OCC, "semantic_flag_parallax_occ"
-            if flags1 & SLSF1_PARALLAX:
-                return SHADER_TYPE_HEIGHTMAP, "semantic_flag_parallax"
         if payload_size % 4 == 0 and payload_size <= 64:
             # Real-world Skyrim SE meshes sometimes carry additional shader
             # payload bytes we do not decode yet. Keep the block parseable so
@@ -2672,7 +2673,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
                 )
                 result.warnings.append(
                     "Skipped shader type-3 block expansion due to layout mismatch; "
-                    f"continued with compatible flag/texture patching ({exc})."
+                    "continued with compatible flag/texture patching."
                 )
             except Exception as fallback_exc:  # noqa: BLE001
                 result.errors.append(f"Patch error: {fallback_exc}")
