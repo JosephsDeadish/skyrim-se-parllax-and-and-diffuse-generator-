@@ -2327,7 +2327,7 @@ def _apply_patches(
                 and not (sp.flags1 & SLSF1_PARALLAX)
             ):
                 # Align legacy-layout behavior with common patchers: when
-                # enabling parallax on default/envmap shaders, set shader type
+                # enabling parallax on default shaders, set shader type
                 # to Heightmap (3) even when force_shader_type_3 is disabled.
                 # This does not insert type-3 payload fields; that remains
                 # controlled by force_shader_type_3.
