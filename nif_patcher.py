@@ -2055,6 +2055,7 @@ def _resolve_unknown_shader_types(
 
 def _shader_resolution_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
     notes: list[str] = []
+    seen: set[str] = set()
     for sp in shader_props:
         if sp.raw_shader_type in _KNOWN_SHADER_TYPES or sp.raw_shader_type == 0xFFFFFFFF:
             continue
@@ -2065,7 +2066,8 @@ def _shader_resolution_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
             f"via {sp.shader_type_resolution} "
             f"({resolution.type}, confidence={resolution.confidence:.2f}, method={resolution.method})."
         )
-        if note not in notes:
+        if note not in seen:
+            seen.add(note)
             notes.append(note)
     return notes
 
@@ -2306,7 +2308,6 @@ def _apply_patches(
     for sp in shader_props:
         new_flags1 = sp.flags1
         new_flags2 = sp.flags2
-        shader_type_changed = False
 
         # ---- Determine whether parallax is safe to enable on this block ----
         enabling_parallax = _should_enable_parallax_on_shader(
@@ -2319,14 +2320,6 @@ def _apply_patches(
 
         # ---- Apply flag changes ----
         if enabling_parallax:
-            if (
-                sp.shader_type_offset is not None
-                and sp.shader_type != SHADER_TYPE_HEIGHTMAP
-                and opts.force_shader_type_3
-                and not (sp.flags1 & SLSF1_PARALLAX)
-            ):
-                buf.write_u32_at(sp.shader_type_offset, SHADER_TYPE_HEIGHTMAP)
-                shader_type_changed = True
             new_flags1 |= SLSF1_PARALLAX
             new_flags2 &= ~SLSF2_MULTI_LAYER_PARALLAX
             # Vertex colours must be set for parallax meshes to render correctly
@@ -2353,7 +2346,7 @@ def _apply_patches(
             new_flags2 &= ~SLSF2_UNUSED01
 
         flags_changed = (new_flags1 != sp.flags1) or (new_flags2 != sp.flags2)
-        if flags_changed or shader_type_changed:
+        if flags_changed:
             buf.write_u32_at(sp.flags1_offset, new_flags1)
             buf.write_u32_at(sp.flags2_offset, new_flags2)
             props_patched += 1
