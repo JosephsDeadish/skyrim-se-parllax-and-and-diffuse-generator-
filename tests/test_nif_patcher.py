@@ -1436,9 +1436,8 @@ class TestParallaxScale(unittest.TestCase):
         )
         self.assertTrue(result.success)
         infos = scan_nif(nif)
-        # Legacy blocks are switched to shader type 3, but no extra scale field
-        # is inserted unless force_shader_type_3=True.
-        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+        # Type is still 0 — no scale field exists in the block
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
         self.assertIsNone(infos[0].parallax_scale)
 
 

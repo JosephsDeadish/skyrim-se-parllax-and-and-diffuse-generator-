@@ -2310,6 +2310,7 @@ def _apply_patches(
             if (
                 sp.shader_type_offset is not None
                 and sp.shader_type != SHADER_TYPE_HEIGHTMAP
+                and opts.force_shader_type_3
                 and not (sp.flags1 & SLSF1_PARALLAX)
             ):
                 buf.write_u32_at(sp.shader_type_offset, SHADER_TYPE_HEIGHTMAP)
