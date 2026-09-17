@@ -910,6 +910,7 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertTrue(result.success, result.errors)
         infos = scan_nif(nif)
         self.assertTrue(infos[0].has_parallax_flag)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
 
     def test_enable_pom_sets_both_parallax_and_occlusion_flags(self) -> None:
         nif = _write_nif(self.tmp)
@@ -918,6 +919,14 @@ class TestPatchNifFlags(unittest.TestCase):
         infos = scan_nif(nif)
         self.assertTrue(infos[0].has_parallax_flag)
         self.assertTrue(infos[0].has_pom_flag)
+
+    def test_enable_parallax_real_layout_keeps_inferred_shader_type(self) -> None:
+        nif = _write_nif(self.tmp, shader_layout="real", shader_type=SHADER_TYPE_DEFAULT)
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
+        self.assertTrue(infos[0].has_parallax_flag)
 
     def test_enable_env_mapping_sets_flag(self) -> None:
         nif = _write_nif(self.tmp)
@@ -1442,8 +1451,9 @@ class TestParallaxScale(unittest.TestCase):
         )
         self.assertTrue(result.success)
         infos = scan_nif(nif)
-        # Type is still 0 — no scale field exists in the block
-        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
+        # Type is updated to 3 for legacy blocks, but no scale field is
+        # inserted unless force_shader_type_3=True.
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
         self.assertIsNone(infos[0].parallax_scale)
 
 

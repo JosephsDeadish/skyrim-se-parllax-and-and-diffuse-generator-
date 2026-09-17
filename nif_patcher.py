@@ -2308,6 +2308,7 @@ def _apply_patches(
     for sp in shader_props:
         new_flags1 = sp.flags1
         new_flags2 = sp.flags2
+        shader_type_changed = False
 
         # ---- Determine whether parallax is safe to enable on this block ----
         enabling_parallax = _should_enable_parallax_on_shader(
@@ -2320,6 +2321,18 @@ def _apply_patches(
 
         # ---- Apply flag changes ----
         if enabling_parallax:
+            if (
+                sp.shader_type_offset is not None
+                and sp.shader_type in (SHADER_TYPE_DEFAULT, SHADER_TYPE_ENVMAP)
+                and not (sp.flags1 & SLSF1_PARALLAX)
+            ):
+                # Align legacy-layout behavior with common patchers: when
+                # enabling parallax on default/envmap shaders, set shader type
+                # to Heightmap (3) even when force_shader_type_3 is disabled.
+                # This does not insert type-3 payload fields; that remains
+                # controlled by force_shader_type_3.
+                buf.write_u32_at(sp.shader_type_offset, SHADER_TYPE_HEIGHTMAP)
+                shader_type_changed = True
             new_flags1 |= SLSF1_PARALLAX
             new_flags2 &= ~SLSF2_MULTI_LAYER_PARALLAX
             # Vertex colours must be set for parallax meshes to render correctly
@@ -2346,7 +2359,7 @@ def _apply_patches(
             new_flags2 &= ~SLSF2_UNUSED01
 
         flags_changed = (new_flags1 != sp.flags1) or (new_flags2 != sp.flags2)
-        if flags_changed:
+        if flags_changed or shader_type_changed:
             buf.write_u32_at(sp.flags1_offset, new_flags1)
             buf.write_u32_at(sp.flags2_offset, new_flags2)
             props_patched += 1
