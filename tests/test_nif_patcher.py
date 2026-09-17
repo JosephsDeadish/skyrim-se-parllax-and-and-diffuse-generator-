@@ -298,10 +298,16 @@ class TestScanNif(unittest.TestCase):
         infos = scan_nif(nif)
         self.assertEqual(len(infos), 1)
 
-    def test_scan_accepts_user_version_2_155(self) -> None:
-        nif = _write_nif(self.tmp, user_ver2=155)
+    def test_scan_accepts_user_version_2_34(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=34)
         infos = scan_nif(nif)
         self.assertEqual(len(infos), 1)
+
+    def test_scan_rejects_unknown_user_version_2(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=155)
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(infos, [])
+        self.assertTrue(any("unexpected user version values" in d.lower() for d in diagnostics), diagnostics)
 
     def test_scan_accepts_crlf_header_line(self) -> None:
         nif = _write_nif(self.tmp, header_line_ending=b"\r\n")

@@ -63,8 +63,6 @@ _KNOWN_SKYRIM_USER_VERSION_2: tuple[int, ...] = (
     _SKYRIM_SE_USER_VERSION_2_CK,
     _SKYRIM_LE_USER_VERSION_2,
 )
-_SKYRIM_USER_VERSION_2_MIN: int = _SKYRIM_LE_USER_VERSION_2
-_SKYRIM_USER_VERSION_2_MAX: int = 255
 
 _HEADER_PREFIXES: tuple[bytes, ...] = (
     b"Gamebryo File Format, Version 20.2.0.7",
@@ -975,9 +973,7 @@ def _has_supported_header_prefix(header_line: bytes) -> bool:
 
 def _is_supported_skyrim_user_version_2(user_version_2: int) -> bool:
     """Return True when *user_version_2* matches Skyrim LE/SE/AE/VR/CK exports."""
-    if user_version_2 in _KNOWN_SKYRIM_USER_VERSION_2:
-        return True
-    return _SKYRIM_USER_VERSION_2_MIN <= user_version_2 <= _SKYRIM_USER_VERSION_2_MAX
+    return user_version_2 in _KNOWN_SKYRIM_USER_VERSION_2
 
 
 def _summarize_non_patchable_block_types(header: _NifHeader) -> list[str]:
@@ -2630,8 +2626,18 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         if opts.force_shader_type_3 and effective_parallax:
             try:
                 fallback_opts = replace(opts, force_shader_type_3=False)
+                fallback_shader_props, fallback_texture_sets, fallback_parse_errors = _build_block_map(
+                    original_data, header, fallback_opts.unknown_shader_type_map
+                )
+                result.errors.extend(fallback_parse_errors)
+                if not fallback_shader_props:
+                    if fallback_parse_errors:
+                        result.message = f"No patchable BSLightingShaderProperty blocks found ({fallback_parse_errors[0]})."
+                    else:
+                        result.message = "No BSLightingShaderProperty blocks found — nothing to patch."
+                    return result
                 new_data, props_patched, sets_patched, upgraded = _apply_patches(
-                    original_data, header, shader_props, texture_sets, fallback_opts
+                    original_data, header, fallback_shader_props, fallback_texture_sets, fallback_opts
                 )
                 result.warnings.append(
                     "Skipped shader type-3 block expansion due to layout mismatch; "
