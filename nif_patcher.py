@@ -1976,8 +1976,24 @@ def _try_assign_shader_type_resolution(
     }
     if rank[proposed.type] < rank[current.type]:
         return False
-    if rank[proposed.type] == rank[current.type] and sp.shader_type_resolution != "fallback_default":
-        return False
+    if rank[proposed.type] == rank[current.type]:
+        if proposed.confidence < current.confidence:
+            return False
+        if proposed.confidence == current.confidence:
+            method_rank = {
+                "fallback": 0,
+                "heuristic": 1,
+                "payload": 2,
+                "semantic": 3,
+                "mapping": 4,
+            }
+            if method_rank.get(proposed.method, 0) < method_rank.get(current.method, 0):
+                return False
+            if (
+                method_rank.get(proposed.method, 0) == method_rank.get(current.method, 0)
+                and sp.shader_type_resolution != "fallback_default"
+            ):
+                return False
     sp.shader_type = shader_type
     sp.shader_type_resolution = resolution
     return True
