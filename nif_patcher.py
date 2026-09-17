@@ -2040,7 +2040,7 @@ def _resolve_unknown_shader_types(
 def _shader_resolution_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
     notes: list[str] = []
     for sp in shader_props:
-        if sp.raw_shader_type in _KNOWN_SHADER_TYPES:
+        if sp.raw_shader_type in _KNOWN_SHADER_TYPES or sp.raw_shader_type == 0xFFFFFFFF:
             continue
         resolution = _classify_shader_type_resolution(sp.shader_type_resolution)
         note = (
