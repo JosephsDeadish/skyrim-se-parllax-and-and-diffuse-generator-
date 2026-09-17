@@ -1116,6 +1116,7 @@ class _ShaderPropBlock:
     raw_shader_type: int
     shader_type_resolution: str
     texture_set_ref: int       # block index of linked BSShaderTextureSet
+    layout_name: str
     layout_shift: int
     common_end_offset: int
 
@@ -1365,6 +1366,7 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
             raw_shader_type=raw_shader_type,
             shader_type_resolution=shader_type_resolution,
             texture_set_ref=texture_set_ref,
+            layout_name=layout_name,
             layout_shift=0,
             common_end_offset=common_end,
             parallax_max_passes_offset=pmx_offset,
@@ -2322,6 +2324,8 @@ def _apply_patches(
         # ---- Apply flag changes ----
         if enabling_parallax:
             if (
+                sp.layout_name == "legacy"
+                and
                 sp.shader_type_offset is not None
                 and sp.shader_type == SHADER_TYPE_DEFAULT
                 and not (sp.flags1 & SLSF1_PARALLAX)
