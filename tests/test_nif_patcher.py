@@ -1436,8 +1436,9 @@ class TestParallaxScale(unittest.TestCase):
         )
         self.assertTrue(result.success)
         infos = scan_nif(nif)
-        # Type is still 0 — no scale field exists in the block
-        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
+        # Legacy blocks are switched to shader type 3, but no extra scale field
+        # is inserted unless force_shader_type_3=True.
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
         self.assertIsNone(infos[0].parallax_scale)
 
 
@@ -1517,6 +1518,25 @@ class TestForceShaderType3(unittest.TestCase):
         infos = scan_nif(nif)
         self.assertEqual(len(infos), 1)
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+
+    def test_force_upgrade_falls_back_when_layout_mismatch(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT, shader_layout="real")
+
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_scale=3.0,
+                force_shader_type_3=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertEqual(result.blocks_upgraded_to_type3, 0)
+        self.assertTrue(any("Skipped shader type-3 block expansion" in w for w in result.warnings))
+        info = scan_nif(nif)[0]
+        self.assertEqual(info.shader_type, SHADER_TYPE_DEFAULT)
+        self.assertTrue(info.has_parallax_flag)
 
     def test_skip_if_havok_does_not_upgrade_default_shader(self) -> None:
         nif = self.tmp / "havok_default.nif"

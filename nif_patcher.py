@@ -44,7 +44,7 @@ Usage (CLI)::
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -2294,6 +2294,7 @@ def _apply_patches(
     for sp in shader_props:
         new_flags1 = sp.flags1
         new_flags2 = sp.flags2
+        shader_type_changed = False
 
         # ---- Determine whether parallax is safe to enable on this block ----
         enabling_parallax = _should_enable_parallax_on_shader(
@@ -2306,6 +2307,13 @@ def _apply_patches(
 
         # ---- Apply flag changes ----
         if enabling_parallax:
+            if (
+                sp.shader_type_offset is not None
+                and sp.shader_type != SHADER_TYPE_HEIGHTMAP
+                and not (sp.flags1 & SLSF1_PARALLAX)
+            ):
+                buf.write_u32_at(sp.shader_type_offset, SHADER_TYPE_HEIGHTMAP)
+                shader_type_changed = True
             new_flags1 |= SLSF1_PARALLAX
             new_flags2 &= ~SLSF2_MULTI_LAYER_PARALLAX
             # Vertex colours must be set for parallax meshes to render correctly
@@ -2332,7 +2340,7 @@ def _apply_patches(
             new_flags2 &= ~SLSF2_UNUSED01
 
         flags_changed = (new_flags1 != sp.flags1) or (new_flags2 != sp.flags2)
-        if flags_changed:
+        if flags_changed or shader_type_changed:
             buf.write_u32_at(sp.flags1_offset, new_flags1)
             buf.write_u32_at(sp.flags2_offset, new_flags2)
             props_patched += 1
@@ -2618,9 +2626,24 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
             original_data, header, shader_props, texture_sets, opts
         )
     except Exception as exc:  # noqa: BLE001
-        result.errors.append(f"Patch error: {exc}")
-        result.message = str(exc)
-        return result
+        if opts.force_shader_type_3 and effective_parallax:
+            try:
+                fallback_opts = replace(opts, force_shader_type_3=False)
+                new_data, props_patched, sets_patched, upgraded = _apply_patches(
+                    original_data, header, shader_props, texture_sets, fallback_opts
+                )
+                result.warnings.append(
+                    "Skipped shader type-3 block expansion due to layout mismatch; "
+                    f"continued with compatible flag/texture patching ({exc})."
+                )
+            except Exception as fallback_exc:  # noqa: BLE001
+                result.errors.append(f"Patch error: {fallback_exc}")
+                result.message = str(fallback_exc)
+                return result
+        else:
+            result.errors.append(f"Patch error: {exc}")
+            result.message = str(exc)
+            return result
 
     result.shader_properties_patched = props_patched
     result.texture_sets_patched = sets_patched
