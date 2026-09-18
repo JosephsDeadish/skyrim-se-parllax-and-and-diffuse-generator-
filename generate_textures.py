@@ -8672,6 +8672,7 @@ if GUI_AVAILABLE:
                     messagebox.showinfo("Generation complete", "\n".join(lines), parent=self.root)
                     self._refresh_preview()
                     keep_polling = False
+                    break
                 elif event_type == "cancelled":
                     results = payload
                     self._set_processing_state(False)
@@ -8686,10 +8687,12 @@ if GUI_AVAILABLE:
                         parent=self.root,
                     )
                     keep_polling = False
+                    break
                 elif event_type == "error":
                     self._set_processing_state(False)
                     messagebox.showerror("Generation failed", str(payload), parent=self.root)
                     keep_polling = False
+                    break
 
             if keep_polling and self.is_processing:
                 self.root.after(100, self._poll_processing_queue)

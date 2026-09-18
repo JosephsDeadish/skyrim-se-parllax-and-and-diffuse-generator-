@@ -3853,6 +3853,37 @@ class GenerateTexturesTests(unittest.TestCase):
         showerror.assert_called_once()
         self.assertFalse(fake_gui.root.after_calls)
 
+    def test_gui_processing_queue_smoke_terminal_done_event_short_circuits_remaining_events(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False, is_processing=True)
+        fake_gui.processing_queue.put(("done", {Path("stone.dds"): {"diffuse": Path("stone_out.dds")}}))
+        fake_gui.processing_queue.put(("error", "should-not-run"))
+
+        with mock.patch("generate_textures.messagebox.showinfo") as showinfo:
+            with mock.patch("generate_textures.messagebox.showerror") as showerror:
+                TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        showinfo.assert_called_once()
+        showerror.assert_not_called()
+        self.assertEqual(fake_gui.processing_queue.qsize(), 1)
+        self.assertFalse(fake_gui.root.after_calls)
+
+    def test_gui_processing_queue_smoke_terminal_error_event_short_circuits_remaining_events(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False, is_processing=True)
+        fake_gui.processing_queue.put(("error", "boom"))
+        fake_gui.processing_queue.put(("progress", (1, 1, Path("textures/stone.dds"))))
+
+        with mock.patch("generate_textures.messagebox.showerror") as showerror:
+            TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        showerror.assert_called_once()
+        fake_gui._set_preview_source_by_path.assert_not_called()
+        self.assertEqual(fake_gui.processing_queue.qsize(), 1)
+        self.assertFalse(fake_gui.root.after_calls)
+
     def test_generate_normal_raises_clear_error_for_buffer_size_mismatch(self) -> None:
         with mock.patch("generate_textures.np.frombuffer", return_value=np.zeros(1, dtype=np.uint8)):
             with self.assertRaisesRegex(RuntimeError, "Normal map red buffer size mismatch"):
