@@ -2021,6 +2021,8 @@ def get_nif_patch_option_warnings(
             warnings.append("Fallout target selected but experimental Fallout write mode is disabled.")
         if force_shader_type_3:
             warnings.append("Fallout experimental mode does not support force shader type 3.")
+        if enable_parallax and not parallax_texture_path.strip():
+            warnings.append("Fallout parallax enabled without a slot 3 _p.dds path.")
     elif experimental_fallout_write:
         warnings.append("Experimental Fallout write mode is enabled while target game is not Fallout.")
     if effective_profile in {"performance", "vr"} and enable_parallax:
@@ -9396,6 +9398,7 @@ if GUI_AVAILABLE:
                 dry_run_var = tk.BooleanVar(value=False)
                 target_game_var = tk.StringVar(value="auto")
                 experimental_fallout_write_var = tk.BooleanVar(value=False)
+                conflict_report_var = tk.BooleanVar(value=True)
                 option_warning_var = tk.StringVar(value="")
 
                 render_row = ttk.Frame(opt_frame)
@@ -9480,6 +9483,12 @@ if GUI_AVAILABLE:
                 backup_check.pack(side="left")
                 dry_run_check = ttk.Checkbutton(misc_row, text="Dry run (scan/preview only)", variable=dry_run_var)
                 dry_run_check.pack(side="left", padx=(12, 0))
+                conflict_report_check = ttk.Checkbutton(
+                    misc_row,
+                    text="Show grouped conflict report in scan details",
+                    variable=conflict_report_var,
+                )
+                conflict_report_check.pack(side="left", padx=(12, 0))
                 guide_label = ttk.Label(
                     opt_frame,
                     text=(
@@ -9641,6 +9650,14 @@ if GUI_AVAILABLE:
                         _apply_renderer_defaults()
                     _update_checkbox_warnings()
 
+                def _sync_target_game_controls(*_: object) -> None:
+                    selected_game = (target_game_var.get() or "auto").strip().lower()
+                    if selected_game == "skyrim":
+                        experimental_fallout_write_var.set(False)
+                        experimental_fallout_check.configure(state=tk.DISABLED)
+                    else:
+                        experimental_fallout_check.configure(state=tk.NORMAL)
+
                 nif_path_var.trace_add("write", _on_nif_target_changed)
                 nif_scan_mode.trace_add("write", _on_nif_target_changed)
                 for watch_var in (
@@ -9665,6 +9682,8 @@ if GUI_AVAILABLE:
                 ):
                     watch_var.trace_add("write", _update_checkbox_warnings)
                 target_game_var.trace_add("write", _update_checkbox_warnings)
+                target_game_var.trace_add("write", _sync_target_game_controls)
+                _sync_target_game_controls()
                 self._add_tooltip(
                     renderer_label,
                     "🎮 Pick your target renderer to auto-apply sane NIF patch toggles for that workflow.",
@@ -9681,6 +9700,10 @@ if GUI_AVAILABLE:
                 self._add_tooltip(force_type3_check, "💪 Upgrades shader type so stronger parallax scale can be written.")
                 self._add_tooltip(backup_check, "🧷 Writes .nif.bak safety copies before patching.")
                 self._add_tooltip(dry_run_check, "🧪 Scan and simulate changes without writing file edits.")
+                self._add_tooltip(
+                    conflict_report_check,
+                    "Include grouped conflict categories with suggested auto-fix actions in scan result details.",
+                )
                 self._add_tooltip(target_game_label, "Set game-header profile handling for NIF patching.")
                 self._add_tooltip(target_game_combo, "auto detects profile from the NIF header; use fallout for Fallout-target patching.")
                 self._add_tooltip(
@@ -10218,6 +10241,14 @@ if GUI_AVAILABLE:
                                 if validation.suggestions:
                                     combined_detail_lines.append("Suggestions:")
                                     combined_detail_lines.extend(f"- {text}" for text in validation.suggestions)
+                                if conflict_report_var.get() and getattr(validation, "conflict_report", None):
+                                    combined_detail_lines.append("Conflict-resolution report:")
+                                    for group in validation.conflict_report[:6]:
+                                        code = getattr(group, "code", "unknown")
+                                        count = getattr(group, "count", 0)
+                                        combined_detail_lines.append(f"- {code}: {count}")
+                                        for action in tuple(getattr(group, "suggested_actions", ())[:2]):
+                                            combined_detail_lines.append(f"    auto-fix: {action}")
                                 if getattr(validation, "renderer_verdicts", None):
                                     combined_detail_lines.append("In-game renderer verdicts:")
                                     for renderer_key, renderer_label in (

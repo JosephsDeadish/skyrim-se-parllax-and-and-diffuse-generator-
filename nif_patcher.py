@@ -849,6 +849,18 @@ class NifValidationResult:
     """
     renderer_verdicts: dict[str, str] = field(default_factory=dict)
     """High-level in-game verdicts keyed by renderer name."""
+    conflict_report: list["NifConflictSummary"] = field(default_factory=list)
+    """Structured grouped conflicts with suggested remediation actions."""
+
+
+@dataclass(frozen=True)
+class NifConflictSummary:
+    """Grouped conflict summary for validation output."""
+
+    code: str
+    count: int
+    examples: tuple[str, ...]
+    suggested_actions: tuple[str, ...]
 
 
 # ---------------------------------------------------------------------------
@@ -3258,6 +3270,81 @@ def _renderer_compatibility(info: NifShaderInfo) -> dict[str, list[str]]:
     return notes
 
 
+_CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
+    "unsupported_header": (
+        "Re-export or convert the mesh to a supported Skyrim/Fallout header profile.",
+        "Use validate mode first to confirm header/profile diagnostics are clean.",
+    ),
+    "fallout_profile": (
+        "Enable target_game='fallout' with experimental_fallout_write for guarded patching.",
+        "Avoid force_shader_type_3/parallax_scale/advanced shader-field writes in Fallout mode.",
+    ),
+    "incompatible_shader_type": (
+        "Patch only Default(0), Heightmap(3), or EnvMap(1) shader blocks.",
+        "Use unknown_shader_type_map for explicit raw shader-type overrides when safe.",
+    ),
+    "single_pass": (
+        "Keep skip_single_pass enabled for safety, or disable it only for known-good meshes.",
+    ),
+    "skinned_or_havok": (
+        "Do not enable parallax on skinned/Havok-driven meshes due to CTD/glitch risk.",
+    ),
+    "alpha_or_decal_lighting": (
+        "Disable parallax for alpha/decal/soft-lighting/anisotropic blocks or separate them into non-parallax materials.",
+    ),
+    "missing_parallax_setup": (
+        "Enable SLSF1_Parallax and provide a valid slot 3 _p.dds height map.",
+    ),
+    "path_or_slot_mismatch": (
+        "Normalize texture paths to Skyrim-relative textures\\... .dds values and keep each map in its expected slot.",
+    ),
+    "fallback_or_unknown": (
+        "Review the listed block diagnostics and apply targeted fixes before repatching.",
+    ),
+}
+
+
+def _classify_conflict_code(message: str) -> str:
+    lowered = message.lower()
+    if "unsupported nif header/profile values" in lowered or "unexpected user version values" in lowered:
+        return "unsupported_header"
+    if "fallout profile" in lowered or "experimental_fallout_write" in lowered:
+        return "fallout_profile"
+    if "incompatible shader type" in lowered:
+        return "incompatible_shader_type"
+    if "single_pass" in lowered:
+        return "single_pass"
+    if "havok" in lowered or "skinned/animated mesh" in lowered or "skinned mesh" in lowered:
+        return "skinned_or_havok"
+    if "alpha" in lowered or "decal" in lowered or "anisotropic" in lowered or "subsurface-scattering" in lowered:
+        return "alpha_or_decal_lighting"
+    if "parallax flag not set" in lowered or "texture slot 3 (parallax) is empty" in lowered:
+        return "missing_parallax_setup"
+    if "slot " in lowered or "path '" in lowered:
+        return "path_or_slot_mismatch"
+    return "fallback_or_unknown"
+
+
+def _build_conflict_report(result: NifValidationResult) -> list[NifConflictSummary]:
+    grouped: dict[str, list[str]] = {}
+    for message in [*result.skip_reasons, *result.issues]:
+        code = _classify_conflict_code(message)
+        grouped.setdefault(code, []).append(message)
+    summaries: list[NifConflictSummary] = []
+    for code, messages in sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0])):
+        examples = tuple(messages[:3])
+        actions = _CONFLICT_ACTIONS.get(code, _CONFLICT_ACTIONS["fallback_or_unknown"])
+        summaries.append(
+            NifConflictSummary(
+                code=code,
+                count=len(messages),
+                examples=examples,
+                suggested_actions=actions,
+            )
+        )
+    return summaries
+
+
 def validate_nif_for_parallax(
     nif_path: Path,
     *,
@@ -3284,6 +3371,7 @@ def validate_nif_for_parallax(
         raw = nif_path.read_bytes()
     except OSError as exc:
         result.issues.append(f"Cannot read NIF: {exc}")
+        result.conflict_report = _build_conflict_report(result)
         return result
     result.detected_game_profile = _detect_game_profile_from_bytes(raw)
     result.has_havok = b"BSBehaviorGraphExtraData" in raw
@@ -3313,6 +3401,7 @@ def validate_nif_for_parallax(
             lowered = diagnostic.lower()
             if "resolution:" in lowered or "convert" in lowered or "re-save" in lowered or "re-export" in lowered:
                 _append_unique(result.suggestions, diagnostic)
+        result.conflict_report = _build_conflict_report(result)
         return result
 
     if result.has_havok:
@@ -3758,6 +3847,7 @@ def validate_nif_for_parallax(
 
     result.renderer_notes = agg_renderer_notes
     result.renderer_verdicts = _build_renderer_verdicts(infos, has_havok=result.has_havok)
+    result.conflict_report = _build_conflict_report(result)
     result.valid = result.shader_count > 0
     return result
 
@@ -4032,6 +4122,11 @@ def _main() -> None:  # pragma: no cover
     parser.add_argument("--validate", action="store_true",
                         help="Just validate and report, do not patch.")
     parser.add_argument(
+        "--conflict-report",
+        action="store_true",
+        help="With --validate, print grouped conflict summaries with suggested auto-fix actions.",
+    )
+    parser.add_argument(
         "--target-game",
         choices=("auto", "skyrim", "fallout"),
         default="auto",
@@ -4170,6 +4265,14 @@ def _main() -> None:  # pragma: no cover
                 print(f"  ⚠ {issue}")
             for sug in v.suggestions:
                 print(f"  → {sug}")
+            if args.conflict_report and v.conflict_report:
+                print("  Conflict report:")
+                for group in v.conflict_report:
+                    print(f"    - {group.code}: {group.count}")
+                    for example in group.examples:
+                        print(f"      example: {example}")
+                    for action in group.suggested_actions:
+                        print(f"      auto-fix: {action}")
         return
 
     opts = NifPatchOptions(
