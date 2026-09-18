@@ -703,7 +703,35 @@ class TestValidateNifForParallax(unittest.TestCase):
         paths = ["textures\\arch\\stone_n.dds"] + [""] * 8
         nif = _write_nif(self.tmp, texture_paths=paths)
         v = validate_nif_for_parallax(nif)
-        self.assertTrue(any(group.code.startswith("path_slot_diffuse.") for group in v.conflict_report))
+        self.assertTrue(any(group.code.startswith("path_slot_diffuse.wrong_suffix.") for group in v.conflict_report))
+
+    def test_conflict_report_uses_granular_per_slot_path_codes(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_NORMAL] = "textures\\arch\\stone_n.dds"
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone_n.dds"
+        nif = _write_nif(self.tmp, flags1=SLSF1_PARALLAX, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        codes = {group.code for group in v.conflict_report}
+        self.assertTrue(any(code.startswith("path_slot_parallax.wrong_suffix.") for code in codes))
+        self.assertTrue(any(code.startswith("path_slot_parallax.matches_normal.") for code in codes))
+
+    def test_conflict_report_uses_granular_per_flag_codes(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_g.dds"
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_m.dds"
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone_p.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=SLSF1_PARALLAX_OCCLUSION,
+            shader_type=SHADER_TYPE_DEFAULT,
+        )
+        v = validate_nif_for_parallax(nif)
+        codes = {group.code for group in v.conflict_report}
+        self.assertTrue(any(code.startswith("flag_glow_map.slot2_filled_without_flag.") for code in codes))
+        self.assertTrue(any(code.startswith("flag_env_mapping.slot5_filled_without_flag.") for code in codes))
+        self.assertTrue(any(code.startswith("flag_pom.without_base_parallax.") for code in codes))
+        self.assertTrue(any(code.startswith("flag_pom.non_heightmap_shader.") for code in codes))
 
     def test_ready_when_flag_and_texture_set(self) -> None:
         paths = [""] * 9
@@ -2201,6 +2229,51 @@ class TestBatchPatchNif(unittest.TestCase):
         results = batch_patch_nif(nifs, NifPatchOptions(enable_parallax=True, backup=False))
         for i, r in enumerate(results):
             self.assertEqual(r.nif_path, nifs[i])
+
+
+class TestMixedModValidationBatches(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_large_mixed_mod_fixture_batch_surfaces_granular_codes(self) -> None:
+        fixtures: list[tuple[dict, tuple[str, ...], bool]] = [
+            ({}, ("missing_parallax_flag.flag1_not_set.",), False),
+            ({"flags1": SLSF1_SINGLE_PASS}, ("skip_single_pass.",), False),
+            ({"texture_paths": ["textures\\arch\\stone_n.dds"] + [""] * 8}, ("path_slot_diffuse.wrong_suffix.",), False),
+            ({"texture_paths": [""] * 9, "shader_layout": "real"}, ("missing_parallax_flag.flag1_not_set.",), False),
+            ({"texture_paths": [""] * 9, "flags1": SLSF1_PARALLAX_OCCLUSION, "shader_type": SHADER_TYPE_DEFAULT}, ("flag_pom.without_base_parallax.", "flag_pom.non_heightmap_shader."), False),
+            ({"texture_paths": [""] * 9}, ("missing_parallax_slot3.empty.",), False),
+            ({"texture_paths": ["textures\\arch\\stone.dds", "textures\\arch\\stone_p.dds"] + [""] * 7}, ("path_slot_normal.wrong_suffix.",), False),
+            ({"texture_paths": ["textures\\arch\\stone.dds"] + [""] * 8, "user_ver2": 130}, ("missing_parallax_flag.flag1_not_set.",), True),
+            ({"texture_paths": [""] * 9, "user_ver2": 130}, ("missing_parallax_flag.flag1_not_set.",), True),
+            ({"texture_paths": [""] * 9}, ("missing_parallax_flag.flag1_not_set.",), False),
+            ({"texture_paths": [""] * 4 + ["textures\\arch\\stone_n.dds"] + [""] * 4}, ("path_slot_cubemap.wrong_suffix.",), False),
+            ({"texture_paths": [""] * 9}, ("missing_parallax_flag.flag1_not_set.",), False),
+        ]
+        reports: list[tuple[Path, list[str]]] = []
+        for idx, (kwargs, expected_prefixes, make_fallout) in enumerate(fixtures):
+            nif = self.tmp / f"batch_{idx}.nif"
+            nif.write_bytes(_build_minimal_nif(**kwargs))
+            if make_fallout:
+                _rewrite_user_version(nif, 11)
+            validation = validate_nif_for_parallax(nif)
+            codes = [group.code for group in validation.conflict_report]
+            reports.append((nif, codes))
+            for prefix in expected_prefixes:
+                self.assertTrue(
+                    any(code.startswith(prefix) for code in codes),
+                    f"{nif.name} missing {prefix}; got {codes}",
+                )
+
+        all_codes = [code for _, codes in reports for code in codes]
+        self.assertGreaterEqual(len(reports), 12)
+        self.assertTrue(any(".skyrim.legacy" in code for code in all_codes))
+        self.assertTrue(any(".skyrim.real" in code for code in all_codes))
+        self.assertTrue(any(".fallout." in code for code in all_codes))
 
 
 # ---------------------------------------------------------------------------

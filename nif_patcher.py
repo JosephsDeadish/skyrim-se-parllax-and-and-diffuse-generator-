@@ -3288,6 +3288,18 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
         "Patch only Default(0), Heightmap(3), or EnvMap(1) shader blocks.",
         "Use unknown_shader_type_map for explicit raw shader-type overrides when safe.",
     ),
+    "skip_skinned_or_havok.havok_graph": (
+        "Do not enable parallax on Havok-driven meshes due to CTD/glitch risk.",
+    ),
+    "skip_alpha_decal_lighting.decal_flag": (
+        "Disable parallax on decal-tagged shader blocks or separate them into non-parallax materials.",
+    ),
+    "skip_alpha_decal_lighting.subsurface_flags": (
+        "Disable parallax on soft/rim/back-lighting blocks; those lighting models conflict with parallax.",
+    ),
+    "skip_alpha_decal_lighting.anisotropic_flag": (
+        "Disable parallax on anisotropic-lighting blocks or use a compatible shader setup.",
+    ),
     "skip_single_pass": (
         "Keep skip_single_pass enabled for safety, or disable it only for known-good meshes.",
     ),
@@ -3299,6 +3311,10 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     ),
     "missing_parallax_flag": (
         "Enable SLSF1_Parallax on patchable shader blocks.",
+    ),
+    "missing_parallax_slot3.empty": (
+        "Set texture slot 3 to a valid _p.dds height map path.",
+        "Verify slot 3 is not blank after exports/conversions from DCC tools.",
     ),
     "missing_parallax_slot3": (
         "Set texture slot 3 to a valid _p.dds height map path.",
@@ -3320,6 +3336,21 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     ),
     "path_slot_env_mask": (
         "Use slot 5 for _m (ENB/vanilla), _cm/_c (CS), or _rmaos/_ramos (TruePBR).",
+    ),
+    "path_slot_env_mask.generic_alias_suffix": (
+        "Replace generic packed aliases (_orm/_mrao) with explicit workflow suffixes such as _m, _cm/_c, or _rmaos/_ramos.",
+    ),
+    "flag_glow_map.slot2_filled_without_flag": (
+        "Enable SLSF2_Glow_Map when slot 2 emissive is present, or clear slot 2.",
+    ),
+    "flag_env_mapping.slot5_filled_without_flag": (
+        "Enable SLSF1_Environment_Mapping when slot 5 is populated, or clear slot 5.",
+    ),
+    "flag_pom.without_base_parallax": (
+        "Enable SLSF1_Parallax when POM is enabled, or disable POM for the block.",
+    ),
+    "flag_pom.non_heightmap_shader": (
+        "Prefer Heightmap shader type (3) when using POM for best compatibility.",
     ),
     "fallback_or_unknown": (
         "Review the listed block diagnostics and apply targeted fixes before repatching.",
@@ -3348,6 +3379,14 @@ def _classify_conflict_code(message: str) -> str:
         return "fallout_profile"
     if "incompatible shader type" in lowered:
         return "incompatible_shader_type"
+    if "bsbehaviorgraphextradata" in lowered or "havok animation graph" in lowered:
+        return "skip_skinned_or_havok.havok_graph"
+    if "decal flag" in lowered:
+        return "skip_alpha_decal_lighting.decal_flag"
+    if "subsurface-scattering lighting flags active" in lowered:
+        return "skip_alpha_decal_lighting.subsurface_flags"
+    if "slsf2_anisotropic_lighting is set" in lowered:
+        return "skip_alpha_decal_lighting.anisotropic_flag"
     if "single_pass" in lowered:
         return "skip_single_pass"
     if "havok" in lowered or "skinned/animated mesh" in lowered or "skinned mesh" in lowered:
@@ -3355,9 +3394,53 @@ def _classify_conflict_code(message: str) -> str:
     if "alpha" in lowered or "decal" in lowered or "anisotropic" in lowered or "subsurface-scattering" in lowered:
         return "skip_alpha_decal_lighting"
     if "parallax flag not set" in lowered:
-        return "missing_parallax_flag"
+        return "missing_parallax_flag.flag1_not_set"
     if "texture slot 3 (parallax) is empty" in lowered:
-        return "missing_parallax_slot3"
+        return "missing_parallax_slot3.empty"
+    if "slot 0 diffuse path" in lowered and "not a .dds texture path" in lowered:
+        return "path_slot_diffuse.non_dds"
+    if "slot 0 diffuse path" in lowered and "authoring suffix naming" in lowered:
+        return "path_slot_diffuse.authoring_suffix"
+    if "slot 0 diffuse path" in lowered and "looks like a non-diffuse map" in lowered:
+        return "path_slot_diffuse.wrong_suffix"
+    if "slot 1 normal path" in lowered and "not a .dds texture path" in lowered:
+        return "path_slot_normal.non_dds"
+    if "slot 1 normal path" in lowered and "does not look like a normal map path" in lowered:
+        return "path_slot_normal.wrong_suffix"
+    if "slot 2 glow path" in lowered and "not a .dds texture path" in lowered:
+        return "path_slot_glow.non_dds"
+    if "slot 2 glow path" in lowered and "does not look like an emissive/glow texture" in lowered:
+        return "path_slot_glow.wrong_suffix"
+    if "slot 3 parallax path" in lowered and "not a .dds texture path" in lowered:
+        return "path_slot_parallax.non_dds"
+    if "parallax path '" in lowered and "not a skyrim-relative textures\\" in lowered:
+        return "path_slot_parallax.non_relative"
+    if "parallax path '" in lowered and "does not use the expected _p.dds naming" in lowered:
+        return "path_slot_parallax.wrong_suffix"
+    if "slot 3 parallax path" in lowered and "looks like a cubemap path" in lowered:
+        return "path_slot_parallax.cubemap_like"
+    if "parallax slot 3 points at the diffuse texture" in lowered:
+        return "path_slot_parallax.matches_diffuse"
+    if "parallax slot 3 points at the normal texture" in lowered:
+        return "path_slot_parallax.matches_normal"
+    if "slot 5 environment-mask path" in lowered and "not a .dds texture path" in lowered:
+        return "path_slot_env_mask.non_dds"
+    if "slot 5 environment-mask path" in lowered and "does not look like an environment mask" in lowered:
+        return "path_slot_env_mask.wrong_suffix"
+    if "slot 5 environment-mask path" in lowered and "generic packed alias suffix" in lowered:
+        return "path_slot_env_mask.generic_alias_suffix"
+    if "slot 4 cubemap path" in lowered and "not a .dds texture path" in lowered:
+        return "path_slot_cubemap.non_dds"
+    if "slot 4 cubemap path" in lowered and "looks like a non-cubemap texture" in lowered:
+        return "path_slot_cubemap.wrong_suffix"
+    if "slot 2 is filled" in lowered and "slsf2_glow_map is not set" in lowered:
+        return "flag_glow_map.slot2_filled_without_flag"
+    if "slot 5 is filled" in lowered and "slsf1_environment_mapping is not enabled" in lowered:
+        return "flag_env_mapping.slot5_filled_without_flag"
+    if "pom flag is set on shader type" in lowered:
+        return "flag_pom.non_heightmap_shader"
+    if "pom flag is enabled without the base slsf1_parallax flag" in lowered:
+        return "flag_pom.without_base_parallax"
     if "slot 0 " in lowered:
         return "path_slot_diffuse"
     if "slot 1 " in lowered:
@@ -3375,13 +3458,25 @@ def _classify_conflict_code(message: str) -> str:
     return "fallback_or_unknown"
 
 
+def _actions_for_conflict_code(base_code: str) -> tuple[str, ...]:
+    probe = base_code
+    while probe:
+        actions = _CONFLICT_ACTIONS.get(probe)
+        if actions:
+            return actions
+        if "." not in probe:
+            break
+        probe = probe.rsplit(".", 1)[0]
+    return _CONFLICT_ACTIONS["fallback_or_unknown"]
+
+
 def _resolve_conflict_actions(
     *,
     base_code: str,
     game_profile: str,
     shader_layout: str,
 ) -> tuple[str, ...]:
-    actions = list(_CONFLICT_ACTIONS.get(base_code, _CONFLICT_ACTIONS["fallback_or_unknown"]))
+    actions = list(_actions_for_conflict_code(base_code))
     if game_profile == _GAME_PROFILE_FALLOUT:
         if "fallout" not in " ".join(actions).lower():
             actions.append(
