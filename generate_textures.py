@@ -9399,6 +9399,7 @@ if GUI_AVAILABLE:
                 target_game_var = tk.StringVar(value="auto")
                 experimental_fallout_write_var = tk.BooleanVar(value=False)
                 conflict_report_var = tk.BooleanVar(value=True)
+                conflict_examples_var = tk.BooleanVar(value=False)
                 option_warning_var = tk.StringVar(value="")
 
                 render_row = ttk.Frame(opt_frame)
@@ -9489,6 +9490,12 @@ if GUI_AVAILABLE:
                     variable=conflict_report_var,
                 )
                 conflict_report_check.pack(side="left", padx=(12, 0))
+                conflict_examples_check = ttk.Checkbutton(
+                    misc_row,
+                    text="Include conflict examples",
+                    variable=conflict_examples_var,
+                )
+                conflict_examples_check.pack(side="left", padx=(12, 0))
                 guide_label = ttk.Label(
                     opt_frame,
                     text=(
@@ -9703,6 +9710,10 @@ if GUI_AVAILABLE:
                 self._add_tooltip(
                     conflict_report_check,
                     "Include grouped conflict categories with suggested auto-fix actions in scan result details.",
+                )
+                self._add_tooltip(
+                    conflict_examples_check,
+                    "When enabled, include example conflict lines under each grouped conflict code.",
                 )
                 self._add_tooltip(target_game_label, "Set game-header profile handling for NIF patching.")
                 self._add_tooltip(target_game_combo, "auto detects profile from the NIF header; use fallout for Fallout-target patching.")
@@ -10246,7 +10257,14 @@ if GUI_AVAILABLE:
                                     for group in validation.conflict_report[:6]:
                                         code = getattr(group, "code", "unknown")
                                         count = getattr(group, "count", 0)
-                                        combined_detail_lines.append(f"- {code}: {count}")
+                                        profile = getattr(group, "game_profile", "unknown")
+                                        layout = getattr(group, "shader_layout", "global")
+                                        combined_detail_lines.append(
+                                            f"- {code}: {count} (profile={profile}, layout={layout})"
+                                        )
+                                        if conflict_examples_var.get():
+                                            for example in tuple(getattr(group, "examples", ())[:2]):
+                                                combined_detail_lines.append(f"    example: {example}")
                                         for action in tuple(getattr(group, "suggested_actions", ())[:2]):
                                             combined_detail_lines.append(f"    auto-fix: {action}")
                                 if getattr(validation, "renderer_verdicts", None):

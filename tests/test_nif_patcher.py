@@ -675,7 +675,10 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertTrue(v.valid)
         self.assertEqual(v.needs_patch_count, 1)
         self.assertTrue(any("flag" in i.lower() for i in v.issues))
-        self.assertTrue(any(group.code == "missing_parallax_setup" for group in v.conflict_report))
+        self.assertTrue(any(group.code.startswith("missing_parallax_flag.") for group in v.conflict_report))
+        conflict = next(group for group in v.conflict_report if group.code.startswith("missing_parallax_flag."))
+        self.assertEqual(conflict.game_profile, "skyrim")
+        self.assertEqual(conflict.shader_layout, "legacy")
 
     def test_reports_single_pass_skip_reason(self) -> None:
         nif = _write_nif(self.tmp, flags1=SLSF1_SINGLE_PASS)
@@ -688,7 +691,19 @@ class TestValidateNifForParallax(unittest.TestCase):
         v = validate_nif_for_parallax(nif, skip_single_pass=False)
         joined = "\n".join(v.skip_reasons).lower()
         self.assertNotIn("single_pass", joined)
-        self.assertFalse(any(group.code == "single_pass" for group in v.conflict_report))
+        self.assertFalse(any(group.code.startswith("skip_single_pass.") for group in v.conflict_report))
+
+    def test_conflict_report_uses_fallout_profile_suffix(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130, shader_layout="legacy")
+        _rewrite_user_version(nif, 11)
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(any(".fallout." in group.code for group in v.conflict_report))
+
+    def test_conflict_report_classifies_slot_specific_paths(self) -> None:
+        paths = ["textures\\arch\\stone_n.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(any(group.code.startswith("path_slot_diffuse.") for group in v.conflict_report))
 
     def test_ready_when_flag_and_texture_set(self) -> None:
         paths = [""] * 9

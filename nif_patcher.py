@@ -43,6 +43,7 @@ Usage (CLI)::
 
 from __future__ import annotations
 
+import re
 import struct
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -680,6 +681,7 @@ class NifShaderInfo:
     env_map_scale: float | None = None
     raw_shader_type: int | None = None
     shader_type_resolution: str = "exact"
+    layout_name: str = ""
 
     # Shape-context fields — populated by scan_nif_diagnostics when a parent
     # BSTriShape-family block can be matched to this shader property.
@@ -859,6 +861,8 @@ class NifConflictSummary:
 
     code: str
     count: int
+    game_profile: str
+    shader_layout: str
     examples: tuple[str, ...]
     suggested_actions: tuple[str, ...]
 
@@ -3065,6 +3069,7 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
             env_map_scale=sp.env_map_scale,
             raw_shader_type=sp.raw_shader_type,
             shader_type_resolution=sp.shader_type_resolution,
+            layout_name=sp.layout_name,
         )
         if shape is not None:
             info.parent_block_type = shape.block_type
@@ -3283,25 +3288,56 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
         "Patch only Default(0), Heightmap(3), or EnvMap(1) shader blocks.",
         "Use unknown_shader_type_map for explicit raw shader-type overrides when safe.",
     ),
-    "single_pass": (
+    "skip_single_pass": (
         "Keep skip_single_pass enabled for safety, or disable it only for known-good meshes.",
     ),
-    "skinned_or_havok": (
+    "skip_skinned_or_havok": (
         "Do not enable parallax on skinned/Havok-driven meshes due to CTD/glitch risk.",
     ),
-    "alpha_or_decal_lighting": (
+    "skip_alpha_decal_lighting": (
         "Disable parallax for alpha/decal/soft-lighting/anisotropic blocks or separate them into non-parallax materials.",
     ),
-    "missing_parallax_setup": (
-        "Enable SLSF1_Parallax and provide a valid slot 3 _p.dds height map.",
+    "missing_parallax_flag": (
+        "Enable SLSF1_Parallax on patchable shader blocks.",
     ),
-    "path_or_slot_mismatch": (
-        "Normalize texture paths to Skyrim-relative textures\\... .dds values and keep each map in its expected slot.",
+    "missing_parallax_slot3": (
+        "Set texture slot 3 to a valid _p.dds height map path.",
+    ),
+    "path_slot_diffuse": (
+        "Use slot 0 for diffuse/albedo only and keep runtime paths as textures\\... .dds.",
+    ),
+    "path_slot_normal": (
+        "Use slot 1 for _n.dds/_msn.dds normal maps and avoid packed/non-normal suffixes.",
+    ),
+    "path_slot_parallax": (
+        "Use slot 3 for _p.dds height maps only.",
+    ),
+    "path_slot_glow": (
+        "Use slot 2 for _g.dds emissive maps and align the glow flag with slot usage.",
+    ),
+    "path_slot_cubemap": (
+        "Use slot 4 for cubemap textures (_e/_env/_cube naming).",
+    ),
+    "path_slot_env_mask": (
+        "Use slot 5 for _m (ENB/vanilla), _cm/_c (CS), or _rmaos/_ramos (TruePBR).",
     ),
     "fallback_or_unknown": (
         "Review the listed block diagnostics and apply targeted fixes before repatching.",
     ),
 }
+
+
+_BLOCK_INDEX_RE = re.compile(r"block\s+(\d+)", re.IGNORECASE)
+
+
+def _extract_block_index(message: str) -> int | None:
+    match = _BLOCK_INDEX_RE.search(message)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
 
 
 def _classify_conflict_code(message: str) -> str:
@@ -3313,33 +3349,91 @@ def _classify_conflict_code(message: str) -> str:
     if "incompatible shader type" in lowered:
         return "incompatible_shader_type"
     if "single_pass" in lowered:
-        return "single_pass"
+        return "skip_single_pass"
     if "havok" in lowered or "skinned/animated mesh" in lowered or "skinned mesh" in lowered:
-        return "skinned_or_havok"
+        return "skip_skinned_or_havok"
     if "alpha" in lowered or "decal" in lowered or "anisotropic" in lowered or "subsurface-scattering" in lowered:
-        return "alpha_or_decal_lighting"
-    if "parallax flag not set" in lowered or "texture slot 3 (parallax) is empty" in lowered:
-        return "missing_parallax_setup"
+        return "skip_alpha_decal_lighting"
+    if "parallax flag not set" in lowered:
+        return "missing_parallax_flag"
+    if "texture slot 3 (parallax) is empty" in lowered:
+        return "missing_parallax_slot3"
+    if "slot 0 " in lowered:
+        return "path_slot_diffuse"
+    if "slot 1 " in lowered:
+        return "path_slot_normal"
+    if "slot 2 " in lowered:
+        return "path_slot_glow"
+    if "slot 3 " in lowered or "parallax path" in lowered:
+        return "path_slot_parallax"
+    if "slot 4 " in lowered:
+        return "path_slot_cubemap"
+    if "slot 5 " in lowered:
+        return "path_slot_env_mask"
     if "slot " in lowered or "path '" in lowered:
-        return "path_or_slot_mismatch"
+        return "fallback_or_unknown"
     return "fallback_or_unknown"
 
 
-def _build_conflict_report(result: NifValidationResult) -> list[NifConflictSummary]:
-    grouped: dict[str, list[str]] = {}
+def _resolve_conflict_actions(
+    *,
+    base_code: str,
+    game_profile: str,
+    shader_layout: str,
+) -> tuple[str, ...]:
+    actions = list(_CONFLICT_ACTIONS.get(base_code, _CONFLICT_ACTIONS["fallback_or_unknown"]))
+    if game_profile == _GAME_PROFILE_FALLOUT:
+        if "fallout" not in " ".join(actions).lower():
+            actions.append(
+                "For Fallout profiles, keep experimental_fallout_write enabled and stay within guarded operation limits."
+            )
+    if shader_layout == "legacy" and base_code in {"incompatible_shader_type", "path_slot_parallax"}:
+        actions.append("Legacy-layout blocks should prefer conservative flag + slot edits before advanced mutations.")
+    if shader_layout == "real" and base_code == "path_slot_normal":
+        actions.append("Real-layout blocks should verify slot-1 normal path consistency before parallax tuning.")
+    deduped: list[str] = []
+    for action in actions:
+        if action not in deduped:
+            deduped.append(action)
+    return tuple(deduped)
+
+
+def _build_conflict_report(
+    result: NifValidationResult,
+    infos: list[NifShaderInfo] | None = None,
+) -> list[NifConflictSummary]:
+    info_by_block = {info.block_index: info for info in (infos or [])}
+    grouped: dict[tuple[str, str, str], list[str]] = {}
     for message in [*result.skip_reasons, *result.issues]:
-        code = _classify_conflict_code(message)
-        grouped.setdefault(code, []).append(message)
+        base_code = _classify_conflict_code(message)
+        block_idx = _extract_block_index(message)
+        layout = "global"
+        if block_idx is not None:
+            block_info = info_by_block.get(block_idx)
+            if block_info is not None and block_info.layout_name:
+                layout = block_info.layout_name
+            else:
+                layout = "unknown"
+        profile = result.detected_game_profile or _GAME_PROFILE_UNKNOWN
+        grouped.setdefault((base_code, profile, layout), []).append(message)
     summaries: list[NifConflictSummary] = []
-    for code, messages in sorted(grouped.items(), key=lambda item: (-len(item[1]), item[0])):
+    for (base_code, profile, layout), messages in sorted(
+        grouped.items(),
+        key=lambda item: (-len(item[1]), item[0][0], item[0][1], item[0][2]),
+    ):
         examples = tuple(messages[:3])
-        actions = _CONFLICT_ACTIONS.get(code, _CONFLICT_ACTIONS["fallback_or_unknown"])
         summaries.append(
             NifConflictSummary(
-                code=code,
+                code=f"{base_code}.{profile}.{layout}",
                 count=len(messages),
+                game_profile=profile,
+                shader_layout=layout,
                 examples=examples,
-                suggested_actions=actions,
+                suggested_actions=_resolve_conflict_actions(
+                    base_code=base_code,
+                    game_profile=profile,
+                    shader_layout=layout,
+                ),
             )
         )
     return summaries
@@ -3847,7 +3941,7 @@ def validate_nif_for_parallax(
 
     result.renderer_notes = agg_renderer_notes
     result.renderer_verdicts = _build_renderer_verdicts(infos, has_havok=result.has_havok)
-    result.conflict_report = _build_conflict_report(result)
+    result.conflict_report = _build_conflict_report(result, infos)
     result.valid = result.shader_count > 0
     return result
 
@@ -4268,7 +4362,10 @@ def _main() -> None:  # pragma: no cover
             if args.conflict_report and v.conflict_report:
                 print("  Conflict report:")
                 for group in v.conflict_report:
-                    print(f"    - {group.code}: {group.count}")
+                    print(
+                        f"    - {group.code}: {group.count} "
+                        f"(profile={group.game_profile}, layout={group.shader_layout})"
+                    )
                     for example in group.examples:
                         print(f"      example: {example}")
                     for action in group.suggested_actions:
