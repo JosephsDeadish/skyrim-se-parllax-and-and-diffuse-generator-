@@ -100,6 +100,7 @@ from generate_textures import (
     select_generation_context_source,
     translate_ui_text,
     get_output_folder_format_warnings,
+    write_batch_failure_artifacts,
     generate_ambient_occlusion,
     generate_roughness,
     analyze_material_type_from_image,
@@ -320,8 +321,8 @@ def _shield_art_image() -> Image.Image:
 
 
 class GenerateTexturesTests(unittest.TestCase):
-    def test_app_version_is_0_7(self) -> None:
-        self.assertEqual(APP_VERSION, "0.7")
+    def test_app_version_is_0_9(self) -> None:
+        self.assertEqual(APP_VERSION, "0.9")
 
     def test_normalize_gui_state_turns_off_individual_auto_flags_when_master_off(self) -> None:
         normalized = _normalize_gui_state(
@@ -3565,6 +3566,99 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(sorted(path.name for path in outputs.keys()), ["a.dds", "b.dds", "c.dds", "d.dds"])
             self.assertEqual(sorted(path.name for path in output_dir.iterdir()), ["a.dds", "b.dds", "c.dds", "d.dds"])
 
+    def test_write_batch_failure_artifacts_writes_structured_json_and_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            failures = [
+                (root / "textures" / "b.dds", "decode error"),
+                (root / "textures" / "a.dds", "unsupported format"),
+            ]
+            outputs = {root / "textures" / "ok.dds": {"diffuse": root / "out" / "ok.dds"}}
+            json_path, csv_path = write_batch_failure_artifacts(
+                artifact_dir=root,
+                failures=failures,
+                batch_outputs=outputs,
+            )
+            self.assertTrue(json_path.exists())
+            self.assertTrue(csv_path.exists())
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["version"], APP_VERSION)
+            self.assertEqual(payload["summary"]["failed_files"], 2)
+            self.assertEqual(payload["summary"]["successful_files"], 1)
+            self.assertEqual(payload["summary"]["successful_outputs"], 1)
+            self.assertEqual([Path(row["file"]).name for row in payload["failures"]], ["a.dds", "b.dds"])
+            csv_lines = csv_path.read_text(encoding="utf-8").splitlines()
+            self.assertIn("file,error,action,conflict_code,conflict_action,outputs_generated", csv_lines[0])
+            self.assertTrue(any("a.dds" in line for line in csv_lines[1:]))
+            self.assertTrue(any("b.dds" in line for line in csv_lines[1:]))
+
+    def test_main_writes_failure_artifacts_for_batch_directory_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "textures"
+            input_dir.mkdir()
+            good = input_dir / "good.dds"
+            good.write_bytes(b"dds")
+            args = mock.Mock(
+                gui=False,
+                input_file=input_dir,
+                output_dir=None,
+                diffuse_name=None,
+                normal_name=None,
+                parallax_name=None,
+                glow_name=None,
+                environment_mask_name=None,
+                rmaos_name=None,
+                complex_name=None,
+                normal_strength=None,
+                parallax_strength=None,
+                glow_threshold=None,
+                environment_mask_strength=None,
+                rmaos_strength=None,
+                complex_strength=None,
+                specular_strength=None,
+                complex_format="msn",
+                environment_mask_mode="standard",
+                emboss_mode=False,
+                relief_mode=False,
+                parallax_mode="standard",
+                no_diffuse=False,
+                no_normal=True,
+                no_parallax=True,
+                glow_map=False,
+                environment_mask=False,
+                rmaos=False,
+                wetness_mask=False,
+                wetness_mask_strength=None,
+                snow_mask=False,
+                snow_mask_strength=None,
+                ao_map=False,
+                ao_strength=None,
+                roughness_map=False,
+                roughness_strength=None,
+                complex_material=False,
+                pbr_material=False,
+                render_profile="auto",
+                batch_workers=1,
+            )
+
+            def _fake_run_batch_with_options(**kwargs):
+                kwargs["error_callback"](1, 2, input_dir / "bad.dds", RuntimeError("decode error"))
+                return {good: {"diffuse": root / "out" / "good.dds"}}
+
+            with mock.patch("generate_textures.parse_args", return_value=args):
+                with mock.patch("generate_textures.run_batch_with_options", side_effect=_fake_run_batch_with_options):
+                    exit_code = main()
+
+            self.assertEqual(exit_code, 1)
+            json_report = input_dir / "batch_failure_report.json"
+            csv_report = input_dir / "batch_failure_report.csv"
+            self.assertTrue(json_report.exists())
+            self.assertTrue(csv_report.exists())
+            payload = json.loads(json_report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["summary"]["failed_files"], 1)
+            self.assertEqual(Path(payload["failures"][0]["file"]).name, "bad.dds")
+
     def test_create_panda_icon_image_returns_rgba_square(self) -> None:
         for size in (16, 32, 64, 128, 256):
             icon = _create_panda_icon_image(size=size)
@@ -3883,6 +3977,121 @@ class GenerateTexturesTests(unittest.TestCase):
         fake_gui._set_preview_source_by_path.assert_not_called()
         self.assertEqual(fake_gui.processing_queue.qsize(), 1)
         self.assertFalse(fake_gui.root.after_calls)
+
+    def test_revert_last_generation_removes_created_and_restores_backups(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_revert_last_generation"):
+            self.skipTest("GUI revert workflow is unavailable in this environment.")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            created = root / "created.dds"
+            created.write_text("new", encoding="utf-8")
+            original = root / "original.dds"
+            original.write_text("modified", encoding="utf-8")
+            backup_dir = root / "backup"
+            backup_dir.mkdir()
+            backup_copy = backup_dir / "original.dds"
+            backup_copy.write_text("original", encoding="utf-8")
+
+            class _Button:
+                def __init__(self) -> None:
+                    self.configure = mock.Mock()
+
+            class _FakeGui:
+                def __init__(self) -> None:
+                    self.is_processing = False
+                    self.revert_button = _Button()
+                    self.last_generation_backup_dir = backup_dir
+                    self.last_generation_backups = {original: backup_copy}
+                    self.last_generation_created_files = {created}
+                    self.status_var = mock.Mock()
+
+                def _has_revert_snapshot(self) -> bool:
+                    return bool(self.last_generation_backups or self.last_generation_created_files)
+
+                def _discard_last_generation_snapshot(self) -> None:
+                    TextureGeneratorGUI._discard_last_generation_snapshot(self)
+
+                def _set_processing_state(self, _processing: bool) -> None:
+                    return None
+
+                def _refresh_preview(self) -> None:
+                    return None
+
+            fake_gui = _FakeGui()
+            with mock.patch("generate_textures.messagebox.askyesno", return_value=True):
+                with mock.patch("generate_textures.messagebox.showinfo") as showinfo:
+                    with mock.patch("generate_textures.messagebox.showerror") as showerror:
+                        TextureGeneratorGUI._revert_last_generation(fake_gui)
+            self.assertFalse(created.exists())
+            self.assertEqual(original.read_text(encoding="utf-8"), "original")
+            self.assertFalse(fake_gui.last_generation_backups)
+            self.assertFalse(fake_gui.last_generation_created_files)
+            self.assertIsNone(fake_gui.last_generation_backup_dir)
+            showinfo.assert_called_once()
+            showerror.assert_not_called()
+
+    def test_revert_last_generation_reports_partial_failures_but_restores_remaining_files(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_revert_last_generation"):
+            self.skipTest("GUI revert workflow is unavailable in this environment.")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            keep_created = root / "created_keep.dds"
+            fail_created = root / "created_fail.dds"
+            keep_created.write_text("new-a", encoding="utf-8")
+            fail_created.write_text("new-b", encoding="utf-8")
+            original = root / "original.dds"
+            original.write_text("modified", encoding="utf-8")
+            backup_dir = root / "backup"
+            backup_dir.mkdir()
+            backup_copy = backup_dir / "original.dds"
+            backup_copy.write_text("original", encoding="utf-8")
+
+            class _Button:
+                def __init__(self) -> None:
+                    self.configure = mock.Mock()
+
+            class _FakeGui:
+                def __init__(self) -> None:
+                    self.is_processing = False
+                    self.revert_button = _Button()
+                    self.last_generation_backup_dir = backup_dir
+                    self.last_generation_backups = {original: backup_copy}
+                    self.last_generation_created_files = {keep_created, fail_created}
+                    self.status_var = mock.Mock()
+
+                def _has_revert_snapshot(self) -> bool:
+                    return bool(self.last_generation_backups or self.last_generation_created_files)
+
+                def _discard_last_generation_snapshot(self) -> None:
+                    TextureGeneratorGUI._discard_last_generation_snapshot(self)
+
+                def _set_processing_state(self, _processing: bool) -> None:
+                    return None
+
+                def _refresh_preview(self) -> None:
+                    return None
+
+            fake_gui = _FakeGui()
+            original_unlink = Path.unlink
+
+            def _unlink_with_failure(path: Path, *args, **kwargs):
+                if path == fail_created:
+                    raise PermissionError("locked")
+                return original_unlink(path, *args, **kwargs)
+
+            with mock.patch("pathlib.Path.unlink", autospec=True, side_effect=_unlink_with_failure):
+                with mock.patch("generate_textures.messagebox.askyesno", return_value=True):
+                    with mock.patch("generate_textures.messagebox.showinfo") as showinfo:
+                        with mock.patch("generate_textures.messagebox.showerror") as showerror:
+                            TextureGeneratorGUI._revert_last_generation(fake_gui)
+            self.assertFalse(keep_created.exists())
+            self.assertTrue(fail_created.exists())
+            self.assertEqual(original.read_text(encoding="utf-8"), "original")
+            self.assertFalse(fake_gui.last_generation_backups)
+            self.assertFalse(fake_gui.last_generation_created_files)
+            self.assertIsNone(fake_gui.last_generation_backup_dir)
+            showinfo.assert_not_called()
+            showerror.assert_called_once()
 
     def test_generate_normal_raises_clear_error_for_buffer_size_mismatch(self) -> None:
         with mock.patch("generate_textures.np.frombuffer", return_value=np.zeros(1, dtype=np.uint8)):

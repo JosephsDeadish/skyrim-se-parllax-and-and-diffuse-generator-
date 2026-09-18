@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import csv
 import gc
 import importlib
 import json
@@ -121,7 +122,7 @@ except ImportError as exc:
 
 
 DDS_EXTENSION = ".dds"
-APP_VERSION = "0.7"
+APP_VERSION = "0.9"
 SUPPORTED_INPUT_EXTENSIONS = {DDS_EXTENSION, ".png", ".jpg", ".jpeg", ".tga", ".bmp"}
 GENERATED_TEXTURE_SUFFIXES = (
     "_msn",
@@ -7046,6 +7047,48 @@ def _apply_cli_pbr_overrides(args: argparse.Namespace) -> argparse.Namespace:
     return args
 
 
+def write_batch_failure_artifacts(
+    *,
+    artifact_dir: Path,
+    failures: list[tuple[Path, str]],
+    batch_outputs: Mapping[Path, Mapping[str, Path]],
+) -> tuple[Path, Path]:
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    json_path = artifact_dir / "batch_failure_report.json"
+    csv_path = artifact_dir / "batch_failure_report.csv"
+    successful_output_count = sum(len(outputs) for outputs in batch_outputs.values())
+    rows = [
+        {
+            "file": str(path),
+            "error": str(message),
+            "action": "generate_textures",
+            "conflict_code": "",
+            "conflict_action": "",
+            "outputs_generated": 0,
+        }
+        for path, message in sorted(failures, key=lambda item: str(item[0]).lower())
+    ]
+    payload = {
+        "tool": "generate_textures",
+        "version": APP_VERSION,
+        "summary": {
+            "failed_files": len(rows),
+            "successful_files": len(batch_outputs),
+            "successful_outputs": successful_output_count,
+        },
+        "failures": rows,
+    }
+    json_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    with csv_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(
+            fh,
+            fieldnames=("file", "error", "action", "conflict_code", "conflict_action", "outputs_generated"),
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+    return json_path, csv_path
+
+
 PATREON_URL = "https://www.patreon.com/cw/DeadOnTheInside"
 MODDING_WIKI_SKYRIM_URL = "https://modding.wiki/en/skyrim"
 
@@ -11751,9 +11794,19 @@ def main() -> int:
             for output_type, path in outputs.items():
                 print(f"  {output_type.replace('_', ' ').title()} texture: {path}")
         if failures:
+            artifact_dir = args.output_dir if args.output_dir is not None else args.input_file
+            json_report, csv_report = write_batch_failure_artifacts(
+                artifact_dir=artifact_dir,
+                failures=failures,
+                batch_outputs=batch_outputs,
+            )
             print("\nSome files failed during batch processing:", file=sys.stderr)
             for file_path, error_message in failures:
                 print(f"- {file_path}: {error_message}", file=sys.stderr)
+            print(
+                f"\nFailure artifacts written: {json_report} and {csv_report}",
+                file=sys.stderr,
+            )
             return 1
         return 0
 

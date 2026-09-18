@@ -1,4 +1,4 @@
-"""Skyrim NIF file patcher (v0.8).
+"""Skyrim NIF file patcher (v0.9).
 
 Reads Skyrim NIF files (format 20.2.0.7, user_version=12,
 covering LE/SE/AE/VR/CK ``user_version_2`` variants) and patches
