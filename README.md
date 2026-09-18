@@ -293,7 +293,7 @@ For safety, parallax auto-patching skips known-problem cases by default (Havok-a
 For CLI runs, `nif_patcher.py --target-game auto|skyrim|fallout` now makes profile intent explicit. Fallout writes require `--experimental-fallout-write` and default to guarded flag/texture-slot patching.
 If you explicitly accept higher-risk Fallout writes, per-operation safety gates are available:
 `--fallout-allow-parallax-scale`, `--fallout-allow-fix-mesh-lighting`, `--fallout-allow-spec-strength`, `--fallout-allow-spec-color`, and `--fallout-allow-env-map-scale`.
-The NIF Editor now exposes matching controls (**NIF game profile** + **Enable experimental Fallout writes**) so GUI patch behavior aligns with CLI behavior.
+The NIF Editor now exposes matching controls (**NIF game profile** + **Enable experimental Fallout writes**) and per-operation Fallout safety gate checkboxes so GUI patch/remediation behavior aligns with CLI behavior.
 Validation can now emit a grouped conflict-resolution view with `--validate --conflict-report`, listing conflict categories plus suggested auto-fix actions per file.
 For larger mod-folder runs, add `--conflict-report-summary` to print a cross-file top-conflict summary, and use the NIF Editor scan view's batch summary row to quickly identify the highest-frequency conflict groups.
 You can also provide `--plugin-conflict-context <json>` (mesh path → plugin refs) to print plugin-aware conflict summaries, and `--auto-remediate` (optionally with `--auto-remediate-codes ...`) to apply safe best-effort fixes from detected conflict codes.
@@ -301,3 +301,4 @@ The GUI now includes a language selector backed by `assets/translations/*.json` 
 NIF scan runs also include retry/cancellation controls and a conflict-only incremental rerun action for faster follow-up passes after resolving issues.
 Plugin-aware conflict discovery now attempts lightweight plugin record parsing (record type + FormID + model-path subrecords) before raw mesh-string fallback so conflict summaries can carry real plugin-record metadata when available.
 NIF Editor conflict reruns now include conflict-only patch and conflict-only auto-remediation actions in addition to conflict-only scan reruns.
+Use `nif_patcher.py --compatibility-report` to print a current game/version support matrix (profiles, layouts, and guarded-operation policy).

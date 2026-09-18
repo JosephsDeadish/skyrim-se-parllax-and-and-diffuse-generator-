@@ -118,6 +118,61 @@ _GAME_PATCH_CAPABILITIES: dict[str, _GamePatchCapability] = {
     ),
 }
 
+
+def build_game_profile_support_matrix() -> tuple[tuple[str, str, str, str, str], ...]:
+    """Return profile support matrix rows for CLI reporting."""
+    rows: list[tuple[str, str, str, str, str]] = []
+    for profile in (_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT, _GAME_PROFILE_UNKNOWN):
+        cap = _GAME_PATCH_CAPABILITIES[profile]
+        mode = "guarded" if cap.requires_experimental_opt_in else "supported"
+        if profile == _GAME_PROFILE_UNKNOWN:
+            mode = "unsupported"
+        layouts = ",".join(cap.allowed_layouts) if cap.allowed_layouts else "none"
+        rows.append(
+            (
+                profile,
+                mode,
+                layouts,
+                "yes" if cap.supports_force_type3 else "no",
+                "yes" if cap.supports_parallax_scale else "gated" if profile == _GAME_PROFILE_FALLOUT else "no",
+            )
+        )
+    return tuple(rows)
+
+
+def build_compatibility_report_text() -> str:
+    lines = [
+        "NIF patch compatibility report",
+        "",
+        "Game profiles:",
+        "  - skyrim: Skyrim LE/SE/AE/VR/CK header families",
+        "  - fallout: Fallout header families (experimental, guarded writes)",
+        "",
+        "Header signatures:",
+        f"  - Skyrim user_version_2: {', '.join(str(v) for v in _KNOWN_SKYRIM_USER_VERSION_2)}",
+        "  - Fallout (user_version,user_version_2): "
+        + ", ".join(f"({u},{u2})" for u, u2 in _KNOWN_FALLOUT_USER_VERSION_SIGNATURES),
+        "",
+        "Support matrix:",
+        "  profile   mode         layouts      force_type3   parallax_scale",
+    ]
+    for profile, mode, layouts, force_type3, parallax_scale in build_game_profile_support_matrix():
+        lines.append(
+            f"  {profile:<9} {mode:<12} {layouts:<12} {force_type3:<12} {parallax_scale}"
+        )
+    lines.extend(
+        (
+            "",
+            "Fallout gated advanced operations:",
+            "  --fallout-allow-parallax-scale",
+            "  --fallout-allow-fix-mesh-lighting",
+            "  --fallout-allow-spec-strength",
+            "  --fallout-allow-spec-color",
+            "  --fallout-allow-env-map-scale",
+        )
+    )
+    return "\n".join(lines)
+
 # Shader Flags 1 (BSLightingShaderProperty)
 SLSF1_SPECULAR: int = 0x00000001
 SLSF1_SKINNED: int = 0x00000002
@@ -3788,6 +3843,11 @@ def build_auto_remediation_patch_options(
     *,
     target_game: str = "auto",
     experimental_fallout_write: bool = False,
+    fallout_allow_parallax_scale: bool = False,
+    fallout_allow_fix_mesh_lighting: bool = False,
+    fallout_allow_spec_strength: bool = False,
+    fallout_allow_spec_color: bool = False,
+    fallout_allow_env_map_scale: bool = False,
     allow_destructive: bool = False,
     backup: bool = True,
     dry_run: bool = False,
@@ -3799,6 +3859,11 @@ def build_auto_remediation_patch_options(
     opts = NifPatchOptions(
         target_game=target_game,
         experimental_fallout_write=experimental_fallout_write,
+        fallout_allow_parallax_scale=fallout_allow_parallax_scale,
+        fallout_allow_fix_mesh_lighting=fallout_allow_fix_mesh_lighting,
+        fallout_allow_spec_strength=fallout_allow_spec_strength,
+        fallout_allow_spec_color=fallout_allow_spec_color,
+        fallout_allow_env_map_scale=fallout_allow_env_map_scale,
         backup=backup,
         dry_run=dry_run,
     )
@@ -3857,6 +3922,11 @@ def auto_remediate_nif_conflicts(
     *,
     target_game: str = "auto",
     experimental_fallout_write: bool = False,
+    fallout_allow_parallax_scale: bool = False,
+    fallout_allow_fix_mesh_lighting: bool = False,
+    fallout_allow_spec_strength: bool = False,
+    fallout_allow_spec_color: bool = False,
+    fallout_allow_env_map_scale: bool = False,
     allow_destructive: bool = False,
     backup: bool = True,
     dry_run: bool = False,
@@ -3867,6 +3937,11 @@ def auto_remediate_nif_conflicts(
         conflict_codes,
         target_game=target_game,
         experimental_fallout_write=experimental_fallout_write,
+        fallout_allow_parallax_scale=fallout_allow_parallax_scale,
+        fallout_allow_fix_mesh_lighting=fallout_allow_fix_mesh_lighting,
+        fallout_allow_spec_strength=fallout_allow_spec_strength,
+        fallout_allow_spec_color=fallout_allow_spec_color,
+        fallout_allow_env_map_scale=fallout_allow_env_map_scale,
         allow_destructive=allow_destructive,
         backup=backup,
         dry_run=dry_run,
@@ -4601,7 +4676,7 @@ def _main() -> None:  # pragma: no cover
     parser = argparse.ArgumentParser(
         description="Patch Skyrim SE NIF files to enable parallax / env mapping.",
     )
-    parser.add_argument("nif", nargs="+", type=Path,
+    parser.add_argument("nif", nargs="*", type=Path,
                         help="NIF file(s) or folder(s) to patch.")
     parser.add_argument("--parallax", metavar="PATH",
                         help="Parallax height-map texture path (slot 3).")
@@ -4669,6 +4744,11 @@ def _main() -> None:  # pragma: no cover
         default=None,
         metavar="JSON",
         help="Optional JSON file mapping NIF paths to plugin references for plugin-aware conflict summaries.",
+    )
+    parser.add_argument(
+        "--compatibility-report",
+        action="store_true",
+        help="Print the current game/version support matrix and guarded-operation policy, then exit.",
     )
     parser.add_argument(
         "--auto-remediate",
@@ -4827,6 +4907,10 @@ def _main() -> None:  # pragma: no cover
                 )
                 sys.exit(1)
 
+    if args.compatibility_report:
+        print(build_compatibility_report_text())
+        return
+
     nif_files: list[Path] = []
     for p in args.nif:
         if p.is_dir():
@@ -4903,6 +4987,11 @@ def _main() -> None:  # pragma: no cover
                     selected_codes,
                     target_game=args.target_game,
                     experimental_fallout_write=args.experimental_fallout_write,
+                    fallout_allow_parallax_scale=args.fallout_allow_parallax_scale,
+                    fallout_allow_fix_mesh_lighting=args.fallout_allow_fix_mesh_lighting,
+                    fallout_allow_spec_strength=args.fallout_allow_spec_strength,
+                    fallout_allow_spec_color=args.fallout_allow_spec_color,
+                    fallout_allow_env_map_scale=args.fallout_allow_env_map_scale,
                     allow_destructive=args.allow_destructive_remediation,
                     backup=not args.no_backup,
                     dry_run=args.dry_run,

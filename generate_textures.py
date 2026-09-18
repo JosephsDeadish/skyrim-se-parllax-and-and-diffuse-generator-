@@ -5231,6 +5231,11 @@ def build_nif_patch_options_for_nif_editor(
     clear_cubemap_texture_path: bool = False,
     target_game: str = "auto",
     experimental_fallout_write: bool = False,
+    fallout_allow_parallax_scale: bool = False,
+    fallout_allow_fix_mesh_lighting: bool = False,
+    fallout_allow_spec_strength: bool = False,
+    fallout_allow_spec_color: bool = False,
+    fallout_allow_env_map_scale: bool = False,
 ) -> NifPatchOptions:
     return NifPatchOptions(
         enable_parallax=enable_parallax,
@@ -5261,6 +5266,11 @@ def build_nif_patch_options_for_nif_editor(
         clear_cubemap_texture_path=clear_cubemap_texture_path,
         target_game=str(target_game or "auto").strip().lower(),
         experimental_fallout_write=bool(experimental_fallout_write),
+        fallout_allow_parallax_scale=bool(fallout_allow_parallax_scale),
+        fallout_allow_fix_mesh_lighting=bool(fallout_allow_fix_mesh_lighting),
+        fallout_allow_spec_strength=bool(fallout_allow_spec_strength),
+        fallout_allow_spec_color=bool(fallout_allow_spec_color),
+        fallout_allow_env_map_scale=bool(fallout_allow_env_map_scale),
     )
 
 
@@ -9799,6 +9809,11 @@ if GUI_AVAILABLE:
                 dry_run_var = tk.BooleanVar(value=False)
                 target_game_var = tk.StringVar(value="auto")
                 experimental_fallout_write_var = tk.BooleanVar(value=False)
+                fallout_allow_parallax_scale_var = tk.BooleanVar(value=False)
+                fallout_allow_fix_mesh_lighting_var = tk.BooleanVar(value=False)
+                fallout_allow_spec_strength_var = tk.BooleanVar(value=False)
+                fallout_allow_spec_color_var = tk.BooleanVar(value=False)
+                fallout_allow_env_map_scale_var = tk.BooleanVar(value=False)
                 conflict_report_var = tk.BooleanVar(value=True)
                 conflict_examples_var = tk.BooleanVar(value=False)
                 retry_count_var = tk.IntVar(value=max(0, min(3, int(self.nif_retry_count_var.get()))))
@@ -9835,6 +9850,40 @@ if GUI_AVAILABLE:
                     variable=experimental_fallout_write_var,
                 )
                 experimental_fallout_check.pack(side="left")
+                fallout_gate_row = ttk.Frame(opt_frame)
+                fallout_gate_row.pack(fill="x", pady=(2, 0))
+                fallout_gate_label = ttk.Label(fallout_gate_row, text="Fallout safety gates:")
+                fallout_gate_label.pack(side="left")
+                fallout_allow_parallax_scale_check = ttk.Checkbutton(
+                    fallout_gate_row,
+                    text="Allow parallax-scale",
+                    variable=fallout_allow_parallax_scale_var,
+                )
+                fallout_allow_parallax_scale_check.pack(side="left", padx=(8, 0))
+                fallout_allow_fix_mesh_lighting_check = ttk.Checkbutton(
+                    fallout_gate_row,
+                    text="Allow fix-mesh-lighting",
+                    variable=fallout_allow_fix_mesh_lighting_var,
+                )
+                fallout_allow_fix_mesh_lighting_check.pack(side="left", padx=(8, 0))
+                fallout_allow_spec_strength_check = ttk.Checkbutton(
+                    fallout_gate_row,
+                    text="Allow spec-strength",
+                    variable=fallout_allow_spec_strength_var,
+                )
+                fallout_allow_spec_strength_check.pack(side="left", padx=(8, 0))
+                fallout_allow_spec_color_check = ttk.Checkbutton(
+                    fallout_gate_row,
+                    text="Allow spec-color",
+                    variable=fallout_allow_spec_color_var,
+                )
+                fallout_allow_spec_color_check.pack(side="left", padx=(8, 0))
+                fallout_allow_env_map_scale_check = ttk.Checkbutton(
+                    fallout_gate_row,
+                    text="Allow env-map-scale",
+                    variable=fallout_allow_env_map_scale_var,
+                )
+                fallout_allow_env_map_scale_check.pack(side="left", padx=(8, 0))
 
                 flag_row = ttk.Frame(opt_frame)
                 flag_row.pack(fill="x")
@@ -10072,11 +10121,29 @@ if GUI_AVAILABLE:
 
                 def _sync_target_game_controls(*_: object) -> None:
                     selected_game = (target_game_var.get() or "auto").strip().lower()
-                    if selected_game == "skyrim":
+                    allow_fallout_controls = selected_game != "skyrim"
+                    if not allow_fallout_controls:
                         experimental_fallout_write_var.set(False)
-                        experimental_fallout_check.configure(state=tk.DISABLED)
-                    else:
-                        experimental_fallout_check.configure(state=tk.NORMAL)
+                    experimental_fallout_check.configure(state=(tk.NORMAL if allow_fallout_controls else tk.DISABLED))
+                    gate_enabled = allow_fallout_controls and experimental_fallout_write_var.get()
+                    for gate_var in (
+                        fallout_allow_parallax_scale_var,
+                        fallout_allow_fix_mesh_lighting_var,
+                        fallout_allow_spec_strength_var,
+                        fallout_allow_spec_color_var,
+                        fallout_allow_env_map_scale_var,
+                    ):
+                        if not gate_enabled:
+                            gate_var.set(False)
+                    gate_state = tk.NORMAL if gate_enabled else tk.DISABLED
+                    for gate_check in (
+                        fallout_allow_parallax_scale_check,
+                        fallout_allow_fix_mesh_lighting_check,
+                        fallout_allow_spec_strength_check,
+                        fallout_allow_spec_color_check,
+                        fallout_allow_env_map_scale_check,
+                    ):
+                        gate_check.configure(state=gate_state)
 
                 nif_path_var.trace_add("write", _on_nif_target_changed)
                 nif_scan_mode.trace_add("write", _on_nif_target_changed)
@@ -10103,6 +10170,7 @@ if GUI_AVAILABLE:
                     watch_var.trace_add("write", _update_checkbox_warnings)
                 target_game_var.trace_add("write", _update_checkbox_warnings)
                 target_game_var.trace_add("write", _sync_target_game_controls)
+                experimental_fallout_write_var.trace_add("write", _sync_target_game_controls)
                 _sync_target_game_controls()
                 self._add_tooltip(
                     renderer_label,
@@ -10134,6 +10202,30 @@ if GUI_AVAILABLE:
                 self._add_tooltip(
                     experimental_fallout_check,
                     "Required for Fallout-target patch writes. Use only with backups; some Fallout paths are still limited.",
+                )
+                self._add_tooltip(
+                    fallout_gate_label,
+                    "Explicitly opt in to higher-risk Fallout writes per operation.",
+                )
+                self._add_tooltip(
+                    fallout_allow_parallax_scale_check,
+                    "Allow parallax-scale writes in Fallout mode (higher risk).",
+                )
+                self._add_tooltip(
+                    fallout_allow_fix_mesh_lighting_check,
+                    "Allow fix-mesh-lighting writes in Fallout mode (higher risk).",
+                )
+                self._add_tooltip(
+                    fallout_allow_spec_strength_check,
+                    "Allow spec-strength writes in Fallout mode (higher risk).",
+                )
+                self._add_tooltip(
+                    fallout_allow_spec_color_check,
+                    "Allow spec-color writes in Fallout mode (higher risk).",
+                )
+                self._add_tooltip(
+                    fallout_allow_env_map_scale_check,
+                    "Allow env-map-scale writes in Fallout mode (higher risk).",
                 )
                 self._add_tooltip(guide_label, "📘 Fast BSLighting checkbox reference so you can patch without guessing.")
                 self._add_tooltip(option_warning_label, "⚠ Compatibility warnings for current checkbox combinations.")
@@ -11003,6 +11095,11 @@ if GUI_AVAILABLE:
                                             codes,
                                             target_game=target_game_var.get(),
                                             experimental_fallout_write=experimental_fallout_write_var.get(),
+                                            fallout_allow_parallax_scale=fallout_allow_parallax_scale_var.get(),
+                                            fallout_allow_fix_mesh_lighting=fallout_allow_fix_mesh_lighting_var.get(),
+                                            fallout_allow_spec_strength=fallout_allow_spec_strength_var.get(),
+                                            fallout_allow_spec_color=fallout_allow_spec_color_var.get(),
+                                            fallout_allow_env_map_scale=fallout_allow_env_map_scale_var.get(),
                                             allow_destructive=False,
                                             backup=backup_var.get(),
                                             dry_run=dry_run_var.get(),
@@ -11103,6 +11200,11 @@ if GUI_AVAILABLE:
                         clear_cubemap_texture_path=clear_cubemap_var.get(),
                         target_game=target_game_var.get(),
                         experimental_fallout_write=experimental_fallout_write_var.get(),
+                        fallout_allow_parallax_scale=fallout_allow_parallax_scale_var.get(),
+                        fallout_allow_fix_mesh_lighting=fallout_allow_fix_mesh_lighting_var.get(),
+                        fallout_allow_spec_strength=fallout_allow_spec_strength_var.get(),
+                        fallout_allow_spec_color=fallout_allow_spec_color_var.get(),
+                        fallout_allow_env_map_scale=fallout_allow_env_map_scale_var.get(),
                     )
                     if warnings_to_confirm:
                         proceed = messagebox.askyesno(
@@ -11155,6 +11257,11 @@ if GUI_AVAILABLE:
                         clear_cubemap_texture_path=clear_cubemap_var.get(),
                         target_game=target_game_var.get(),
                         experimental_fallout_write=experimental_fallout_write_var.get(),
+                        fallout_allow_parallax_scale=fallout_allow_parallax_scale_var.get(),
+                        fallout_allow_fix_mesh_lighting=fallout_allow_fix_mesh_lighting_var.get(),
+                        fallout_allow_spec_strength=fallout_allow_spec_strength_var.get(),
+                        fallout_allow_spec_color=fallout_allow_spec_color_var.get(),
+                        fallout_allow_env_map_scale=fallout_allow_env_map_scale_var.get(),
                     )
                     _is_running[0] = True
                     _cancel_requested[0] = False
@@ -11286,6 +11393,11 @@ if GUI_AVAILABLE:
                         dry_run=dry_run_var.get(),
                         target_game=target_game_var.get(),
                         experimental_fallout_write=experimental_fallout_write_var.get(),
+                        fallout_allow_parallax_scale=fallout_allow_parallax_scale_var.get(),
+                        fallout_allow_fix_mesh_lighting=fallout_allow_fix_mesh_lighting_var.get(),
+                        fallout_allow_spec_strength=fallout_allow_spec_strength_var.get(),
+                        fallout_allow_spec_color=fallout_allow_spec_color_var.get(),
+                        fallout_allow_env_map_scale=fallout_allow_env_map_scale_var.get(),
                     )
                     _is_running[0] = True
                     _cancel_requested[0] = False

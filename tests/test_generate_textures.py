@@ -3193,6 +3193,29 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(options.env_mask_texture_path, r"textures\architecture\stone\stone_cm.dds")
         self.assertEqual(options.cubemap_texture_path, r"textures\cubemaps\chrome_e.dds")
 
+    def test_build_nif_patch_options_for_nif_editor_carries_fallout_gate_flags(self) -> None:
+        options = build_nif_patch_options_for_nif_editor(
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=False,
+            enable_glow_map=False,
+            enable_pbr=False,
+            parallax_scale=2.0,
+            force_shader_type_3=False,
+            target_game="fallout",
+            experimental_fallout_write=True,
+            fallout_allow_parallax_scale=True,
+            fallout_allow_fix_mesh_lighting=True,
+            fallout_allow_spec_strength=True,
+            fallout_allow_spec_color=True,
+            fallout_allow_env_map_scale=True,
+        )
+        self.assertTrue(options.fallout_allow_parallax_scale)
+        self.assertTrue(options.fallout_allow_fix_mesh_lighting)
+        self.assertTrue(options.fallout_allow_spec_strength)
+        self.assertTrue(options.fallout_allow_spec_color)
+        self.assertTrue(options.fallout_allow_env_map_scale)
+
     def test_build_nif_patch_options_for_nif_editor_prefixes_relative_paths_with_textures(self) -> None:
         options = build_nif_patch_options_for_nif_editor(
             enable_parallax=True,

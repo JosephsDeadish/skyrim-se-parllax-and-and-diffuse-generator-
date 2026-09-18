@@ -40,6 +40,8 @@ from nif_patcher import (
     summarize_plugin_aware_validation_conflicts,
     summarize_validation_conflicts,
     build_auto_remediation_patch_options,
+    build_compatibility_report_text,
+    build_game_profile_support_matrix,
     auto_remediate_nif_conflicts,
     scan_nif_diagnostics,
     validate_nif_for_parallax,
@@ -2464,6 +2466,45 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertTrue(after.has_env_mapping_flag)
         self.assertTrue(after.has_glow_map_flag)
         self.assertIn("enable_parallax", steps)
+
+    def test_auto_remediation_build_options_carries_fallout_gate_flags(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        _rewrite_user_version(nif, 11)
+        opts, _steps = build_auto_remediation_patch_options(
+            nif,
+            ["missing_parallax_flag.fallout.legacy"],
+            target_game="fallout",
+            experimental_fallout_write=True,
+            fallout_allow_parallax_scale=True,
+            fallout_allow_fix_mesh_lighting=True,
+            fallout_allow_spec_strength=True,
+            fallout_allow_spec_color=True,
+            fallout_allow_env_map_scale=True,
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(opts.fallout_allow_parallax_scale)
+        self.assertTrue(opts.fallout_allow_fix_mesh_lighting)
+        self.assertTrue(opts.fallout_allow_spec_strength)
+        self.assertTrue(opts.fallout_allow_spec_color)
+        self.assertTrue(opts.fallout_allow_env_map_scale)
+
+
+class TestCompatibilityReport(unittest.TestCase):
+    def test_game_profile_support_matrix_has_expected_profiles(self) -> None:
+        matrix = build_game_profile_support_matrix()
+        profiles = {row[0]: row for row in matrix}
+        self.assertIn("skyrim", profiles)
+        self.assertIn("fallout", profiles)
+        self.assertIn("unknown", profiles)
+        self.assertEqual(profiles["fallout"][1], "guarded")
+
+    def test_compatibility_report_mentions_fallout_safety_gate_flags(self) -> None:
+        report = build_compatibility_report_text()
+        self.assertIn("NIF patch compatibility report", report)
+        self.assertIn("--fallout-allow-parallax-scale", report)
+        self.assertIn("--fallout-allow-env-map-scale", report)
 
 
 class TestFixtureCorpusCompatibilityMatrix(unittest.TestCase):
