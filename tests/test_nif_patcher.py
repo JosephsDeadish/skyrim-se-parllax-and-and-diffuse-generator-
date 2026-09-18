@@ -347,6 +347,16 @@ class TestScanNif(unittest.TestCase):
         validation = validate_nif_for_parallax(nif)
         self.assertEqual(validation.detected_game_profile, "unknown")
 
+    def test_validate_treats_user12_130_as_skyrim_profile(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        validation = validate_nif_for_parallax(nif)
+        self.assertEqual(validation.detected_game_profile, "skyrim")
+
+    def test_validate_treats_user12_131_as_fallout_profile(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=131)
+        validation = validate_nif_for_parallax(nif)
+        self.assertEqual(validation.detected_game_profile, "fallout")
+
     def test_scan_accepts_crlf_header_line(self) -> None:
         nif = _write_nif(self.tmp, header_line_ending=b"\r\n")
         infos = scan_nif(nif)

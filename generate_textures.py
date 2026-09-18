@@ -10003,10 +10003,10 @@ if GUI_AVAILABLE:
                     if not first_line:
                         return "Unknown error"
                     lowered = first_line.lower()
-                    if "target_game='fallout'" in lowered or "fallout patch-write support" in lowered:
-                        return "Fallout profile not writable with current options"
                     if "experimental_fallout_write is disabled" in lowered:
                         return "Fallout profile requires experimental write opt-in"
+                    if "target_game='fallout'" in lowered or "fallout patch-write support" in lowered:
+                        return "Fallout profile not writable with current options"
                     if "unsupported skyrim nif header values" in lowered or "unexpected user version values" in lowered:
                         return "Unsupported or non-Skyrim header values"
                     if "no patchable bslightingshaderproperty blocks found" in lowered:

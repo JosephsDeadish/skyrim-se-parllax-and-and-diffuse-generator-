@@ -63,7 +63,15 @@ _KNOWN_SKYRIM_USER_VERSION_2: tuple[int, ...] = (
     _SKYRIM_SE_USER_VERSION_2_CK,
     _SKYRIM_LE_USER_VERSION_2,
 )
-_KNOWN_FALLOUT_USER_VERSION_2: tuple[int, ...] = (130, 131, 132, 139)
+_KNOWN_FALLOUT_USER_VERSION_SIGNATURES: tuple[tuple[int, int], ...] = (
+    (11, 130),
+    (11, 131),
+    (11, 132),
+    (11, 139),
+    (12, 131),
+    (12, 132),
+    (12, 139),
+)
 _GAME_PROFILE_SKYRIM: str = "skyrim"
 _GAME_PROFILE_FALLOUT: str = "fallout"
 _GAME_PROFILE_UNKNOWN: str = "unknown"
@@ -952,10 +960,10 @@ class _NifHeader:
 
 def _detect_game_profile(user_version: int, user_version_2: int) -> str:
     """Classify a NIF into a coarse game profile using user-version fields."""
+    if (user_version, user_version_2) in _KNOWN_FALLOUT_USER_VERSION_SIGNATURES:
+        return _GAME_PROFILE_FALLOUT
     if user_version == _SKYRIM_USER_VERSION and _is_supported_skyrim_user_version_2(user_version_2):
         return _GAME_PROFILE_SKYRIM
-    if user_version == 11 and user_version_2 in _KNOWN_FALLOUT_USER_VERSION_2:
-        return _GAME_PROFILE_FALLOUT
     return _GAME_PROFILE_UNKNOWN
 
 
@@ -1223,7 +1231,8 @@ class _TextureSetBlock:
 
 
 def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
-                       block_size: int, num_blocks: int) -> _ShaderPropBlock:
+                       block_size: int, num_blocks: int,
+                       *, allow_num_extra_fallback: bool = True) -> _ShaderPropBlock:
     """Parse a BSLightingShaderProperty block.
 
     Layout for Skyrim/SE BSLightingShaderProperty (NIF 20.2.0.7 / user_version=12):
@@ -1269,7 +1278,7 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
     num_extra_candidates: list[int] = []
     if raw_num_extra <= max_extra_refs:
         num_extra_candidates.append(raw_num_extra)
-    if 0 not in num_extra_candidates:
+    if allow_num_extra_fallback and 0 not in num_extra_candidates:
         num_extra_candidates.append(0)
 
     num_extra: int | None = None
@@ -1330,10 +1339,10 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         if payload_size == 24:
             return SHADER_TYPE_MULTILAYER, "real_payload_multilayer"
         if payload_size % 4 == 0 and payload_size <= 64:
-            # Real-world Skyrim SE meshes sometimes carry additional shader
-            # payload bytes we do not decode yet. Keep the block parseable so
-            # scan/patch flows can still operate on flags and texture slots.
-            return SHADER_TYPE_DEFAULT, "real_payload_default_fallback"
+            # Payload shape is structurally aligned but unknown. Keep this
+            # unresolved so scan/patch flows can still handle flag/texture
+            # operations without reclassifying the shader type.
+            return None, "real_payload_unknown_aligned"
         return None, "unknown"
 
     def _build_candidate(
@@ -1367,12 +1376,14 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
 
         shader_type = shader_type_value
         if shader_type is None or shader_type not in _KNOWN_SHADER_TYPES:
-            # For both "real" and "legacy" layouts, fall back to DEFAULT when
-            # the shader type is unrecognised (e.g. another null-sentinel value
-            # that _decode_shader_type did not map to a known type).  This keeps
-            # vanilla NIFs with non-standard shader_type values parseable.
-            shader_type = SHADER_TYPE_DEFAULT
-            shader_type_resolution = "fallback_default"
+            if layout_name == "real":
+                # Preserve unresolved real-layout classifications as raw values
+                # so diagnostics remain accurate for unknown payload variants.
+                shader_type = raw_shader_type
+            else:
+                # For legacy layouts, keep backward-compatible fallback.
+                shader_type = SHADER_TYPE_DEFAULT
+                shader_type_resolution = "fallback_default"
 
         common_end = block_start + common_size + extra_shift
         payload_size = block_size - (common_size + extra_shift)
@@ -2177,6 +2188,8 @@ def _build_block_map(
     data: bytes,
     header: _NifHeader,
     mapping_table: dict[int, int] | None = None,
+    *,
+    allow_num_extra_fallback: bool = True,
 ) -> tuple[list[_ShaderPropBlock], dict[int, _TextureSetBlock], list[str]]:
     """Return (shader_props, texture_sets, errors)."""
     block_starts = _compute_block_starts(header.blocks_start, header.block_sizes)
@@ -2192,7 +2205,14 @@ def _build_block_map(
 
         if btype == "BSLightingShaderProperty":
             try:
-                sp = _parse_shader_prop(buf, bi, bstart, bsize, header.num_blocks)
+                sp = _parse_shader_prop(
+                    buf,
+                    bi,
+                    bstart,
+                    bsize,
+                    header.num_blocks,
+                    allow_num_extra_fallback=allow_num_extra_fallback,
+                )
                 shader_props.append(sp)
             except (ValueError, struct.error, IndexError) as exc:
                 errors.append(
@@ -2314,6 +2334,16 @@ def _apply_patches(
     opts: NifPatchOptions,
 ) -> tuple[bytes, int, int, int]:
     """Return (new_data, props_patched, sets_patched, blocks_upgraded)."""
+    source_profile = _detect_game_profile(header.user_version, header.user_version_2)
+    reparse_profiles = (
+        (source_profile,)
+        if source_profile in (_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT)
+        else (_GAME_PROFILE_SKYRIM,)
+    )
+
+    def _reparse_header(data_bytes: bytes) -> _NifHeader | None:
+        return _read_header_for_profiles(_Buf(data_bytes), allowed_profiles=reparse_profiles)
+
     upgraded = 0
     effective_parallax = opts.enable_parallax or opts.enable_pom
     want_scale = opts.parallax_scale is not None and opts.parallax_scale > 0
@@ -2336,10 +2366,10 @@ def _apply_patches(
         # there are two or more type-0 shader blocks to upgrade.
         while True:
             buf_check = _Buf(data)
-            chk_header = _read_header(buf_check)
+            chk_header = _read_header_for_profiles(buf_check, allowed_profiles=reparse_profiles)
             if chk_header is None:
                 raise RuntimeError("Header corrupted after type-3 upgrade.")
-            fresh_props, _, _ = _build_block_map(data, chk_header)
+            fresh_props, _, _ = _build_block_map(data, chk_header, allow_num_extra_fallback=False)
             sp_to_upgrade = next(
                 (
                     sp
@@ -2366,10 +2396,10 @@ def _apply_patches(
         if upgraded:
             # Final reparse to give phase 2 fresh offsets.
             buf = _Buf(data)
-            new_header = _read_header(buf)
+            new_header = _read_header_for_profiles(buf, allowed_profiles=reparse_profiles)
             if new_header is None:
                 raise RuntimeError("Header corrupted after type-3 upgrade.")
-            shader_props, texture_sets, _ = _build_block_map(data, new_header)
+            shader_props, texture_sets, _ = _build_block_map(data, new_header, allow_num_extra_fallback=False)
             header = new_header
 
     # --- Phase 2: in-place flag + parallax scale + field patches --------------
@@ -2498,10 +2528,14 @@ def _apply_patches(
         buf_local.write_u32_at(ts_bsize_off, old_ts_size + (needed * 4))
         new_data_local = buf_local.to_bytes()
 
-        new_header_local = _read_header(_Buf(new_data_local))
+        new_header_local = _reparse_header(new_data_local)
         if new_header_local is None:
             raise RuntimeError("Header corrupted after texture slot extension.")
-        _, new_texture_sets, _ = _build_block_map(new_data_local, new_header_local)
+        _, new_texture_sets, _ = _build_block_map(
+            new_data_local,
+            new_header_local,
+            allow_num_extra_fallback=False,
+        )
         return new_data_local, new_header_local, new_texture_sets, True
 
     for sp in shader_props:
@@ -2592,9 +2626,9 @@ def _apply_patches(
 
         # Reparse so subsequent shader props (if any) get fresh offsets.
         buf3 = _Buf(data)
-        new_header = _read_header(buf3)
+        new_header = _read_header_for_profiles(buf3, allowed_profiles=reparse_profiles)
         if new_header:
-            _, texture_sets, _ = _build_block_map(data, new_header)
+            _, texture_sets, _ = _build_block_map(data, new_header, allow_num_extra_fallback=False)
             header = new_header
         sets_patched += 1
 
@@ -2754,7 +2788,10 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         )
 
     shader_props, texture_sets, parse_errors = _build_block_map(
-        original_data, header, opts.unknown_shader_type_map
+        original_data,
+        header,
+        opts.unknown_shader_type_map,
+        allow_num_extra_fallback=False,
     )
     result.errors.extend(parse_errors)
     result.warnings.extend(_shader_resolution_notes(shader_props))
@@ -2799,7 +2836,10 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
             try:
                 fallback_opts = replace(opts, force_shader_type_3=False)
                 fallback_shader_props, fallback_texture_sets, fallback_parse_errors = _build_block_map(
-                    original_data, header, fallback_opts.unknown_shader_type_map
+                    original_data,
+                    header,
+                    fallback_opts.unknown_shader_type_map,
+                    allow_num_extra_fallback=False,
                 )
                 if not fallback_shader_props:
                     if fallback_parse_errors:
