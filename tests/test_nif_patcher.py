@@ -326,6 +326,19 @@ class TestScanNif(unittest.TestCase):
         self.assertIn("fallout", joined)
         self.assertIn("experimental", joined)
 
+    def test_validate_detects_fallout_profile(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=83)
+        raw = bytearray(nif.read_bytes())
+        user_version_offset = len(b"Gamebryo File Format, Version 20.2.0.7\n") + 4 + 1
+        struct.pack_into("<I", raw, user_version_offset, 11)
+        nif.write_bytes(bytes(raw))
+        validation = validate_nif_for_parallax(nif)
+        self.assertEqual(validation.detected_game_profile, "fallout")
+        self.assertTrue(
+            any("fallout-era profile" in s.lower() for s in validation.suggestions),
+            validation.suggestions,
+        )
+
     def test_scan_accepts_crlf_header_line(self) -> None:
         nif = _write_nif(self.tmp, header_line_ending=b"\r\n")
         infos = scan_nif(nif)
@@ -1049,6 +1062,19 @@ class TestPatchNifFlags(unittest.TestCase):
         nif = _write_nif(self.tmp)
         result = patch_nif(nif, NifPatchOptions(backup=False))
         self.assertFalse(result.success)  # success=False when nothing requested
+
+    def test_target_game_fallout_is_validate_only(self) -> None:
+        nif = _write_nif(self.tmp)
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False, target_game="fallout"))
+        self.assertFalse(result.success)
+        self.assertIn("fallout patch-write support is not implemented yet", result.message.lower())
+        self.assertTrue(any("validate-only" in err.lower() for err in result.errors), result.errors)
+
+    def test_invalid_target_game_option_fails_fast(self) -> None:
+        nif = _write_nif(self.tmp)
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False, target_game="oblivion"))
+        self.assertFalse(result.success)
+        self.assertIn("unsupported target_game", result.message.lower())
 
     def test_disable_parallax_clears_parallax_and_pom_flags(self) -> None:
         nif = _write_nif(self.tmp, flags1=SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION)

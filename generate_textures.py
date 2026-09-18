@@ -7276,15 +7276,15 @@ if GUI_AVAILABLE:
 
             _complex_label = ttk.Label(options_frame, text="Complex strength")
             _complex_label.grid(row=9, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_complex_label, "🔮 Controls complex-material contrast.\nHigher = punchier ENB material response. Lower = subtle, civilized vibes.")
+            self._add_tooltip(_complex_label, "Controls complex-material contrast.\nHigher = stronger ENB material response. Lower = subtler output.")
             self.complex_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.complex_strength_var, command=lambda _: self._on_slider_changed())
             self.complex_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
-            self._add_tooltip(self.complex_scale, "🔮 Right = louder material definition.\nLeft = quieter output for restrained legends.")
+            self._add_tooltip(self.complex_scale, "Move right for stronger material definition.\nMove left for subtler output.")
             self.complex_strength_display_label = ttk.Label(options_frame, textvariable=self.complex_strength_display_var)
             self.complex_strength_display_label.grid(row=9, column=3, sticky=tk.W, padx=8)
             self.auto_complex_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_complex_suggestion_var, command=self._on_auto_slider_preference_changed)
             self.auto_complex_check.grid(row=9, column=4, sticky=tk.W)
-            self._add_tooltip(self.auto_complex_check, "🤖 Auto-set complex strength. Let the algorithm\nscrutinise your texture's material complexity.")
+            self._add_tooltip(self.auto_complex_check, "Automatically choose complex-material strength from source texture analysis.")
 
             _specular_label = ttk.Label(options_frame, text="Specular strength (_msn alpha)")
             _specular_label.grid(row=10, column=0, sticky=tk.W, pady=8)
@@ -7296,7 +7296,7 @@ if GUI_AVAILABLE:
             self.specular_strength_display_label.grid(row=10, column=3, sticky=tk.W, padx=8)
             self.auto_specular_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_specular_suggestion_var, command=self._on_auto_slider_preference_changed)
             self.auto_specular_check.grid(row=10, column=4, sticky=tk.W)
-            self._add_tooltip(self.auto_specular_check, "🤖 Auto-set specular strength. The AI ponders how shiny\nyour texture DESERVES to be.")
+            self._add_tooltip(self.auto_specular_check, "Automatically choose specular strength from source texture analysis.")
 
             _ao_label = ttk.Label(options_frame, text="AO strength")
             _ao_label.grid(row=11, column=0, sticky=tk.W, pady=8)
@@ -7405,10 +7405,10 @@ if GUI_AVAILABLE:
             actions.pack(fill=tk.X)
             self.generate_button = ttk.Button(actions, text="Generate", command=self._generate)
             self.generate_button.pack(side=tk.LEFT)
-            self._add_tooltip(self.generate_button, "🚀 ENGAGE! Click to process your textures.\nWARNING: May cause excitement, temporary CPU warming, and beautiful Skyrim textures.")
+            self._add_tooltip(self.generate_button, "Start texture generation for the selected input and output settings.")
             self.cancel_button = ttk.Button(actions, text="Cancel Process", command=self._cancel_processing, state=tk.DISABLED)
             self.cancel_button.pack(side=tk.LEFT, padx=(6, 0))
-            self._add_tooltip(self.cancel_button, "🛑 Ask the current batch to stop after the active file completes.\nUseful when you realize things have gone terribly wrong.")
+            self._add_tooltip(self.cancel_button, "Stop the current batch after the active file finishes.")
             self.revert_button = ttk.Button(actions, text="Revert Process", command=self._revert_last_generation, state=tk.DISABLED)
             self.revert_button.pack(side=tk.LEFT, padx=(6, 0))
             self._add_tooltip(self.revert_button, "↩ Restore files from the most recent generation run.\nDisabled until a generation run has something to undo.")
@@ -7425,8 +7425,7 @@ if GUI_AVAILABLE:
             _status_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=14)
             self._add_tooltip(
                 _status_label,
-                "📢 Live status feed.\n"
-                "If something explodes, this line tells you what and where before panic mode fully activates.",
+                "Live status updates for generation and patching tasks.",
             )
             self._bind_responsive_wrap(top_bar, top_bar_message, horizontal_padding=260, min_wrap=220)
             self._bind_responsive_wrap(file_frame, _detected_context_label, horizontal_padding=28, min_wrap=220)
@@ -7442,15 +7441,13 @@ if GUI_AVAILABLE:
             )
             self._add_tooltip(
                 _before_title,
-                "🧾 Source preview header.\n"
-                "This is your control sample — the 'before' shot before sliders and wizardry get involved.",
+                "Source texture preview used as the baseline before generation.",
             )
             self.before_image_label = ttk.Label(preview_frame, text="No source loaded", anchor=tk.CENTER, justify=tk.CENTER)
             self.before_image_label.grid(row=2, column=0, columnspan=2, padx=6, pady=(0, 3), sticky="")
             self._add_tooltip(
                 self.before_image_label,
-                "👀 This is the original input texture.\n"
-                "Use it as your baseline: if the generated maps look weird, compare here first before blaming your GPU, ENB, or moon phases.",
+                "Original input texture preview. Compare generated outputs here when tuning settings.",
             )
 
             source_controls = ttk.Frame(preview_frame)
@@ -7459,22 +7456,19 @@ if GUI_AVAILABLE:
             self.prev_source_button.pack(side=tk.LEFT, padx=4)
             self._add_tooltip(
                 self.prev_source_button,
-                "⏮ Show the previous source file in folder mode.\n"
-                "Perfect for side-eyeing what your last texture looked like before your artistic decisions escalated.",
+                "Show the previous source file in folder mode.",
             )
             _source_name_label = ttk.Label(source_controls, textvariable=self.preview_source_name_var)
             _source_name_label.pack(side=tk.LEFT, padx=8)
             self._add_tooltip(
                 _source_name_label,
-                "🏷 Shows which source file you're previewing right now.\n"
-                "In folder mode it's index/total, so you can keep your sanity during big batches.",
+                "Shows the currently previewed source file and folder index.",
             )
             self.next_source_button = ttk.Button(source_controls, text="Next ▶", command=self._show_next_preview_source)
             self.next_source_button.pack(side=tk.LEFT, padx=4)
             self._add_tooltip(
                 self.next_source_button,
-                "⏭ Show the next source file in folder mode.\n"
-                "Use this to QA your batch without opening fifty windows like a chaos wizard.",
+                "Show the next source file in folder mode.",
             )
             _jump_label = ttk.Label(source_controls, text="Go to #")
             _jump_label.pack(side=tk.LEFT, padx=(12, 4))
@@ -7495,8 +7489,7 @@ if GUI_AVAILABLE:
             self.preview_jump_button.pack(side=tk.LEFT, padx=(0, 4))
             self._add_tooltip(
                 self.preview_jump_button,
-                "🚀 Jump to the typed preview number.\n"
-                "Great for large folders where clicking Next 200 times is cruel and unusual punishment.",
+                "Jump directly to the typed preview index.",
             )
             _preview_size_label = ttk.Label(source_controls, text="Preview size")
             _preview_size_label.pack(side=tk.LEFT, padx=(14, 4))
@@ -7516,8 +7509,7 @@ if GUI_AVAILABLE:
             preview_size_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_preview_size_changed())
             self._add_tooltip(
                 preview_size_combo,
-                "📐 XS→XL changes how big previews look in this window.\n"
-                "It does NOT change generated file quality, but XL can make you feel like a very serious texture scientist.",
+                "XS→XL changes preview size in this window only.\nGenerated output quality is unchanged.",
             )
             _batch_prev_check = ttk.Checkbutton(
                 source_controls,
@@ -7528,9 +7520,7 @@ if GUI_AVAILABLE:
             _batch_prev_check.pack(side=tk.LEFT, padx=(14, 4))
             self._add_tooltip(
                 _batch_prev_check,
-                "🎬 Live preview while batch-processing.\n"
-                "Heads-up: enabling this can slow processing, especially with big textures and huge folders.\n"
-                "Default is OFF for speed; enable only when you want to watch the magic happen.",
+                "Show live preview while batch-processing.\nThis can slow large batches, so it is disabled by default.",
             )
             _auto_patch_nifs_check = ttk.Checkbutton(
                 source_controls,
@@ -7553,8 +7543,7 @@ if GUI_AVAILABLE:
             )
             self._add_tooltip(
                 _generated_title,
-                "🧪 These are previews of what will be written to disk.\n"
-                "If one pane looks cursed, fix settings now instead of discovering it in-game three load screens later.",
+                "Preview of generated outputs that will be written to disk.",
             )
             self.preview_output_labels: dict[str, ttk.Label] = {}
             output_grid = ttk.Frame(preview_frame)
@@ -7573,17 +7562,17 @@ if GUI_AVAILABLE:
                 ("complex_material", "Complex Material"),
             )
             _output_tooltips = {
-                "diffuse": "🎨 Final colour/albedo preview.\nIf this looks off, every other map will inherit the drama. Start here.",
-                "normal": "🗻 Normal-map preview (fake surface depth).\nBlue-purple space magic that tells light where bumps should pretend to exist.",
-                "parallax": "🏔 Height/parallax preview.\nDarker = lower, lighter = higher. Think of it as tiny grayscale topography for your texture.",
-                "glow": "✨ Emissive/glow preview.\nBright pixels glow in darkness; dark pixels mind their own business like respectable citizens.",
-                "environment_mask": "🪞 Reflection mask preview.\nBrighter = shinier, darker = matte. Basically a \"where may I sparkle\" permit.",
+                "diffuse": "Final colour/albedo preview.",
+                "normal": "Normal-map preview used for surface lighting direction.",
+                "parallax": "Height/parallax preview. Darker = lower, lighter = higher.",
+                "glow": "Emissive/glow preview. Brighter pixels emit more light.",
+                "environment_mask": "Reflection mask preview. Brighter = shinier, darker = more matte.",
                 "rmaos": "🧩 TruePBR RMAOS preview (_rmaos/_ramos).\nPacked grayscale channels (not purple normal-map colors). Generator also writes a JSON sidecar in PBRNifPatcher/.",
-                "wetness_mask": "🌧 Wetness-mask preview (_wt).\nDarker areas are more rain-friendly; lighter areas stay less puddly.",
-                "snow_mask": "❄ Dynamic-snow mask preview (_sm).\nBrighter areas collect more snow; darker zones stay more sheltered.",
-                "ao": "🕳 Ambient-occlusion preview (_ao).\nDarker crevices, brighter open surfaces. Cheap fake shadows that make things look pleasingly real.",
+                "wetness_mask": "Wetness-mask preview (_wt).",
+                "snow_mask": "Dynamic-snow mask preview (_sm).",
+                "ao": "Ambient-occlusion preview (_ao). Darker crevices indicate stronger cavity shading.",
                 "roughness": "🪵 Roughness/microsurface preview (_rough).\nBrighter = rougher (matte), darker = smoother (glossy). Controls how blurry reflections look.",
-                "complex_material": "🔮 Complex-material preview.\nFor MSN format this pane is split: LEFT = RGB normal channels, RIGHT = alpha/specular channel.\nFor CM format it shows the packed texture directly. Not a bug — just advanced wizard math.",
+                "complex_material": "Complex-material preview.\nFor MSN format this pane is split: LEFT = RGB normal channels, RIGHT = alpha/specular channel.\nFor CM format it shows the packed texture directly.",
             }
             for index, (output_key, output_label) in enumerate(output_specs):
                 row = (index // 2) * 2
@@ -9364,8 +9353,8 @@ if GUI_AVAILABLE:
                 browse_nif_button = ttk.Button(row1, text="Browse…", command=_browse_nif)
                 browse_nif_button.pack(side="left")
                 self._add_tooltip(path_label, "📍 Pick the NIF file/folder you want to scan or patch.")
-                self._add_tooltip(nif_path_entry, "⌨ Paste a full path here. Yes, even that scary MO2 path with 400 folders.")
-                self._add_tooltip(browse_nif_button, "🧭 Opens file/folder picker so your fingers don’t have to type all that.")
+                self._add_tooltip(nif_path_entry, "Paste or edit the full NIF file/folder path here.")
+                self._add_tooltip(browse_nif_button, "Open a file/folder picker for the NIF path.")
 
                 opt_frame = ttk.LabelFrame(controls_wrapper, text="Patch Options (what to enable)", padding=6)
                 opt_frame.pack(fill="x", pady=4)
@@ -10008,6 +9997,36 @@ if GUI_AVAILABLE:
                     status_var.set(f"{status}: {file_name} — {row_preview}")
                     results_tree.yview_moveto(1.0)
 
+                def _batch_failure_key(details: str) -> str:
+                    normalized = _normalize_nif_result_details(details)
+                    first_line = next((line.strip() for line in normalized.splitlines() if line.strip()), "")
+                    if not first_line:
+                        return "Unknown error"
+                    lowered = first_line.lower()
+                    if "target_game='fallout'" in lowered or "fallout patch-write support" in lowered:
+                        return "Fallout profile currently validate-only"
+                    if "unsupported skyrim nif header values" in lowered or "unexpected user version values" in lowered:
+                        return "Unsupported or non-Skyrim header values"
+                    if "no patchable bslightingshaderproperty blocks found" in lowered:
+                        return "No patchable BSLightingShaderProperty blocks"
+                    return first_line[:160]
+
+                def _emit_failure_summary_row(
+                    failure_groups: dict[str, int],
+                    *,
+                    label: str,
+                    max_groups: int = 6,
+                ) -> None:
+                    if not failure_groups:
+                        return
+                    ranked = sorted(failure_groups.items(), key=lambda item: (-item[1], item[0]))
+                    shown = ranked[:max_groups]
+                    lines = [f"{count}× {reason}" for reason, count in shown]
+                    remaining = len(ranked) - len(shown)
+                    if remaining > 0:
+                        lines.append(f"...and {remaining} more reason group(s).")
+                    _safe_add_row("WARN", "Batch summary", f"{label}\n" + "\n".join(lines))
+
                 def _clear_log() -> None:
                     for item in results_tree.get_children():
                         results_tree.delete(item)
@@ -10139,6 +10158,8 @@ if GUI_AVAILABLE:
                             try:
                                 validation = validate_nif_for_parallax(nif)
                                 combined_detail_lines: list[str] = []
+                                if validation.detected_game_profile != "unknown":
+                                    combined_detail_lines.append(f"Detected profile: {validation.detected_game_profile}")
                                 if validation.has_havok:
                                     combined_detail_lines.append("⚠ Havok animation graph detected — parallax patching on this NIF can crash in-game.")
                                 if validation.skip_reasons:
@@ -10284,6 +10305,8 @@ if GUI_AVAILABLE:
 
                     def _patch_worker(nif_list=nifs, opts=options) -> None:
                         ok = skip = fail = 0
+                        failure_groups: dict[str, int] = {}
+                        status_interval = 25
                         for index, nif in enumerate(nif_list, start=1):
                             try:
                                 resolved_options, autofill_notes = resolve_nif_editor_patch_options_for_target(
@@ -10306,12 +10329,28 @@ if GUI_AVAILABLE:
                                 else:
                                     fail += 1
                                     _safe_add_row("FAIL", nif.name, detail_text or "Patch failed.")
+                                    failure_key = _batch_failure_key(detail_text or "Patch failed.")
+                                    failure_groups[failure_key] = failure_groups.get(failure_key, 0) + 1
                                     for err in result.errors:
                                         _safe_add_row("FAIL", nif.name, err)
+                                        error_key = _batch_failure_key(err)
+                                        failure_groups[error_key] = failure_groups.get(error_key, 0) + 1
                             except Exception as exc:
                                 fail += 1
-                                _safe_add_row("FAIL", nif.name, f"Patch failed: {exc}")
+                                fail_text = f"Patch failed: {exc}"
+                                _safe_add_row("FAIL", nif.name, fail_text)
+                                failure_key = _batch_failure_key(fail_text)
+                                failure_groups[failure_key] = failure_groups.get(failure_key, 0) + 1
                             _safe_progress(float(index))
+                            if index % status_interval == 0 or index == len(nif_list):
+                                _safe_status(
+                                    f"Patching progress {index}/{len(nif_list)} — "
+                                    f"{ok} patched, {skip} skipped, {fail} failed."
+                                )
+                        _emit_failure_summary_row(
+                            failure_groups,
+                            label=f"Top failure groups across {fail} failed patch operation(s):",
+                        )
                         _safe_status(f"Done — {ok} patched, {skip} skipped, {fail} failed.")
                         win.after(0, _finish_op)
 
@@ -10366,6 +10405,8 @@ if GUI_AVAILABLE:
 
                     def _unpatch_worker(nif_list=nifs, opts=options) -> None:
                         ok = skip = fail = 0
+                        failure_groups: dict[str, int] = {}
+                        status_interval = 25
                         for index, nif in enumerate(nif_list, start=1):
                             try:
                                 result = patch_nif(nif, opts)
@@ -10378,12 +10419,28 @@ if GUI_AVAILABLE:
                                 else:
                                     fail += 1
                                     _safe_add_row("FAIL", nif.name, result.message)
+                                    failure_key = _batch_failure_key(result.message)
+                                    failure_groups[failure_key] = failure_groups.get(failure_key, 0) + 1
                                     for err in result.errors:
                                         _safe_add_row("FAIL", nif.name, err)
+                                        error_key = _batch_failure_key(err)
+                                        failure_groups[error_key] = failure_groups.get(error_key, 0) + 1
                             except Exception as exc:
                                 fail += 1
-                                _safe_add_row("FAIL", nif.name, f"Unpatch failed: {exc}")
+                                fail_text = f"Unpatch failed: {exc}"
+                                _safe_add_row("FAIL", nif.name, fail_text)
+                                failure_key = _batch_failure_key(fail_text)
+                                failure_groups[failure_key] = failure_groups.get(failure_key, 0) + 1
                             _safe_progress(float(index))
+                            if index % status_interval == 0 or index == len(nif_list):
+                                _safe_status(
+                                    f"Unpatch progress {index}/{len(nif_list)} — "
+                                    f"{ok} unpatched, {skip} skipped, {fail} failed."
+                                )
+                        _emit_failure_summary_row(
+                            failure_groups,
+                            label=f"Top failure groups across {fail} failed unpatch operation(s):",
+                        )
                         _safe_status(f"Done — {ok} unpatched, {skip} skipped, {fail} failed.")
                         win.after(0, _finish_op)
 

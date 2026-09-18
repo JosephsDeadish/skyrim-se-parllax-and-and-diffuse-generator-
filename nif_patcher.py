@@ -63,6 +63,9 @@ _KNOWN_SKYRIM_USER_VERSION_2: tuple[int, ...] = (
     _SKYRIM_SE_USER_VERSION_2_CK,
     _SKYRIM_LE_USER_VERSION_2,
 )
+_GAME_PROFILE_SKYRIM: str = "skyrim"
+_GAME_PROFILE_FALLOUT: str = "fallout"
+_GAME_PROFILE_UNKNOWN: str = "unknown"
 
 _HEADER_PREFIXES: tuple[bytes, ...] = (
     b"Gamebryo File Format, Version 20.2.0.7",
@@ -494,6 +497,11 @@ class NifPatchOptions:
         Empty texture slot 5 (environment mask).
     clear_cubemap_texture_path:
         Empty texture slot 4 (cubemap).
+    target_game:
+        Cross-game profile selector. ``"auto"`` detects profile from NIF header.
+        ``"skyrim"`` enforces Skyrim-compatible headers. ``"fallout"`` is
+        accepted for readiness diagnostics groundwork but patch-write support is
+        not enabled yet.
     """
 
     enable_parallax: bool = False
@@ -522,6 +530,7 @@ class NifPatchOptions:
     clear_diffuse_texture_path: bool = False
     clear_env_mask_texture_path: bool = False
     clear_cubemap_texture_path: bool = False
+    target_game: str = "auto"
 
     # ----- Safety skip conditions -----
     skip_incompatible_shader_types: bool = True
@@ -757,6 +766,7 @@ class NifPatchResult:
     backup_path: Path | None = None
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    detected_game_profile: str = _GAME_PROFILE_UNKNOWN
 
 
 @dataclass
@@ -769,6 +779,7 @@ class NifValidationResult:
     needs_patch_count: int = 0    # shaders present but missing flags/texture
     skip_count: int = 0           # shaders skipped due to hard incompatibilities
     has_havok: bool = False       # True if a BSBehaviorGraphExtraData block exists
+    detected_game_profile: str = _GAME_PROFILE_UNKNOWN
     issues: list[str] = field(default_factory=list)
     suggestions: list[str] = field(default_factory=list)
     skip_reasons: list[str] = field(default_factory=list)
@@ -932,6 +943,32 @@ class _NifHeader:
     block_sizes_offset: int  # byte offset of block_sizes[0] in the file
 
 
+def _detect_game_profile(user_version: int, user_version_2: int) -> str:
+    """Classify a NIF into a coarse game profile using user-version fields."""
+    if user_version == _SKYRIM_USER_VERSION and _is_supported_skyrim_user_version_2(user_version_2):
+        return _GAME_PROFILE_SKYRIM
+    if user_version == 11:
+        return _GAME_PROFILE_FALLOUT
+    return _GAME_PROFILE_UNKNOWN
+
+
+def _detect_game_profile_from_bytes(data: bytes) -> str:
+    """Best-effort game profile detection for diagnostics and status UI."""
+    header_line_end = _find_header_terminator(data)
+    if header_line_end is None:
+        return _GAME_PROFILE_UNKNOWN
+    try:
+        version_offset = header_line_end
+        version = struct.unpack_from("<I", data, version_offset)[0]
+        if version != _NIF_VERSION_20_2_0_7:
+            return _GAME_PROFILE_UNKNOWN
+        user_version = struct.unpack_from("<I", data, version_offset + 5)[0]
+        user_version_2 = struct.unpack_from("<I", data, version_offset + 13)[0]
+    except (struct.error, IndexError, ValueError):
+        return _GAME_PROFILE_UNKNOWN
+    return _detect_game_profile(user_version, user_version_2)
+
+
 def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
     diagnostics = [f"Malformed or truncated NIF: {exc}"]
     if len(data) < 64:
@@ -955,7 +992,8 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
             return diagnostics
         user_version = struct.unpack_from("<I", data, version_offset + 5)[0]
         user_version_2 = struct.unpack_from("<I", data, version_offset + 13)[0]
-        if user_version == 11:
+        profile = _detect_game_profile(user_version, user_version_2)
+        if profile == _GAME_PROFILE_FALLOUT:
             diagnostics.append(
                 "Detected user_version=11 (likely Fallout-era NIF header). "
                 "Fallout compatibility is still experimental and not patch-enabled yet."
@@ -965,7 +1003,7 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
                 "or use validate-only checks until Fallout patch support is implemented."
             )
             return diagnostics
-        if user_version != _SKYRIM_USER_VERSION or not _is_supported_skyrim_user_version_2(user_version_2):
+        if profile != _GAME_PROFILE_SKYRIM:
             diagnostics.append(
                 f"Unexpected user version values ({user_version}, {user_version_2}). The file may use a different game/export format."
             )
@@ -1049,9 +1087,6 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
         return None
 
     user_version = buf.read_u32()
-    if user_version != _SKYRIM_USER_VERSION:
-        return None
-
     num_blocks = buf.read_u32()
 
     # Bethesda stream header (BSStreamHeader):
@@ -1067,7 +1102,7 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
     # (notably CK-style 130 headers), causing real blocks to be misread and
     # skipped during patching.
     user_version_2 = buf.read_u32()
-    if not _is_supported_skyrim_user_version_2(user_version_2):
+    if _detect_game_profile(user_version, user_version_2) != _GAME_PROFILE_SKYRIM:
         return None
     buf.read_sstring_u8()  # author
     if user_version_2 > 130:
@@ -2622,6 +2657,13 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
     if not has_any_toggle:
         result.message = "Nothing to patch — all options are disabled."
         return result
+    target_game = (opts.target_game or "auto").strip().lower()
+    if target_game not in {"auto", _GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT}:
+        result.errors.append(
+            f"Unsupported target_game {opts.target_game!r}. Expected one of: auto, skyrim, fallout."
+        )
+        result.message = "Unsupported target_game option."
+        return result
 
     for field_name, path_value in (
         ("parallax_texture_path", opts.parallax_texture_path),
@@ -2642,6 +2684,16 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         result.errors.append(f"Cannot read: {exc}")
         result.message = str(exc)
         return result
+    result.detected_game_profile = _detect_game_profile_from_bytes(original_data)
+    if target_game == _GAME_PROFILE_FALLOUT:
+        result.errors.append(
+            "target_game='fallout' selected, but Fallout patch-write support is not implemented yet."
+        )
+        result.errors.append(
+            "Use validate-only checks for Fallout-era meshes or convert to Skyrim-compatible NIFs before patching."
+        )
+        result.message = result.errors[0]
+        return result
 
     buf = _Buf(original_data)
     try:
@@ -2657,6 +2709,14 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         )
         result.errors.extend(header_diagnostics)
         result.message = header_diagnostics[0]
+        return result
+    detected_profile = _detect_game_profile(header.user_version, header.user_version_2)
+    result.detected_game_profile = detected_profile
+    if target_game == _GAME_PROFILE_SKYRIM and detected_profile != _GAME_PROFILE_SKYRIM:
+        result.errors.append(
+            f"target_game='skyrim' requires Skyrim-compatible headers; detected profile: {detected_profile}."
+        )
+        result.message = result.errors[0]
         return result
 
     shader_props, texture_sets, parse_errors = _build_block_map(
@@ -3040,6 +3100,7 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
     except OSError as exc:
         result.issues.append(f"Cannot read NIF: {exc}")
         return result
+    result.detected_game_profile = _detect_game_profile_from_bytes(raw)
     result.has_havok = b"BSBehaviorGraphExtraData" in raw
 
     infos, diagnostics = scan_nif_diagnostics(nif_path)
@@ -3052,6 +3113,11 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
     if diagnostics:
         result.issues.extend(diagnostics[:6])
     if not infos:
+        if result.detected_game_profile == _GAME_PROFILE_FALLOUT:
+            _append_unique(
+                result.suggestions,
+                "Detected Fallout-era profile; patch-write support is pending. Use validate output only for now.",
+            )
         if not diagnostics:
             result.issues.append("No BSLightingShaderProperty blocks found or not a Skyrim SE NIF.")
         for diagnostic in diagnostics:
@@ -3776,6 +3842,13 @@ def _main() -> None:  # pragma: no cover
                         help="Preview changes without writing.")
     parser.add_argument("--validate", action="store_true",
                         help="Just validate and report, do not patch.")
+    parser.add_argument(
+        "--target-game",
+        choices=("auto", "skyrim", "fallout"),
+        default="auto",
+        help="Header profile target. 'auto' detects from NIF, 'skyrim' enforces Skyrim profile, "
+             "'fallout' is accepted for diagnostics groundwork but patch-write is not enabled yet.",
+    )
     parser.add_argument("--strict-unknown-shader-types", action="store_true",
                         help="Fail patching only when an unknown raw shader_type value "
                              "is classified as UNRESOLVED after mapping, semantic, and "
@@ -3896,7 +3969,8 @@ def _main() -> None:  # pragma: no cover
             v = validate_nif_for_parallax(nif)
             status = "READY" if v.ready_count == v.shader_count else "NEEDS PATCH"
             print(f"[{status}] {nif.name}: "
-                  f"{v.ready_count}/{v.shader_count} shaders ready for parallax")
+                  f"{v.ready_count}/{v.shader_count} shaders ready for parallax "
+                  f"(profile={v.detected_game_profile})")
             for issue in v.issues:
                 print(f"  ⚠ {issue}")
             for sug in v.suggestions:
@@ -3942,6 +4016,7 @@ def _main() -> None:  # pragma: no cover
         spec_color=parsed_spec_color,
         strict_unknown_shader_types=args.strict_unknown_shader_types,
         unknown_shader_type_map=parsed_shader_map,
+        target_game=args.target_game,
     )
 
     ok = 0
