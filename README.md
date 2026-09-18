@@ -294,3 +294,4 @@ For CLI runs, `nif_patcher.py --target-game auto|skyrim|fallout` now makes profi
 The NIF Editor now exposes matching controls (**NIF game profile** + **Enable experimental Fallout writes**) so GUI patch behavior aligns with CLI behavior.
 Validation can now emit a grouped conflict-resolution view with `--validate --conflict-report`, listing conflict categories plus suggested auto-fix actions per file.
 For larger mod-folder runs, add `--conflict-report-summary` to print a cross-file top-conflict summary, and use the NIF Editor scan view's batch summary row to quickly identify the highest-frequency conflict groups.
+You can also provide `--plugin-conflict-context <json>` (mesh path → plugin refs) to print plugin-aware conflict summaries, and `--auto-remediate` (optionally with `--auto-remediate-codes ...`) to apply safe best-effort fixes from detected conflict codes.

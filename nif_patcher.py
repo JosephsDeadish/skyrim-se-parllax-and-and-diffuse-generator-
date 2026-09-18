@@ -880,6 +880,30 @@ class NifBatchConflictSummary:
     suggested_actions: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class NifPluginConflictRef:
+    """Plugin context entry linked to a mesh conflict."""
+
+    plugin_name: str
+    record_id: str = ""
+    record_type: str = ""
+
+
+@dataclass(frozen=True)
+class NifPluginAwareConflictSummary:
+    """Cross-file conflict summary with plugin-record context."""
+
+    code: str
+    count: int
+    file_count: int
+    plugin_count: int
+    game_profile: str
+    shader_layout: str
+    example_files: tuple[str, ...]
+    example_plugins: tuple[str, ...]
+    suggested_actions: tuple[str, ...]
+
+
 # ---------------------------------------------------------------------------
 # Low-level binary buffer
 # ---------------------------------------------------------------------------
@@ -3616,6 +3640,209 @@ def summarize_validation_conflicts(
     return summaries
 
 
+def summarize_plugin_aware_validation_conflicts(
+    validations: list[NifValidationResult],
+    *,
+    plugin_context: dict[str, list[NifPluginConflictRef]] | None = None,
+    max_example_files: int = 3,
+    max_example_plugins: int = 5,
+) -> list[NifPluginAwareConflictSummary]:
+    """Aggregate conflicts with optional plugin/record linkage by mesh path."""
+    plugin_context = plugin_context or {}
+    grouped: dict[str, dict[str, object]] = {}
+    for validation in validations:
+        file_key = str(validation.nif_path).lower()
+        refs = plugin_context.get(file_key, [])
+        report = getattr(validation, "conflict_report", None) or []
+        seen_codes_for_file: set[str] = set()
+        seen_plugin_for_code: dict[str, set[str]] = {}
+        for group in report:
+            code = group.code
+            bucket = grouped.setdefault(
+                code,
+                {
+                    "count": 0,
+                    "file_count": 0,
+                    "plugin_names": set(),
+                    "game_profile": group.game_profile,
+                    "shader_layout": group.shader_layout,
+                    "example_files": [],
+                    "example_plugins": [],
+                    "actions": [],
+                },
+            )
+            bucket["count"] = int(bucket["count"]) + max(1, int(group.count))
+            if code not in seen_codes_for_file:
+                bucket["file_count"] = int(bucket["file_count"]) + 1
+                seen_codes_for_file.add(code)
+
+            file_examples = bucket["example_files"]
+            if not isinstance(file_examples, list):
+                file_examples = []
+                bucket["example_files"] = file_examples
+            if validation.nif_path.name not in file_examples and len(file_examples) < max(1, max_example_files):
+                file_examples.append(validation.nif_path.name)
+
+            plugin_names = bucket["plugin_names"]
+            if not isinstance(plugin_names, set):
+                plugin_names = set()
+                bucket["plugin_names"] = plugin_names
+            plugin_examples = bucket["example_plugins"]
+            if not isinstance(plugin_examples, list):
+                plugin_examples = []
+                bucket["example_plugins"] = plugin_examples
+            seen_for_code = seen_plugin_for_code.setdefault(code, set())
+            for ref in refs:
+                plugin_name = ref.plugin_name.strip()
+                if not plugin_name or plugin_name in seen_for_code:
+                    continue
+                plugin_names.add(plugin_name)
+                if plugin_name not in plugin_examples and len(plugin_examples) < max(1, max_example_plugins):
+                    plugin_examples.append(plugin_name)
+                seen_for_code.add(plugin_name)
+
+            actions = bucket["actions"]
+            if not isinstance(actions, list):
+                actions = []
+                bucket["actions"] = actions
+            for action in group.suggested_actions:
+                if action not in actions:
+                    actions.append(action)
+
+    summaries: list[NifPluginAwareConflictSummary] = []
+    for code, payload in sorted(
+        grouped.items(),
+        key=lambda item: (
+            -int(item[1]["count"]),
+            -int(item[1]["file_count"]),
+            -len(item[1]["plugin_names"]) if isinstance(item[1]["plugin_names"], set) else 0,
+            item[0],
+        ),
+    ):
+        plugin_names = payload["plugin_names"] if isinstance(payload["plugin_names"], set) else set()
+        summaries.append(
+            NifPluginAwareConflictSummary(
+                code=code,
+                count=int(payload["count"]),
+                file_count=int(payload["file_count"]),
+                plugin_count=len(plugin_names),
+                game_profile=str(payload["game_profile"]),
+                shader_layout=str(payload["shader_layout"]),
+                example_files=tuple(
+                    payload["example_files"] if isinstance(payload["example_files"], list) else []
+                ),
+                example_plugins=tuple(
+                    payload["example_plugins"] if isinstance(payload["example_plugins"], list) else []
+                ),
+                suggested_actions=tuple(
+                    payload["actions"] if isinstance(payload["actions"], list) else []
+                ),
+            )
+        )
+    return summaries
+
+
+def _conflict_base_code(conflict_code: str) -> str:
+    parts = conflict_code.split(".")
+    if len(parts) >= 3:
+        return ".".join(parts[:-2])
+    return conflict_code
+
+
+def build_auto_remediation_patch_options(
+    nif_path: Path,
+    conflict_codes: list[str],
+    *,
+    target_game: str = "auto",
+    experimental_fallout_write: bool = False,
+    allow_destructive: bool = False,
+    backup: bool = True,
+    dry_run: bool = False,
+) -> tuple[NifPatchOptions | None, tuple[str, ...]]:
+    """Build a safe patch option set for selected conflict codes."""
+    if not conflict_codes:
+        return None, ("No conflict codes were provided for auto-remediation.",)
+    base_codes = {_conflict_base_code(code) for code in conflict_codes}
+    opts = NifPatchOptions(
+        target_game=target_game,
+        experimental_fallout_write=experimental_fallout_write,
+        backup=backup,
+        dry_run=dry_run,
+    )
+    applied_steps: list[str] = []
+    guessed_parallax = guess_parallax_path_for_nif(nif_path)
+    guessed_normal = guess_normal_path_for_nif(nif_path)
+    guessed_glow = guess_glow_path_for_nif(nif_path)
+    guessed_env = guess_env_mask_path_for_nif(nif_path)
+
+    if any(code.startswith("missing_parallax_flag") for code in base_codes):
+        opts.enable_parallax = True
+        applied_steps.append("enable_parallax")
+    if any(code.startswith("flag_pom.without_base_parallax") for code in base_codes):
+        opts.enable_parallax = True
+        applied_steps.append("enable_parallax_for_pom")
+    if any(code.startswith("flag_env_mapping.slot5_filled_without_flag") for code in base_codes):
+        opts.enable_env_mapping = True
+        applied_steps.append("enable_env_mapping")
+    if any(code.startswith("flag_glow_map.slot2_filled_without_flag") for code in base_codes):
+        opts.enable_glow_map = True
+        applied_steps.append("enable_glow_map")
+    if any(code.startswith("path_slot_parallax") or code.startswith("missing_parallax_slot3") for code in base_codes):
+        if guessed_parallax:
+            opts.parallax_texture_path = guessed_parallax
+            applied_steps.append("set_slot3_parallax")
+    if any(code.startswith("path_slot_normal") for code in base_codes):
+        if guessed_normal:
+            opts.normal_texture_path = guessed_normal
+            applied_steps.append("set_slot1_normal")
+    if any(code.startswith("path_slot_glow") for code in base_codes):
+        if guessed_glow:
+            opts.glow_texture_path = guessed_glow
+            applied_steps.append("set_slot2_glow")
+    if any(code.startswith("path_slot_env_mask") for code in base_codes):
+        if guessed_env:
+            opts.env_mask_texture_path = guessed_env
+            applied_steps.append("set_slot5_env_mask")
+    if any(code.startswith("path_slot_cubemap") for code in base_codes) and allow_destructive:
+        opts.clear_cubemap_texture_path = True
+        applied_steps.append("clear_slot4_cubemap")
+    if any(code.startswith("path_slot_diffuse") for code in base_codes) and allow_destructive:
+        opts.clear_diffuse_texture_path = True
+        applied_steps.append("clear_slot0_diffuse")
+
+    if not applied_steps:
+        return None, (
+            "No safe auto-remediation actions matched the selected conflict codes.",
+            "Use targeted patch options manually for unsupported conflict categories.",
+        )
+    return opts, tuple(applied_steps)
+
+
+def auto_remediate_nif_conflicts(
+    nif_path: Path,
+    conflict_codes: list[str],
+    *,
+    target_game: str = "auto",
+    experimental_fallout_write: bool = False,
+    allow_destructive: bool = False,
+    backup: bool = True,
+    dry_run: bool = False,
+) -> tuple[NifPatchResult | None, tuple[str, ...]]:
+    """Apply selected conflict-code remediations to one NIF."""
+    opts, steps = build_auto_remediation_patch_options(
+        nif_path,
+        conflict_codes,
+        target_game=target_game,
+        experimental_fallout_write=experimental_fallout_write,
+        allow_destructive=allow_destructive,
+        backup=backup,
+        dry_run=dry_run,
+    )
+    if opts is None:
+        return None, steps
+    return patch_nif(nif_path, opts), steps
+
+
 def validate_nif_for_parallax(
     nif_path: Path,
     *,
@@ -4335,6 +4562,7 @@ def batch_patch_nif(
 
 def _main() -> None:  # pragma: no cover
     import argparse
+    import json
     import sys
 
     parser = argparse.ArgumentParser(
@@ -4401,6 +4629,30 @@ def _main() -> None:  # pragma: no cover
         "--conflict-report-summary",
         action="store_true",
         help="With --validate, print a cross-file grouped conflict summary for large batches.",
+    )
+    parser.add_argument(
+        "--plugin-conflict-context",
+        type=Path,
+        default=None,
+        metavar="JSON",
+        help="Optional JSON file mapping NIF paths to plugin references for plugin-aware conflict summaries.",
+    )
+    parser.add_argument(
+        "--auto-remediate",
+        action="store_true",
+        help="With --validate, apply safe best-effort fixes inferred from detected conflict codes.",
+    )
+    parser.add_argument(
+        "--auto-remediate-codes",
+        nargs="*",
+        default=None,
+        metavar="CODE",
+        help="Optional list of conflict codes/prefixes to auto-remediate. Defaults to all detected codes.",
+    )
+    parser.add_argument(
+        "--allow-destructive-remediation",
+        action="store_true",
+        help="Allow clear-slot remediations for some path-conflict categories.",
     )
     parser.add_argument(
         "--target-game",
@@ -4532,6 +4784,30 @@ def _main() -> None:  # pragma: no cover
 
     if args.validate:
         validation_results: list[NifValidationResult] = []
+        plugin_context: dict[str, list[NifPluginConflictRef]] = {}
+        if args.plugin_conflict_context:
+            try:
+                payload = json.loads(args.plugin_conflict_context.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                print(f"Error: failed to read plugin context JSON: {exc}", file=sys.stderr)
+                sys.exit(1)
+            if isinstance(payload, dict):
+                for nif_key, refs in payload.items():
+                    if not isinstance(nif_key, str) or not isinstance(refs, list):
+                        continue
+                    parsed_refs: list[NifPluginConflictRef] = []
+                    for ref in refs:
+                        if isinstance(ref, dict):
+                            parsed_refs.append(
+                                NifPluginConflictRef(
+                                    plugin_name=str(ref.get("plugin_name", "")).strip(),
+                                    record_id=str(ref.get("record_id", "")).strip(),
+                                    record_type=str(ref.get("record_type", "")).strip(),
+                                )
+                            )
+                        elif isinstance(ref, str):
+                            parsed_refs.append(NifPluginConflictRef(plugin_name=ref.strip()))
+                    plugin_context[str(Path(nif_key)).lower()] = [r for r in parsed_refs if r.plugin_name]
         for nif in nif_files:
             v = validate_nif_for_parallax(nif)
             validation_results.append(v)
@@ -4554,6 +4830,35 @@ def _main() -> None:  # pragma: no cover
                         print(f"      example: {example}")
                     for action in group.suggested_actions:
                         print(f"      auto-fix: {action}")
+            if args.auto_remediate:
+                selected_codes: list[str]
+                report_codes = [group.code for group in v.conflict_report]
+                if args.auto_remediate_codes:
+                    selected_codes = [
+                        code for code in report_codes
+                        if any(code.startswith(prefix) for prefix in args.auto_remediate_codes)
+                    ]
+                else:
+                    selected_codes = report_codes
+                rem_result, rem_steps = auto_remediate_nif_conflicts(
+                    nif,
+                    selected_codes,
+                    target_game=args.target_game,
+                    experimental_fallout_write=args.experimental_fallout_write,
+                    allow_destructive=args.allow_destructive_remediation,
+                    backup=not args.no_backup,
+                    dry_run=args.dry_run,
+                )
+                if rem_result is None:
+                    print(f"  [AUTO-REMEDIATE SKIP] {nif.name}: {' | '.join(rem_steps)}")
+                else:
+                    rem_status = "OK" if rem_result.success else "FAIL"
+                    print(
+                        f"  [AUTO-REMEDIATE {rem_status}] {nif.name}: {rem_result.message} "
+                        f"(steps={', '.join(rem_steps)})"
+                    )
+                    for err in rem_result.errors:
+                        print(f"       {err}", file=sys.stderr)
         if args.conflict_report_summary:
             summary = summarize_validation_conflicts(validation_results)
             if summary:
@@ -4563,6 +4868,23 @@ def _main() -> None:  # pragma: no cover
                     print(
                         f"  - {group.code}: {group.count} across {group.file_count} file(s) "
                         f"(examples: {files})"
+                    )
+                    for action in group.suggested_actions[:2]:
+                        print(f"      auto-fix: {action}")
+        if args.conflict_report_summary and plugin_context:
+            plugin_summary = summarize_plugin_aware_validation_conflicts(
+                validation_results,
+                plugin_context=plugin_context,
+            )
+            if plugin_summary:
+                print("\nPlugin-aware conflict summary:")
+                for group in plugin_summary[:12]:
+                    plugins = ", ".join(group.example_plugins)
+                    files = ", ".join(group.example_files)
+                    print(
+                        f"  - {group.code}: {group.count} across {group.file_count} file(s), "
+                        f"{group.plugin_count} plugin(s) "
+                        f"(files: {files}; plugins: {plugins})"
                     )
                     for action in group.suggested_actions[:2]:
                         print(f"      auto-fix: {action}")

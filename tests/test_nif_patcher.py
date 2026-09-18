@@ -37,9 +37,13 @@ from nif_patcher import (
     batch_patch_nif,
     patch_nif,
     scan_nif,
+    summarize_plugin_aware_validation_conflicts,
     summarize_validation_conflicts,
+    build_auto_remediation_patch_options,
+    auto_remediate_nif_conflicts,
     scan_nif_diagnostics,
     validate_nif_for_parallax,
+    NifPluginConflictRef,
     _Buf,
     _build_block_map,
     _classify_shader_type_resolution,
@@ -2320,6 +2324,129 @@ class TestBatchConflictSummaries(unittest.TestCase):
         target = next(group for group in summary if group.code.startswith("path_slot_diffuse.wrong_suffix."))
         self.assertEqual(target.file_count, 5)
         self.assertEqual(len(target.example_files), 2)
+
+
+class TestPluginAwareConflictSummaries(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_plugin_aware_summary_counts_plugins_per_conflict(self) -> None:
+        a = self.tmp / "a.nif"
+        b = self.tmp / "b.nif"
+        a.write_bytes(_build_minimal_nif(texture_paths=["textures\\arch\\stone_n.dds"] + [""] * 8))
+        b.write_bytes(_build_minimal_nif(texture_paths=["textures\\arch\\stone_n.dds"] + [""] * 8))
+        v_a = validate_nif_for_parallax(a)
+        v_b = validate_nif_for_parallax(b)
+        summary = summarize_plugin_aware_validation_conflicts(
+            [v_a, v_b],
+            plugin_context={
+                str(a).lower(): [
+                    NifPluginConflictRef(plugin_name="MyMod.esp", record_id="0x0001", record_type="STAT"),
+                    NifPluginConflictRef(plugin_name="Patch.esp", record_id="0x1001", record_type="STAT"),
+                ],
+                str(b).lower(): [
+                    NifPluginConflictRef(plugin_name="Patch.esp", record_id="0x1002", record_type="STAT"),
+                ],
+            },
+        )
+        target = next(group for group in summary if group.code.startswith("path_slot_diffuse.wrong_suffix."))
+        self.assertEqual(target.file_count, 2)
+        self.assertEqual(target.plugin_count, 2)
+        self.assertIn("MyMod.esp", target.example_plugins)
+        self.assertIn("Patch.esp", target.example_plugins)
+
+
+class TestAutoRemediationExecutor(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_build_auto_remediation_options_enables_matching_flags(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_m.dds"
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_g.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths, flags1=0, flags2=0)
+        v = validate_nif_for_parallax(nif)
+        codes = [group.code for group in v.conflict_report]
+        opts, steps = build_auto_remediation_patch_options(nif, codes)
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(opts.enable_parallax)
+        self.assertTrue(opts.enable_env_mapping)
+        self.assertTrue(opts.enable_glow_map)
+        self.assertIn("enable_parallax", steps)
+        self.assertIn("enable_env_mapping", steps)
+        self.assertIn("enable_glow_map", steps)
+
+    def test_auto_remediate_conflicts_applies_changes(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone_p.dds"
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_m.dds"
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_g.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=SLSF1_PARALLAX_OCCLUSION,
+            flags2=0,
+            shader_type=SHADER_TYPE_DEFAULT,
+        )
+        before = validate_nif_for_parallax(nif)
+        before_codes = [group.code for group in before.conflict_report]
+        result, steps = auto_remediate_nif_conflicts(nif, before_codes, backup=False)
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertTrue(result.success, result.errors)
+        after = scan_nif(nif)[0]
+        self.assertTrue(after.has_parallax_flag)
+        self.assertTrue(after.has_env_mapping_flag)
+        self.assertTrue(after.has_glow_map_flag)
+        self.assertIn("enable_parallax", steps)
+
+
+class TestFixtureCorpusCompatibilityMatrix(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_profile_layout_corpus_matrix_and_broken_headers(self) -> None:
+        corpus: list[Path] = []
+        for profile in ("skyrim", "fallout"):
+            for layout in ("legacy", "real"):
+                for idx in range(5):
+                    p = self.tmp / f"{profile}_{layout}_{idx}.nif"
+                    p.write_bytes(
+                        _build_minimal_nif(
+                            shader_layout=layout,
+                            user_ver2=130 if layout == "real" else 83,
+                            texture_paths=["textures\\arch\\stone.dds"] + [""] * 8,
+                        )
+                    )
+                    if profile == "fallout":
+                        _rewrite_user_version(p, 11)
+                    corpus.append(p)
+        broken = self.tmp / "broken_header.nif"
+        broken.write_bytes((_build_minimal_nif())[:90])
+        corpus.append(broken)
+
+        validations = [validate_nif_for_parallax(p) for p in corpus]
+        self.assertEqual(len(validations), 21)
+        self.assertTrue(any(v.detected_game_profile == "skyrim" for v in validations))
+        self.assertTrue(any(v.detected_game_profile == "fallout" for v in validations))
+        self.assertTrue(any("unsupported nif header/profile values" in "\n".join(v.issues).lower() for v in validations))
+        summary = summarize_validation_conflicts(validations)
+        self.assertTrue(any(group.code.startswith("unsupported_header.") for group in summary))
+        self.assertTrue(any(".skyrim.legacy" in group.code for group in summary))
+        self.assertTrue(any(".fallout.real" in group.code for group in summary))
 
 
 # ---------------------------------------------------------------------------

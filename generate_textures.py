@@ -67,6 +67,7 @@ try:
     def _load_nif_patcher_exports(search_dirs: tuple[Path, ...] | None = None) -> dict[str, object]:
         required_exports = (
             "NifPatchOptions",
+            "auto_remediate_nif_conflicts",
             "find_nif_files",
             "guess_cubemap_path_for_nif",
             "guess_env_mask_path_for_nif",
@@ -10019,6 +10020,32 @@ if GUI_AVAILABLE:
                     wraplength=860,
                 )
                 results_hint_label.pack(fill="x", pady=(0, 6))
+                filter_frame = ttk.Frame(res_frame)
+                filter_frame.pack(fill="x", pady=(0, 6))
+                ttk.Label(filter_frame, text="Filter:").pack(side="left")
+                result_filter_var = tk.StringVar(value="")
+                result_filter_entry = ttk.Entry(filter_frame, textvariable=result_filter_var, width=32)
+                result_filter_entry.pack(side="left", padx=(6, 8))
+                ttk.Label(filter_frame, text="Status:").pack(side="left")
+                result_status_filter_var = tk.StringVar(value="All")
+                result_status_combo = ttk.Combobox(
+                    filter_frame,
+                    textvariable=result_status_filter_var,
+                    values=("All", "OK", "WARN", "FAIL", "SKIP"),
+                    width=8,
+                    state="readonly",
+                )
+                result_status_combo.pack(side="left", padx=(6, 8))
+                ttk.Label(filter_frame, text="Sort:").pack(side="left")
+                result_sort_var = tk.StringVar(value="Newest")
+                result_sort_combo = ttk.Combobox(
+                    filter_frame,
+                    textvariable=result_sort_var,
+                    values=("Newest", "Status", "File"),
+                    width=10,
+                    state="readonly",
+                )
+                result_sort_combo.pack(side="left", padx=(6, 0))
                 results_list_frame = ttk.Frame(res_frame)
                 results_list_frame.pack(fill="both", expand=True)
                 style = ttk.Style(win)
@@ -10064,18 +10091,76 @@ if GUI_AVAILABLE:
                     results_hint_label,
                     "⇳ The divider above this panel is draggable, so the log does not have to take over the whole window.",
                 )
+                self._add_tooltip(
+                    result_filter_entry,
+                    "Filter rows by status/detail text, conflict code, profile, or file path.",
+                )
+                self._add_tooltip(
+                    result_status_combo,
+                    "Show only a specific result status or all rows.",
+                )
+                self._add_tooltip(
+                    result_sort_combo,
+                    "Sort rows by newest first, status, or file name.",
+                )
 
                 full_row_details: dict[str, str] = {}
+                all_result_rows: list[dict[str, str]] = []
+                latest_validation_codes: dict[str, list[str]] = {}
+
+                def _status_sort_rank(status_value: str) -> int:
+                    ranks = {"FAIL": 0, "WARN": 1, "SKIP": 2, "OK": 3}
+                    return ranks.get(status_value.upper(), 4)
+
+                def _filtered_rows() -> list[dict[str, str]]:
+                    keyword = (result_filter_var.get() or "").strip().lower()
+                    status_filter = (result_status_filter_var.get() or "All").strip().upper()
+                    rows = all_result_rows
+                    if status_filter != "ALL":
+                        rows = [row for row in rows if row["status"].upper() == status_filter]
+                    if keyword:
+                        rows = [
+                            row
+                            for row in rows
+                            if keyword in row["status"].lower()
+                            or keyword in row["file_name"].lower()
+                            or keyword in row["details"].lower()
+                            or keyword in row["preview"].lower()
+                        ]
+                    sort_mode = (result_sort_var.get() or "Newest").strip().lower()
+                    if sort_mode == "status":
+                        rows = sorted(rows, key=lambda row: (_status_sort_rank(row["status"]), row["file_name"].lower()))
+                    elif sort_mode == "file":
+                        rows = sorted(rows, key=lambda row: row["file_name"].lower())
+                    return rows
+
+                def _render_results_tree(*_: object) -> None:
+                    for item in results_tree.get_children():
+                        results_tree.delete(item)
+                    full_row_details.clear()
+                    rows = _filtered_rows()
+                    for row in rows:
+                        item_id = results_tree.insert("", "end", values=(row["status"], row["file_name"], row["preview"]))
+                        full_row_details[str(item_id)] = row["details"]
+                    if rows:
+                        last = results_tree.get_children()[-1]
+                        results_tree.selection_set(last)
+                        results_tree.focus(last)
+                        results_tree.yview_moveto(1.0)
 
                 def _add_result_row(status: str, file_name: str, details: str) -> None:
                     normalized_details = _normalize_nif_result_details(details)
                     row_preview = _format_nif_result_row_details(normalized_details)
-                    item_id = results_tree.insert("", "end", values=(status, file_name, row_preview))
-                    full_row_details[str(item_id)] = normalized_details
-                    results_tree.selection_set(item_id)
-                    results_tree.focus(item_id)
+                    all_result_rows.append(
+                        {
+                            "status": status,
+                            "file_name": file_name,
+                            "details": normalized_details,
+                            "preview": row_preview,
+                        }
+                    )
+                    _render_results_tree()
                     status_var.set(f"{status}: {file_name} — {row_preview}")
-                    results_tree.yview_moveto(1.0)
 
                 def _batch_failure_key(details: str) -> str:
                     normalized = _normalize_nif_result_details(details)
@@ -10113,6 +10198,8 @@ if GUI_AVAILABLE:
                     for item in results_tree.get_children():
                         results_tree.delete(item)
                     full_row_details.clear()
+                    all_result_rows.clear()
+                    latest_validation_codes.clear()
                     status_var.set("Results cleared.")
                     progress_var.set(0.0)
 
@@ -10142,19 +10229,42 @@ if GUI_AVAILABLE:
                     status_var.set("Copied selected result to clipboard.")
 
                 def _copy_all_results() -> None:
-                    items = results_tree.get_children()
-                    if not items:
+                    rows = _filtered_rows()
+                    if not rows:
                         status_var.set("No results to copy yet.")
                         return
                     lines: list[str] = []
-                    for item in items:
-                        row_values = results_tree.item(item, "values")
-                        if row_values:
-                            full_details = full_row_details.get(str(item), str(row_values[2]))
-                            lines.append(f"[{row_values[0]}] {row_values[1]} — {full_details}")
+                    for row in rows:
+                        lines.append(f"[{row['status']}] {row['file_name']} — {row['details']}")
                     win.clipboard_clear()
                     win.clipboard_append("\n".join(lines))
-                    status_var.set(f"Copied {len(lines)} result row(s) to clipboard.")
+                    status_var.set(f"Copied {len(lines)} filtered result row(s) to clipboard.")
+
+                def _export_conflict_report() -> None:
+                    rows = _filtered_rows()
+                    if not rows:
+                        status_var.set("No filtered rows to export.")
+                        return
+                    default_name = "nif_conflict_report.txt"
+                    target = filedialog.asksaveasfilename(
+                        title="Export conflict report",
+                        defaultextension=".txt",
+                        initialfile=default_name,
+                        filetypes=[("Text report", "*.txt"), ("All files", "*.*")],
+                    )
+                    if not target:
+                        return
+                    lines: list[str] = []
+                    for row in rows:
+                        lines.append(f"[{row['status']}] {row['file_name']}")
+                        lines.append(row["details"])
+                        lines.append("")
+                    try:
+                        Path(target).write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+                    except OSError as exc:
+                        status_var.set(f"Export failed: {exc}")
+                        return
+                    status_var.set(f"Exported {len(rows)} row(s) to {Path(target).name}.")
 
                 context_menu = tk.Menu(win, tearoff=False)
                 context_menu.add_command(label="Copy selected row", command=_copy_selected_result)
@@ -10170,6 +10280,9 @@ if GUI_AVAILABLE:
 
                 results_tree.bind("<<TreeviewSelect>>", _on_result_selected)
                 results_tree.bind("<Button-3>", _show_tree_context_menu)
+                result_filter_var.trace_add("write", _render_results_tree)
+                result_status_filter_var.trace_add("write", _render_results_tree)
+                result_sort_var.trace_add("write", _render_results_tree)
 
                 # ---- Threading helpers -----------------------------------------------
                 # Scan/patch/restore operations run in daemon threads so the UI stays
@@ -10237,10 +10350,16 @@ if GUI_AVAILABLE:
 
                     def _worker() -> None:
                         validations_for_summary: list[object] = []
+                        latest_validation_codes.clear()
                         for index, nif in enumerate(nifs, start=1):
                             try:
                                 validation = validate_nif_for_parallax(nif)
                                 validations_for_summary.append(validation)
+                                latest_validation_codes[str(nif)] = [
+                                    getattr(group, "code", "")
+                                    for group in (getattr(validation, "conflict_report", None) or [])
+                                    if getattr(group, "code", "")
+                                ]
                                 combined_detail_lines: list[str] = []
                                 if validation.detected_game_profile:
                                     combined_detail_lines.append(f"Detected profile: {validation.detected_game_profile}")
@@ -10329,6 +10448,76 @@ if GUI_AVAILABLE:
                         win.after(0, _finish_op)
 
                     threading.Thread(target=_worker, daemon=True).start()
+
+                def _run_auto_remediate_conflicts() -> None:
+                    nifs = _resolve_nifs()
+                    _clear_log()
+                    if not nifs:
+                        _add_result_row("WARN", "—", "No NIF files found at the selected path.")
+                        return
+                    if _is_running[0]:
+                        status_var.set("Another operation is in progress. Please wait.")
+                        return
+                    _is_running[0] = True
+                    _set_ops_active(False)
+                    status_var.set(f"Auto-remediation started for {len(nifs)} NIF file(s)…")
+                    progress_bar.configure(maximum=max(1, len(nifs)))
+                    progress_var.set(0.0)
+
+                    def _auto_fix_worker(nif_list=nifs) -> None:
+                        ok = skip = fail = 0
+                        failure_groups: dict[str, int] = {}
+                        for index, nif in enumerate(nif_list, start=1):
+                            try:
+                                codes = latest_validation_codes.get(str(nif))
+                                if not codes:
+                                    validation = validate_nif_for_parallax(nif)
+                                    codes = [
+                                        getattr(group, "code", "")
+                                        for group in (getattr(validation, "conflict_report", None) or [])
+                                        if getattr(group, "code", "")
+                                    ]
+                                result, steps = auto_remediate_nif_conflicts(
+                                    nif,
+                                    codes,
+                                    target_game=target_game_var.get(),
+                                    experimental_fallout_write=experimental_fallout_write_var.get(),
+                                    allow_destructive=False,
+                                    backup=backup_var.get(),
+                                    dry_run=dry_run_var.get(),
+                                )
+                                if result is None:
+                                    skip += 1
+                                    _safe_add_row("SKIP", nif.name, " | ".join(steps))
+                                elif result.success:
+                                    ok += 1
+                                    step_text = f" (steps: {', '.join(steps)})" if steps else ""
+                                    _safe_add_row("OK", nif.name, f"{result.message}{step_text}")
+                                else:
+                                    fail += 1
+                                    detail_lines = [result.message]
+                                    if steps:
+                                        detail_lines.append(f"steps: {', '.join(steps)}")
+                                    detail_lines.extend(result.errors[:4])
+                                    detail_text = "\n".join(line for line in detail_lines if line)
+                                    _safe_add_row("FAIL", nif.name, detail_text or "Auto-remediation failed.")
+                                    failure_key = _batch_failure_key(detail_text or "Auto-remediation failed.")
+                                    failure_groups[failure_key] = failure_groups.get(failure_key, 0) + 1
+                            except Exception as exc:
+                                fail += 1
+                                fail_text = f"Auto-remediation failed: {exc}"
+                                _safe_add_row("FAIL", nif.name, fail_text)
+                                failure_key = _batch_failure_key(fail_text)
+                                failure_groups[failure_key] = failure_groups.get(failure_key, 0) + 1
+                            _safe_progress(float(index))
+                        _emit_failure_summary_row(
+                            failure_groups,
+                            label=f"Top failure groups across {fail} failed auto-remediation operation(s):",
+                        )
+                        _safe_status(f"Auto-remediation complete — {ok} patched, {skip} skipped, {fail} failed.")
+                        win.after(0, _finish_op)
+
+                    threading.Thread(target=_auto_fix_worker, daemon=True).start()
 
                 def _run_patch() -> None:
                     nifs = _resolve_nifs()
@@ -10618,12 +10807,20 @@ if GUI_AVAILABLE:
                 scan_button.pack(side="left", padx=(0, 6))
                 patch_button = ttk.Button(btn_frame, text="Apply patch", command=_run_patch)
                 patch_button.pack(side="left", padx=(0, 6))
+                auto_fix_button = ttk.Button(
+                    btn_frame,
+                    text="Auto-remediate conflicts",
+                    command=_run_auto_remediate_conflicts,
+                )
+                auto_fix_button.pack(side="left", padx=(0, 6))
                 unpatch_button = ttk.Button(btn_frame, text="Remove features (unpatch)", command=_run_unpatch)
                 unpatch_button.pack(side="left", padx=(0, 6))
                 restore_button = ttk.Button(btn_frame, text="Restore from .bak", command=_run_restore_backups)
                 restore_button.pack(side="left", padx=(0, 6))
                 clear_button = ttk.Button(btn_frame, text="Clear log", command=_clear_log)
                 clear_button.pack(side="left")
+                export_report_button = ttk.Button(btn_frame, text="Export report", command=_export_conflict_report)
+                export_report_button.pack(side="left", padx=(6, 0))
                 copy_selected_button = ttk.Button(btn_frame, text="Copy selected", command=_copy_selected_result)
                 copy_selected_button.pack(side="left", padx=(6, 0))
                 copy_all_button = ttk.Button(btn_frame, text="Copy all", command=_copy_all_results)
@@ -10631,12 +10828,14 @@ if GUI_AVAILABLE:
                 close_button = ttk.Button(btn_frame, text="Close", command=win.destroy)
                 close_button.pack(side="right")
                 # Register action buttons so _set_ops_active can disable them during ops
-                _action_buttons_ref.extend([scan_button, patch_button, unpatch_button, restore_button])
+                _action_buttons_ref.extend([scan_button, patch_button, auto_fix_button, unpatch_button, restore_button])
                 self._add_tooltip(scan_button, "Read-only analysis pass. No file changes are written.")
                 self._add_tooltip(patch_button, "Apply selected NIF patch options and write changes to disk.")
+                self._add_tooltip(auto_fix_button, "Run safe best-effort auto-remediation using detected conflict codes.")
                 self._add_tooltip(unpatch_button, "Remove selected flags/slots to undo or simplify prior NIF patching.")
                 self._add_tooltip(restore_button, "Restore .nif files from sibling .nif.bak backups.")
                 self._add_tooltip(clear_button, "Clear result rows from the log.")
+                self._add_tooltip(export_report_button, "Export the currently filtered result rows to a text report.")
                 self._add_tooltip(copy_selected_button, "Copy only the selected result row.")
                 self._add_tooltip(copy_all_button, "Copy all result rows for logs or bug reports.")
                 self._add_tooltip(close_button, "Close the NIF Editor window.")
