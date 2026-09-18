@@ -663,6 +663,12 @@ class TestValidateNifForParallax(unittest.TestCase):
         joined = "\n".join(v.skip_reasons).lower()
         self.assertIn("single_pass", joined)
 
+    def test_skip_single_pass_reason_can_be_disabled(self) -> None:
+        nif = _write_nif(self.tmp, flags1=SLSF1_SINGLE_PASS)
+        v = validate_nif_for_parallax(nif, skip_single_pass=False)
+        joined = "\n".join(v.skip_reasons).lower()
+        self.assertNotIn("single_pass", joined)
+
     def test_ready_when_flag_and_texture_set(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_PARALLAX] = "textures\\stone_p.dds"

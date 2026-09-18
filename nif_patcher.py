@@ -2764,18 +2764,26 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         result.message = "Strict unknown-shader check failed."
         return result
     result.shader_properties_found = len(shader_props)
-    if detected_profile == _GAME_PROFILE_FALLOUT and any(sp.layout_name != "real" for sp in shader_props):
-        result.errors.append(
-            "Experimental Fallout patch mode only supports real-layout shader blocks."
-        )
-        result.message = result.errors[0]
-        return result
+    if detected_profile == _GAME_PROFILE_FALLOUT:
+        unsupported_layout_blocks = [sp.block_index for sp in shader_props if sp.layout_name != "real"]
+        if unsupported_layout_blocks:
+            shader_props = [sp for sp in shader_props if sp.layout_name == "real"]
+            result.warnings.append(
+                "Skipped non-real-layout shader blocks in experimental Fallout mode: "
+                + ", ".join(str(idx) for idx in unsupported_layout_blocks[:12])
+                + ("..." if len(unsupported_layout_blocks) > 12 else "")
+            )
 
     if not shader_props:
         if parse_errors:
             result.message = f"No patchable BSLightingShaderProperty blocks found ({parse_errors[0]})."
         else:
-            result.message = "No BSLightingShaderProperty blocks found — nothing to patch."
+            if detected_profile == _GAME_PROFILE_FALLOUT:
+                result.message = (
+                    "No Fallout-compatible real-layout BSLightingShaderProperty blocks found for experimental patch mode."
+                )
+            else:
+                result.message = "No BSLightingShaderProperty blocks found — nothing to patch."
         extra_hints = _summarize_non_patchable_block_types(header)
         if extra_hints:
             result.errors.extend(extra_hints)
@@ -3125,7 +3133,11 @@ def _renderer_compatibility(info: NifShaderInfo) -> dict[str, list[str]]:
     return notes
 
 
-def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
+def validate_nif_for_parallax(
+    nif_path: Path,
+    *,
+    skip_single_pass: bool = True,
+) -> NifValidationResult:
     """Check whether a NIF is ready for parallax, and suggest fixes.
 
     The result now carries per-block :attr:`~NifValidationResult.skip_reasons`
@@ -3248,7 +3260,7 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
             _append_unique(result.skip_reasons, reason)
             block_skipped = True
 
-        if info.has_single_pass_flag:
+        if skip_single_pass and info.has_single_pass_flag:
             reason = (
                 f"{bname}: SLSF1_Single_Pass is set — "
                 f"single-pass materials are incompatible with standard parallax patching"
