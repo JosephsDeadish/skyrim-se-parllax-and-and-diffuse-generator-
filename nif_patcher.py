@@ -2800,7 +2800,6 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         result.errors.extend(strict_unknowns)
         result.message = "Strict unknown-shader check failed."
         return result
-    result.shader_properties_found = len(shader_props)
     if detected_profile == _GAME_PROFILE_FALLOUT:
         unsupported_layout_blocks = [sp.block_index for sp in shader_props if sp.layout_name != "real"]
         if unsupported_layout_blocks:
@@ -2810,6 +2809,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
                 + ", ".join(str(idx) for idx in unsupported_layout_blocks[:12])
                 + ("..." if len(unsupported_layout_blocks) > 12 else "")
             )
+    result.shader_properties_found = len(shader_props)
 
     if not shader_props:
         if parse_errors:
