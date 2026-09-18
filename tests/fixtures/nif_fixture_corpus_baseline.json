@@ -1,0 +1,16 @@
+{
+  "expected_total_cases": 13,
+  "expected_profile_counts": {
+    "skyrim": 7,
+    "fallout": 5,
+    "unknown": 1
+  },
+  "required_summary_code_prefixes": [
+    "missing_parallax_flag.flag1_not_set.skyrim.",
+    "missing_parallax_flag.flag1_not_set.fallout.",
+    "path_slot_diffuse.wrong_suffix.skyrim.",
+    "path_slot_normal.wrong_suffix.skyrim.",
+    "path_slot_cubemap.wrong_suffix.skyrim.",
+    "unsupported_header."
+  ]
+}

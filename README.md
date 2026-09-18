@@ -302,3 +302,4 @@ NIF scan runs also include retry/cancellation controls and a conflict-only incre
 Plugin-aware conflict discovery now attempts lightweight plugin record parsing (record type + FormID + model-path subrecords) before raw mesh-string fallback so conflict summaries can carry real plugin-record metadata when available.
 NIF Editor conflict reruns now include conflict-only patch and conflict-only auto-remediation actions in addition to conflict-only scan reruns.
 Use `nif_patcher.py --compatibility-report` to print a current game/version support matrix (profiles, layouts, and guarded-operation policy).
+The regression suite also includes a locked fixture corpus baseline at `tests/fixtures/nif_fixture_corpus*.json` for cross-profile/layout conflict-matrix stability checks.

@@ -1,6 +1,7 @@
 """Tests for nif_patcher.py."""
 from __future__ import annotations
 
+import json
 import shutil
 import struct
 import tempfile
@@ -56,6 +57,10 @@ from nif_patcher import (
     RESOLUTION_UNRESOLVED,
     RESOLUTION_WEAK,
 )
+
+_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
+_FIXTURE_CORPUS_MANIFEST = _FIXTURE_DIR / "nif_fixture_corpus.json"
+_FIXTURE_CORPUS_BASELINE = _FIXTURE_DIR / "nif_fixture_corpus_baseline.json"
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +279,55 @@ def _rewrite_user_version(path: Path, value: int) -> None:
     user_version_offset = len(b"Gamebryo File Format, Version 20.2.0.7\n") + 4 + 1
     struct.pack_into("<I", raw, user_version_offset, value)
     path.write_bytes(bytes(raw))
+
+
+def _load_fixture_corpus_payload(path: Path) -> dict[str, object]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise AssertionError(f"Invalid fixture payload in {path}: expected object root.")
+    return raw
+
+
+def _materialize_fixture_corpus(temp_root: Path, payload: dict[str, object]) -> list[Path]:
+    cases = payload.get("cases", [])
+    if not isinstance(cases, list):
+        raise AssertionError("Fixture payload must include a list under 'cases'.")
+    created: list[Path] = []
+    for entry in cases:
+        if not isinstance(entry, dict):
+            continue
+        case_id = str(entry.get("id", "case")).strip() or "case"
+        target = temp_root / f"{case_id}.nif"
+        if bool(entry.get("broken_header", False)):
+            truncated = int(entry.get("truncated_bytes", 90))
+            target.write_bytes(_build_minimal_nif()[: max(16, truncated)])
+            created.append(target)
+            continue
+
+        line_ending = b"\r\n" if str(entry.get("header_line_ending", "lf")).lower() == "crlf" else b"\n"
+        raw_texture_paths = entry.get("texture_paths")
+        texture_paths = (
+            [str(path) for path in raw_texture_paths]
+            if isinstance(raw_texture_paths, list) and len(raw_texture_paths) == 9
+            else ["textures\\arch\\stone.dds"] + [""] * 8
+        )
+        raw = _build_minimal_nif(
+            shader_layout=str(entry.get("shader_layout", "legacy")),
+            shader_type=int(entry.get("shader_type", SHADER_TYPE_DEFAULT)),
+            flags1=int(entry.get("flags1", 0)),
+            flags2=int(entry.get("flags2", 0)),
+            user_ver2=int(entry.get("user_ver2", 83)),
+            header_line_ending=line_ending,
+            texture_set_layout_shift=int(entry.get("texture_set_layout_shift", 0)),
+            texture_set_count_u16=bool(entry.get("texture_set_count_u16", False)),
+            texture_paths=texture_paths,
+        )
+        target.write_bytes(raw)
+        user_version = entry.get("user_version")
+        if user_version is not None:
+            _rewrite_user_version(target, int(user_version))
+        created.append(target)
+    return created
 
 
 def _texture_set_slot_count(nif_path: Path) -> int:
@@ -2544,6 +2598,53 @@ class TestFixtureCorpusCompatibilityMatrix(unittest.TestCase):
         self.assertTrue(any(group.code.startswith("unsupported_header.") for group in summary))
         self.assertTrue(any(".skyrim.legacy" in group.code for group in summary))
         self.assertTrue(any(".fallout.real" in group.code for group in summary))
+
+
+class TestFixtureCorpusBaselinePack(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_fixture_manifest_and_baseline_are_consistent(self) -> None:
+        payload = _load_fixture_corpus_payload(_FIXTURE_CORPUS_MANIFEST)
+        baseline = _load_fixture_corpus_payload(_FIXTURE_CORPUS_BASELINE)
+        cases = payload.get("cases", [])
+        self.assertIsInstance(cases, list)
+        case_ids = [str(case.get("id", "")).strip() for case in cases if isinstance(case, dict)]
+        self.assertEqual(len(case_ids), len(set(case_ids)), "Fixture case ids must be unique.")
+        self.assertEqual(len(case_ids), int(baseline.get("expected_total_cases", 0)))
+
+    def test_fixture_pack_matches_baseline_conflict_matrix(self) -> None:
+        payload = _load_fixture_corpus_payload(_FIXTURE_CORPUS_MANIFEST)
+        baseline = _load_fixture_corpus_payload(_FIXTURE_CORPUS_BASELINE)
+        corpus = _materialize_fixture_corpus(self.tmp, payload)
+        validations = [validate_nif_for_parallax(path) for path in corpus]
+        self.assertEqual(len(validations), int(baseline.get("expected_total_cases", 0)))
+
+        expected_profile_counts = baseline.get("expected_profile_counts", {})
+        self.assertIsInstance(expected_profile_counts, dict)
+        observed_profile_counts: dict[str, int] = {}
+        for validation in validations:
+            key = validation.detected_game_profile or "unknown"
+            observed_profile_counts[key] = observed_profile_counts.get(key, 0) + 1
+        self.assertEqual(observed_profile_counts, {str(k): int(v) for k, v in expected_profile_counts.items()})
+        self.assertTrue(
+            any("unexpected user version values" in "\n".join(v.issues).lower() for v in validations),
+            "Fixture corpus should include at least one unknown-header signature case.",
+        )
+
+        summary = summarize_validation_conflicts(validations)
+        summary_codes = tuple(group.code for group in summary)
+        required_prefixes = baseline.get("required_summary_code_prefixes", [])
+        self.assertIsInstance(required_prefixes, list)
+        for prefix in required_prefixes:
+            self.assertTrue(
+                any(code.startswith(str(prefix)) for code in summary_codes),
+                f"Missing required summary code prefix: {prefix!r}",
+            )
 
 
 # ---------------------------------------------------------------------------
