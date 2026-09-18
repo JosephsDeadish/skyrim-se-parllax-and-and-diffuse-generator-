@@ -10512,14 +10512,14 @@ if GUI_AVAILABLE:
                 close_button.pack(side="right")
                 # Register action buttons so _set_ops_active can disable them during ops
                 _action_buttons_ref.extend([scan_button, patch_button, unpatch_button, restore_button])
-                self._add_tooltip(scan_button, "🔍 Read-only analysis pass. No file changes are written.")
-                self._add_tooltip(patch_button, "🛠 Apply selected NIF patch options and write changes to disk.")
-                self._add_tooltip(unpatch_button, "↩ Remove selected flags/slots to undo or simplify prior NIF patching.")
-                self._add_tooltip(restore_button, "♻ Restores .nif files from sibling .nif.bak backups.")
-                self._add_tooltip(clear_button, "🧽 Clear result rows from the log.")
-                self._add_tooltip(copy_selected_button, "📎 Copy only the selected result row.")
-                self._add_tooltip(copy_all_button, "📦 Copy all result rows for logs or bug reports.")
-                self._add_tooltip(close_button, "🚪 Close the NIF Editor window.")
+                self._add_tooltip(scan_button, "Read-only analysis pass. No file changes are written.")
+                self._add_tooltip(patch_button, "Apply selected NIF patch options and write changes to disk.")
+                self._add_tooltip(unpatch_button, "Remove selected flags/slots to undo or simplify prior NIF patching.")
+                self._add_tooltip(restore_button, "Restore .nif files from sibling .nif.bak backups.")
+                self._add_tooltip(clear_button, "Clear result rows from the log.")
+                self._add_tooltip(copy_selected_button, "Copy only the selected result row.")
+                self._add_tooltip(copy_all_button, "Copy all result rows for logs or bug reports.")
+                self._add_tooltip(close_button, "Close the NIF Editor window.")
 
                 _NIF_EDITOR_LAYOUT_RETRY_MAX = 6
                 _NIF_EDITOR_LAYOUT_RETRY_DELAY_MS = 80

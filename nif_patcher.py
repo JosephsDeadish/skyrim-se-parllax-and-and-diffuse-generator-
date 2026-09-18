@@ -2404,6 +2404,7 @@ def _apply_patches(
                 # controlled by force_shader_type_3.
                 buf.write_u32_at(sp.shader_type_offset, SHADER_TYPE_HEIGHTMAP)
                 sp.shader_type = SHADER_TYPE_HEIGHTMAP
+                sp.raw_shader_type = SHADER_TYPE_HEIGHTMAP
                 shader_type_changed = True
             new_flags1 |= SLSF1_PARALLAX
             new_flags2 &= ~SLSF2_MULTI_LAYER_PARALLAX
