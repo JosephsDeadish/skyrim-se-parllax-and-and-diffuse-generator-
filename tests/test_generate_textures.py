@@ -23,6 +23,7 @@ from generate_textures import (
     discover_plugin_conflict_context_from_manager,
     discover_ui_languages,
     extract_mesh_paths_from_plugin_bytes,
+    extract_plugin_mesh_record_refs,
     load_ui_translations,
     _normalize_nif_editor_texture_input_path,
     _load_nif_patcher_exports,
@@ -491,14 +492,39 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertAlmostEqual(compute_effective_ui_scale(pixels_per_inch=800, user_scale=5), 2.5)
         self.assertAlmostEqual(compute_effective_ui_scale(pixels_per_inch=96, user_scale=1.25), 1.25)
 
-    def test_extract_mesh_paths_from_plugin_bytes_parses_common_extensions(self) -> None:
+    def test_extract_mesh_paths_from_plugin_bytes_parses_nif_paths(self) -> None:
         blob = (
             b"meshes\\architecture\\stone.nif\x00"
             b"meshes/architecture/stone.nif\x00"
-            b"meshes\\armor\\iron.kf\x00"
+            b"meshes\\effects\\bad.txt\x00"
         )
         paths = extract_mesh_paths_from_plugin_bytes(blob)
-        self.assertEqual(paths, ("meshes\\architecture\\stone.nif", "meshes\\armor\\iron.kf"))
+        self.assertEqual(paths, ("meshes\\architecture\\stone.nif",))
+
+    def test_extract_plugin_mesh_record_refs_parses_record_id_and_type(self) -> None:
+        mesh_bytes = b"meshes\\architecture\\stone.nif\x00"
+        record_payload = (
+            b"EDID"
+            + (4).to_bytes(2, "little")
+            + b"Test"
+            + b"MODL"
+            + len(mesh_bytes).to_bytes(2, "little")
+            + mesh_bytes
+        )
+        record = (
+            b"STAT"
+            + len(record_payload).to_bytes(4, "little")
+            + (0).to_bytes(4, "little")
+            + int("1234ABCD", 16).to_bytes(4, "little")
+            + (0).to_bytes(4, "little")
+            + (0).to_bytes(4, "little")
+            + record_payload
+        )
+        refs = extract_plugin_mesh_record_refs(record)
+        self.assertEqual(len(refs), 1)
+        self.assertEqual(refs[0].mesh_path, "meshes\\architecture\\stone.nif")
+        self.assertEqual(refs[0].record_id, "1234ABCD")
+        self.assertEqual(refs[0].record_type, "STAT")
 
     def test_discover_plugin_conflict_context_from_manager_collects_mesh_refs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -520,6 +546,42 @@ class GenerateTexturesTests(unittest.TestCase):
             discovered["meshes/architecture/stone.nif"][0].plugin_name,
             "Example.esp",
         )
+        self.assertEqual(
+            discovered["meshes/architecture/stone.nif"][0].record_type,
+            "",
+        )
+
+    def test_discover_plugin_conflict_context_from_manager_records_metadata_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game_root = Path(temp_dir) / "Skyrim"
+            plugin_path = game_root / "Data" / "Example.esp"
+            plugin_path.parent.mkdir(parents=True)
+            mesh_bytes = b"meshes\\architecture\\stone.nif\x00"
+            payload = (
+                b"MODL"
+                + len(mesh_bytes).to_bytes(2, "little")
+                + mesh_bytes
+            )
+            plugin_path.write_bytes(
+                b"STAT"
+                + len(payload).to_bytes(4, "little")
+                + (0).to_bytes(4, "little")
+                + int("00000ABC", 16).to_bytes(4, "little")
+                + (0).to_bytes(4, "little")
+                + (0).to_bytes(4, "little")
+                + payload
+            )
+            context = ModManagerContext(
+                manager="Vortex",
+                game_root=game_root,
+                enabled_plugins=("Example.esp",),
+            )
+            discovered = discover_plugin_conflict_context_from_manager(
+                [Path("meshes/architecture/stone.nif")],
+                context,
+            )
+        self.assertEqual(discovered["meshes/architecture/stone.nif"][0].record_id, "00000ABC")
+        self.assertEqual(discovered["meshes/architecture/stone.nif"][0].record_type, "STAT")
 
     def test_normalize_gui_state_accepts_truepbr_alias(self) -> None:
         normalized = _normalize_gui_state({"render_profile": "true pbr"})

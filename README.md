@@ -297,3 +297,5 @@ For larger mod-folder runs, add `--conflict-report-summary` to print a cross-fil
 You can also provide `--plugin-conflict-context <json>` (mesh path → plugin refs) to print plugin-aware conflict summaries, and `--auto-remediate` (optionally with `--auto-remediate-codes ...`) to apply safe best-effort fixes from detected conflict codes.
 The GUI now includes a language selector backed by `assets/translations/*.json` and a UI scale selector (0.75x–2.00x) for high-DPI display tuning.
 NIF scan runs also include retry/cancellation controls and a conflict-only incremental rerun action for faster follow-up passes after resolving issues.
+Plugin-aware conflict discovery now attempts lightweight plugin record parsing (record type + FormID + model-path subrecords) before raw mesh-string fallback so conflict summaries can carry real plugin-record metadata when available.
+NIF Editor conflict reruns now include conflict-only patch and conflict-only auto-remediation actions in addition to conflict-only scan reruns.

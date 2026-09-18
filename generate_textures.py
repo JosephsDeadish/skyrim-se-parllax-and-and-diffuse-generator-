@@ -950,6 +950,14 @@ def detect_mod_manager_context(
 
 
 _PLUGIN_MESH_PATH_RE = re.compile(rb"meshes\\[ -~]{1,260}?\.nif", re.IGNORECASE)
+_PLUGIN_MESH_SUBRECORDS = {b"MODL", b"MOD2", b"MOD3", b"MOD4", b"DMDL", b"DNAM", b"MNAM"}
+
+
+@dataclass(frozen=True)
+class PluginMeshRecordRef:
+    mesh_path: str
+    record_id: str = ""
+    record_type: str = ""
 
 
 def extract_mesh_paths_from_plugin_bytes(raw: bytes) -> tuple[str, ...]:
@@ -962,6 +970,124 @@ def extract_mesh_paths_from_plugin_bytes(raw: bytes) -> tuple[str, ...]:
         if text and text not in matches:
             matches.append(text)
     return tuple(matches)
+
+
+def extract_plugin_mesh_record_refs(raw: bytes) -> tuple[PluginMeshRecordRef, ...]:
+    refs: list[PluginMeshRecordRef] = []
+    seen: set[tuple[str, str, str]] = set()
+    by_path_has_detailed: set[str] = set()
+    data_len = len(raw)
+    if data_len < 24:
+        return ()
+
+    def _record_type_name(token: bytes) -> str:
+        try:
+            name = token.decode("ascii", errors="ignore").strip().upper()
+        except Exception:
+            return ""
+        if len(name) != 4 or not name.isalnum():
+            return ""
+        return name
+
+    def _decode_mesh_path(payload: bytes) -> str:
+        if not payload:
+            return ""
+        try:
+            text = payload.split(b"\x00", 1)[0].decode("latin-1", errors="ignore")
+        except Exception:
+            return ""
+        normalized = text.replace("/", "\\").strip().lower()
+        if not normalized:
+            return ""
+        if "meshes\\" in normalized:
+            normalized = "meshes\\" + normalized.split("meshes\\", 1)[1]
+        if not normalized.startswith("meshes\\"):
+            return ""
+        if not normalized.endswith(".nif"):
+            return ""
+        return normalized
+
+    def _append_ref(mesh_path: str, record_id: str = "", record_type: str = "") -> None:
+        if not (record_id or record_type) and mesh_path in by_path_has_detailed:
+            return
+        key = (mesh_path, record_id, record_type)
+        if key in seen:
+            return
+        seen.add(key)
+        if record_id or record_type:
+            by_path_has_detailed.add(mesh_path)
+            generic_key = (mesh_path, "", "")
+            if generic_key in seen:
+                seen.discard(generic_key)
+                refs[:] = [ref for ref in refs if not (ref.mesh_path == mesh_path and not ref.record_id and not ref.record_type)]
+        refs.append(PluginMeshRecordRef(mesh_path=mesh_path, record_id=record_id, record_type=record_type))
+
+    def _scan_record_payload(payload: bytes, record_id: str, record_type: str) -> None:
+        cursor = 0
+        pending_size: int | None = None
+        payload_len = len(payload)
+        while cursor + 6 <= payload_len:
+            token = payload[cursor : cursor + 4]
+            token_size = int.from_bytes(payload[cursor + 4 : cursor + 6], "little", signed=False)
+            if token == b"XXXX":
+                if cursor + 10 > payload_len:
+                    break
+                pending_size = int.from_bytes(payload[cursor + 6 : cursor + 10], "little", signed=False)
+                cursor += 10
+                continue
+            cursor += 6
+            subrecord_size = pending_size if pending_size is not None else token_size
+            pending_size = None
+            if subrecord_size < 0 or cursor + subrecord_size > payload_len:
+                break
+            if token in _PLUGIN_MESH_SUBRECORDS:
+                mesh_path = _decode_mesh_path(payload[cursor : cursor + subrecord_size])
+                if mesh_path:
+                    _append_ref(mesh_path, record_id=record_id, record_type=record_type)
+            cursor += subrecord_size
+
+    stack: list[tuple[int, int]] = [(0, data_len)]
+    while stack:
+        region_start, region_end = stack.pop()
+        offset = region_start
+        while offset + 24 <= region_end:
+            signature = raw[offset : offset + 4]
+            block_size = int.from_bytes(raw[offset + 4 : offset + 8], "little", signed=False)
+            if signature == b"GRUP":
+                if block_size < 24:
+                    offset += 1
+                    continue
+                group_end = offset + block_size
+                if group_end > region_end:
+                    offset += 1
+                    continue
+                nested_start = offset + 24
+                if nested_start < group_end:
+                    stack.append((nested_start, group_end))
+                offset = group_end
+                continue
+
+            record_type = _record_type_name(signature)
+            if not record_type:
+                offset += 1
+                continue
+            if block_size <= 0:
+                offset += 1
+                continue
+            record_end = offset + 24 + block_size
+            if record_end > region_end:
+                offset += 1
+                continue
+            flags = int.from_bytes(raw[offset + 8 : offset + 12], "little", signed=False)
+            form_id = int.from_bytes(raw[offset + 12 : offset + 16], "little", signed=False)
+            payload = raw[offset + 24 : record_end]
+            if not (flags & 0x00040000):
+                _scan_record_payload(payload, f"{form_id:08X}", record_type)
+            offset = record_end
+
+    for path in extract_mesh_paths_from_plugin_bytes(raw):
+        _append_ref(path)
+    return tuple(refs)
 
 
 def discover_plugin_conflict_context_from_manager(
@@ -1016,14 +1142,20 @@ def discover_plugin_conflict_context_from_manager(
             raw = plugin_path.read_bytes()
         except OSError:
             continue
-        for mesh_path in extract_mesh_paths_from_plugin_bytes(raw):
-            tail = mesh_path.split("meshes\\", 1)[-1]
+        for mesh_ref in extract_plugin_mesh_record_refs(raw):
+            tail = mesh_ref.mesh_path.split("meshes\\", 1)[-1]
             nif_key = nif_by_relative_tail.get(tail)
             if nif_key is None:
                 continue
             if nif_key not in normalized_nif_keys:
                 continue
-            discovered.setdefault(nif_key, []).append(NifPluginConflictRef(plugin_name=plugin_name))
+            discovered.setdefault(nif_key, []).append(
+                NifPluginConflictRef(
+                    plugin_name=plugin_name,
+                    record_id=mesh_ref.record_id,
+                    record_type=mesh_ref.record_type,
+                )
+            )
     return discovered
 
 
@@ -7839,7 +7971,11 @@ if GUI_AVAILABLE:
             try:
                 text = widget.cget("text")
                 if isinstance(text, str) and text:
-                    localized = self._tr(text)
+                    source_text = getattr(widget, "_i18n_source_text", "")
+                    if not source_text:
+                        source_text = text
+                        setattr(widget, "_i18n_source_text", source_text)
+                    localized = self._tr(source_text)
                     if localized != text:
                         widget.configure(text=localized)
             except Exception:
@@ -7902,7 +8038,7 @@ if GUI_AVAILABLE:
             self.root.after_idle(_update_wrap)
 
         def _add_tooltip(self, widget: tk.Widget, text: str) -> None:
-            localized_text = self._tr(text)
+            source_text = text
             tip_window: list[tk.Toplevel | None] = [None]
 
             def _position_tip(tip: tk.Toplevel, pointer_x: int, pointer_y: int) -> None:
@@ -7929,7 +8065,7 @@ if GUI_AVAILABLE:
                             pass
                         label = tk.Label(
                             tip,
-                            text=localized_text,
+                            text=self._tr(source_text),
                             justify=tk.LEFT,
                             background=self._tooltip_bg,
                             foreground=self._tooltip_fg,
@@ -7944,6 +8080,12 @@ if GUI_AVAILABLE:
                         tip_window[0] = tip
                     pointer_x = int(getattr(event, "x_root", widget.winfo_pointerx()))
                     pointer_y = int(getattr(event, "y_root", widget.winfo_pointery()))
+                    try:
+                        first_child = tip.winfo_children()[0] if tip.winfo_children() else None
+                        if first_child is not None:
+                            first_child.configure(text=self._tr(source_text))
+                    except Exception:
+                        pass
                     _position_tip(tip, pointer_x, pointer_y)
                 except Exception:
                     tip_window[0] = None
@@ -10805,9 +10947,21 @@ if GUI_AVAILABLE:
                         return
                     _scan_nifs(conflict_nifs, preserve_log=False)
 
-                def _run_auto_remediate_conflicts() -> None:
-                    nifs = _resolve_nifs()
-                    _clear_log()
+                def _rerun_conflict_auto_remediate() -> None:
+                    conflict_nifs = _resolve_conflict_nifs()
+                    if not conflict_nifs:
+                        _add_result_row("WARN", "—", "No conflict-affected NIF files are currently tracked.")
+                        return
+                    _run_auto_remediate_conflicts(conflict_nifs, preserve_log=False)
+
+                def _run_auto_remediate_conflicts(
+                    selected_nifs: list[Path] | None = None,
+                    *,
+                    preserve_log: bool = False,
+                ) -> None:
+                    nifs = selected_nifs or _resolve_nifs()
+                    if not preserve_log:
+                        _clear_log()
                     if not nifs:
                         _add_result_row("WARN", "—", "No NIF files found at the selected path.")
                         return
@@ -10904,9 +11058,21 @@ if GUI_AVAILABLE:
 
                     threading.Thread(target=_auto_fix_worker, daemon=True).start()
 
-                def _run_patch() -> None:
-                    nifs = _resolve_nifs()
-                    _clear_log()
+                def _rerun_conflict_patch() -> None:
+                    conflict_nifs = _resolve_conflict_nifs()
+                    if not conflict_nifs:
+                        _add_result_row("WARN", "—", "No conflict-affected NIF files are currently tracked.")
+                        return
+                    _run_patch(conflict_nifs, preserve_log=False)
+
+                def _run_patch(
+                    selected_nifs: list[Path] | None = None,
+                    *,
+                    preserve_log: bool = False,
+                ) -> None:
+                    nifs = selected_nifs or _resolve_nifs()
+                    if not preserve_log:
+                        _clear_log()
                     if not nifs:
                         _add_result_row("WARN", "—", "No NIF files found at the selected path.")
                         return
@@ -11253,6 +11419,12 @@ if GUI_AVAILABLE:
                     command=_rerun_conflict_scan,
                 )
                 rerun_conflicts_button.pack(side="left", padx=(0, 6))
+                rerun_patch_conflicts_button = ttk.Button(
+                    btn_frame,
+                    text="Patch conflicts only",
+                    command=_rerun_conflict_patch,
+                )
+                rerun_patch_conflicts_button.pack(side="left", padx=(0, 6))
                 patch_button = ttk.Button(btn_frame, text="Apply patch", command=_run_patch)
                 patch_button.pack(side="left", padx=(0, 6))
                 auto_fix_button = ttk.Button(
@@ -11261,6 +11433,12 @@ if GUI_AVAILABLE:
                     command=_run_auto_remediate_conflicts,
                 )
                 auto_fix_button.pack(side="left", padx=(0, 6))
+                rerun_auto_fix_conflicts_button = ttk.Button(
+                    btn_frame,
+                    text="Auto-remediate conflict files only",
+                    command=_rerun_conflict_auto_remediate,
+                )
+                rerun_auto_fix_conflicts_button.pack(side="left", padx=(0, 6))
                 unpatch_button = ttk.Button(btn_frame, text="Remove features (unpatch)", command=_run_unpatch)
                 unpatch_button.pack(side="left", padx=(0, 6))
                 restore_button = ttk.Button(btn_frame, text="Restore from .bak", command=_run_restore_backups)
@@ -11278,11 +11456,27 @@ if GUI_AVAILABLE:
                 close_button = ttk.Button(btn_frame, text="Close", command=win.destroy)
                 close_button.pack(side="right")
                 # Register action buttons so _set_ops_active can disable them during ops
-                _action_buttons_ref.extend([scan_button, rerun_conflicts_button, patch_button, auto_fix_button, unpatch_button, restore_button])
+                _action_buttons_ref.extend(
+                    [
+                        scan_button,
+                        rerun_conflicts_button,
+                        rerun_patch_conflicts_button,
+                        patch_button,
+                        auto_fix_button,
+                        rerun_auto_fix_conflicts_button,
+                        unpatch_button,
+                        restore_button,
+                    ]
+                )
                 self._add_tooltip(scan_button, "Read-only analysis pass. No file changes are written.")
                 self._add_tooltip(rerun_conflicts_button, "Incremental rerun: scan only files that previously reported conflicts or failures.")
+                self._add_tooltip(rerun_patch_conflicts_button, "Incremental rerun: patch only files that previously reported conflicts or failures.")
                 self._add_tooltip(patch_button, "Apply selected NIF patch options and write changes to disk.")
                 self._add_tooltip(auto_fix_button, "Run safe best-effort auto-remediation using detected conflict codes.")
+                self._add_tooltip(
+                    rerun_auto_fix_conflicts_button,
+                    "Incremental rerun: auto-remediate only files that previously reported conflicts or failures.",
+                )
                 self._add_tooltip(unpatch_button, "Remove selected flags/slots to undo or simplify prior NIF patching.")
                 self._add_tooltip(restore_button, "Restore .nif files from sibling .nif.bak backups.")
                 self._add_tooltip(clear_button, "Clear result rows from the log.")
