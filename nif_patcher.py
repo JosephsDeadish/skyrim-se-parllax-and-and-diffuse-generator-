@@ -2566,6 +2566,17 @@ def _apply_patches(
     return data, props_patched, sets_patched, upgraded
 
 
+def _is_retryable_force_type3_error(exc: Exception) -> bool:
+    if not isinstance(exc, ValueError):
+        return False
+    text = str(exc).lower()
+    return (
+        "recorded block size" in text and "expected type-0 size" in text
+    ) or (
+        "cannot force shader type 3 on a real-layout skyrim shader block" in text
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -2676,7 +2687,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
             original_data, header, shader_props, texture_sets, opts
         )
     except Exception as exc:  # noqa: BLE001
-        if opts.force_shader_type_3 and effective_parallax:
+        if opts.force_shader_type_3 and effective_parallax and _is_retryable_force_type3_error(exc):
             try:
                 fallback_opts = replace(opts, force_shader_type_3=False)
                 fallback_shader_props, fallback_texture_sets, fallback_parse_errors = _build_block_map(

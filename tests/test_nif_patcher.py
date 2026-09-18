@@ -42,6 +42,7 @@ from nif_patcher import (
     _Buf,
     _build_block_map,
     _classify_shader_type_resolution,
+    _is_retryable_force_type3_error,
     _renderer_compatibility,
     _read_header,
     RESOLUTION_RESOLVED,
@@ -1189,6 +1190,22 @@ class TestPatchNifFlags(unittest.TestCase):
             _classify_shader_type_resolution("future_unknown_resolution").type,
             RESOLUTION_UNRESOLVED,
         )
+
+    def test_retryable_force_type3_error_detection(self) -> None:
+        self.assertTrue(
+            _is_retryable_force_type3_error(
+                ValueError("recorded block size 104 does not match expected type-0 size 100")
+            )
+        )
+        self.assertTrue(
+            _is_retryable_force_type3_error(
+                ValueError("cannot force shader type 3 on a real-layout Skyrim shader block")
+            )
+        )
+
+    def test_non_retryable_patch_error_detection(self) -> None:
+        self.assertFalse(_is_retryable_force_type3_error(RuntimeError("boom")))
+        self.assertFalse(_is_retryable_force_type3_error(ValueError("some other parse issue")))
 
 
 # ---------------------------------------------------------------------------
