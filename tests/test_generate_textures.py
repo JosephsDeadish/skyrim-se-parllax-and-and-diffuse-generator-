@@ -484,6 +484,12 @@ class GenerateTexturesTests(unittest.TestCase):
             translations = load_ui_translations("en", translations_dir)
         self.assertEqual(translations.get("Hello"), "Hi")
 
+    def test_default_translation_catalog_offers_multiple_languages(self) -> None:
+        languages = discover_ui_languages()
+        self.assertIn("en", languages)
+        self.assertIn("de", languages)
+        self.assertIn("es", languages)
+
     def test_translate_ui_text_formats_tokens(self) -> None:
         self.assertEqual(
             translate_ui_text("Ready {value}", {"Ready {value}": "Done {value}"}),
@@ -3136,6 +3142,7 @@ class GenerateTexturesTests(unittest.TestCase):
             cubemap_texture_path="textures\\cubemaps\\chrome_e.dds",
             backup=False,
             dry_run=True,
+            dry_run_diff=True,
             disable_parallax=True,
             disable_pom=True,
             disable_env_mapping=True,
@@ -3170,6 +3177,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(options.clear_cubemap_texture_path)
         self.assertFalse(options.backup)
         self.assertTrue(options.dry_run)
+        self.assertTrue(options.dry_run_diff)
 
     def test_build_nif_patch_options_for_nif_editor_normalizes_manual_paths_to_dds(self) -> None:
         options = build_nif_patch_options_for_nif_editor(

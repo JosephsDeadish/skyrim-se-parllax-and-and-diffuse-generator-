@@ -635,6 +635,8 @@ class NifPatchOptions:
     cubemap_texture_path: str | None = None
     backup: bool = True
     dry_run: bool = False
+    dry_run_diff: bool = False
+    strict_pre_write_validation: bool = True
     disable_parallax: bool = False
     disable_pom: bool = False
     disable_env_mapping: bool = False
@@ -2826,6 +2828,72 @@ def _is_retryable_force_type3_error(exc: Exception) -> bool:
     )
 
 
+def _summarize_binary_diff(
+    original_data: bytes,
+    new_data: bytes,
+    *,
+    max_ranges: int = 8,
+) -> tuple[int, list[tuple[int, int]]]:
+    changed_ranges: list[tuple[int, int]] = []
+    changed_bytes = 0
+    limit = min(len(original_data), len(new_data))
+    start: int | None = None
+    end = -1
+    for idx in range(limit):
+        if original_data[idx] != new_data[idx]:
+            changed_bytes += 1
+            if start is None:
+                start = idx
+            end = idx
+        elif start is not None:
+            changed_ranges.append((start, end))
+            start = None
+            if len(changed_ranges) >= max_ranges:
+                break
+    if start is not None and len(changed_ranges) < max_ranges:
+        changed_ranges.append((start, end))
+    if len(original_data) != len(new_data):
+        changed_bytes += abs(len(original_data) - len(new_data))
+        if len(changed_ranges) < max_ranges:
+            start_idx = limit
+            end_idx = max(len(original_data), len(new_data)) - 1
+            changed_ranges.append((start_idx, end_idx))
+    return changed_bytes, changed_ranges
+
+
+def _validate_patched_bytes_before_write(
+    new_data: bytes,
+    *,
+    allowed_profiles: tuple[str, ...],
+    unknown_shader_type_map: dict[int, int] | None,
+) -> list[str]:
+    errors: list[str] = []
+    try:
+        header = _read_header_for_profiles(
+            _Buf(new_data),
+            allowed_profiles=allowed_profiles,
+        )
+    except (ValueError, struct.error, IndexError) as exc:
+        errors.append(f"Pre-write header validation failed: {exc}")
+        return errors
+    if header is None:
+        errors.append("Pre-write header validation failed: unsupported NIF header/profile values.")
+        return errors
+    try:
+        _shader_props, _texture_sets, parse_errors = _build_block_map(
+            new_data,
+            header,
+            unknown_shader_type_map,
+            allow_num_extra_fallback=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"Pre-write block-map validation failed: {exc}")
+        return errors
+    if parse_errors:
+        errors.extend(f"Pre-write block-map warning/error: {item}" for item in parse_errors)
+    return errors
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -3090,12 +3158,31 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         return result
 
     if opts.dry_run:
+        diff_suffix = ""
+        if opts.dry_run_diff:
+            changed_bytes, changed_ranges = _summarize_binary_diff(original_data, new_data)
+            range_summary = ", ".join(f"{start}-{end}" for start, end in changed_ranges) if changed_ranges else "none"
+            diff_suffix = (
+                f" Diff: {changed_bytes} byte(s) differ across range(s): {range_summary}."
+            )
         result.success = True
         result.message = (
             f"[DRY RUN] Would patch {props_patched} shader(s), "
             f"{sets_patched} texture set(s), upgrade {upgraded} block(s) to type 3."
+            + diff_suffix
         )
         return result
+
+    if opts.strict_pre_write_validation:
+        pre_write_errors = _validate_patched_bytes_before_write(
+            new_data,
+            allowed_profiles=allowed_profiles,
+            unknown_shader_type_map=opts.unknown_shader_type_map,
+        )
+        if pre_write_errors:
+            result.errors.extend(pre_write_errors)
+            result.message = "Pre-write validation failed — refusing to write patched bytes."
+            return result
 
     if opts.backup:
         backup_path = nif_path.with_suffix(".nif.bak")
@@ -3851,6 +3938,7 @@ def build_auto_remediation_patch_options(
     allow_destructive: bool = False,
     backup: bool = True,
     dry_run: bool = False,
+    strict_pre_write_validation: bool = True,
 ) -> tuple[NifPatchOptions | None, tuple[str, ...]]:
     """Build a safe patch option set for selected conflict codes."""
     if not conflict_codes:
@@ -3866,6 +3954,7 @@ def build_auto_remediation_patch_options(
         fallout_allow_env_map_scale=fallout_allow_env_map_scale,
         backup=backup,
         dry_run=dry_run,
+        strict_pre_write_validation=strict_pre_write_validation,
     )
     applied_steps: list[str] = []
     guessed_parallax = guess_parallax_path_for_nif(nif_path)
@@ -3930,6 +4019,7 @@ def auto_remediate_nif_conflicts(
     allow_destructive: bool = False,
     backup: bool = True,
     dry_run: bool = False,
+    strict_pre_write_validation: bool = True,
 ) -> tuple[NifPatchResult | None, tuple[str, ...]]:
     """Apply selected conflict-code remediations to one NIF."""
     opts, steps = build_auto_remediation_patch_options(
@@ -3945,6 +4035,7 @@ def auto_remediate_nif_conflicts(
         allow_destructive=allow_destructive,
         backup=backup,
         dry_run=dry_run,
+        strict_pre_write_validation=strict_pre_write_validation,
     )
     if opts is None:
         return None, steps
@@ -4726,6 +4817,16 @@ def _main() -> None:  # pragma: no cover
                         help="Skip .nif.bak backup.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Preview changes without writing.")
+    parser.add_argument(
+        "--dry-run-diff",
+        action="store_true",
+        help="With --dry-run, include changed-byte range summary for proposed patch bytes.",
+    )
+    parser.add_argument(
+        "--no-strict-pre-write-validation",
+        action="store_true",
+        help="Disable strict pre-write structural validation of patched bytes before file write.",
+    )
     parser.add_argument("--validate", action="store_true",
                         help="Just validate and report, do not patch.")
     parser.add_argument(
@@ -4995,6 +5096,7 @@ def _main() -> None:  # pragma: no cover
                     allow_destructive=args.allow_destructive_remediation,
                     backup=not args.no_backup,
                     dry_run=args.dry_run,
+                    strict_pre_write_validation=not args.no_strict_pre_write_validation,
                 )
                 if rem_result is None:
                     print(f"  [AUTO-REMEDIATE SKIP] {nif.name}: {' | '.join(rem_steps)}")
@@ -5052,6 +5154,8 @@ def _main() -> None:  # pragma: no cover
         cubemap_texture_path=args.cubemap,
         backup=not args.no_backup,
         dry_run=args.dry_run,
+        dry_run_diff=args.dry_run_diff,
+        strict_pre_write_validation=not args.no_strict_pre_write_validation,
         disable_parallax=args.disable_parallax,
         disable_pom=args.disable_pom,
         disable_env_mapping=args.disable_env_mapping,

@@ -27,12 +27,14 @@ from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageOp
 
 try:
     import tkinter as tk
+    import tkinter.font as tkfont
     from tkinter import filedialog, messagebox, ttk
     from PIL import ImageTk
 
     GUI_AVAILABLE = True
 except Exception:
     tk = None
+    tkfont = None
     filedialog = None
     messagebox = None
     ttk = None
@@ -5219,6 +5221,7 @@ def build_nif_patch_options_for_nif_editor(
     cubemap_texture_path: str = "",
     backup: bool = True,
     dry_run: bool = False,
+    dry_run_diff: bool = False,
     disable_parallax: bool = False,
     disable_pom: bool = False,
     disable_env_mapping: bool = False,
@@ -5254,6 +5257,7 @@ def build_nif_patch_options_for_nif_editor(
         cubemap_texture_path=_normalize_nif_editor_texture_input_path(cubemap_texture_path),
         backup=backup,
         dry_run=dry_run,
+        dry_run_diff=dry_run_diff,
         disable_parallax=disable_parallax,
         disable_pom=disable_pom,
         disable_env_mapping=disable_env_mapping,
@@ -7314,8 +7318,10 @@ if GUI_AVAILABLE:
             self.status_var = tk.StringVar(
                 value=self.manager_context.summary if self.manager_context.manager is not None else "Select a DDS file to begin."
             )
+            self._base_named_font_sizes: dict[str, tuple[int, bool]] = {}
             self._apply_persisted_gui_state()
             self._reload_ui_translations()
+            self._capture_base_named_font_sizes()
             self._apply_ui_scaling()
             self._update_theme_toggle_text()
             self._update_slider_value_labels()
@@ -7325,7 +7331,9 @@ if GUI_AVAILABLE:
             container.pack(fill=tk.BOTH, expand=True)
 
             canvas = tk.Canvas(container, highlightthickness=0)
-            scrollbar = ttk.Scrollbar(container, orient=tk.VERTICAL, command=canvas.yview)
+            scrollbar = ttk.Scrollbar(container, orient=tk.VERTICAL, command=canvas.yview, style="Main.Vertical.TScrollbar")
+            self._main_canvas = canvas
+            self._main_scrollbar = scrollbar
             wrapper = ttk.Frame(canvas, padding=12)
 
             canvas.configure(yscrollcommand=scrollbar.set)
@@ -7847,13 +7855,13 @@ if GUI_AVAILABLE:
             self.revert_button = ttk.Button(actions, text="Revert Process", command=self._revert_last_generation, state=tk.DISABLED)
             self.revert_button.pack(side=tk.LEFT, padx=(6, 0))
             self._add_tooltip(self.revert_button, "↩ Restore files from the most recent generation run.\nDisabled until a generation run has something to undo.")
-            nif_editor_button = ttk.Button(actions, text="NIF Editor… [Experimental]", command=self._open_nif_editor)
+            nif_editor_button = ttk.Button(actions, text="NIF Editor (Skyrim/Fallout)… [Experimental]", command=self._open_nif_editor)
             nif_editor_button.pack(side=tk.LEFT, padx=(12, 0))
             self._add_tooltip(
                 nif_editor_button,
                 "🔧 Open the NIF Editor window. ⚠ Experimental feature.\n"
-                "Patch BSLightingShaderProperty flags and texture slots in Skyrim SE\n"
-                "mesh files so mods that shipped without parallax/ENB support gain it.\n"
+                "Patch BSLightingShaderProperty flags and texture slots in Skyrim/Fallout mesh files.\n"
+                "Use 'NIF game profile' inside the editor to switch Auto/Skyrim/Fallout mode.\n"
                 "Always keep backups before patching NIFs.",
             )
             _status_label = ttk.Label(actions, textvariable=self.status_var, justify=tk.LEFT, anchor=tk.W)
@@ -8050,6 +8058,41 @@ if GUI_AVAILABLE:
         def _tr(self, text: str) -> str:
             return translate_ui_text(text, self._ui_translations)
 
+        def _capture_base_named_font_sizes(self) -> None:
+            if tkfont is None:
+                self._base_named_font_sizes = {}
+                return
+            captured: dict[str, tuple[int, bool]] = {}
+            for name in (
+                "TkDefaultFont",
+                "TkTextFont",
+                "TkFixedFont",
+                "TkMenuFont",
+                "TkHeadingFont",
+                "TkCaptionFont",
+                "TkSmallCaptionFont",
+                "TkIconFont",
+                "TkTooltipFont",
+            ):
+                try:
+                    font_obj = tkfont.nametofont(name)
+                    size = int(font_obj.cget("size"))
+                    captured[name] = (abs(size), bool(size < 0))
+                except Exception:
+                    continue
+            self._base_named_font_sizes = captured
+
+        def _apply_named_font_scaling(self, ui_scale: float) -> None:
+            if tkfont is None or not self._base_named_font_sizes:
+                return
+            for name, (base_size, pixel_sized) in self._base_named_font_sizes.items():
+                try:
+                    font_obj = tkfont.nametofont(name)
+                    scaled = max(1, int(round(base_size * ui_scale)))
+                    font_obj.configure(size=(-scaled if pixel_sized else scaled))
+                except Exception:
+                    continue
+
         def _apply_ui_scaling(self) -> None:
             try:
                 pixels_per_inch = float(self.root.winfo_fpixels("1i"))
@@ -8063,6 +8106,11 @@ if GUI_AVAILABLE:
                 self.root.tk.call("tk", "scaling", scale)
             except Exception:
                 return
+            self._apply_named_font_scaling(float(self.ui_scale_var.get()))
+            try:
+                self.root.update_idletasks()
+            except Exception:
+                pass
 
         def _apply_runtime_localization(self) -> None:
             self.root.title(self._tr("Skyrim Texture Generator v{version}").format(version=APP_VERSION))
@@ -8103,6 +8151,7 @@ if GUI_AVAILABLE:
                 self.ui_scale_var.set(float(_GUI_STATE_DEFAULTS["ui_scale"]))
                 self.ui_scale_combo.set(f"{self.ui_scale_var.get():.2f}".rstrip("0").rstrip("."))
             self._apply_ui_scaling()
+            self._apply_theme()
             self._save_persisted_gui_state()
             self.status_var.set(
                 self._tr("UI scale set to {scale:.2f}x.").format(scale=float(self.ui_scale_var.get()))
@@ -8231,6 +8280,24 @@ if GUI_AVAILABLE:
             style.configure("Auto.Horizontal.TScale", background=colors["bg"], troughcolor=colors["auto_trough"])
             style.configure("TScrollbar", background=colors["button_bg"], troughcolor=colors["bg"])
             style.map("TScrollbar", background=[("active", colors["trough"])])
+            style.configure(
+                "Main.Vertical.TScrollbar",
+                background=colors["button_bg"],
+                troughcolor=colors["trough"],
+                arrowcolor=colors["fg"],
+                width=18,
+                arrowsize=18,
+            )
+            style.map("Main.Vertical.TScrollbar", background=[("active", colors["auto_trough"])])
+            if hasattr(self, "_main_canvas"):
+                try:
+                    self._main_canvas.configure(
+                        highlightthickness=1,
+                        highlightbackground=colors["trough"],
+                        background=colors["bg"],
+                    )
+                except Exception:
+                    pass
             self._update_slider_auto_states()
 
         def _toggle_theme(self) -> None:
@@ -9017,8 +9084,8 @@ if GUI_AVAILABLE:
 
             win = tk.Toplevel(self.root)
             win.title("Renderer / Channel Help")
-            win.geometry("860x620")
-            win.minsize(620, 420)
+            win.geometry("980x700")
+            win.minsize(700, 480)
             win.transient(self.root)
             self.render_profile_help_window = win
 
@@ -9030,8 +9097,14 @@ if GUI_AVAILABLE:
                 justify=tk.LEFT,
                 anchor=tk.W,
             ).pack(fill=tk.X, pady=(0, 8))
+            ttk.Label(
+                container,
+                text="Quick tip: choose a target renderer first, then match slot/path suffixes shown below.",
+                justify=tk.LEFT,
+                anchor=tk.W,
+            ).pack(fill=tk.X, pady=(0, 8))
             text = tk.Text(container, wrap=tk.WORD)
-            y_scroll = ttk.Scrollbar(container, orient=tk.VERTICAL, command=text.yview)
+            y_scroll = ttk.Scrollbar(container, orient=tk.VERTICAL, command=text.yview, style="Main.Vertical.TScrollbar")
             text.configure(yscrollcommand=y_scroll.set)
             text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             y_scroll.pack(side=tk.RIGHT, fill=tk.Y)
@@ -9800,7 +9873,12 @@ if GUI_AVAILABLE:
                 content_pane.pack(fill="both", expand=True, padx=10, pady=(8, 0))
                 controls_container = ttk.Frame(content_pane)
                 controls_canvas = tk.Canvas(controls_container, highlightthickness=0, background=bg)
-                controls_scrollbar = ttk.Scrollbar(controls_container, orient="vertical", command=controls_canvas.yview)
+                controls_scrollbar = ttk.Scrollbar(
+                    controls_container,
+                    orient="vertical",
+                    command=controls_canvas.yview,
+                    style="Main.Vertical.TScrollbar",
+                )
                 controls_wrapper = ttk.Frame(controls_canvas, padding=(0, 0, 0, 8))
                 controls_canvas.configure(yscrollcommand=controls_scrollbar.set)
                 controls_canvas.pack(side="left", fill="both", expand=True)
@@ -9902,6 +9980,7 @@ if GUI_AVAILABLE:
                 clear_cubemap_var = tk.BooleanVar(value=False)
                 backup_var = tk.BooleanVar(value=True)
                 dry_run_var = tk.BooleanVar(value=False)
+                dry_run_diff_var = tk.BooleanVar(value=False)
                 target_game_var = tk.StringVar(value="auto")
                 experimental_fallout_write_var = tk.BooleanVar(value=False)
                 fallout_allow_parallax_scale_var = tk.BooleanVar(value=False)
@@ -9936,49 +10015,57 @@ if GUI_AVAILABLE:
                     textvariable=target_game_var,
                     values=("auto", "skyrim", "fallout"),
                     state="readonly",
-                    width=12,
+                    width=14,
                 )
                 target_game_combo.pack(side="left", padx=(6, 10))
+                game_hint_label = ttk.Label(game_row, text="(Switch to fallout here)")
+                game_hint_label.pack(side="left")
+                fallout_mode_row = ttk.Frame(opt_frame)
+                fallout_mode_row.pack(fill="x", pady=(2, 0))
                 experimental_fallout_check = ttk.Checkbutton(
-                    game_row,
+                    fallout_mode_row,
                     text="Enable experimental Fallout writes",
                     variable=experimental_fallout_write_var,
                 )
                 experimental_fallout_check.pack(side="left")
-                fallout_gate_row = ttk.Frame(opt_frame)
-                fallout_gate_row.pack(fill="x", pady=(2, 0))
-                fallout_gate_label = ttk.Label(fallout_gate_row, text="Fallout safety gates:")
-                fallout_gate_label.pack(side="left")
+                fallout_gate_frame = ttk.LabelFrame(opt_frame, text="Fallout safety gates", padding=6)
+                fallout_gate_frame.pack(fill="x", pady=(2, 0))
+                fallout_gate_label = ttk.Label(fallout_gate_frame, text="Opt in per operation (higher risk):")
+                fallout_gate_label.pack(anchor=tk.W, pady=(0, 4))
+                fallout_gate_row1 = ttk.Frame(fallout_gate_frame)
+                fallout_gate_row1.pack(fill="x")
+                fallout_gate_row2 = ttk.Frame(fallout_gate_frame)
+                fallout_gate_row2.pack(fill="x", pady=(2, 0))
                 fallout_allow_parallax_scale_check = ttk.Checkbutton(
-                    fallout_gate_row,
+                    fallout_gate_row1,
                     text="Allow parallax-scale",
                     variable=fallout_allow_parallax_scale_var,
                 )
-                fallout_allow_parallax_scale_check.pack(side="left", padx=(8, 0))
+                fallout_allow_parallax_scale_check.pack(side="left", padx=(0, 8))
                 fallout_allow_fix_mesh_lighting_check = ttk.Checkbutton(
-                    fallout_gate_row,
+                    fallout_gate_row1,
                     text="Allow fix-mesh-lighting",
                     variable=fallout_allow_fix_mesh_lighting_var,
                 )
-                fallout_allow_fix_mesh_lighting_check.pack(side="left", padx=(8, 0))
+                fallout_allow_fix_mesh_lighting_check.pack(side="left", padx=(0, 8))
                 fallout_allow_spec_strength_check = ttk.Checkbutton(
-                    fallout_gate_row,
+                    fallout_gate_row1,
                     text="Allow spec-strength",
                     variable=fallout_allow_spec_strength_var,
                 )
-                fallout_allow_spec_strength_check.pack(side="left", padx=(8, 0))
+                fallout_allow_spec_strength_check.pack(side="left", padx=(0, 8))
                 fallout_allow_spec_color_check = ttk.Checkbutton(
-                    fallout_gate_row,
+                    fallout_gate_row2,
                     text="Allow spec-color",
                     variable=fallout_allow_spec_color_var,
                 )
-                fallout_allow_spec_color_check.pack(side="left", padx=(8, 0))
+                fallout_allow_spec_color_check.pack(side="left", padx=(0, 8))
                 fallout_allow_env_map_scale_check = ttk.Checkbutton(
-                    fallout_gate_row,
+                    fallout_gate_row2,
                     text="Allow env-map-scale",
                     variable=fallout_allow_env_map_scale_var,
                 )
-                fallout_allow_env_map_scale_check.pack(side="left", padx=(8, 0))
+                fallout_allow_env_map_scale_check.pack(side="left", padx=(0, 8))
 
                 flag_row = ttk.Frame(opt_frame)
                 flag_row.pack(fill="x")
@@ -10044,6 +10131,12 @@ if GUI_AVAILABLE:
                 conflict_examples_check.pack(side="left", padx=(12, 0))
                 misc_row2 = ttk.Frame(opt_frame)
                 misc_row2.pack(fill="x", pady=(2, 0))
+                dry_run_diff_check = ttk.Checkbutton(
+                    misc_row2,
+                    text="Dry-run diff summary",
+                    variable=dry_run_diff_var,
+                )
+                dry_run_diff_check.pack(side="left", padx=(0, 12))
                 ttk.Label(misc_row2, text="Retries per file:").pack(side="left")
                 retry_count_combo = ttk.Combobox(
                     misc_row2,
@@ -10283,6 +10376,10 @@ if GUI_AVAILABLE:
                 self._add_tooltip(force_type3_check, "💪 Upgrades shader type so stronger parallax scale can be written.")
                 self._add_tooltip(backup_check, "🧷 Writes .nif.bak safety copies before patching.")
                 self._add_tooltip(dry_run_check, "🧪 Scan and simulate changes without writing file edits.")
+                self._add_tooltip(
+                    dry_run_diff_check,
+                    "With Dry run enabled, include changed-byte ranges in the summary.",
+                )
                 self._add_tooltip(
                     conflict_report_check,
                     "Include grouped conflict categories with suggested auto-fix actions in scan result details.",
@@ -11198,6 +11295,7 @@ if GUI_AVAILABLE:
                                             allow_destructive=False,
                                             backup=backup_var.get(),
                                             dry_run=dry_run_var.get(),
+                                            dry_run_diff=dry_run_diff_var.get(),
                                         )
                                         if attempt > 0:
                                             _safe_add_row("WARN", nif.name, f"Auto-remediation succeeded after retry {attempt}/{retries_per_file}.")
@@ -11339,6 +11437,7 @@ if GUI_AVAILABLE:
                         cubemap_texture_path=cubemap_tex_var.get(),
                         backup=backup_var.get(),
                         dry_run=dry_run_var.get(),
+                        dry_run_diff=dry_run_diff_var.get(),
                         disable_parallax=disable_parallax_var.get(),
                         disable_pom=disable_pom_var.get(),
                         disable_env_mapping=disable_env_var.get(),

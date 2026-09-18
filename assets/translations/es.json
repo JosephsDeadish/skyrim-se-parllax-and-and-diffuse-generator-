@@ -1,0 +1,15 @@
+{
+  "meta": {
+    "display_name": "Español"
+  },
+  "strings": {
+    "Language": "Idioma",
+    "UI scale": "Escala de UI",
+    "Help": "Ayuda",
+    "Generate": "Generar",
+    "Cancel Process": "Cancelar proceso",
+    "Revert Process": "Revertir proceso",
+    "Interface language set to {language}.": "Idioma de la interfaz cambiado a {language}.",
+    "UI scale set to {scale:.2f}x.": "Escala de UI ajustada a {scale:.2f}x."
+  }
+}

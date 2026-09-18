@@ -7,6 +7,7 @@ import struct
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from nif_patcher import (
     SLSF1_ENVIRONMENT_MAPPING,
@@ -1187,6 +1188,31 @@ class TestPatchNifFlags(unittest.TestCase):
             NifPatchOptions(enable_parallax=True, backup=False, dry_run=True),
         )
         self.assertTrue(result.success)
+        self.assertEqual(nif.read_bytes(), original)
+
+    def test_dry_run_diff_reports_changed_ranges(self) -> None:
+        nif = _write_nif(self.tmp)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(enable_parallax=True, backup=False, dry_run=True, dry_run_diff=True),
+        )
+        self.assertTrue(result.success)
+        self.assertIn("Diff:", result.message)
+        self.assertIn("range(s)", result.message)
+
+    def test_strict_pre_write_validation_blocks_write_on_validation_failure(self) -> None:
+        nif = _write_nif(self.tmp)
+        original = nif.read_bytes()
+        with mock.patch(
+            "nif_patcher._validate_patched_bytes_before_write",
+            return_value=["Pre-write block-map warning/error: synthetic failure"],
+        ):
+            result = patch_nif(
+                nif,
+                NifPatchOptions(enable_parallax=True, backup=False, strict_pre_write_validation=True),
+            )
+        self.assertFalse(result.success)
+        self.assertIn("Pre-write validation failed", result.message)
         self.assertEqual(nif.read_bytes(), original)
 
     def test_backup_is_written(self) -> None:
