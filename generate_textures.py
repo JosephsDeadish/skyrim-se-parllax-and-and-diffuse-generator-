@@ -75,6 +75,7 @@ try:
             "guess_parallax_path_for_nif",
             "patch_nif",
             "scan_nif",
+            "summarize_validation_conflicts",
             "validate_nif_for_parallax",
         )
         last_error: ImportError | None = None
@@ -10235,9 +10236,11 @@ if GUI_AVAILABLE:
                     progress_var.set(0.0)
 
                     def _worker() -> None:
+                        validations_for_summary: list[object] = []
                         for index, nif in enumerate(nifs, start=1):
                             try:
                                 validation = validate_nif_for_parallax(nif)
+                                validations_for_summary.append(validation)
                                 combined_detail_lines: list[str] = []
                                 if validation.detected_game_profile:
                                     combined_detail_lines.append(f"Detected profile: {validation.detected_game_profile}")
@@ -10307,6 +10310,21 @@ if GUI_AVAILABLE:
                                 row_args = ("FAIL", nif.name, f"Scan failed: {exc}")
                             _safe_add_row(*row_args)
                             _safe_progress(float(index))
+                        if conflict_report_var.get() and validations_for_summary:
+                            grouped_conflicts = summarize_validation_conflicts(validations_for_summary)
+                            if grouped_conflicts:
+                                summary_lines = []
+                                for group in grouped_conflicts[:8]:
+                                    examples = ", ".join(tuple(group.example_files[:3]))
+                                    summary_lines.append(
+                                        f"{group.count}× {group.code} in {group.file_count} file(s)"
+                                        + (f" [{examples}]" if examples else "")
+                                    )
+                                _safe_add_row(
+                                    "WARN",
+                                    "Batch conflict summary",
+                                    "Top grouped conflicts across scanned NIFs:\n" + "\n".join(summary_lines),
+                                )
                         _safe_status(f"Scan complete: {len(nifs)} file(s) reviewed.")
                         win.after(0, _finish_op)
 

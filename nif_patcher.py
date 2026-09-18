@@ -867,6 +867,19 @@ class NifConflictSummary:
     suggested_actions: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class NifBatchConflictSummary:
+    """Cross-file grouped conflict summary for large validation batches."""
+
+    code: str
+    count: int
+    file_count: int
+    game_profile: str
+    shader_layout: str
+    example_files: tuple[str, ...]
+    suggested_actions: tuple[str, ...]
+
+
 # ---------------------------------------------------------------------------
 # Low-level binary buffer
 # ---------------------------------------------------------------------------
@@ -3534,6 +3547,75 @@ def _build_conflict_report(
     return summaries
 
 
+def summarize_validation_conflicts(
+    validations: list[NifValidationResult],
+    *,
+    max_example_files: int = 3,
+) -> list[NifBatchConflictSummary]:
+    """Aggregate per-file conflict reports into grouped batch diagnostics."""
+    grouped: dict[str, dict[str, object]] = {}
+    for validation in validations:
+        report = getattr(validation, "conflict_report", None) or []
+        seen_codes_for_file: set[str] = set()
+        file_name = validation.nif_path.name
+        for group in report:
+            code = group.code
+            bucket = grouped.setdefault(
+                code,
+                {
+                    "count": 0,
+                    "file_count": 0,
+                    "game_profile": group.game_profile,
+                    "shader_layout": group.shader_layout,
+                    "example_files": [],
+                    "actions": [],
+                },
+            )
+            bucket["count"] = int(bucket["count"]) + max(1, int(group.count))
+            if code not in seen_codes_for_file:
+                bucket["file_count"] = int(bucket["file_count"]) + 1
+                seen_codes_for_file.add(code)
+            file_examples = bucket["example_files"]
+            if not isinstance(file_examples, list):
+                file_examples = []
+                bucket["example_files"] = file_examples
+            if file_name not in file_examples and len(file_examples) < max(1, max_example_files):
+                file_examples.append(file_name)
+            actions = bucket["actions"]
+            if not isinstance(actions, list):
+                actions = []
+                bucket["actions"] = actions
+            for action in group.suggested_actions:
+                if action not in actions:
+                    actions.append(action)
+
+    summaries: list[NifBatchConflictSummary] = []
+    for code, payload in sorted(
+        grouped.items(),
+        key=lambda item: (
+            -int(item[1]["count"]),
+            -int(item[1]["file_count"]),
+            item[0],
+        ),
+    ):
+        summaries.append(
+            NifBatchConflictSummary(
+                code=code,
+                count=int(payload["count"]),
+                file_count=int(payload["file_count"]),
+                game_profile=str(payload["game_profile"]),
+                shader_layout=str(payload["shader_layout"]),
+                example_files=tuple(
+                    payload["example_files"] if isinstance(payload["example_files"], list) else []
+                ),
+                suggested_actions=tuple(
+                    payload["actions"] if isinstance(payload["actions"], list) else []
+                ),
+            )
+        )
+    return summaries
+
+
 def validate_nif_for_parallax(
     nif_path: Path,
     *,
@@ -4316,6 +4398,11 @@ def _main() -> None:  # pragma: no cover
         help="With --validate, print grouped conflict summaries with suggested auto-fix actions.",
     )
     parser.add_argument(
+        "--conflict-report-summary",
+        action="store_true",
+        help="With --validate, print a cross-file grouped conflict summary for large batches.",
+    )
+    parser.add_argument(
         "--target-game",
         choices=("auto", "skyrim", "fallout"),
         default="auto",
@@ -4444,8 +4531,10 @@ def _main() -> None:  # pragma: no cover
         sys.exit(1)
 
     if args.validate:
+        validation_results: list[NifValidationResult] = []
         for nif in nif_files:
             v = validate_nif_for_parallax(nif)
+            validation_results.append(v)
             status = "READY" if v.ready_count == v.shader_count else "NEEDS PATCH"
             print(f"[{status}] {nif.name}: "
                   f"{v.ready_count}/{v.shader_count} shaders ready for parallax "
@@ -4464,6 +4553,18 @@ def _main() -> None:  # pragma: no cover
                     for example in group.examples:
                         print(f"      example: {example}")
                     for action in group.suggested_actions:
+                        print(f"      auto-fix: {action}")
+        if args.conflict_report_summary:
+            summary = summarize_validation_conflicts(validation_results)
+            if summary:
+                print("\nBatch conflict summary:")
+                for group in summary[:12]:
+                    files = ", ".join(group.example_files)
+                    print(
+                        f"  - {group.code}: {group.count} across {group.file_count} file(s) "
+                        f"(examples: {files})"
+                    )
+                    for action in group.suggested_actions[:2]:
                         print(f"      auto-fix: {action}")
         return
 

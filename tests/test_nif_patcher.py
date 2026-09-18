@@ -37,6 +37,7 @@ from nif_patcher import (
     batch_patch_nif,
     patch_nif,
     scan_nif,
+    summarize_validation_conflicts,
     scan_nif_diagnostics,
     validate_nif_for_parallax,
     _Buf,
@@ -2274,6 +2275,51 @@ class TestMixedModValidationBatches(unittest.TestCase):
         self.assertTrue(any(".skyrim.legacy" in code for code in all_codes))
         self.assertTrue(any(".skyrim.real" in code for code in all_codes))
         self.assertTrue(any(".fallout." in code for code in all_codes))
+
+
+class TestBatchConflictSummaries(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_summarize_validation_conflicts_groups_across_files(self) -> None:
+        nif_a = _write_nif(
+            self.tmp,
+            texture_paths=["textures\\arch\\stone_n.dds"] + [""] * 8,
+        )
+        nif_b = self.tmp / "b.nif"
+        nif_b.write_bytes(
+            _build_minimal_nif(
+                texture_paths=["textures\\arch\\stone_n.dds"] + [""] * 8
+            )
+        )
+        v_a = validate_nif_for_parallax(nif_a)
+        v_b = validate_nif_for_parallax(nif_b)
+        summary = summarize_validation_conflicts([v_a, v_b])
+        target = next(group for group in summary if group.code.startswith("path_slot_diffuse.wrong_suffix."))
+        self.assertEqual(target.file_count, 2)
+        self.assertGreaterEqual(target.count, 2)
+        self.assertIn("test.nif", target.example_files)
+        self.assertIn("b.nif", target.example_files)
+        self.assertTrue(any("slot 0" in action.lower() for action in target.suggested_actions))
+
+    def test_summarize_validation_conflicts_limits_example_files(self) -> None:
+        validations = []
+        for idx in range(5):
+            p = self.tmp / f"many_{idx}.nif"
+            p.write_bytes(
+                _build_minimal_nif(
+                    texture_paths=["textures\\arch\\stone_n.dds"] + [""] * 8
+                )
+            )
+            validations.append(validate_nif_for_parallax(p))
+        summary = summarize_validation_conflicts(validations, max_example_files=2)
+        target = next(group for group in summary if group.code.startswith("path_slot_diffuse.wrong_suffix."))
+        self.assertEqual(target.file_count, 5)
+        self.assertEqual(len(target.example_files), 2)
 
 
 # ---------------------------------------------------------------------------
