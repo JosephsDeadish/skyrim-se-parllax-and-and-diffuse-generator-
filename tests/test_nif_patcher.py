@@ -312,7 +312,7 @@ class TestScanNif(unittest.TestCase):
         self.assertTrue(any("unexpected user version values" in d.lower() for d in diagnostics), diagnostics)
 
     def test_scan_reports_fallout_header_as_experimental(self) -> None:
-        nif = _write_nif(self.tmp, user_ver2=83)
+        nif = _write_nif(self.tmp, user_ver2=130)
         raw = bytearray(nif.read_bytes())
         header = _read_header(_Buf(bytes(raw)))
         self.assertIsNotNone(header)
@@ -327,7 +327,7 @@ class TestScanNif(unittest.TestCase):
         self.assertIn("experimental", joined)
 
     def test_validate_detects_fallout_profile(self) -> None:
-        nif = _write_nif(self.tmp, user_ver2=83)
+        nif = _write_nif(self.tmp, user_ver2=130)
         raw = bytearray(nif.read_bytes())
         user_version_offset = len(b"Gamebryo File Format, Version 20.2.0.7\n") + 4 + 1
         struct.pack_into("<I", raw, user_version_offset, 11)
@@ -338,6 +338,15 @@ class TestScanNif(unittest.TestCase):
             any("fallout-era profile" in s.lower() for s in validation.suggestions),
             validation.suggestions,
         )
+
+    def test_validate_keeps_unknown_for_non_fallout_user11_combo(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=83)
+        raw = bytearray(nif.read_bytes())
+        user_version_offset = len(b"Gamebryo File Format, Version 20.2.0.7\n") + 4 + 1
+        struct.pack_into("<I", raw, user_version_offset, 11)
+        nif.write_bytes(bytes(raw))
+        validation = validate_nif_for_parallax(nif)
+        self.assertEqual(validation.detected_game_profile, "unknown")
 
     def test_scan_accepts_crlf_header_line(self) -> None:
         nif = _write_nif(self.tmp, header_line_ending=b"\r\n")

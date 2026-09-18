@@ -63,6 +63,7 @@ _KNOWN_SKYRIM_USER_VERSION_2: tuple[int, ...] = (
     _SKYRIM_SE_USER_VERSION_2_CK,
     _SKYRIM_LE_USER_VERSION_2,
 )
+_KNOWN_FALLOUT_USER_VERSION_2: tuple[int, ...] = (130, 131, 132, 139)
 _GAME_PROFILE_SKYRIM: str = "skyrim"
 _GAME_PROFILE_FALLOUT: str = "fallout"
 _GAME_PROFILE_UNKNOWN: str = "unknown"
@@ -947,7 +948,7 @@ def _detect_game_profile(user_version: int, user_version_2: int) -> str:
     """Classify a NIF into a coarse game profile using user-version fields."""
     if user_version == _SKYRIM_USER_VERSION and _is_supported_skyrim_user_version_2(user_version_2):
         return _GAME_PROFILE_SKYRIM
-    if user_version == 11:
+    if user_version == 11 and user_version_2 in _KNOWN_FALLOUT_USER_VERSION_2:
         return _GAME_PROFILE_FALLOUT
     return _GAME_PROFILE_UNKNOWN
 
@@ -2392,7 +2393,6 @@ def _apply_patches(
                 and sp.shader_type_resolution in {
                     "exact",
                     "sentinel_default",
-                    "mapping_table",
                     "masked_low8",
                     "masked_low16",
                 }
