@@ -2521,6 +2521,39 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertTrue(after.has_glow_map_flag)
         self.assertIn("enable_parallax", steps)
 
+    def test_auto_remediate_conflicts_end_to_end_validate_report_rerun(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone_p.dds"
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_m.dds"
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_g.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=0,
+            flags2=0,
+            shader_type=SHADER_TYPE_DEFAULT,
+        )
+        before = validate_nif_for_parallax(nif)
+        before_codes = [group.code for group in before.conflict_report]
+        self.assertTrue(any(code.startswith("missing_parallax_flag.") for code in before_codes))
+        self.assertTrue(any(code.startswith("flag_env_mapping.") for code in before_codes))
+        self.assertTrue(any(code.startswith("flag_glow_map.") for code in before_codes))
+
+        result, steps = auto_remediate_nif_conflicts(nif, before_codes, backup=False)
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertTrue(result.success, result.errors)
+        self.assertIn("enable_parallax", steps)
+        self.assertIn("enable_env_mapping", steps)
+        self.assertIn("enable_glow_map", steps)
+
+        after = validate_nif_for_parallax(nif)
+        after_codes = [group.code for group in after.conflict_report]
+        self.assertLessEqual(len(after_codes), len(before_codes))
+        self.assertFalse(any(code.startswith("missing_parallax_flag.") for code in after_codes))
+        self.assertFalse(any(code.startswith("flag_env_mapping.") for code in after_codes))
+        self.assertFalse(any(code.startswith("flag_glow_map.") for code in after_codes))
+
     def test_auto_remediation_build_options_carries_fallout_gate_flags(self) -> None:
         nif = _write_nif(self.tmp, user_ver2=130)
         _rewrite_user_version(nif, 11)

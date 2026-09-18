@@ -118,6 +118,20 @@
       "profile": "unknown",
       "shader_layout": "legacy",
       "user_ver2": 155
+    },
+    {
+      "id": "broken_header_truncated_72",
+      "profile": "unknown",
+      "shader_layout": "legacy",
+      "broken_header": true,
+      "truncated_bytes": 32
+    },
+    {
+      "id": "skyrim_shifted_texture_set_layout",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_set_layout_shift": 4
     }
   ]
 }
