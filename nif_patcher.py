@@ -543,6 +543,11 @@ class NifPatchOptions:
     """Skip shader blocks with ``SLSF2_Anisotropic_Lighting`` when enabling
     parallax.  Anisotropic-lit shapes produce incorrect results with parallax."""
 
+    skip_single_pass: bool = True
+    """Skip shader blocks with ``SLSF1_Single_Pass`` when enabling parallax.
+    Single-pass material workflows are not compatible with standard parallax
+    flag patching and often produce broken rendering."""
+
     skip_if_havok: bool = True
     """Skip all parallax patching in NIFs that contain a
     ``BSBehaviorGraphExtraData`` block (attached Havok skeleton).  Parallax
@@ -668,6 +673,11 @@ class NifShaderInfo:
         in Skyrim SE.
         """
         return bool(self.flags1 & (SLSF1_DECAL | SLSF1_DYNAMIC_DECAL))
+
+    @property
+    def has_single_pass_flag(self) -> bool:
+        """True when ``SLSF1_Single_Pass`` is set."""
+        return bool(self.flags1 & SLSF1_SINGLE_PASS)
 
     @property
     def has_soft_lighting_flag(self) -> bool:
@@ -945,6 +955,16 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
             return diagnostics
         user_version = struct.unpack_from("<I", data, version_offset + 5)[0]
         user_version_2 = struct.unpack_from("<I", data, version_offset + 13)[0]
+        if user_version == 11:
+            diagnostics.append(
+                "Detected user_version=11 (likely Fallout-era NIF header). "
+                "Fallout compatibility is still experimental and not patch-enabled yet."
+            )
+            diagnostics.append(
+                "Resolution: convert/export to a Skyrim-compatible mesh path first, "
+                "or use validate-only checks until Fallout patch support is implemented."
+            )
+            return diagnostics
         if user_version != _SKYRIM_USER_VERSION or not _is_supported_skyrim_user_version_2(user_version_2):
             diagnostics.append(
                 f"Unexpected user version values ({user_version}, {user_version_2}). The file may use a different game/export format."
@@ -2223,6 +2243,8 @@ def _should_enable_parallax_on_shader(
         return False
     if opts.skip_anisotropic and (sp.flags2 & SLSF2_ANISOTROPIC_LIGHTING):
         return False
+    if opts.skip_single_pass and (sp.flags1 & SLSF1_SINGLE_PASS):
+        return False
     shape = shader_to_shape.get(sp.block_index)
     if opts.skip_if_skinned and shape is not None and shape.skin_instance_ref >= 0:
         return False
@@ -3097,6 +3119,14 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
             _append_unique(result.skip_reasons, reason)
             block_skipped = True
 
+        if info.has_single_pass_flag:
+            reason = (
+                f"{bname}: SLSF1_Single_Pass is set — "
+                f"single-pass materials are incompatible with standard parallax patching"
+            )
+            _append_unique(result.skip_reasons, reason)
+            block_skipped = True
+
         if info.is_skinned or info.has_skinned_flag:
             sources = []
             if info.is_skinned:
@@ -3761,6 +3791,9 @@ def _main() -> None:  # pragma: no cover
                              "back-lit shaders when enabling parallax).")
     parser.add_argument("--no-skip-anisotropic", action="store_true",
                         help="Disable anisotropic-lighting skip when enabling parallax.")
+    parser.add_argument("--no-skip-single-pass", action="store_true",
+                        help="Disable single-pass skip (default: skip shaders with "
+                             "SLSF1_Single_Pass when enabling parallax).")
     parser.add_argument("--no-skip-havok", action="store_true",
                         help="Disable Havok-NIF skip (default: skip parallax patching "
                              "for NIFs with BSBehaviorGraphExtraData blocks).")
@@ -3888,6 +3921,7 @@ def _main() -> None:  # pragma: no cover
         skip_decal=not args.no_skip_decal,
         skip_lighting_effects=not args.no_skip_lighting_effects,
         skip_anisotropic=not args.no_skip_anisotropic,
+        skip_single_pass=not args.no_skip_single_pass,
         skip_if_havok=not args.no_skip_havok,
         skip_if_skinned=not args.no_skip_skinned,
         skip_if_alpha=not args.no_skip_alpha,

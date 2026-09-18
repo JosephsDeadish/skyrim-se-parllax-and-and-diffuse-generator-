@@ -10470,8 +10470,10 @@ if GUI_AVAILABLE:
                             controls_requested_height=controls_wrapper.winfo_reqheight() + 24,
                             footer_height=footer_frame.winfo_reqheight(),
                         )
-                        max_sash = max(340, pane_height - 180)
-                        controls_height = min(controls_height, max_sash)
+                        pane_upper = max(1, pane_height - 1)
+                        min_sash = min(340, pane_upper)
+                        max_sash = max(min_sash, min(pane_upper, pane_height - 180))
+                        controls_height = max(min_sash, min(controls_height, max_sash))
                         content_pane.sashpos(0, controls_height)
                     except Exception:
                         pass

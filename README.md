@@ -289,3 +289,4 @@ When both Community Shaders and ENB markers are detected in mod-manager context,
 The **NIF Editor** (accessible from the toolbar button) lets you patch BSLightingShaderProperty flags and texture slots in Skyrim mesh files with LE/SE/AE/VR/CK-style headers, but output workflows are Skyrim SE-focused (convert legacy LE meshes for SSE usage when needed).
 **This is an experimental feature.** Always keep backups of your NIF files before patching.
 The **Auto-patch NIFs after generation** checkbox (off by default) triggers NIF patching automatically after each generation run.
+For safety, parallax auto-patching skips known-problem cases by default (Havok-attached meshes, skinned/alpha meshes, decal/anisotropic/soft-lighting variants, and single-pass shader blocks).

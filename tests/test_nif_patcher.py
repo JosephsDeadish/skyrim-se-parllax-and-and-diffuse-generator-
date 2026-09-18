@@ -9,6 +9,7 @@ from pathlib import Path
 
 from nif_patcher import (
     SLSF1_ENVIRONMENT_MAPPING,
+    SLSF1_SINGLE_PASS,
     SLSF1_PARALLAX,
     SLSF1_PARALLAX_OCCLUSION,
     SLSF2_GLOW_MAP,
@@ -308,6 +309,21 @@ class TestScanNif(unittest.TestCase):
         infos, diagnostics = scan_nif_diagnostics(nif)
         self.assertEqual(infos, [])
         self.assertTrue(any("unexpected user version values" in d.lower() for d in diagnostics), diagnostics)
+
+    def test_scan_reports_fallout_header_as_experimental(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=83)
+        raw = bytearray(nif.read_bytes())
+        header = _read_header(_Buf(bytes(raw)))
+        self.assertIsNotNone(header)
+        assert header is not None
+        user_version_offset = len(b"Gamebryo File Format, Version 20.2.0.7\n") + 4 + 1
+        struct.pack_into("<I", raw, user_version_offset, 11)
+        nif.write_bytes(bytes(raw))
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(infos, [])
+        joined = "\n".join(diagnostics).lower()
+        self.assertIn("fallout", joined)
+        self.assertIn("experimental", joined)
 
     def test_scan_accepts_crlf_header_line(self) -> None:
         nif = _write_nif(self.tmp, header_line_ending=b"\r\n")
@@ -618,6 +634,12 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertTrue(v.valid)
         self.assertEqual(v.needs_patch_count, 1)
         self.assertTrue(any("flag" in i.lower() for i in v.issues))
+
+    def test_reports_single_pass_skip_reason(self) -> None:
+        nif = _write_nif(self.tmp, flags1=SLSF1_SINGLE_PASS)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.skip_reasons).lower()
+        self.assertIn("single_pass", joined)
 
     def test_ready_when_flag_and_texture_set(self) -> None:
         paths = [""] * 9
@@ -2495,6 +2517,13 @@ class TestSkipConditions(unittest.TestCase):
         info = scan_nif(nif)[0]
         self.assertFalse(info.has_parallax_flag, "Anisotropic-lit shader must not get parallax")
 
+    def test_skip_single_pass_flag(self) -> None:
+        """Shaders with SLSF1_SINGLE_PASS must not receive parallax."""
+        nif = self._write(shader_flags1=SLSF1_SINGLE_PASS)
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.has_parallax_flag, "Single-pass shader must not get parallax")
+
     def test_skip_incompatible_shader_type(self) -> None:
         """Shaders with types other than Default/Parallax/EnvMap must be skipped."""
         nif = self._write(shader_type=SHADER_TYPE_MULTILAYER)
@@ -2543,6 +2572,17 @@ class TestSkipConditions(unittest.TestCase):
         info = scan_nif(nif)[0]
         self.assertTrue(info.has_parallax_flag,
                         "Decal shader should get parallax when skip_decal=False")
+
+    def test_no_skip_single_pass_when_disabled(self) -> None:
+        nif = self._write(shader_flags1=SLSF1_SINGLE_PASS)
+        patch_nif(nif, NifPatchOptions(
+            enable_parallax=True,
+            backup=False,
+            skip_single_pass=False,
+        ))
+        info = scan_nif(nif)[0]
+        self.assertTrue(info.has_parallax_flag,
+                        "Single-pass shader should get parallax when skip_single_pass=False")
 
     def test_havok_skip_does_not_affect_env_mapping(self) -> None:
         """Havok skip only blocks parallax; env-mapping patching must still work."""
