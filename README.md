@@ -291,3 +291,4 @@ The **NIF Editor** (accessible from the toolbar button) patches Skyrim-format BS
 The **Auto-patch NIFs after generation** checkbox (off by default) triggers NIF patching automatically after each generation run.
 For safety, parallax auto-patching skips known-problem cases by default (Havok-attached meshes, skinned/alpha meshes, decal/anisotropic/soft-lighting variants, and single-pass shader blocks).
 For CLI runs, `nif_patcher.py --target-game auto|skyrim|fallout` now makes profile intent explicit. Fallout writes require `--experimental-fallout-write` and are intentionally limited to guarded flag/texture-slot patching (no type-3 expansion or advanced shader-field writes yet).
+The NIF Editor now exposes matching controls (**NIF game profile** + **Enable experimental Fallout writes**) so GUI patch behavior aligns with CLI behavior.

@@ -81,6 +81,42 @@ _HEADER_PREFIXES: tuple[bytes, ...] = (
     b"NetImmerse File Format, Version 20.2.0.7",
 )
 
+
+@dataclass(frozen=True)
+class _GamePatchCapability:
+    """Per-game patch capability policy."""
+
+    allowed_layouts: tuple[str, ...]
+    supports_force_type3: bool
+    supports_parallax_scale: bool
+    supports_advanced_shader_fields: bool
+    requires_experimental_opt_in: bool = False
+
+
+_GAME_PATCH_CAPABILITIES: dict[str, _GamePatchCapability] = {
+    _GAME_PROFILE_SKYRIM: _GamePatchCapability(
+        allowed_layouts=("legacy", "real"),
+        supports_force_type3=True,
+        supports_parallax_scale=True,
+        supports_advanced_shader_fields=True,
+        requires_experimental_opt_in=False,
+    ),
+    _GAME_PROFILE_FALLOUT: _GamePatchCapability(
+        allowed_layouts=("legacy", "real"),
+        supports_force_type3=False,
+        supports_parallax_scale=False,
+        supports_advanced_shader_fields=False,
+        requires_experimental_opt_in=True,
+    ),
+    _GAME_PROFILE_UNKNOWN: _GamePatchCapability(
+        allowed_layouts=(),
+        supports_force_type3=False,
+        supports_parallax_scale=False,
+        supports_advanced_shader_fields=False,
+        requires_experimental_opt_in=False,
+    ),
+}
+
 # Shader Flags 1 (BSLightingShaderProperty)
 SLSF1_SPECULAR: int = 0x00000001
 SLSF1_SKINNED: int = 0x00000002
@@ -965,6 +1001,11 @@ def _detect_game_profile(user_version: int, user_version_2: int) -> str:
     if user_version == _SKYRIM_USER_VERSION and _is_supported_skyrim_user_version_2(user_version_2):
         return _GAME_PROFILE_SKYRIM
     return _GAME_PROFILE_UNKNOWN
+
+
+def _game_patch_capability(profile: str) -> _GamePatchCapability:
+    """Return patch capability policy for a detected game profile."""
+    return _GAME_PATCH_CAPABILITIES.get(profile, _GAME_PATCH_CAPABILITIES[_GAME_PROFILE_UNKNOWN])
 
 
 def _detect_game_profile_from_bytes(data: bytes) -> str:
@@ -2770,7 +2811,8 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         return result
     detected_profile = _detect_game_profile(header.user_version, header.user_version_2)
     result.detected_game_profile = detected_profile
-    if detected_profile == _GAME_PROFILE_FALLOUT and not opts.experimental_fallout_write:
+    capability = _game_patch_capability(detected_profile)
+    if capability.requires_experimental_opt_in and not opts.experimental_fallout_write:
         result.errors.append(
             "Fallout profile detected/selected, but experimental_fallout_write is disabled."
         )
@@ -2788,18 +2830,19 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         return result
     if detected_profile == _GAME_PROFILE_FALLOUT:
         unsupported_ops: list[str] = []
-        if opts.force_shader_type_3:
+        if opts.force_shader_type_3 and not capability.supports_force_type3:
             unsupported_ops.append("force_shader_type_3")
-        if opts.parallax_scale is not None:
+        if opts.parallax_scale is not None and not capability.supports_parallax_scale:
             unsupported_ops.append("parallax_scale")
-        if opts.fix_mesh_lighting:
-            unsupported_ops.append("fix_mesh_lighting")
-        if opts.spec_strength is not None:
-            unsupported_ops.append("spec_strength")
-        if opts.spec_color is not None:
-            unsupported_ops.append("spec_color")
-        if opts.env_map_scale is not None:
-            unsupported_ops.append("env_map_scale")
+        if not capability.supports_advanced_shader_fields:
+            if opts.fix_mesh_lighting:
+                unsupported_ops.append("fix_mesh_lighting")
+            if opts.spec_strength is not None:
+                unsupported_ops.append("spec_strength")
+            if opts.spec_color is not None:
+                unsupported_ops.append("spec_color")
+            if opts.env_map_scale is not None:
+                unsupported_ops.append("env_map_scale")
         if unsupported_ops:
             result.errors.append(
                 "Experimental Fallout patch mode does not support: "
@@ -2829,11 +2872,13 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         result.message = "Strict unknown-shader check failed."
         return result
     if detected_profile == _GAME_PROFILE_FALLOUT:
-        unsupported_layout_blocks = [sp.block_index for sp in shader_props if sp.layout_name != "real"]
+        unsupported_layout_blocks = [
+            sp.block_index for sp in shader_props if sp.layout_name not in capability.allowed_layouts
+        ]
         if unsupported_layout_blocks:
-            shader_props = [sp for sp in shader_props if sp.layout_name == "real"]
+            shader_props = [sp for sp in shader_props if sp.layout_name in capability.allowed_layouts]
             result.warnings.append(
-                "Skipped non-real-layout shader blocks in experimental Fallout mode: "
+                "Skipped unsupported-layout shader blocks in experimental Fallout mode: "
                 + ", ".join(str(idx) for idx in unsupported_layout_blocks[:12])
                 + ("..." if len(unsupported_layout_blocks) > 12 else "")
             )
@@ -2845,7 +2890,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         else:
             if detected_profile == _GAME_PROFILE_FALLOUT:
                 result.message = (
-                    "No Fallout-compatible real-layout BSLightingShaderProperty blocks found for experimental patch mode."
+                    "No Fallout-compatible BSLightingShaderProperty blocks found for experimental patch mode."
                 )
             else:
                 result.message = "No BSLightingShaderProperty blocks found — nothing to patch."
@@ -2964,20 +3009,23 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
             data, ValueError("Unsupported NIF header/profile values")
         )
     detected_profile = _detect_game_profile(header.user_version, header.user_version_2)
+    capability = _game_patch_capability(detected_profile)
     if detected_profile == _GAME_PROFILE_FALLOUT:
         diagnostics.append(
             "Detected Fallout-era profile. Patch-write support is experimental; keep backups and verify in-game."
         )
     shader_props, texture_sets, parse_errors = _build_block_map(data, header)
     if detected_profile == _GAME_PROFILE_FALLOUT:
-        skipped_scan_blocks = [sp.block_index for sp in shader_props if sp.layout_name != "real"]
+        skipped_scan_blocks = [
+            sp.block_index for sp in shader_props if sp.layout_name not in capability.allowed_layouts
+        ]
         if skipped_scan_blocks:
             diagnostics.append(
-                "Skipped non-real-layout shader blocks in Fallout profile diagnostics: "
+                "Skipped unsupported-layout shader blocks in Fallout profile diagnostics: "
                 + ", ".join(str(idx) for idx in skipped_scan_blocks[:12])
                 + ("..." if len(skipped_scan_blocks) > 12 else "")
             )
-            shader_props = [sp for sp in shader_props if sp.layout_name == "real"]
+            shader_props = [sp for sp in shader_props if sp.layout_name in capability.allowed_layouts]
     diagnostics.extend(parse_errors)
     diagnostics.extend(_shader_resolution_notes(shader_props))
     if not shader_props:

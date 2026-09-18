@@ -2000,6 +2000,8 @@ def get_nif_patch_option_warnings(
     clear_glow_texture_path: bool = False,
     clear_diffuse_texture_path: bool = False,
     clear_cubemap_texture_path: bool = False,
+    target_game: str = "auto",
+    experimental_fallout_write: bool = False,
 ) -> list[str]:
     warnings: list[str] = []
     normalized_selected_profile = _normalize_render_profile(str(selected_profile or "auto"))
@@ -2013,6 +2015,14 @@ def get_nif_patch_option_warnings(
         effective_profile = "vanilla"
     if effective_profile == "vanilla" and enable_pom:
         warnings.append("ENB POM is usually incorrect for vanilla meshes.")
+    normalized_target_game = str(target_game or "auto").strip().lower()
+    if normalized_target_game == "fallout":
+        if not experimental_fallout_write:
+            warnings.append("Fallout target selected but experimental Fallout write mode is disabled.")
+        if force_shader_type_3:
+            warnings.append("Fallout experimental mode does not support force shader type 3.")
+    elif experimental_fallout_write:
+        warnings.append("Experimental Fallout write mode is enabled while target game is not Fallout.")
     if effective_profile in {"performance", "vr"} and enable_parallax:
         warnings.append("Performance/VR workflows usually keep parallax disabled to reduce shimmer and GPU cost.")
     if effective_profile == "characters" and enable_parallax:
@@ -4934,6 +4944,8 @@ def build_nif_patch_options_for_nif_editor(
     clear_glow_texture_path: bool = False,
     clear_diffuse_texture_path: bool = False,
     clear_cubemap_texture_path: bool = False,
+    target_game: str = "auto",
+    experimental_fallout_write: bool = False,
 ) -> NifPatchOptions:
     return NifPatchOptions(
         enable_parallax=enable_parallax,
@@ -4962,6 +4974,8 @@ def build_nif_patch_options_for_nif_editor(
         clear_glow_texture_path=clear_glow_texture_path,
         clear_diffuse_texture_path=clear_diffuse_texture_path,
         clear_cubemap_texture_path=clear_cubemap_texture_path,
+        target_game=str(target_game or "auto").strip().lower(),
+        experimental_fallout_write=bool(experimental_fallout_write),
     )
 
 
@@ -9380,6 +9394,8 @@ if GUI_AVAILABLE:
                 clear_cubemap_var = tk.BooleanVar(value=False)
                 backup_var = tk.BooleanVar(value=True)
                 dry_run_var = tk.BooleanVar(value=False)
+                target_game_var = tk.StringVar(value="auto")
+                experimental_fallout_write_var = tk.BooleanVar(value=False)
                 option_warning_var = tk.StringVar(value="")
 
                 render_row = ttk.Frame(opt_frame)
@@ -9394,6 +9410,25 @@ if GUI_AVAILABLE:
                     width=20,
                 )
                 renderer_combo.pack(side="left", padx=(6, 6))
+
+                game_row = ttk.Frame(opt_frame)
+                game_row.pack(fill="x", pady=(2, 0))
+                target_game_label = ttk.Label(game_row, text="NIF game profile:")
+                target_game_label.pack(side="left")
+                target_game_combo = ttk.Combobox(
+                    game_row,
+                    textvariable=target_game_var,
+                    values=("auto", "skyrim", "fallout"),
+                    state="readonly",
+                    width=12,
+                )
+                target_game_combo.pack(side="left", padx=(6, 10))
+                experimental_fallout_check = ttk.Checkbutton(
+                    game_row,
+                    text="Enable experimental Fallout writes",
+                    variable=experimental_fallout_write_var,
+                )
+                experimental_fallout_check.pack(side="left")
 
                 flag_row = ttk.Frame(opt_frame)
                 flag_row.pack(fill="x")
@@ -9585,6 +9620,8 @@ if GUI_AVAILABLE:
                         clear_glow_texture_path=clear_glow_var.get(),
                         clear_diffuse_texture_path=clear_diffuse_var.get(),
                         clear_cubemap_texture_path=clear_cubemap_var.get(),
+                        target_game=target_game_var.get(),
+                        experimental_fallout_write=experimental_fallout_write_var.get(),
                     )
                     option_warning_var.set("⚠ " + " | ".join(warnings[:3]) if warnings else "")
 
@@ -9624,8 +9661,10 @@ if GUI_AVAILABLE:
                     clear_glow_var,
                     clear_diffuse_var,
                     clear_cubemap_var,
+                    experimental_fallout_write_var,
                 ):
                     watch_var.trace_add("write", _update_checkbox_warnings)
+                target_game_var.trace_add("write", _update_checkbox_warnings)
                 self._add_tooltip(
                     renderer_label,
                     "🎮 Pick your target renderer to auto-apply sane NIF patch toggles for that workflow.",
@@ -9642,6 +9681,12 @@ if GUI_AVAILABLE:
                 self._add_tooltip(force_type3_check, "💪 Upgrades shader type so stronger parallax scale can be written.")
                 self._add_tooltip(backup_check, "🧷 Writes .nif.bak safety copies before patching.")
                 self._add_tooltip(dry_run_check, "🧪 Scan and simulate changes without writing file edits.")
+                self._add_tooltip(target_game_label, "Set game-header profile handling for NIF patching.")
+                self._add_tooltip(target_game_combo, "auto detects profile from the NIF header; use fallout for Fallout-target patching.")
+                self._add_tooltip(
+                    experimental_fallout_check,
+                    "Required for Fallout-target patch writes. Use only with backups; some Fallout paths are still limited.",
+                )
                 self._add_tooltip(guide_label, "📘 Fast BSLighting checkbox reference so you can patch without guessing.")
                 self._add_tooltip(option_warning_label, "⚠ Compatibility warnings for current checkbox combinations.")
                 self._add_tooltip(disable_parallax_check, "🚫 Removes parallax and POM flags from BSLightingShaderProperty.")
@@ -10249,6 +10294,8 @@ if GUI_AVAILABLE:
                         clear_glow_texture_path=clear_glow_var.get(),
                         clear_diffuse_texture_path=clear_diffuse_var.get(),
                         clear_cubemap_texture_path=clear_cubemap_var.get(),
+                        target_game=target_game_var.get(),
+                        experimental_fallout_write=experimental_fallout_write_var.get(),
                     )
                     if warnings_to_confirm:
                         proceed = messagebox.askyesno(
@@ -10297,6 +10344,8 @@ if GUI_AVAILABLE:
                         clear_glow_texture_path=clear_glow_var.get(),
                         clear_diffuse_texture_path=clear_diffuse_var.get(),
                         clear_cubemap_texture_path=clear_cubemap_var.get(),
+                        target_game=target_game_var.get(),
+                        experimental_fallout_write=experimental_fallout_write_var.get(),
                     )
                     _is_running[0] = True
                     _set_ops_active(False)
@@ -10401,6 +10450,8 @@ if GUI_AVAILABLE:
                         clear_cubemap_texture_path=clear_cubemap_var.get(),
                         backup=backup_var.get(),
                         dry_run=dry_run_var.get(),
+                        target_game=target_game_var.get(),
+                        experimental_fallout_write=experimental_fallout_write_var.get(),
                     )
                     _is_running[0] = True
                     _set_ops_active(False)

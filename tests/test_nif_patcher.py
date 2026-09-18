@@ -326,11 +326,11 @@ class TestScanNif(unittest.TestCase):
         assert header is not None
         _rewrite_user_version(nif, 11)
         infos, diagnostics = scan_nif_diagnostics(nif)
-        self.assertEqual(len(infos), 0)
+        self.assertEqual(len(infos), 1)
         joined = "\n".join(diagnostics).lower()
         self.assertIn("fallout", joined)
         self.assertIn("experimental", joined)
-        self.assertIn("skipped non-real-layout shader blocks", joined)
+        self.assertNotIn("skipped unsupported-layout shader blocks", joined)
 
     def test_scan_fallout_real_layout_returns_shader_info(self) -> None:
         nif = _write_nif(self.tmp, user_ver2=130, shader_layout="real")
@@ -1121,6 +1121,22 @@ class TestPatchNifFlags(unittest.TestCase):
         infos = scan_nif(nif)
         self.assertTrue(infos[0].has_parallax_flag)
 
+    def test_target_game_fallout_legacy_layout_with_opt_in_patches_flags(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130, shader_layout="legacy")
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                backup=False,
+                target_game="fallout",
+                experimental_fallout_write=True,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertTrue(infos[0].has_parallax_flag)
+
     def test_target_game_fallout_rejects_parallax_scale(self) -> None:
         nif = _write_nif(self.tmp, user_ver2=130)
         _rewrite_user_version(nif, 11)
@@ -1137,6 +1153,22 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("does not support", result.message.lower())
         self.assertIn("parallax_scale", result.message)
+
+    def test_target_game_fallout_rejects_force_type3(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                force_shader_type_3=True,
+                backup=False,
+                target_game="fallout",
+                experimental_fallout_write=True,
+            ),
+        )
+        self.assertFalse(result.success)
+        self.assertIn("force_shader_type_3", result.message)
 
     def test_invalid_target_game_option_fails_fast(self) -> None:
         nif = _write_nif(self.tmp)
