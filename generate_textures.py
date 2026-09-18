@@ -10329,12 +10329,16 @@ if GUI_AVAILABLE:
                                 else:
                                     fail += 1
                                     _safe_add_row("FAIL", nif.name, detail_text or "Patch failed.")
-                                    failure_key = _batch_failure_key(detail_text or "Patch failed.")
-                                    failure_groups[failure_key] = failure_groups.get(failure_key, 0) + 1
+                                    unique_failure_keys: set[str] = set()
+                                    if detail_text:
+                                        unique_failure_keys.add(_batch_failure_key(detail_text))
                                     for err in result.errors:
                                         _safe_add_row("FAIL", nif.name, err)
-                                        error_key = _batch_failure_key(err)
-                                        failure_groups[error_key] = failure_groups.get(error_key, 0) + 1
+                                        unique_failure_keys.add(_batch_failure_key(err))
+                                    if not unique_failure_keys:
+                                        unique_failure_keys.add(_batch_failure_key("Patch failed."))
+                                    for key in unique_failure_keys:
+                                        failure_groups[key] = failure_groups.get(key, 0) + 1
                             except Exception as exc:
                                 fail += 1
                                 fail_text = f"Patch failed: {exc}"
@@ -10419,12 +10423,16 @@ if GUI_AVAILABLE:
                                 else:
                                     fail += 1
                                     _safe_add_row("FAIL", nif.name, result.message)
-                                    failure_key = _batch_failure_key(result.message)
-                                    failure_groups[failure_key] = failure_groups.get(failure_key, 0) + 1
+                                    unique_failure_keys: set[str] = set()
+                                    if result.message:
+                                        unique_failure_keys.add(_batch_failure_key(result.message))
                                     for err in result.errors:
                                         _safe_add_row("FAIL", nif.name, err)
-                                        error_key = _batch_failure_key(err)
-                                        failure_groups[error_key] = failure_groups.get(error_key, 0) + 1
+                                        unique_failure_keys.add(_batch_failure_key(err))
+                                    if not unique_failure_keys:
+                                        unique_failure_keys.add(_batch_failure_key("Unpatch failed."))
+                                    for key in unique_failure_keys:
+                                        failure_groups[key] = failure_groups.get(key, 0) + 1
                             except Exception as exc:
                                 fail += 1
                                 fail_text = f"Unpatch failed: {exc}"
