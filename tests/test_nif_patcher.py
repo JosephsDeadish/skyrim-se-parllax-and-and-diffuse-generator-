@@ -566,7 +566,7 @@ class TestScanNif(unittest.TestCase):
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
         self.assertTrue(any("texture_suffix_parallax" in d for d in diagnostics), diagnostics)
 
-    def test_mapping_table_does_not_override_existing_weak_classification(self) -> None:
+    def test_mapping_table_overrides_existing_weak_classification(self) -> None:
         nif = _write_nif(self.tmp, shader_type=0x12340003)
         data = nif.read_bytes()
         header = _read_header(_Buf(data))
@@ -576,8 +576,8 @@ class TestScanNif(unittest.TestCase):
             header,  # type: ignore[arg-type]
             mapping_table={0x12340003: SHADER_TYPE_DEFAULT},
         )
-        self.assertEqual(shader_props[0].shader_type_resolution, "masked_low8")
-        self.assertEqual(shader_props[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+        self.assertEqual(shader_props[0].shader_type_resolution, "mapping_table")
+        self.assertEqual(shader_props[0].shader_type, SHADER_TYPE_DEFAULT)
 
     def test_patch_nif_with_u16_count_texture_set(self) -> None:
         """patch_nif must work correctly on a NIF whose texture set uses a u16 count."""
@@ -984,6 +984,22 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertTrue(result.success, result.errors)
         infos = scan_nif(nif)
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
+        self.assertTrue(infos[0].has_parallax_flag)
+
+    def test_enable_parallax_does_not_retype_sentinel_default_block(self) -> None:
+        nif = _write_nif(self.tmp)
+        raw = bytearray(nif.read_bytes())
+        shader_header = struct.pack("<IIiI", 0, 0, -1, SHADER_TYPE_DEFAULT)
+        shader_start = raw.find(shader_header)
+        self.assertNotEqual(shader_start, -1)
+        struct.pack_into("<I", raw, shader_start + 12, 0xFFFFFFFF)
+        nif.write_bytes(bytes(raw))
+
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].raw_shader_type, 0xFFFFFFFF)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
         self.assertTrue(infos[0].has_parallax_flag)
 
     def test_enable_parallax_preserves_unknown_raw_shader_value(self) -> None:

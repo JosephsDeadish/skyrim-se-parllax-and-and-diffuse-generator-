@@ -2036,13 +2036,11 @@ def _resolve_unknown_shader_types(
     3. Texture-slot suffix inference
     4. Default fallback (``SHADER_TYPE_DEFAULT``) — sets ``"default_fallback"``
 
-    Only blocks still classified as ``UNRESOLVED`` are processed. Any existing
-    ``WEAK_RESOLUTION`` or ``RESOLVED`` classification is treated as immutable.
+    Mapping-table overrides are always applied first for unknown raw values,
+    even when a weak built-in heuristic was already assigned.
     """
     for sp in shader_props:
         if sp.raw_shader_type in _KNOWN_SHADER_TYPES or sp.raw_shader_type == 0xFFFFFFFF:
-            continue
-        if _classify_shader_type_resolution(sp.shader_type_resolution).type != RESOLUTION_UNRESOLVED:
             continue
 
         # 1. User-provided mapping table
@@ -2055,6 +2053,9 @@ def _resolve_unknown_shader_types(
                     resolution="mapping_table",
                 )
                 continue
+
+        if _classify_shader_type_resolution(sp.shader_type_resolution).type != RESOLUTION_UNRESOLVED:
+            continue
 
         # 2. Semantic-flag inference
         shader_type, resolution = _infer_shader_type_from_semantics(sp.flags1, sp.flags2)
@@ -2353,10 +2354,7 @@ def _apply_patches(
                 sp.shader_type_offset is not None
                 and sp.shader_type == SHADER_TYPE_DEFAULT
                 and not (sp.flags1 & SLSF1_PARALLAX)
-                and (
-                    sp.raw_shader_type in (SHADER_TYPE_DEFAULT, 0xFFFFFFFF)
-                    or sp.shader_type_resolution in {"exact", "sentinel_default"}
-                )
+                and sp.raw_shader_type == SHADER_TYPE_DEFAULT
             ):
                 # Align legacy-layout behavior with common patchers: when
                 # enabling parallax on default shaders, set shader type
