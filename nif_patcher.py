@@ -1966,6 +1966,7 @@ def _classify_shader_type_resolution(resolution: str) -> ShaderTypeResolutionRes
         "real_payload_envmap",
         "real_payload_heightmap",
         "real_payload_multilayer",
+        "sentinel_default",
     }:
         return ShaderTypeResolutionResult(RESOLUTION_RESOLVED, 0.92, "payload")
     if resolution in {
