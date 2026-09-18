@@ -66,6 +66,7 @@ try:
 
     def _load_nif_patcher_exports(search_dirs: tuple[Path, ...] | None = None) -> dict[str, object]:
         required_exports = (
+            "NifPluginConflictRef",
             "NifPatchOptions",
             "auto_remediate_nif_conflicts",
             "find_nif_files",
@@ -76,6 +77,7 @@ try:
             "guess_parallax_path_for_nif",
             "patch_nif",
             "scan_nif",
+            "summarize_plugin_aware_validation_conflicts",
             "summarize_validation_conflicts",
             "validate_nif_for_parallax",
         )
@@ -171,6 +173,7 @@ PREVIEW_SIZE_PRESETS: dict[str, tuple[int, int]] = {
     "XL": (620, 460),
 }
 GUI_STATE_FILE = Path.home() / ".skyrim_texture_generator_gui_state.json"
+UI_TRANSLATIONS_DIR = Path(__file__).resolve().parent / "assets" / "translations"
 _GUI_STATE_DEFAULTS: dict[str, object] = {
     "input_path": "",
     "output_path": "",
@@ -218,6 +221,9 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "ao_strength": 1.2,
     "roughness_strength": 1.0,
     "dismissed_warnings": [],
+    "ui_language": "en",
+    "ui_scale": 1.0,
+    "nif_retry_count": 1,
 }
 
 
@@ -474,6 +480,10 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         state["dismissed_warnings"] = [str(w) for w in raw_dismissed if isinstance(w, str)]
     else:
         state["dismissed_warnings"] = []
+    ui_language = str(raw.get("ui_language", state["ui_language"]) or state["ui_language"]).strip().lower()
+    state["ui_language"] = ui_language or "en"
+    state["ui_scale"] = _coerce_float(raw.get("ui_scale"), float(state["ui_scale"]), 0.8, 2.5)
+    state["nif_retry_count"] = _coerce_int(raw.get("nif_retry_count"), int(state["nif_retry_count"]), 0, 3)
     return state
 
 
@@ -496,6 +506,67 @@ def save_gui_state(state: Mapping[str, object], state_file: Path = GUI_STATE_FIL
         state_file.write_text(json.dumps(normalized, indent=2, sort_keys=True), encoding="utf-8")
     except Exception:
         pass
+
+
+def discover_ui_languages(translations_dir: Path = UI_TRANSLATIONS_DIR) -> tuple[str, ...]:
+    if not translations_dir.exists():
+        return ("en",)
+    names = sorted(
+        path.stem
+        for path in translations_dir.glob("*.json")
+        if path.is_file() and path.stem.strip()
+    )
+    if "en" not in names:
+        names.insert(0, "en")
+    return tuple(dict.fromkeys(names))
+
+
+def load_ui_translations(language: str, translations_dir: Path = UI_TRANSLATIONS_DIR) -> dict[str, str]:
+    resolved_language = (language or "en").strip().lower() or "en"
+    catalog_path = translations_dir / f"{resolved_language}.json"
+    if not catalog_path.exists():
+        return {}
+    try:
+        payload = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(payload, Mapping):
+        return {}
+    raw_strings = payload.get("strings", {})
+    if isinstance(raw_strings, Mapping):
+        return {
+            str(source): str(target)
+            for source, target in raw_strings.items()
+            if isinstance(source, str) and isinstance(target, str)
+        }
+    return {}
+
+
+def translate_ui_text(text: str, catalog: Mapping[str, str] | None) -> str:
+    if not text:
+        return text
+    if not catalog:
+        return text
+    return str(catalog.get(text, text))
+
+
+def _enable_process_dpi_awareness() -> None:
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        return
+
+
+def compute_effective_ui_scale(*, pixels_per_inch: float, user_scale: float) -> float:
+    baseline = max(1.0, pixels_per_inch / 96.0)
+    return max(0.8, min(2.5, baseline * user_scale))
 
 
 @dataclass(frozen=True)
@@ -876,6 +947,84 @@ def detect_mod_manager_context(
     if mo2_context.manager is not None:
         return mo2_context
     return _detect_vortex_context(resolved_env, executable_path=resolved_executable)
+
+
+_PLUGIN_MESH_PATH_RE = re.compile(rb"meshes\\[ -~]{1,260}?\.nif", re.IGNORECASE)
+
+
+def extract_mesh_paths_from_plugin_bytes(raw: bytes) -> tuple[str, ...]:
+    matches: list[str] = []
+    for found in _PLUGIN_MESH_PATH_RE.findall(raw):
+        try:
+            text = found.decode("latin-1", errors="ignore").replace("/", "\\").lower()
+        except Exception:
+            continue
+        if text and text not in matches:
+            matches.append(text)
+    return tuple(matches)
+
+
+def discover_plugin_conflict_context_from_manager(
+    nif_paths: list[Path],
+    context: ModManagerContext,
+) -> dict[str, list[object]]:
+    plugin_names = tuple(
+        dict.fromkeys(
+            name.strip()
+            for name in (*context.enabled_plugins, *context.load_order)
+            if isinstance(name, str) and name.strip().lower().endswith((".esp", ".esm", ".esl"))
+        )
+    )
+    if not plugin_names:
+        return {}
+    roots = [
+        context.game_root / "Data" if context.game_root is not None else None,
+        context.instance_root / "mods" if context.instance_root is not None else None,
+        context.staging_root if context.staging_root is not None else None,
+    ]
+    search_roots = [root for root in roots if root is not None and root.exists()]
+    if not search_roots:
+        return {}
+
+    normalized_nif_keys = {str(path).lower() for path in nif_paths}
+    if not normalized_nif_keys:
+        return {}
+    nif_by_relative_tail = {
+        str(path).replace("/", "\\").lower().split("meshes\\", 1)[-1]: str(path).lower()
+        for path in nif_paths
+    }
+    discovered: dict[str, list[object]] = {}
+    for plugin_name in plugin_names:
+        plugin_path: Path | None = None
+        for root in search_roots:
+            direct = root / plugin_name
+            if direct.exists():
+                plugin_path = direct
+                break
+            try:
+                candidate = next(root.rglob(plugin_name))
+            except StopIteration:
+                candidate = None
+            except Exception:
+                candidate = None
+            if candidate is not None and candidate.exists():
+                plugin_path = candidate
+                break
+        if plugin_path is None:
+            continue
+        try:
+            raw = plugin_path.read_bytes()
+        except OSError:
+            continue
+        for mesh_path in extract_mesh_paths_from_plugin_bytes(raw):
+            tail = mesh_path.split("meshes\\", 1)[-1]
+            nif_key = nif_by_relative_tail.get(tail)
+            if nif_key is None:
+                continue
+            if nif_key not in normalized_nif_keys:
+                continue
+            discovered.setdefault(nif_key, []).append(NifPluginConflictRef(plugin_name=plugin_name))
+    return discovered
 
 
 def _histogram_percentile(histogram: list[int], percentile: float) -> float:
@@ -6835,6 +6984,7 @@ _DARK_THEME: dict[str, str] = {
 if GUI_AVAILABLE:
     class TextureGeneratorGUI:
         def __init__(self) -> None:
+            _enable_process_dpi_awareness()
             self.root = tk.Tk()
             self.root.title(f"Skyrim Texture Generator v{APP_VERSION}")
             self.root.geometry("960x700")
@@ -6859,6 +7009,11 @@ if GUI_AVAILABLE:
             self.show_batch_preview_var = tk.BooleanVar(value=False)
             self.auto_patch_nifs_var = tk.BooleanVar(value=False)
             self.dark_mode_var = tk.BooleanVar(value=False)
+            self.ui_language_var = tk.StringVar(value="en")
+            self.ui_scale_var = tk.DoubleVar(value=1.0)
+            self.nif_retry_count_var = tk.IntVar(value=1)
+            self._ui_translations: dict[str, str] = {}
+            self._available_ui_languages: tuple[str, ...] = discover_ui_languages()
             self._tooltip_bg = _LIGHT_THEME["tooltip_bg"]
             self._tooltip_fg = _LIGHT_THEME["tooltip_fg"]
             self.dismissed_warnings: set[str] = set()
@@ -6926,6 +7081,8 @@ if GUI_AVAILABLE:
                 value=self.manager_context.summary if self.manager_context.manager is not None else "Select a DDS file to begin."
             )
             self._apply_persisted_gui_state()
+            self._reload_ui_translations()
+            self._apply_ui_scaling()
             self._update_theme_toggle_text()
             self._update_slider_value_labels()
 
@@ -6987,7 +7144,33 @@ if GUI_AVAILABLE:
                 command=self._toggle_theme,
             )
             _theme_top_check.pack(side=tk.RIGHT, padx=(0, 8))
+            _language_label = ttk.Label(top_bar, text="Language")
+            _language_label.pack(side=tk.RIGHT, padx=(12, 4))
+            self.language_combo = ttk.Combobox(
+                top_bar,
+                textvariable=self.ui_language_var,
+                values=self._available_ui_languages,
+                state="readonly",
+                width=8,
+            )
+            self.language_combo.pack(side=tk.RIGHT, padx=(0, 6))
+            self.language_combo.bind("<<ComboboxSelected>>", self._on_ui_language_changed)
+            _ui_scale_label = ttk.Label(top_bar, text="UI scale")
+            _ui_scale_label.pack(side=tk.RIGHT, padx=(12, 4))
+            self.ui_scale_combo = ttk.Combobox(
+                top_bar,
+                values=("0.9", "1.0", "1.15", "1.3", "1.5"),
+                state="readonly",
+                width=6,
+            )
+            self.ui_scale_combo.set(f"{self.ui_scale_var.get():.2f}".rstrip("0").rstrip("."))
+            self.ui_scale_combo.pack(side=tk.RIGHT, padx=(0, 8))
+            self.ui_scale_combo.bind("<<ComboboxSelected>>", self._on_ui_scale_changed)
             self._add_tooltip(_theme_top_check, "🌙 Toggle dark/light mode.\nEasy on the eyes during those 3am modding sessions.")
+            self._add_tooltip(_language_label, "Choose the interface language from available translation files.")
+            self._add_tooltip(self.language_combo, "Switch language for labels, buttons, and tooltips.")
+            self._add_tooltip(_ui_scale_label, "Manual UI scale multiplier for high-DPI displays.")
+            self._add_tooltip(self.ui_scale_combo, "Increase this on 4K/high-DPI displays if controls look too small.")
             self._add_tooltip(
                 _patreon_button,
                 "❤ Fuel the project on Patreon.\n"
@@ -7613,6 +7796,7 @@ if GUI_AVAILABLE:
             self._apply_theme()
             self._on_render_profile_changed()
             self._restore_startup_selection()
+            self._apply_runtime_localization()
 
         def _set_app_icon(self) -> None:
             try:
@@ -7621,6 +7805,70 @@ if GUI_AVAILABLE:
                 self.root.iconphoto(True, self._panda_icon_photo)
             except Exception:
                 pass
+
+        def _reload_ui_translations(self) -> None:
+            resolved_language = (self.ui_language_var.get() or "en").strip().lower() or "en"
+            if resolved_language not in self._available_ui_languages:
+                resolved_language = "en"
+                self.ui_language_var.set(resolved_language)
+            self._ui_translations = load_ui_translations(resolved_language)
+
+        def _tr(self, text: str) -> str:
+            return translate_ui_text(text, self._ui_translations)
+
+        def _apply_ui_scaling(self) -> None:
+            try:
+                pixels_per_inch = float(self.root.winfo_fpixels("1i"))
+            except Exception:
+                pixels_per_inch = 96.0
+            scale = compute_effective_ui_scale(
+                pixels_per_inch=pixels_per_inch,
+                user_scale=float(self.ui_scale_var.get()),
+            )
+            try:
+                self.root.tk.call("tk", "scaling", scale)
+            except Exception:
+                return
+
+        def _apply_runtime_localization(self) -> None:
+            self.root.title(self._tr("Skyrim Texture Generator v{version}").format(version=APP_VERSION))
+            self._localize_widget_tree(self.root)
+            self._update_theme_toggle_text()
+
+        def _localize_widget_tree(self, widget: tk.Widget) -> None:
+            try:
+                text = widget.cget("text")
+                if isinstance(text, str) and text:
+                    localized = self._tr(text)
+                    if localized != text:
+                        widget.configure(text=localized)
+            except Exception:
+                pass
+            for child in widget.winfo_children():
+                self._localize_widget_tree(child)
+
+        def _on_ui_language_changed(self, _event: object | None = None) -> None:
+            self._reload_ui_translations()
+            self._apply_runtime_localization()
+            self._save_persisted_gui_state()
+            self.status_var.set(
+                self._tr("Interface language set to {language}.").format(
+                    language=self.ui_language_var.get()
+                )
+            )
+
+        def _on_ui_scale_changed(self, _event: object | None = None) -> None:
+            value = str(self.ui_scale_combo.get()).strip()
+            try:
+                self.ui_scale_var.set(float(value))
+            except ValueError:
+                self.ui_scale_var.set(float(_GUI_STATE_DEFAULTS["ui_scale"]))
+                self.ui_scale_combo.set(f"{self.ui_scale_var.get():.2f}".rstrip("0").rstrip("."))
+            self._apply_ui_scaling()
+            self._save_persisted_gui_state()
+            self.status_var.set(
+                self._tr("UI scale set to {scale:.2f}x.").format(scale=float(self.ui_scale_var.get()))
+            )
 
         def _bind_mousewheel(self, canvas: tk.Canvas) -> None:
             def _on_mousewheel(event: tk.Event[tk.Misc]) -> None:
@@ -7654,6 +7902,7 @@ if GUI_AVAILABLE:
             self.root.after_idle(_update_wrap)
 
         def _add_tooltip(self, widget: tk.Widget, text: str) -> None:
+            localized_text = self._tr(text)
             tip_window: list[tk.Toplevel | None] = [None]
 
             def _position_tip(tip: tk.Toplevel, pointer_x: int, pointer_y: int) -> None:
@@ -7680,7 +7929,7 @@ if GUI_AVAILABLE:
                             pass
                         label = tk.Label(
                             tip,
-                            text=text,
+                            text=localized_text,
                             justify=tk.LEFT,
                             background=self._tooltip_bg,
                             foreground=self._tooltip_fg,
@@ -7743,10 +7992,12 @@ if GUI_AVAILABLE:
         def _toggle_theme(self) -> None:
             self._apply_theme()
             theme_name = "dark" if self.dark_mode_var.get() else "light"
-            self.status_var.set(f"Switched to {theme_name} mode.")
+            self.status_var.set(self._tr("Switched to {theme_name} mode.").format(theme_name=theme_name))
 
         def _update_theme_toggle_text(self) -> None:
-            self.theme_mode_label_var.set("🌙 Dark mode" if self.dark_mode_var.get() else "☀ Light mode")
+            self.theme_mode_label_var.set(
+                self._tr("🌙 Dark mode") if self.dark_mode_var.get() else self._tr("☀ Light mode")
+            )
 
         def _apply_persisted_gui_state(self) -> None:
             state = load_gui_state()
@@ -7756,6 +8007,9 @@ if GUI_AVAILABLE:
             self.dark_mode_var.set(bool(state["dark_mode"]))
             self.show_batch_preview_var.set(bool(state["show_batch_preview"]))
             self.auto_patch_nifs_var.set(bool(state["auto_patch_nifs"]))
+            self.ui_language_var.set(str(state.get("ui_language", "en") or "en"))
+            self.ui_scale_var.set(float(state.get("ui_scale", 1.0)))
+            self.nif_retry_count_var.set(int(state.get("nif_retry_count", 1)))
             self.preview_size_var.set(str(state["preview_size"]))
             self.complex_format_var.set(str(state["complex_format"]))
             self.env_mask_mode_var.set(str(state["env_mask_mode"]))
@@ -7808,6 +8062,9 @@ if GUI_AVAILABLE:
                 "dark_mode": self.dark_mode_var.get(),
                 "show_batch_preview": self.show_batch_preview_var.get(),
                 "auto_patch_nifs": self.auto_patch_nifs_var.get(),
+                "ui_language": self.ui_language_var.get(),
+                "ui_scale": self.ui_scale_var.get(),
+                "nif_retry_count": self.nif_retry_count_var.get(),
                 "preview_size": self.preview_size_var.get(),
                 "complex_format": self.complex_format_var.get(),
                 "env_mask_mode": self.env_mask_mode_var.get(),
@@ -9278,7 +9535,7 @@ if GUI_AVAILABLE:
                 return
 
             win = tk.Toplevel(self.root)
-            win.title(f"NIF Editor — Skyrim Texture Generator v{APP_VERSION}")
+            win.title(self._tr("NIF Editor — Skyrim Texture Generator v{version}").format(version=APP_VERSION))
             win.geometry("1120x820")
             win.minsize(760, 620)
             win.resizable(True, True)
@@ -9402,6 +9659,7 @@ if GUI_AVAILABLE:
                 experimental_fallout_write_var = tk.BooleanVar(value=False)
                 conflict_report_var = tk.BooleanVar(value=True)
                 conflict_examples_var = tk.BooleanVar(value=False)
+                retry_count_var = tk.IntVar(value=max(0, min(3, int(self.nif_retry_count_var.get()))))
                 option_warning_var = tk.StringVar(value="")
 
                 render_row = ttk.Frame(opt_frame)
@@ -9498,6 +9756,17 @@ if GUI_AVAILABLE:
                     variable=conflict_examples_var,
                 )
                 conflict_examples_check.pack(side="left", padx=(12, 0))
+                misc_row2 = ttk.Frame(opt_frame)
+                misc_row2.pack(fill="x", pady=(2, 0))
+                ttk.Label(misc_row2, text="Retries per file:").pack(side="left")
+                retry_count_combo = ttk.Combobox(
+                    misc_row2,
+                    textvariable=retry_count_var,
+                    values=(0, 1, 2, 3),
+                    width=4,
+                    state="readonly",
+                )
+                retry_count_combo.pack(side="left", padx=(6, 10))
                 guide_label = ttk.Label(
                     opt_frame,
                     text=(
@@ -9717,6 +9986,7 @@ if GUI_AVAILABLE:
                     conflict_examples_check,
                     "When enabled, include example conflict lines under each grouped conflict code.",
                 )
+                self._add_tooltip(retry_count_combo, "Retries transient per-file failures during scan/patch operations.")
                 self._add_tooltip(target_game_label, "Set game-header profile handling for NIF patching.")
                 self._add_tooltip(target_game_combo, "auto detects profile from the NIF header; use fallout for Fallout-target patching.")
                 self._add_tooltip(
@@ -10107,6 +10377,7 @@ if GUI_AVAILABLE:
                 full_row_details: dict[str, str] = {}
                 all_result_rows: list[dict[str, str]] = []
                 latest_validation_codes: dict[str, list[str]] = {}
+                latest_conflict_files: set[str] = set()
 
                 def _status_sort_rank(status_value: str) -> int:
                     ranks = {"FAIL": 0, "WARN": 1, "SKIP": 2, "OK": 3}
@@ -10200,6 +10471,7 @@ if GUI_AVAILABLE:
                     full_row_details.clear()
                     all_result_rows.clear()
                     latest_validation_codes.clear()
+                    latest_conflict_files.clear()
                     status_var.set("Results cleared.")
                     progress_var.set(0.0)
 
@@ -10289,6 +10561,7 @@ if GUI_AVAILABLE:
                 # responsive.  All tkinter mutations are posted back via win.after(0, ...)
                 # rather than called directly from the worker thread.
                 _is_running = [False]
+                _cancel_requested = [False]
                 _action_buttons_ref: list[Any] = []  # populated after button creation
 
                 def _set_ops_active(active: bool) -> None:
@@ -10298,10 +10571,22 @@ if GUI_AVAILABLE:
                             _btn.configure(state=state)
                         except Exception:
                             pass
+                    try:
+                        cancel_ops_button.configure(state=(tk.DISABLED if active else tk.NORMAL))
+                    except Exception:
+                        pass
 
                 def _finish_op() -> None:
                     _is_running[0] = False
+                    _cancel_requested[0] = False
                     _set_ops_active(True)
+
+                def _request_cancel_nif_editor_ops() -> None:
+                    if not _is_running[0]:
+                        status_var.set("No NIF Editor operation is currently running.")
+                        return
+                    _cancel_requested[0] = True
+                    status_var.set("Cancellation requested. Current file will finish, then operation stops.")
 
                 def _queue_ui_update(callback: Callable[[], None]) -> None:
                     try:
@@ -10333,33 +10618,69 @@ if GUI_AVAILABLE:
                         return [root_path]
                     return []
 
-                def _scan_nifs() -> None:
-                    nifs = _resolve_nifs()
-                    _clear_log()
+                def _resolve_conflict_nifs() -> list[Path]:
+                    resolved: list[Path] = []
+                    for raw_path in sorted(latest_conflict_files):
+                        path = Path(raw_path)
+                        if path.exists() and path.suffix.lower() == ".nif":
+                            resolved.append(path)
+                    return resolved
+
+                def _scan_nifs(
+                    selected_nifs: list[Path] | None = None,
+                    *,
+                    preserve_log: bool = False,
+                ) -> None:
+                    nifs = selected_nifs or _resolve_nifs()
+                    if not preserve_log:
+                        _clear_log()
                     if not nifs:
                         _add_result_row("WARN", "—", "No NIF files found.")
                         return
                     if _is_running[0]:
                         status_var.set("Another operation is in progress. Please wait.")
                         return
+                    self.nif_retry_count_var.set(int(retry_count_var.get()))
+                    self._save_persisted_gui_state()
                     _is_running[0] = True
+                    _cancel_requested[0] = False
                     _set_ops_active(False)
-                    status_var.set(f"Scanning {len(nifs)} NIF file(s)…")
+                    status_var.set(f"Phase 1/4 (scan): scanning {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
 
                     def _worker() -> None:
                         validations_for_summary: list[object] = []
                         latest_validation_codes.clear()
+                        latest_conflict_files.clear()
+                        plugin_context = discover_plugin_conflict_context_from_manager(nifs, self.manager_context)
+                        retries_per_file = max(0, min(3, int(retry_count_var.get())))
                         for index, nif in enumerate(nifs, start=1):
+                            if _cancel_requested[0]:
+                                break
                             try:
-                                validation = validate_nif_for_parallax(nif)
+                                validation = None
+                                last_exc: Exception | None = None
+                                for attempt in range(retries_per_file + 1):
+                                    try:
+                                        validation = validate_nif_for_parallax(nif)
+                                        if attempt > 0:
+                                            _safe_add_row("WARN", nif.name, f"Scan succeeded after retry {attempt}/{retries_per_file}.")
+                                        break
+                                    except Exception as exc:
+                                        last_exc = exc
+                                        if attempt < retries_per_file:
+                                            continue
+                                if validation is None:
+                                    raise last_exc or RuntimeError("Scan failed")
                                 validations_for_summary.append(validation)
                                 latest_validation_codes[str(nif)] = [
                                     getattr(group, "code", "")
                                     for group in (getattr(validation, "conflict_report", None) or [])
                                     if getattr(group, "code", "")
                                 ]
+                                if latest_validation_codes[str(nif)]:
+                                    latest_conflict_files.add(str(nif))
                                 combined_detail_lines: list[str] = []
                                 if validation.detected_game_profile:
                                     combined_detail_lines.append(f"Detected profile: {validation.detected_game_profile}")
@@ -10426,9 +10747,15 @@ if GUI_AVAILABLE:
                                     issue_text = "\n".join(combined_detail_lines) if combined_detail_lines else "Needs patching."
                                     row_args = ("WARN", nif.name, f"{validation.ready_count}/{validation.shader_count} ready{skip_info}.\n{issue_text}")
                             except Exception as exc:
+                                latest_conflict_files.add(str(nif))
                                 row_args = ("FAIL", nif.name, f"Scan failed: {exc}")
                             _safe_add_row(*row_args)
                             _safe_progress(float(index))
+                            if index % 25 == 0 or index == len(nifs):
+                                _safe_status(
+                                    f"Phase 1/4 (scan): {index}/{len(nifs)} file(s) processed; "
+                                    f"{len(latest_conflict_files)} with conflicts/issues."
+                                )
                         if conflict_report_var.get() and validations_for_summary:
                             grouped_conflicts = summarize_validation_conflicts(validations_for_summary)
                             if grouped_conflicts:
@@ -10444,10 +10771,39 @@ if GUI_AVAILABLE:
                                     "Batch conflict summary",
                                     "Top grouped conflicts across scanned NIFs:\n" + "\n".join(summary_lines),
                                 )
-                        _safe_status(f"Scan complete: {len(nifs)} file(s) reviewed.")
+                            if plugin_context:
+                                plugin_summary = summarize_plugin_aware_validation_conflicts(
+                                    validations_for_summary,
+                                    plugin_context=plugin_context,
+                                )
+                                if plugin_summary:
+                                    plugin_lines = []
+                                    for group in plugin_summary[:6]:
+                                        plugins = ", ".join(tuple(group.example_plugins[:2]))
+                                        plugin_lines.append(
+                                            f"{group.count}× {group.code} in {group.file_count} file(s), "
+                                            f"{group.plugin_count} plugin(s)"
+                                            + (f" [{plugins}]" if plugins else "")
+                                        )
+                                    _safe_add_row(
+                                        "WARN",
+                                        "Plugin conflict summary",
+                                        "Plugin-linked conflict hotspots:\n" + "\n".join(plugin_lines),
+                                    )
+                        if _cancel_requested[0]:
+                            _safe_status("Scan cancelled by user.")
+                        else:
+                            _safe_status(f"Phase 1/4 complete: scanned {len(nifs)} NIF file(s).")
                         win.after(0, _finish_op)
 
                     threading.Thread(target=_worker, daemon=True).start()
+
+                def _rerun_conflict_scan() -> None:
+                    conflict_nifs = _resolve_conflict_nifs()
+                    if not conflict_nifs:
+                        _add_result_row("WARN", "—", "No conflict-affected NIF files are currently tracked.")
+                        return
+                    _scan_nifs(conflict_nifs, preserve_log=False)
 
                 def _run_auto_remediate_conflicts() -> None:
                     nifs = _resolve_nifs()
@@ -10458,16 +10814,22 @@ if GUI_AVAILABLE:
                     if _is_running[0]:
                         status_var.set("Another operation is in progress. Please wait.")
                         return
+                    self.nif_retry_count_var.set(int(retry_count_var.get()))
+                    self._save_persisted_gui_state()
                     _is_running[0] = True
+                    _cancel_requested[0] = False
                     _set_ops_active(False)
-                    status_var.set(f"Auto-remediation started for {len(nifs)} NIF file(s)…")
+                    status_var.set(f"Phase 2/4 (auto-remediation): processing {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
 
                     def _auto_fix_worker(nif_list=nifs) -> None:
                         ok = skip = fail = 0
                         failure_groups: dict[str, int] = {}
+                        retries_per_file = max(0, min(3, int(retry_count_var.get())))
                         for index, nif in enumerate(nif_list, start=1):
+                            if _cancel_requested[0]:
+                                break
                             try:
                                 codes = latest_validation_codes.get(str(nif))
                                 if not codes:
@@ -10477,15 +10839,28 @@ if GUI_AVAILABLE:
                                         for group in (getattr(validation, "conflict_report", None) or [])
                                         if getattr(group, "code", "")
                                     ]
-                                result, steps = auto_remediate_nif_conflicts(
-                                    nif,
-                                    codes,
-                                    target_game=target_game_var.get(),
-                                    experimental_fallout_write=experimental_fallout_write_var.get(),
-                                    allow_destructive=False,
-                                    backup=backup_var.get(),
-                                    dry_run=dry_run_var.get(),
-                                )
+                                result = None
+                                steps: tuple[str, ...] = ()
+                                last_exc: Exception | None = None
+                                for attempt in range(retries_per_file + 1):
+                                    try:
+                                        result, steps = auto_remediate_nif_conflicts(
+                                            nif,
+                                            codes,
+                                            target_game=target_game_var.get(),
+                                            experimental_fallout_write=experimental_fallout_write_var.get(),
+                                            allow_destructive=False,
+                                            backup=backup_var.get(),
+                                            dry_run=dry_run_var.get(),
+                                        )
+                                        if attempt > 0:
+                                            _safe_add_row("WARN", nif.name, f"Auto-remediation succeeded after retry {attempt}/{retries_per_file}.")
+                                        break
+                                    except Exception as exc:
+                                        last_exc = exc
+                                        if attempt < retries_per_file:
+                                            continue
+                                        raise last_exc
                                 if result is None:
                                     skip += 1
                                     _safe_add_row("SKIP", nif.name, " | ".join(steps))
@@ -10510,11 +10885,21 @@ if GUI_AVAILABLE:
                                 failure_key = _batch_failure_key(fail_text)
                                 failure_groups[failure_key] = failure_groups.get(failure_key, 0) + 1
                             _safe_progress(float(index))
+                            if index % 25 == 0 or index == len(nif_list):
+                                _safe_status(
+                                    f"Phase 2/4 (auto-remediation): {index}/{len(nif_list)} — "
+                                    f"{ok} patched, {skip} skipped, {fail} failed."
+                                )
                         _emit_failure_summary_row(
                             failure_groups,
                             label=f"Top failure groups across {fail} failed auto-remediation operation(s):",
                         )
-                        _safe_status(f"Auto-remediation complete — {ok} patched, {skip} skipped, {fail} failed.")
+                        if _cancel_requested[0]:
+                            _safe_status(
+                                f"Auto-remediation cancelled — {ok} patched, {skip} skipped, {fail} failed before stop."
+                            )
+                        else:
+                            _safe_status(f"Phase 2/4 complete — {ok} patched, {skip} skipped, {fail} failed.")
                         win.after(0, _finish_op)
 
                     threading.Thread(target=_auto_fix_worker, daemon=True).start()
@@ -10567,6 +10952,8 @@ if GUI_AVAILABLE:
                     if _is_running[0]:
                         status_var.set("Another operation is in progress. Please wait.")
                         return
+                    self.nif_retry_count_var.set(int(retry_count_var.get()))
+                    self._save_persisted_gui_state()
                     recommended_profile = _recommended_nif_editor_profile()
                     resolved_defaults = resolve_nif_patch_defaults_for_render_profile(
                         renderer_profile_var.get(),
@@ -10604,9 +10991,10 @@ if GUI_AVAILABLE:
                         experimental_fallout_write=experimental_fallout_write_var.get(),
                     )
                     _is_running[0] = True
+                    _cancel_requested[0] = False
                     _set_ops_active(False)
                     mode_label = "dry-run patching" if options.dry_run else "patching"
-                    status_var.set(f"Starting {mode_label} for {len(nifs)} NIF file(s)…")
+                    status_var.set(f"Phase 3/4 (patch): starting {mode_label} for {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
 
@@ -10614,15 +11002,32 @@ if GUI_AVAILABLE:
                         ok = skip = fail = 0
                         failure_groups: dict[str, int] = {}
                         status_interval = 25
+                        retries_per_file = max(0, min(3, int(retry_count_var.get())))
                         for index, nif in enumerate(nif_list, start=1):
+                            if _cancel_requested[0]:
+                                break
                             try:
-                                resolved_options, autofill_notes = resolve_nif_editor_patch_options_for_target(
-                                    nif,
-                                    opts,
-                                    prefer_msn_normal=bool(resolved_defaults.get("prefer_msn_normal", False)),
-                                    preferred_env_mask_suffix=preferred_env_mask_suffix,
-                                )
-                                result = patch_nif(nif, resolved_options)
+                                result = None
+                                autofill_notes: tuple[str, ...] = ()
+                                last_exc: Exception | None = None
+                                for attempt in range(retries_per_file + 1):
+                                    try:
+                                        resolved_options, autofill_notes = resolve_nif_editor_patch_options_for_target(
+                                            nif,
+                                            opts,
+                                            prefer_msn_normal=bool(resolved_defaults.get("prefer_msn_normal", False)),
+                                            preferred_env_mask_suffix=preferred_env_mask_suffix,
+                                        )
+                                        result = patch_nif(nif, resolved_options)
+                                        if attempt > 0:
+                                            _safe_add_row("WARN", nif.name, f"Patching succeeded after retry {attempt}/{retries_per_file}.")
+                                        break
+                                    except Exception as exc:
+                                        last_exc = exc
+                                        if attempt < retries_per_file:
+                                            continue
+                                if result is None:
+                                    raise last_exc or RuntimeError("Patch failed")
                                 detail_lines = [*autofill_notes, result.message]
                                 if result.warnings:
                                     detail_lines.extend(f"Warning: {warning}" for warning in result.warnings[:3])
@@ -10635,6 +11040,7 @@ if GUI_AVAILABLE:
                                     _safe_add_row("OK", nif.name, detail_text or "Patched.")
                                 else:
                                     fail += 1
+                                    latest_conflict_files.add(str(nif))
                                     _safe_add_row("FAIL", nif.name, detail_text or "Patch failed.")
                                     unique_failure_keys: set[str] = set()
                                     if detail_text:
@@ -10648,6 +11054,7 @@ if GUI_AVAILABLE:
                                         failure_groups[key] = failure_groups.get(key, 0) + 1
                             except Exception as exc:
                                 fail += 1
+                                latest_conflict_files.add(str(nif))
                                 fail_text = f"Patch failed: {exc}"
                                 _safe_add_row("FAIL", nif.name, fail_text)
                                 failure_key = _batch_failure_key(fail_text)
@@ -10655,14 +11062,17 @@ if GUI_AVAILABLE:
                             _safe_progress(float(index))
                             if index % status_interval == 0 or index == len(nif_list):
                                 _safe_status(
-                                    f"Patching progress {index}/{len(nif_list)} — "
+                                    f"Phase 3/4 (patch) {index}/{len(nif_list)} — "
                                     f"{ok} patched, {skip} skipped, {fail} failed."
                                 )
                         _emit_failure_summary_row(
                             failure_groups,
                             label=f"Top failure groups across {fail} failed patch operation(s):",
                         )
-                        _safe_status(f"Done — {ok} patched, {skip} skipped, {fail} failed.")
+                        if _cancel_requested[0]:
+                            _safe_status(f"Patch cancelled — {ok} patched, {skip} skipped, {fail} failed before stop.")
+                        else:
+                            _safe_status(f"Phase 3/4 complete — {ok} patched, {skip} skipped, {fail} failed.")
                         win.after(0, _finish_op)
 
                     threading.Thread(target=_patch_worker, daemon=True).start()
@@ -10692,6 +11102,8 @@ if GUI_AVAILABLE:
                     if _is_running[0]:
                         status_var.set("Another operation is in progress. Please wait.")
                         return
+                    self.nif_retry_count_var.set(int(retry_count_var.get()))
+                    self._save_persisted_gui_state()
                     options = NifPatchOptions(
                         disable_parallax=disable_parallax_var.get(),
                         disable_pom=disable_pom_var.get(),
@@ -10710,9 +11122,10 @@ if GUI_AVAILABLE:
                         experimental_fallout_write=experimental_fallout_write_var.get(),
                     )
                     _is_running[0] = True
+                    _cancel_requested[0] = False
                     _set_ops_active(False)
                     mode_label = "dry-run unpatching" if options.dry_run else "unpatching"
-                    status_var.set(f"Starting {mode_label} for {len(nifs)} NIF file(s)…")
+                    status_var.set(f"Phase 4/4 (unpatch): starting {mode_label} for {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
 
@@ -10720,9 +11133,25 @@ if GUI_AVAILABLE:
                         ok = skip = fail = 0
                         failure_groups: dict[str, int] = {}
                         status_interval = 25
+                        retries_per_file = max(0, min(3, int(retry_count_var.get())))
                         for index, nif in enumerate(nif_list, start=1):
+                            if _cancel_requested[0]:
+                                break
                             try:
-                                result = patch_nif(nif, opts)
+                                result = None
+                                last_exc: Exception | None = None
+                                for attempt in range(retries_per_file + 1):
+                                    try:
+                                        result = patch_nif(nif, opts)
+                                        if attempt > 0:
+                                            _safe_add_row("WARN", nif.name, f"Unpatch succeeded after retry {attempt}/{retries_per_file}.")
+                                        break
+                                    except Exception as exc:
+                                        last_exc = exc
+                                        if attempt < retries_per_file:
+                                            continue
+                                if result is None:
+                                    raise last_exc or RuntimeError("Unpatch failed")
                                 if result.already_up_to_date:
                                     skip += 1
                                     _safe_add_row("SKIP", nif.name, "Already up-to-date.")
@@ -10731,6 +11160,7 @@ if GUI_AVAILABLE:
                                     _safe_add_row("OK", nif.name, result.message)
                                 else:
                                     fail += 1
+                                    latest_conflict_files.add(str(nif))
                                     _safe_add_row("FAIL", nif.name, result.message)
                                     unique_failure_keys: set[str] = set()
                                     if result.message:
@@ -10744,6 +11174,7 @@ if GUI_AVAILABLE:
                                         failure_groups[key] = failure_groups.get(key, 0) + 1
                             except Exception as exc:
                                 fail += 1
+                                latest_conflict_files.add(str(nif))
                                 fail_text = f"Unpatch failed: {exc}"
                                 _safe_add_row("FAIL", nif.name, fail_text)
                                 failure_key = _batch_failure_key(fail_text)
@@ -10751,14 +11182,19 @@ if GUI_AVAILABLE:
                             _safe_progress(float(index))
                             if index % status_interval == 0 or index == len(nif_list):
                                 _safe_status(
-                                    f"Unpatch progress {index}/{len(nif_list)} — "
+                                    f"Phase 4/4 (unpatch) {index}/{len(nif_list)} — "
                                     f"{ok} unpatched, {skip} skipped, {fail} failed."
                                 )
                         _emit_failure_summary_row(
                             failure_groups,
                             label=f"Top failure groups across {fail} failed unpatch operation(s):",
                         )
-                        _safe_status(f"Done — {ok} unpatched, {skip} skipped, {fail} failed.")
+                        if _cancel_requested[0]:
+                            _safe_status(
+                                f"Unpatch cancelled — {ok} unpatched, {skip} skipped, {fail} failed before stop."
+                            )
+                        else:
+                            _safe_status(f"Phase 4/4 complete — {ok} unpatched, {skip} skipped, {fail} failed.")
                         win.after(0, _finish_op)
 
                     threading.Thread(target=_unpatch_worker, daemon=True).start()
@@ -10782,14 +11218,17 @@ if GUI_AVAILABLE:
                         status_var.set("Another operation is in progress. Please wait.")
                         return
                     _is_running[0] = True
+                    _cancel_requested[0] = False
                     _set_ops_active(False)
-                    status_var.set(f"Restoring backups for {len(nifs)} NIF file(s)…")
+                    status_var.set(f"Restore phase: restoring backups for {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
 
                     def _restore_worker(nif_list=nifs) -> None:
                         ok = skip = fail = 0
                         for index, (row_status, file_name, details) in enumerate(restore_nif_backups(nif_list), start=1):
+                            if _cancel_requested[0]:
+                                break
                             _safe_add_row(row_status, file_name, details)
                             if row_status == "OK":
                                 ok += 1
@@ -10798,13 +11237,22 @@ if GUI_AVAILABLE:
                             else:
                                 fail += 1
                             _safe_progress(float(index))
-                        _safe_status(f"Restore complete — {ok} restored, {skip} skipped, {fail} failed.")
+                        if _cancel_requested[0]:
+                            _safe_status(f"Restore cancelled — {ok} restored, {skip} skipped, {fail} failed before stop.")
+                        else:
+                            _safe_status(f"Restore complete — {ok} restored, {skip} skipped, {fail} failed.")
                         win.after(0, _finish_op)
 
                     threading.Thread(target=_restore_worker, daemon=True).start()
 
                 scan_button = ttk.Button(btn_frame, text="Scan NIFs", command=_scan_nifs)
                 scan_button.pack(side="left", padx=(0, 6))
+                rerun_conflicts_button = ttk.Button(
+                    btn_frame,
+                    text="Re-scan conflicts only",
+                    command=_rerun_conflict_scan,
+                )
+                rerun_conflicts_button.pack(side="left", padx=(0, 6))
                 patch_button = ttk.Button(btn_frame, text="Apply patch", command=_run_patch)
                 patch_button.pack(side="left", padx=(0, 6))
                 auto_fix_button = ttk.Button(
@@ -10825,11 +11273,14 @@ if GUI_AVAILABLE:
                 copy_selected_button.pack(side="left", padx=(6, 0))
                 copy_all_button = ttk.Button(btn_frame, text="Copy all", command=_copy_all_results)
                 copy_all_button.pack(side="left", padx=(6, 0))
+                cancel_ops_button = ttk.Button(btn_frame, text="Cancel operation", command=_request_cancel_nif_editor_ops, state=tk.DISABLED)
+                cancel_ops_button.pack(side="left", padx=(6, 0))
                 close_button = ttk.Button(btn_frame, text="Close", command=win.destroy)
                 close_button.pack(side="right")
                 # Register action buttons so _set_ops_active can disable them during ops
-                _action_buttons_ref.extend([scan_button, patch_button, auto_fix_button, unpatch_button, restore_button])
+                _action_buttons_ref.extend([scan_button, rerun_conflicts_button, patch_button, auto_fix_button, unpatch_button, restore_button])
                 self._add_tooltip(scan_button, "Read-only analysis pass. No file changes are written.")
+                self._add_tooltip(rerun_conflicts_button, "Incremental rerun: scan only files that previously reported conflicts or failures.")
                 self._add_tooltip(patch_button, "Apply selected NIF patch options and write changes to disk.")
                 self._add_tooltip(auto_fix_button, "Run safe best-effort auto-remediation using detected conflict codes.")
                 self._add_tooltip(unpatch_button, "Remove selected flags/slots to undo or simplify prior NIF patching.")
@@ -10838,6 +11289,7 @@ if GUI_AVAILABLE:
                 self._add_tooltip(export_report_button, "Export the currently filtered result rows to a text report.")
                 self._add_tooltip(copy_selected_button, "Copy only the selected result row.")
                 self._add_tooltip(copy_all_button, "Copy all result rows for logs or bug reports.")
+                self._add_tooltip(cancel_ops_button, "Request cancellation for the running scan/patch operation after the current file.")
                 self._add_tooltip(close_button, "Close the NIF Editor window.")
 
                 _NIF_EDITOR_LAYOUT_RETRY_MAX = 6

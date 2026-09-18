@@ -16,9 +16,14 @@ from generate_textures import (
     _map_parallax_strength_to_nif_scale,
     _compute_tooltip_position,
     _candidate_nif_patcher_search_dirs,
+    compute_effective_ui_scale,
     _compute_nif_editor_controls_pane_height,
     _compute_nif_editor_result_details_height,
     _format_nif_result_row_details,
+    discover_plugin_conflict_context_from_manager,
+    discover_ui_languages,
+    extract_mesh_paths_from_plugin_bytes,
+    load_ui_translations,
     _normalize_nif_editor_texture_input_path,
     _load_nif_patcher_exports,
     _normalize_nif_result_details,
@@ -90,6 +95,7 @@ from generate_textures import (
     save_gui_state,
     should_apply_preview_recommendations,
     select_generation_context_source,
+    translate_ui_text,
     get_output_folder_format_warnings,
     generate_ambient_occlusion,
     generate_roughness,
@@ -129,7 +135,13 @@ class TestNifPatcherLoading(unittest.TestCase):
             module_path.write_text(
                 "\n".join(
                     [
+                        "class NifPluginConflictRef:",
+                        "    def __init__(self, plugin_name, record_id='', record_type=''):",
+                        "        self.plugin_name = plugin_name",
+                        "        self.record_id = record_id",
+                        "        self.record_type = record_type",
                         "class NifPatchOptions: pass",
+                        "def auto_remediate_nif_conflicts(*args, **kwargs): return (None, ())",
                         "def find_nif_files(*args, **kwargs): return []",
                         "def guess_cubemap_path_for_nif(*args, **kwargs): return None",
                         "def guess_env_mask_path_for_nif(*args, **kwargs): return None",
@@ -138,6 +150,8 @@ class TestNifPatcherLoading(unittest.TestCase):
                         "def guess_parallax_path_for_nif(*args, **kwargs): return None",
                         "def patch_nif(*args, **kwargs): return None",
                         "def scan_nif(*args, **kwargs): return None",
+                        "def summarize_plugin_aware_validation_conflicts(*args, **kwargs): return []",
+                        "def summarize_validation_conflicts(*args, **kwargs): return []",
                         "def validate_nif_for_parallax(*args, **kwargs): return None",
                     ]
                 ),
@@ -446,6 +460,66 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertAlmostEqual(float(normalized["environment_mask_strength"]), 8.0)
         self.assertAlmostEqual(float(normalized["complex_strength"]), 0.1)
         self.assertAlmostEqual(float(normalized["specular_strength"]), 0.1)
+
+    def test_discover_ui_languages_includes_default_and_detects_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            translations_dir = Path(temp_dir)
+            (translations_dir / "de.json").write_text(
+                json.dumps({"meta": {"display_name": "Deutsch"}}), encoding="utf-8"
+            )
+            languages = discover_ui_languages(translations_dir)
+        self.assertIn("en", languages)
+        self.assertIn("de", languages)
+
+    def test_load_ui_translations_reads_string_map(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            translations_dir = Path(temp_dir)
+            (translations_dir / "en.json").write_text(
+                json.dumps({"strings": {"Hello": "Hi"}}), encoding="utf-8"
+            )
+            translations = load_ui_translations("en", translations_dir)
+        self.assertEqual(translations.get("Hello"), "Hi")
+
+    def test_translate_ui_text_formats_tokens(self) -> None:
+        self.assertEqual(
+            translate_ui_text("Ready {value}", {"Ready {value}": "Done {value}"}),
+            "Done {value}",
+        )
+
+    def test_compute_effective_ui_scale_clamps_range(self) -> None:
+        self.assertAlmostEqual(compute_effective_ui_scale(pixels_per_inch=40, user_scale=0.1), 0.8)
+        self.assertAlmostEqual(compute_effective_ui_scale(pixels_per_inch=800, user_scale=5), 2.5)
+        self.assertAlmostEqual(compute_effective_ui_scale(pixels_per_inch=96, user_scale=1.25), 1.25)
+
+    def test_extract_mesh_paths_from_plugin_bytes_parses_common_extensions(self) -> None:
+        blob = (
+            b"meshes\\architecture\\stone.nif\x00"
+            b"meshes/architecture/stone.nif\x00"
+            b"meshes\\armor\\iron.kf\x00"
+        )
+        paths = extract_mesh_paths_from_plugin_bytes(blob)
+        self.assertEqual(paths, ("meshes\\architecture\\stone.nif", "meshes\\armor\\iron.kf"))
+
+    def test_discover_plugin_conflict_context_from_manager_collects_mesh_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game_root = Path(temp_dir) / "Skyrim"
+            plugin_path = game_root / "Data" / "Example.esp"
+            plugin_path.parent.mkdir(parents=True)
+            plugin_path.write_bytes(b"meshes\\architecture\\stone.nif\x00")
+            context = ModManagerContext(
+                manager="Vortex",
+                game_root=game_root,
+                enabled_plugins=("Example.esp",),
+            )
+            discovered = discover_plugin_conflict_context_from_manager(
+                [Path("meshes/architecture/stone.nif")],
+                context,
+            )
+        self.assertIn("meshes/architecture/stone.nif", discovered)
+        self.assertEqual(
+            discovered["meshes/architecture/stone.nif"][0].plugin_name,
+            "Example.esp",
+        )
 
     def test_normalize_gui_state_accepts_truepbr_alias(self) -> None:
         normalized = _normalize_gui_state({"render_profile": "true pbr"})
