@@ -1967,6 +1967,8 @@ def _classify_shader_type_resolution(resolution: str) -> ShaderTypeResolutionRes
         "real_payload_heightmap",
         "real_payload_multilayer",
         "sentinel_default",
+        "masked_low8",
+        "masked_low16",
     }:
         return ShaderTypeResolutionResult(RESOLUTION_RESOLVED, 0.92, "payload")
     if resolution in {
@@ -1974,8 +1976,6 @@ def _classify_shader_type_resolution(resolution: str) -> ShaderTypeResolutionRes
         "texture_suffix_parallax",
         "texture_suffix_envmask",
         "texture_suffix_normal",
-        "masked_low8",
-        "masked_low16",
         "texture_slot_cubemap",
     }:
         return ShaderTypeResolutionResult(RESOLUTION_WEAK, 0.65, "heuristic")
@@ -2362,6 +2362,7 @@ def _apply_patches(
                 # This does not insert type-3 payload fields; that remains
                 # controlled by force_shader_type_3.
                 buf.write_u32_at(sp.shader_type_offset, SHADER_TYPE_HEIGHTMAP)
+                sp.shader_type = SHADER_TYPE_HEIGHTMAP
                 shader_type_changed = True
             new_flags1 |= SLSF1_PARALLAX
             new_flags2 &= ~SLSF2_MULTI_LAYER_PARALLAX

@@ -10456,25 +10456,32 @@ if GUI_AVAILABLE:
                 self._add_tooltip(copy_all_button, "📦 Copies every row in one go for logs/changelists.")
                 self._add_tooltip(close_button, "🚪 Closes this window. Your NIFs will not feel abandoned.")
 
+                _NIF_EDITOR_LAYOUT_RETRY_MAX = 6
+                _NIF_EDITOR_LAYOUT_RETRY_DELAY_MS = 80
+                _NIF_EDITOR_MIN_CONTROLS_PANE_HEIGHT = 340
+                _NIF_EDITOR_MIN_RESULTS_PANE_HEIGHT = 180
+
                 def _apply_nif_editor_initial_pane_layout(attempt: int = 0) -> None:
                     try:
                         if not win.winfo_exists():
                             return
                         win.update_idletasks()
                         pane_height = content_pane.winfo_height()
-                        if pane_height <= 1 and attempt < 6:
-                            win.after(80, lambda: _apply_nif_editor_initial_pane_layout(attempt + 1))
+                        if pane_height <= 1 and attempt < _NIF_EDITOR_LAYOUT_RETRY_MAX:
+                            win.after(
+                                _NIF_EDITOR_LAYOUT_RETRY_DELAY_MS,
+                                lambda: _apply_nif_editor_initial_pane_layout(attempt + 1),
+                            )
                             return
                         controls_height = _compute_nif_editor_controls_pane_height(
                             window_height=max(content_pane.winfo_height(), win.winfo_height()),
                             controls_requested_height=controls_wrapper.winfo_reqheight() + 24,
                             footer_height=footer_frame.winfo_reqheight(),
                         )
-                        minimum_lower_pane_height = 180
                         pane_upper = max(1, pane_height - 1)
-                        if pane_height > minimum_lower_pane_height + 1:
-                            max_sash = min(pane_upper, pane_height - minimum_lower_pane_height)
-                            min_sash = min(340, max_sash)
+                        if pane_height > _NIF_EDITOR_MIN_RESULTS_PANE_HEIGHT + 1:
+                            max_sash = min(pane_upper, pane_height - _NIF_EDITOR_MIN_RESULTS_PANE_HEIGHT)
+                            min_sash = min(_NIF_EDITOR_MIN_CONTROLS_PANE_HEIGHT, max_sash)
                         else:
                             max_sash = max(1, pane_height // 2)
                             min_sash = max_sash
