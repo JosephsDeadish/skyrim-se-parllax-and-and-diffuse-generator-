@@ -428,6 +428,17 @@ class TestScanNif(unittest.TestCase):
         validation = validate_nif_for_parallax(nif)
         self.assertEqual(validation.detected_game_profile, "fallout")
 
+    def test_validate_treats_user11_133_as_fallout_profile(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=133)
+        _rewrite_user_version(nif, 11)
+        validation = validate_nif_for_parallax(nif)
+        self.assertEqual(validation.detected_game_profile, "fallout")
+
+    def test_validate_treats_user12_133_as_fallout_profile(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=133)
+        validation = validate_nif_for_parallax(nif)
+        self.assertEqual(validation.detected_game_profile, "fallout")
+
     def test_scan_accepts_crlf_header_line(self) -> None:
         nif = _write_nif(self.tmp, header_line_ending=b"\r\n")
         infos = scan_nif(nif)
@@ -2616,6 +2627,7 @@ class TestCompatibilityReport(unittest.TestCase):
     def test_compatibility_report_mentions_fallout_safety_gate_flags(self) -> None:
         report = build_compatibility_report_text()
         self.assertIn("NIF patch compatibility report", report)
+        self.assertIn("Fallout signature range", report)
         self.assertIn("--fallout-allow-parallax-scale", report)
         self.assertIn("--fallout-allow-env-map-scale", report)
 

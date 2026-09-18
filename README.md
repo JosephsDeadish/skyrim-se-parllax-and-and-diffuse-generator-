@@ -83,11 +83,11 @@ Optional arguments:
 
 - positional input may also be a folder; folder mode scans subfolders, processes only original `.dds` source textures, and skips generated `_n`, `_p`, `_g`/legacy glow aliases, `_m`, packed `_rmaos`/`_orm` variants, `_s`, `_sk`, `_msn`, `_cm`, `_wt`, `_sm`, and common non-Skyrim authoring-suffix aliases such as `_ao`, `_roughness`, and `_metalness`
 
-- `--diffuse-name` (default: `<input_stem>`, e.g. `stonewall.dds`)
+- `--diffuse-name` (default: game-aware: Skyrim/Fallout 3/NV -> `<input_stem>`, Fallout 4/76 -> `<input_stem>_d`)
 - `--normal-name` (default: `<input_stem>_n`, e.g. `stonewall_n.dds`)
 - `--parallax-name` (default: `<input_stem>_p`, e.g. `stonewall_p.dds`)
 - `--glow-name` (default: `<input_stem>_g`, e.g. `stonewall_g.dds`)
-- `--environment-mask-name` (default: `<input_stem>_m`)
+- `--environment-mask-name` (default: game-aware: Skyrim/Fallout 3/NV -> `<input_stem>_m`, Fallout 4/76 -> `<input_stem>_s`)
 - `--rmaos-name` / `--ramos-name` (default: `<input_stem>_rmaos`)
 - `--complex-name` (default from format: `<input_stem>_msn` or `<input_stem>_cm`)
   - use `<input_stem>_c` here when a shader pack expects `_c.dds` naming
@@ -119,6 +119,8 @@ Optional arguments:
 - `--pbr-material` (shortcut for the app's Community Shaders Extended Materials packed output: enables complex material, forces `--complex-format cm`, and keeps compatible standard env/parallax modes; not an ENB workflow)
 - `--render-profile` (`auto`, `custom`, `vanilla`, `performance`, `vr`, `terrain`, `architecture`, `characters`, `community_shaders`, `truepbr`, `enb`)
   - locked profiles (and `auto` in single-file mode) now auto-correct conflicting `--complex-format`, `--environment-mask-mode`, and `--parallax-mode` values, then print the applied guardrail changes to stderr
+- `--target-game` (`skyrim`, `fallout3`, `falloutnv`, `fallout4`, `fallout76`; default: `skyrim`)
+  - controls generated filename conventions (for example, Fallout 4/76 diffuse defaults to `_d.dds` and env-mask defaults to `_s.dds`)
 - `--batch-workers` (parallel workers for folder mode; `0` = automatic)
 - `--gui` (force GUI mode)
 

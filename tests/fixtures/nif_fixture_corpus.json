@@ -107,11 +107,25 @@
       "flags1": 32
     },
     {
+      "id": "fallout_real_11_133",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 133
+    },
+    {
       "id": "fallout_real_12_131",
       "profile": "fallout",
       "shader_layout": "real",
       "user_version": 12,
       "user_ver2": 131
+    },
+    {
+      "id": "fallout_legacy_12_133",
+      "profile": "fallout",
+      "shader_layout": "legacy",
+      "user_version": 12,
+      "user_ver2": 133
     },
     {
       "id": "unknown_header_signature",

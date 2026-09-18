@@ -64,14 +64,10 @@ _KNOWN_SKYRIM_USER_VERSION_2: tuple[int, ...] = (
     _SKYRIM_SE_USER_VERSION_2_CK,
     _SKYRIM_LE_USER_VERSION_2,
 )
-_KNOWN_FALLOUT_USER_VERSION_SIGNATURES: tuple[tuple[int, int], ...] = (
-    (11, 130),
-    (11, 131),
-    (11, 132),
-    (11, 139),
-    (12, 131),
-    (12, 132),
-    (12, 139),
+_KNOWN_FALLOUT_USER_VERSION_SIGNATURES: tuple[tuple[int, int], ...] = tuple(
+    (user_version, user_version_2)
+    for user_version, min_user_version_2 in ((11, 130), (12, 131))
+    for user_version_2 in range(min_user_version_2, 140)
 )
 _GAME_PROFILE_SKYRIM: str = "skyrim"
 _GAME_PROFILE_FALLOUT: str = "fallout"
@@ -141,6 +137,15 @@ def build_game_profile_support_matrix() -> tuple[tuple[str, str, str, str, str],
 
 
 def build_compatibility_report_text() -> str:
+    fallout_versions = sorted({u for u, _ in _KNOWN_FALLOUT_USER_VERSION_SIGNATURES})
+    fallout_user_ver2_values = sorted({u2 for _, u2 in _KNOWN_FALLOUT_USER_VERSION_SIGNATURES})
+    if fallout_user_ver2_values:
+        fallout_signature_summary = (
+            f"user_version in {fallout_versions}, user_version_2 in "
+            f"{fallout_user_ver2_values[0]}..{fallout_user_ver2_values[-1]}"
+        )
+    else:
+        fallout_signature_summary = "(none)"
     lines = [
         "NIF patch compatibility report",
         "",
@@ -150,7 +155,8 @@ def build_compatibility_report_text() -> str:
         "",
         "Header signatures:",
         f"  - Skyrim user_version_2: {', '.join(str(v) for v in _KNOWN_SKYRIM_USER_VERSION_2)}",
-        "  - Fallout (user_version,user_version_2): "
+        f"  - Fallout signature range: {fallout_signature_summary}",
+        "  - Fallout explicit signatures: "
         + ", ".join(f"({u},{u2})" for u, u2 in _KNOWN_FALLOUT_USER_VERSION_SIGNATURES),
         "",
         "Support matrix:",

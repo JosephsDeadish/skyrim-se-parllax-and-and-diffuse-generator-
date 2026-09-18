@@ -189,6 +189,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "env_mask_mode": "standard",
     "parallax_mode": "standard",
     "render_profile": "custom",
+    "target_game": "skyrim",
     "emboss_mode": False,
     "relief_mode": False,
     "include_diffuse": True,
@@ -228,6 +229,57 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "ui_scale": 1.0,
     "nif_retry_count": 1,
 }
+
+_TEXTURE_TARGET_GAME_VALUES: tuple[str, ...] = (
+    "skyrim",
+    "fallout3",
+    "falloutnv",
+    "fallout4",
+    "fallout76",
+)
+_FALLOUT_TEXTURE_TARGET_GAMES: frozenset[str] = frozenset(_TEXTURE_TARGET_GAME_VALUES[1:])
+
+
+def _normalize_texture_target_game(value: str | None) -> str:
+    normalized = str(value or "skyrim").strip().lower()
+    aliases = {
+        "fo3": "fallout3",
+        "fo:nv": "falloutnv",
+        "fonv": "falloutnv",
+        "fnv": "falloutnv",
+        "new vegas": "falloutnv",
+        "fo4": "fallout4",
+        "fallout 4": "fallout4",
+        "fo76": "fallout76",
+        "fallout 76": "fallout76",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in _TEXTURE_TARGET_GAME_VALUES:
+        return "skyrim"
+    return normalized
+
+
+def _strip_known_diffuse_suffix(stem: str) -> str:
+    lowered = stem.lower()
+    for suffix in (
+        "_d",
+        "_diff",
+        "_diffuse",
+        "_albedo",
+        "_basecolor",
+        "_base_color",
+    ):
+        if lowered.endswith(suffix):
+            return stem[: -len(suffix)]
+    return stem
+
+
+def _build_default_output_stem(base_stem: str, suffix: str) -> str:
+    if not suffix:
+        return base_stem
+    if base_stem.lower().endswith(suffix.lower()):
+        return base_stem
+    return f"{base_stem}{suffix}"
 
 
 def _coerce_bool(value: object, default: bool) -> bool:
@@ -456,6 +508,7 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
             state["render_profile"] = render_profile
     else:
         state["render_profile"] = str(_GUI_STATE_DEFAULTS["render_profile"])
+    state["target_game"] = _normalize_texture_target_game(str(raw.get("target_game", state["target_game"]) or state["target_game"]))
     state["normal_strength"] = _coerce_float(raw.get("normal_strength"), float(state["normal_strength"]), 0.1, 8.0)
     state["parallax_strength"] = _coerce_float(raw.get("parallax_strength"), float(state["parallax_strength"]), 0.1, 6.0)
     state["glow_threshold"] = _coerce_int(raw.get("glow_threshold"), int(state["glow_threshold"]), 0, 255)
@@ -1097,11 +1150,43 @@ def discover_plugin_conflict_context_from_manager(
     nif_paths: list[Path],
     context: ModManagerContext,
 ) -> dict[str, list[object]]:
+    def _normalize_plugin_candidate(name: str) -> str:
+        cleaned = str(name or "").strip().strip('"').strip("'")
+        if not cleaned:
+            return ""
+        if cleaned.startswith("*"):
+            cleaned = cleaned[1:].strip()
+        for marker in ("#", ";"):
+            if marker in cleaned:
+                cleaned = cleaned.split(marker, 1)[0].strip()
+        if "|" in cleaned:
+            cleaned = cleaned.split("|", 1)[0].strip()
+        return cleaned
+
+    def _resolve_plugin_path(plugin_name: str, search_roots: list[Path]) -> Path | None:
+        lowered_name = plugin_name.lower()
+        for root in search_roots:
+            direct = root / plugin_name
+            if direct.exists():
+                return direct
+            try:
+                for candidate in root.rglob("*"):
+                    if not candidate.is_file():
+                        continue
+                    if candidate.name.lower() != lowered_name:
+                        continue
+                    return candidate
+            except Exception:
+                continue
+        return None
+
     plugin_names = tuple(
         dict.fromkeys(
-            name.strip()
+            normalized_name
             for name in (*context.enabled_plugins, *context.load_order)
-            if isinstance(name, str) and name.strip().lower().endswith((".esp", ".esm", ".esl"))
+            if isinstance(name, str)
+            for normalized_name in (_normalize_plugin_candidate(name),)
+            if normalized_name.lower().endswith((".esp", ".esm", ".esl"))
         )
     )
     if not plugin_names:
@@ -1124,21 +1209,7 @@ def discover_plugin_conflict_context_from_manager(
     }
     discovered: dict[str, list[object]] = {}
     for plugin_name in plugin_names:
-        plugin_path: Path | None = None
-        for root in search_roots:
-            direct = root / plugin_name
-            if direct.exists():
-                plugin_path = direct
-                break
-            try:
-                candidate = next(root.rglob(plugin_name))
-            except StopIteration:
-                candidate = None
-            except Exception:
-                candidate = None
-            if candidate is not None and candidate.exists():
-                plugin_path = candidate
-                break
+        plugin_path = _resolve_plugin_path(plugin_name, search_roots)
         if plugin_path is None:
             continue
         try:
@@ -4266,13 +4337,16 @@ def build_output_paths(
     output_dir: Path | None,
     diffuse_name: str | None = None,
     parallax_name: str | None = None,
+    target_game: str = "skyrim",
 ) -> tuple[Path, Path]:
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
-
-    diffuse_stem = diffuse_name or input_path.stem
-    parallax_stem = parallax_name or f"{input_path.stem}_p"
+    normalized_target_game = _normalize_texture_target_game(target_game)
+    base_stem = _strip_known_diffuse_suffix(input_path.stem)
+    diffuse_suffix = "_d" if normalized_target_game in {"fallout4", "fallout76"} else ""
+    diffuse_stem = diffuse_name or _build_default_output_stem(base_stem, diffuse_suffix)
+    parallax_stem = parallax_name or f"{base_stem}_p"
     return base_output_dir / f"{diffuse_stem}{ext}", base_output_dir / f"{parallax_stem}{ext}"
 
 
@@ -4280,11 +4354,13 @@ def build_normal_output_path(
     input_path: Path,
     output_dir: Path | None,
     normal_name: str | None = None,
+    target_game: str = "skyrim",
 ) -> Path:
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
-    normal_stem = normal_name or f"{input_path.stem}_n"
+    del target_game
+    normal_stem = normal_name or f"{_strip_known_diffuse_suffix(input_path.stem)}_n"
     return base_output_dir / f"{normal_stem}{ext}"
 
 
@@ -4292,11 +4368,13 @@ def build_glow_output_path(
     input_path: Path,
     output_dir: Path | None,
     glow_name: str | None = None,
+    target_game: str = "skyrim",
 ) -> Path:
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
-    glow_stem = glow_name or f"{input_path.stem}_g"
+    del target_game
+    glow_stem = glow_name or f"{_strip_known_diffuse_suffix(input_path.stem)}_g"
     return base_output_dir / f"{glow_stem}{ext}"
 
 
@@ -4308,12 +4386,15 @@ def build_environment_mask_output_path(
     complex_format: str = "msn",
     render_profile: str = "auto",
     include_complex: bool | None = None,
+    target_game: str = "skyrim",
 ) -> Path:
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
-    default_suffix = "_m"
-    mask_stem = environment_mask_name or f"{input_path.stem}{default_suffix}"
+    del env_mask_mode, complex_format, render_profile, include_complex
+    normalized_target_game = _normalize_texture_target_game(target_game)
+    default_suffix = "_s" if normalized_target_game in {"fallout4", "fallout76"} else "_m"
+    mask_stem = environment_mask_name or f"{_strip_known_diffuse_suffix(input_path.stem)}{default_suffix}"
     return base_output_dir / f"{mask_stem}{ext}"
 
 
@@ -4321,11 +4402,13 @@ def build_rmaos_output_path(
     input_path: Path,
     output_dir: Path | None,
     rmaos_name: str | None = None,
+    target_game: str = "skyrim",
 ) -> Path:
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
-    rmaos_stem = rmaos_name or f"{input_path.stem}_rmaos"
+    del target_game
+    rmaos_stem = rmaos_name or f"{_strip_known_diffuse_suffix(input_path.stem)}_rmaos"
     return base_output_dir / f"{rmaos_stem}{ext}"
 
 
@@ -4719,14 +4802,16 @@ def build_complex_output_path(
     output_dir: Path | None,
     complex_name: str | None = None,
     complex_format: str = "msn",
+    target_game: str = "skyrim",
 ) -> Path:
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
     if complex_format not in {"msn", "cm"}:
         raise ValueError("complex_format must be 'msn' or 'cm'.")
+    del target_game
     suffix = "_msn" if complex_format == "msn" else "_cm"
-    complex_stem = complex_name or f"{input_path.stem}{suffix}"
+    complex_stem = complex_name or f"{_strip_known_diffuse_suffix(input_path.stem)}{suffix}"
     return base_output_dir / f"{complex_stem}{ext}"
 
 
@@ -4759,6 +4844,7 @@ def _collect_planned_output_paths(
     include_snow_mask: bool = False,
     include_ao: bool = False,
     include_roughness: bool = False,
+    target_game: str = "skyrim",
 ) -> dict[str, Path]:
     planned: dict[str, Path] = {}
     if include_diffuse or include_parallax:
@@ -4767,6 +4853,7 @@ def _collect_planned_output_paths(
             output_dir=output_dir,
             diffuse_name=diffuse_name,
             parallax_name=parallax_name,
+            target_game=target_game,
         )
         if include_diffuse:
             planned["diffuse"] = diffuse_path
@@ -4777,12 +4864,14 @@ def _collect_planned_output_paths(
             input_path=input_file,
             output_dir=output_dir,
             normal_name=normal_name,
+            target_game=target_game,
         )
     if include_glow:
         planned["glow"] = build_glow_output_path(
             input_path=input_file,
             output_dir=output_dir,
             glow_name=glow_name,
+            target_game=target_game,
         )
     if include_environment_mask:
         planned["environment_mask"] = build_environment_mask_output_path(
@@ -4793,12 +4882,14 @@ def _collect_planned_output_paths(
             complex_format=complex_format,
             render_profile=render_profile,
             include_complex=include_complex,
+            target_game=target_game,
         )
     if include_rmaos:
         planned["rmaos"] = build_rmaos_output_path(
             input_path=input_file,
             output_dir=output_dir,
             rmaos_name=rmaos_name,
+            target_game=target_game,
         )
     if include_wetness_mask:
         planned["wetness_mask"] = build_wetness_mask_output_path(
@@ -4830,6 +4921,7 @@ def _collect_planned_output_paths(
             output_dir=output_dir,
             complex_name=complex_name,
             complex_format=complex_format,
+            target_game=target_game,
         )
     return planned
 
@@ -6362,6 +6454,7 @@ def run_with_options(
     include_rmaos: bool = False,
     include_complex: bool = False,
     render_profile: str = "auto",
+    target_game: str = "skyrim",
     include_wetness_mask: bool = False,
     wetness_mask_strength: float | None = None,
     wetness_name: str | None = None,
@@ -6395,6 +6488,7 @@ def run_with_options(
         raise ValueError("Select at least one output.")
     if parallax_mode not in {"standard", "occlusion"}:
         raise ValueError("parallax_mode must be 'standard' or 'occlusion'.")
+    normalized_target_game = _normalize_texture_target_game(target_game)
     planned_paths = _collect_planned_output_paths(
         input_file=input_file,
         output_dir=output_dir,
@@ -6423,6 +6517,7 @@ def run_with_options(
         include_snow_mask=include_snow_mask,
         include_ao=include_ao,
         include_roughness=include_roughness,
+        target_game=normalized_target_game,
     )
     _validate_output_path_conflicts(planned_paths)
     resolved_env_complex_workflow = resolve_env_mask_complex_workflow(
@@ -6469,6 +6564,7 @@ def run_with_options(
                 output_dir=output_dir,
                 diffuse_name=diffuse_name,
                 parallax_name=parallax_name,
+                target_game=normalized_target_game,
             )
             outputs["diffuse"] = _save_with_dds_fallback(
                 diffuse,
@@ -6484,6 +6580,7 @@ def run_with_options(
                 input_path=input_file,
                 output_dir=output_dir,
                 normal_name=normal_name,
+                target_game=normalized_target_game,
             )
             outputs["normal"] = _save_with_dds_fallback(
                 normal,
@@ -6506,6 +6603,7 @@ def run_with_options(
                 output_dir=output_dir,
                 diffuse_name=diffuse_name,
                 parallax_name=parallax_name,
+                target_game=normalized_target_game,
             )
             outputs["parallax"] = _save_with_dds_fallback(
                 parallax,
@@ -6520,6 +6618,7 @@ def run_with_options(
                 input_path=input_file,
                 output_dir=output_dir,
                 glow_name=glow_name,
+                target_game=normalized_target_game,
             )
             outputs["glow"] = _save_with_dds_fallback(
                 glow,
@@ -6546,6 +6645,7 @@ def run_with_options(
                 complex_format=complex_format,
                 render_profile=render_profile,
                 include_complex=include_complex,
+                target_game=normalized_target_game,
             )
             outputs["environment_mask"] = _save_with_dds_fallback(
                 environment_mask,
@@ -6572,6 +6672,7 @@ def run_with_options(
                 input_path=input_file,
                 output_dir=output_dir,
                 rmaos_name=rmaos_name,
+                target_game=normalized_target_game,
             )
             outputs["rmaos"] = _save_with_dds_fallback(
                 rmaos_map,
@@ -6674,6 +6775,7 @@ def run_with_options(
                 output_dir=output_dir,
                 complex_name=complex_name,
                 complex_format=complex_format,
+                target_game=normalized_target_game,
             )
             outputs["complex_material"] = _save_with_dds_fallback(
                 complex_material,
@@ -6719,6 +6821,7 @@ def run_batch_with_options(
     include_rmaos: bool = False,
     include_complex: bool = False,
     render_profile: str = "auto",
+    target_game: str = "skyrim",
     include_wetness_mask: bool = False,
     wetness_mask_strength: float | None = None,
     wetness_name: str | None = None,
@@ -6810,6 +6913,7 @@ def run_batch_with_options(
                     include_rmaos=include_rmaos,
                     include_complex=include_complex,
                     render_profile=render_profile,
+                    target_game=target_game,
                     include_wetness_mask=include_wetness_mask,
                     wetness_mask_strength=wetness_mask_strength,
                     wetness_name=wetness_name,
@@ -6863,6 +6967,7 @@ def run_batch_with_options(
             include_rmaos=include_rmaos,
             include_complex=include_complex,
             render_profile=render_profile,
+            target_game=target_game,
             include_wetness_mask=include_wetness_mask,
             wetness_mask_strength=wetness_mask_strength,
             wetness_name=wetness_name,
@@ -6900,7 +7005,7 @@ def run_batch_with_options(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate Skyrim texture maps from an input texture or a folder of source DDS textures."
+        description="Generate Skyrim/Fallout texture maps from an input texture or a folder of source DDS textures."
     )
     parser.add_argument(
         "input_file",
@@ -7066,6 +7171,15 @@ def parse_args() -> argparse.Namespace:
             "Target renderer/output profile. "
             "'auto' (default) infers workflow from file path/mod-manager context; "
             "other presets force profile-specific format/mode/output defaults."
+        ),
+    )
+    parser.add_argument(
+        "--target-game",
+        choices=_TEXTURE_TARGET_GAME_VALUES,
+        default="skyrim",
+        help=(
+            "Target game naming scheme for generated textures. "
+            "skyrim keeps diffuse as <stem>.dds; fallout4/fallout76 use <stem>_d.dds and default env mask <stem>_s.dds."
         ),
     )
     parser.add_argument(
@@ -7288,6 +7402,7 @@ if GUI_AVAILABLE:
             self.relief_mode_manual_override = False
             self.parallax_mode_var = tk.StringVar(value="standard")
             self.render_profile_var = tk.StringVar(value="custom")
+            self.target_game_var = tk.StringVar(value="skyrim")
             self.render_profile_suggestion_var = tk.StringVar(
                 value=build_render_profile_brief_message("custom")
             )
@@ -7356,7 +7471,7 @@ if GUI_AVAILABLE:
             top_bar.pack(fill=tk.X)
             top_bar_message = ttk.Label(
                 top_bar,
-                text="Generate Skyrim-ready texture maps from one source image (single file or full folder batch).",
+                text="Generate Skyrim/Fallout-ready texture maps from one source image (single file or full folder batch).",
                 justify=tk.LEFT,
                 anchor=tk.W,
             )
@@ -7408,11 +7523,27 @@ if GUI_AVAILABLE:
             self.ui_scale_combo.set(f"{self.ui_scale_var.get():.2f}".rstrip("0").rstrip("."))
             self.ui_scale_combo.pack(side=tk.RIGHT, padx=(0, 8))
             self.ui_scale_combo.bind("<<ComboboxSelected>>", self._on_ui_scale_changed)
+            _target_game_label = ttk.Label(top_bar, text="Game")
+            _target_game_label.pack(side=tk.RIGHT, padx=(12, 4))
+            self.target_game_combo = ttk.Combobox(
+                top_bar,
+                textvariable=self.target_game_var,
+                values=_TEXTURE_TARGET_GAME_VALUES,
+                state="readonly",
+                width=10,
+            )
+            self.target_game_combo.pack(side=tk.RIGHT, padx=(0, 6))
+            self.target_game_combo.bind("<<ComboboxSelected>>", lambda _event: self._save_persisted_gui_state())
             self._add_tooltip(_theme_top_check, "🌙 Toggle dark/light mode.\nEasy on the eyes during those 3am modding sessions.")
             self._add_tooltip(_language_label, "Choose the interface language from available translation files.")
             self._add_tooltip(self.language_combo, "Switch language for labels, buttons, and tooltips.")
             self._add_tooltip(_ui_scale_label, "Manual UI scale multiplier for high-DPI displays.")
             self._add_tooltip(self.ui_scale_combo, "Increase this on 4K/high-DPI displays if controls look too small.")
+            self._add_tooltip(_target_game_label, "Select Skyrim or Fallout naming mode for generated texture filenames.")
+            self._add_tooltip(
+                self.target_game_combo,
+                "Skyrim keeps diffuse as <stem>.dds. Fallout 4/76 defaults diffuse to <stem>_d.dds and env mask to <stem>_s.dds.",
+            )
             self._add_tooltip(
                 _patreon_button,
                 "❤ Fuel the project on Patreon.\n"
@@ -8329,6 +8460,7 @@ if GUI_AVAILABLE:
             if persisted_profile not in _RENDER_PROFILE_GUI_VALUES:
                 persisted_profile = "custom"
             self.render_profile_var.set(persisted_profile)
+            self.target_game_var.set(_normalize_texture_target_game(str(state.get("target_game", "skyrim"))))
             self.emboss_mode_var.set(bool(state["emboss_mode"]))
             self.relief_mode_var.set(bool(state["relief_mode"]))
             self.include_diffuse_var.set(bool(state["include_diffuse"]))
@@ -8381,6 +8513,7 @@ if GUI_AVAILABLE:
                 "env_mask_mode": self.env_mask_mode_var.get(),
                 "parallax_mode": self.parallax_mode_var.get(),
                 "render_profile": _normalize_render_profile(self.render_profile_var.get()),
+                "target_game": _normalize_texture_target_game(self.target_game_var.get()),
                 "emboss_mode": self.emboss_mode_var.get(),
                 "relief_mode": self.relief_mode_var.get(),
                 "include_diffuse": self.include_diffuse_var.get(),
@@ -8641,6 +8774,7 @@ if GUI_AVAILABLE:
                         output_dir=generation_kwargs["output_dir"],
                         diffuse_name=generation_kwargs.get("diffuse_name"),
                         parallax_name=generation_kwargs.get("parallax_name"),
+                        target_game=str(generation_kwargs.get("target_game", "skyrim")),
                     )
                     expected_paths.append(diffuse_path)
                 if includes["normal"]:
@@ -8648,6 +8782,7 @@ if GUI_AVAILABLE:
                         build_normal_output_path(
                             input_path=input_file,
                             output_dir=generation_kwargs["output_dir"],
+                            target_game=str(generation_kwargs.get("target_game", "skyrim")),
                         )
                     )
                 if includes["parallax"]:
@@ -8656,6 +8791,7 @@ if GUI_AVAILABLE:
                         output_dir=generation_kwargs["output_dir"],
                         diffuse_name=generation_kwargs.get("diffuse_name"),
                         parallax_name=generation_kwargs.get("parallax_name"),
+                        target_game=str(generation_kwargs.get("target_game", "skyrim")),
                     )
                     expected_paths.append(parallax_path)
                 if includes["glow"]:
@@ -8663,6 +8799,7 @@ if GUI_AVAILABLE:
                         build_glow_output_path(
                             input_path=input_file,
                             output_dir=generation_kwargs["output_dir"],
+                            target_game=str(generation_kwargs.get("target_game", "skyrim")),
                         )
                     )
                 if includes["environment_mask"]:
@@ -8674,6 +8811,7 @@ if GUI_AVAILABLE:
                             complex_format=str(generation_kwargs.get("complex_format", "msn")),
                             render_profile=str(generation_kwargs.get("render_profile", "auto")),
                             include_complex=bool(generation_kwargs.get("include_complex", False)),
+                            target_game=str(generation_kwargs.get("target_game", "skyrim")),
                         )
                     )
                 if includes["complex_material"]:
@@ -8682,6 +8820,7 @@ if GUI_AVAILABLE:
                             input_path=input_file,
                             output_dir=generation_kwargs["output_dir"],
                             complex_format=str(generation_kwargs["complex_format"]),
+                            target_game=str(generation_kwargs.get("target_game", "skyrim")),
                         )
                     )
                 if includes["rmaos"]:
@@ -8689,6 +8828,7 @@ if GUI_AVAILABLE:
                         build_rmaos_output_path(
                             input_path=input_file,
                             output_dir=generation_kwargs["output_dir"],
+                            target_game=str(generation_kwargs.get("target_game", "skyrim")),
                         )
                     )
                 if includes["ao"]:
@@ -9766,6 +9906,7 @@ if GUI_AVAILABLE:
                     "auto_patch_nifs": self.auto_patch_nifs_var.get(),
                     "manager_context": self.manager_context,
                     "render_profile": self.render_profile_var.get(),
+                    "target_game": self.target_game_var.get(),
                     "include_diffuse": include_diffuse,
                     "include_normal": include_normal,
                     "include_parallax": include_parallax,
@@ -11933,6 +12074,7 @@ def main() -> int:
             roughness_strength=args.roughness_strength,
             include_complex=args.complex_material,
             render_profile=getattr(args, "render_profile", "auto"),
+            target_game=args.target_game,
             continue_on_error=True,
             batch_workers=args.batch_workers,
             checkpoint_file=args.checkpoint_file,
@@ -11998,6 +12140,7 @@ def main() -> int:
         roughness_strength=args.roughness_strength,
         include_complex=args.complex_material,
         render_profile=getattr(args, "render_profile", "auto"),
+        target_game=args.target_game,
     )
     for output_type, path in outputs.items():
         print(f"{output_type.replace('_', ' ').title()} texture: {path}")

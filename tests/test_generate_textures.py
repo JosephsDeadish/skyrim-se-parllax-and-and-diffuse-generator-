@@ -592,6 +592,43 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(discovered["meshes/architecture/stone.nif"][0].record_id, "00000ABC")
         self.assertEqual(discovered["meshes/architecture/stone.nif"][0].record_type, "STAT")
 
+    def test_discover_plugin_conflict_context_normalizes_starred_plugin_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game_root = Path(temp_dir) / "Skyrim"
+            plugin_path = game_root / "Data" / "Example.esp"
+            plugin_path.parent.mkdir(parents=True)
+            plugin_path.write_bytes(b"meshes\\architecture\\stone.nif\x00")
+            context = ModManagerContext(
+                manager="Vortex",
+                game_root=game_root,
+                enabled_plugins=("*Example.esp",),
+                load_order=("Example.esp # active",),
+            )
+            discovered = discover_plugin_conflict_context_from_manager(
+                [Path("meshes/architecture/stone.nif")],
+                context,
+            )
+        self.assertIn("meshes/architecture/stone.nif", discovered)
+        self.assertEqual(discovered["meshes/architecture/stone.nif"][0].plugin_name, "Example.esp")
+
+    def test_discover_plugin_conflict_context_resolves_case_insensitive_plugin_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game_root = Path(temp_dir) / "Skyrim"
+            plugin_path = game_root / "Data" / "Example.ESP"
+            plugin_path.parent.mkdir(parents=True)
+            plugin_path.write_bytes(b"meshes\\architecture\\stone.nif\x00")
+            context = ModManagerContext(
+                manager="Vortex",
+                game_root=game_root,
+                enabled_plugins=("example.esp",),
+            )
+            discovered = discover_plugin_conflict_context_from_manager(
+                [Path("meshes/architecture/stone.nif")],
+                context,
+            )
+        self.assertIn("meshes/architecture/stone.nif", discovered)
+        self.assertEqual(discovered["meshes/architecture/stone.nif"][0].plugin_name.lower(), "example.esp")
+
     def test_normalize_gui_state_accepts_truepbr_alias(self) -> None:
         normalized = _normalize_gui_state({"render_profile": "true pbr"})
         self.assertEqual(str(normalized["render_profile"]), "truepbr")
@@ -2442,6 +2479,21 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(diffuse_path.name, "brick.dds")
             self.assertEqual(parallax_path.name, "brick_p.dds")
 
+    def test_build_output_paths_fallout4_defaults_to_d_diffuse_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.dds"
+            input_path.write_bytes(b"stub")
+
+            diffuse_path, parallax_path = build_output_paths(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+                target_game="fallout4",
+            )
+
+            self.assertEqual(diffuse_path.name, "brick_d.dds")
+            self.assertEqual(parallax_path.name, "brick_p.dds")
+
     def test_custom_output_paths_preserve_textures_subfolders_for_skyrim_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -2517,6 +2569,21 @@ class GenerateTexturesTests(unittest.TestCase):
             )
 
             self.assertEqual(environment_mask_path.name, "brick_m.dds")
+
+    def test_build_environment_mask_output_path_fallout4_defaults_to_s_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.dds"
+            input_path.write_bytes(b"stub")
+
+            environment_mask_path = build_environment_mask_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+                environment_mask_name=None,
+                target_game="fallout4",
+            )
+
+            self.assertEqual(environment_mask_path.name, "brick_s.dds")
 
     def test_build_environment_mask_output_path_uses_m_name_for_enb_complex_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
