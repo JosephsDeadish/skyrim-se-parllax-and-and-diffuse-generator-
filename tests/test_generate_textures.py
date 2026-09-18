@@ -3566,6 +3566,75 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(sorted(path.name for path in outputs.keys()), ["a.dds", "b.dds", "c.dds", "d.dds"])
             self.assertEqual(sorted(path.name for path in output_dir.iterdir()), ["a.dds", "b.dds", "c.dds", "d.dds"])
 
+    def test_run_batch_with_options_writes_checkpoint_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            checkpoint = temp_path / "state" / "batch_checkpoint.json"
+            input_dir.mkdir()
+            for name in ("a.dds", "b.dds"):
+                _sample_image().save(input_dir / name, format="DDS", pixel_format="DXT5")
+
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                batch_workers=1,
+                checkpoint_file=checkpoint,
+            )
+
+            payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(payload["version"], APP_VERSION)
+            self.assertEqual(payload["completed_success_count"], 2)
+            self.assertEqual(payload["resumed_completed_count"], 0)
+            self.assertEqual(len(payload["completed_success_files"]), 2)
+            self.assertEqual(len(outputs), 2)
+
+    def test_run_batch_with_options_resume_checkpoint_skips_completed_successes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            checkpoint = temp_path / "batch_checkpoint.json"
+            input_dir.mkdir()
+            a_path = input_dir / "a.dds"
+            b_path = input_dir / "b.dds"
+            _sample_image().save(a_path, format="DDS", pixel_format="DXT5")
+            _sample_image().save(b_path, format="DDS", pixel_format="DXT5")
+            checkpoint.write_text(
+                json.dumps(
+                    {
+                        "completed_success_files": [str(a_path.resolve())],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                batch_workers=1,
+                checkpoint_file=checkpoint,
+                resume_from_checkpoint=True,
+            )
+
+            self.assertEqual(sorted(path.name for path in outputs.keys()), ["b.dds"])
+            payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(payload["resumed_completed_count"], 1)
+            self.assertEqual(payload["completed_success_count"], 2)
+
     def test_write_batch_failure_artifacts_writes_structured_json_and_csv(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -3659,6 +3728,63 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["failed_files"], 1)
             self.assertEqual(Path(payload["failures"][0]["file"]).name, "bad.dds")
 
+    def test_main_passes_checkpoint_options_to_batch_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "textures"
+            input_dir.mkdir()
+            checkpoint = root / "checkpoint.json"
+            args = mock.Mock(
+                gui=False,
+                input_file=input_dir,
+                output_dir=None,
+                diffuse_name=None,
+                normal_name=None,
+                parallax_name=None,
+                glow_name=None,
+                environment_mask_name=None,
+                rmaos_name=None,
+                complex_name=None,
+                normal_strength=None,
+                parallax_strength=None,
+                glow_threshold=None,
+                environment_mask_strength=None,
+                rmaos_strength=None,
+                complex_strength=None,
+                specular_strength=None,
+                complex_format="msn",
+                environment_mask_mode="standard",
+                emboss_mode=False,
+                relief_mode=False,
+                parallax_mode="standard",
+                no_diffuse=False,
+                no_normal=True,
+                no_parallax=True,
+                glow_map=False,
+                environment_mask=False,
+                rmaos=False,
+                wetness_mask=False,
+                wetness_mask_strength=None,
+                snow_mask=False,
+                snow_mask_strength=None,
+                ao_map=False,
+                ao_strength=None,
+                roughness_map=False,
+                roughness_strength=None,
+                complex_material=False,
+                pbr_material=False,
+                render_profile="auto",
+                batch_workers=2,
+                checkpoint_file=checkpoint,
+                resume_checkpoint=True,
+            )
+            with mock.patch("generate_textures.parse_args", return_value=args):
+                with mock.patch("generate_textures.run_batch_with_options", return_value={}) as batch_mock:
+                    exit_code = main()
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(batch_mock.call_args.kwargs["checkpoint_file"], checkpoint)
+            self.assertTrue(batch_mock.call_args.kwargs["resume_from_checkpoint"])
+
     def test_create_panda_icon_image_returns_rgba_square(self) -> None:
         for size in (16, 32, 64, 128, 256):
             icon = _create_panda_icon_image(size=size)
@@ -3703,6 +3829,25 @@ class GenerateTexturesTests(unittest.TestCase):
             with mock.patch("sys.argv", ["generate_textures.py", str(input_file), "--render-profile", "architecture"]):
                 args = parse_args()
         self.assertEqual(str(args.render_profile), "architecture")
+
+    def test_parse_args_accepts_checkpoint_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_dir = Path(temp_dir) / "textures"
+            input_dir.mkdir()
+            checkpoint = Path(temp_dir) / "checkpoint.json"
+            with mock.patch(
+                "sys.argv",
+                [
+                    "generate_textures.py",
+                    str(input_dir),
+                    "--checkpoint-file",
+                    str(checkpoint),
+                    "--resume-checkpoint",
+                ],
+            ):
+                args = parse_args()
+        self.assertEqual(args.checkpoint_file, checkpoint)
+        self.assertTrue(args.resume_checkpoint)
 
     def test_main_pbr_material_forces_complex_material_cm_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

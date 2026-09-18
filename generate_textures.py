@@ -6731,8 +6731,42 @@ def run_batch_with_options(
     error_callback: Callable[[int, int, Path, Exception], None] | None = None,
     continue_on_error: bool = False,
     batch_workers: int | None = None,
+    checkpoint_file: Path | None = None,
+    resume_from_checkpoint: bool = False,
 ) -> dict[Path, dict[str, Path]]:
     input_files = collect_source_textures(input_path)
+    completed_success_files: set[str] = set()
+    resumed_completed_count = 0
+
+    def _checkpoint_key(path: Path) -> str:
+        return str(path.resolve())
+
+    def _write_checkpoint_state() -> None:
+        if checkpoint_file is None:
+            return
+        checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "tool": "generate_textures",
+            "version": APP_VERSION,
+            "input_root": _checkpoint_key(input_path),
+            "completed_success_count": len(completed_success_files),
+            "resumed_completed_count": resumed_completed_count,
+            "completed_success_files": sorted(completed_success_files),
+        }
+        checkpoint_file.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    if checkpoint_file is not None and resume_from_checkpoint and checkpoint_file.exists():
+        try:
+            payload = json.loads(checkpoint_file.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict):
+            raw_completed = payload.get("completed_success_files", [])
+            if isinstance(raw_completed, list):
+                completed_success_files = {str(entry) for entry in raw_completed if isinstance(entry, str)}
+        resumed_completed_count = len(completed_success_files)
+        input_files = [path for path in input_files if _checkpoint_key(path) not in completed_success_files]
+
     results: dict[Path, dict[str, Path]] = {}
     total = len(input_files)
     workers = _resolve_batch_workers(batch_workers, total)
@@ -6785,6 +6819,8 @@ def run_batch_with_options(
                     roughness_strength=roughness_strength,
                     roughness_name=roughness_name,
                 )
+                completed_success_files.add(_checkpoint_key(input_file))
+                _write_checkpoint_state()
             except Exception as exc:
                 if error_callback is not None:
                     error_callback(index, total, input_file, exc)
@@ -6847,6 +6883,8 @@ def run_batch_with_options(
                 progress_callback(completed, total, input_file)
             try:
                 results[input_file] = future.result()
+                completed_success_files.add(_checkpoint_key(input_file))
+                _write_checkpoint_state()
             except Exception as exc:
                 if error_callback is not None:
                     error_callback(completed, total, input_file, exc)
@@ -7031,6 +7069,17 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="Parallel workers for folder batch mode (0 = automatic).",
+    )
+    parser.add_argument(
+        "--checkpoint-file",
+        type=Path,
+        default=None,
+        help="Write batch progress checkpoint JSON to this path during folder runs.",
+    )
+    parser.add_argument(
+        "--resume-checkpoint",
+        action="store_true",
+        help="Resume a folder run by skipping files already marked as successful in --checkpoint-file.",
     )
     parser.add_argument("--gui", action="store_true", help="Launch graphical interface.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {APP_VERSION}")
@@ -11787,6 +11836,8 @@ def main() -> int:
             render_profile=getattr(args, "render_profile", "auto"),
             continue_on_error=True,
             batch_workers=args.batch_workers,
+            checkpoint_file=args.checkpoint_file,
+            resume_from_checkpoint=args.resume_checkpoint,
             error_callback=lambda _index, _total, current, exc: failures.append((current, str(exc))),
         )
         for input_file, outputs in batch_outputs.items():
