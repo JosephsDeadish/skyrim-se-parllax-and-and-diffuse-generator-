@@ -2384,28 +2384,6 @@ def _apply_patches(
 
         # ---- Apply flag changes ----
         if enabling_parallax:
-            if (
-                sp.layout_name == "legacy"
-                and
-                sp.shader_type_offset is not None
-                and sp.shader_type == SHADER_TYPE_DEFAULT
-                and not (sp.flags1 & SLSF1_PARALLAX)
-                and sp.shader_type_resolution in {
-                    "exact",
-                    "sentinel_default",
-                    "masked_low8",
-                    "masked_low16",
-                }
-            ):
-                # Align legacy-layout behavior with common patchers: when
-                # enabling parallax on default shaders, set shader type
-                # to Heightmap (3) even when force_shader_type_3 is disabled.
-                # This does not insert type-3 payload fields; that remains
-                # controlled by force_shader_type_3.
-                buf.write_u32_at(sp.shader_type_offset, SHADER_TYPE_HEIGHTMAP)
-                sp.shader_type = SHADER_TYPE_HEIGHTMAP
-                sp.raw_shader_type = SHADER_TYPE_HEIGHTMAP
-                shader_type_changed = True
             new_flags1 |= SLSF1_PARALLAX
             new_flags2 &= ~SLSF2_MULTI_LAYER_PARALLAX
             # Vertex colours must be set for parallax meshes to render correctly

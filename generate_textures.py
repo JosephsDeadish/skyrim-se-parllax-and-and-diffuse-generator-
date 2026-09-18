@@ -10158,7 +10158,7 @@ if GUI_AVAILABLE:
                             try:
                                 validation = validate_nif_for_parallax(nif)
                                 combined_detail_lines: list[str] = []
-                                if validation.detected_game_profile != "unknown":
+                                if validation.detected_game_profile:
                                     combined_detail_lines.append(f"Detected profile: {validation.detected_game_profile}")
                                 if validation.has_havok:
                                     combined_detail_lines.append("⚠ Havok animation graph detected — parallax patching on this NIF can crash in-game.")

@@ -982,7 +982,7 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertTrue(result.success, result.errors)
         infos = scan_nif(nif)
         self.assertTrue(infos[0].has_parallax_flag)
-        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
 
     def test_enable_pom_sets_both_parallax_and_occlusion_flags(self) -> None:
         nif = _write_nif(self.tmp)
@@ -1008,7 +1008,7 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
         self.assertTrue(infos[0].has_parallax_flag)
 
-    def test_enable_parallax_retypes_sentinel_default_block(self) -> None:
+    def test_enable_parallax_preserves_sentinel_default_block_type(self) -> None:
         nif = _write_nif(self.tmp)
         raw = bytearray(nif.read_bytes())
         shader_header = struct.pack("<IIiI", 0, 0, -1, SHADER_TYPE_DEFAULT)
@@ -1020,8 +1020,8 @@ class TestPatchNifFlags(unittest.TestCase):
         result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
         self.assertTrue(result.success, result.errors)
         infos = scan_nif(nif)
-        self.assertEqual(infos[0].raw_shader_type, SHADER_TYPE_HEIGHTMAP)
-        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+        self.assertEqual(infos[0].raw_shader_type, 0xFFFFFFFF)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
         self.assertTrue(infos[0].has_parallax_flag)
 
     def test_enable_parallax_preserves_unknown_raw_shader_value(self) -> None:
@@ -1586,9 +1586,9 @@ class TestParallaxScale(unittest.TestCase):
         )
         self.assertTrue(result.success)
         infos = scan_nif(nif)
-        # Type is updated to 3 for legacy blocks, but no scale field is
-        # inserted unless force_shader_type_3=True.
-        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+        # Without force_shader_type_3, legacy type-0 blocks keep their type
+        # and only receive compatible flag updates.
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
         self.assertIsNone(infos[0].parallax_scale)
 
 
