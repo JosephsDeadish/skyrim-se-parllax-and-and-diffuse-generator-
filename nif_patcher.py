@@ -2941,6 +2941,15 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
             "Detected Fallout-era profile. Patch-write support is experimental; keep backups and verify in-game."
         )
     shader_props, texture_sets, parse_errors = _build_block_map(data, header)
+    if detected_profile == _GAME_PROFILE_FALLOUT:
+        skipped_scan_blocks = [sp.block_index for sp in shader_props if sp.layout_name != "real"]
+        if skipped_scan_blocks:
+            diagnostics.append(
+                "Skipped non-real-layout shader blocks in Fallout profile diagnostics: "
+                + ", ".join(str(idx) for idx in skipped_scan_blocks[:12])
+                + ("..." if len(skipped_scan_blocks) > 12 else "")
+            )
+            shader_props = [sp for sp in shader_props if sp.layout_name == "real"]
     diagnostics.extend(parse_errors)
     diagnostics.extend(_shader_resolution_notes(shader_props))
     if not shader_props:

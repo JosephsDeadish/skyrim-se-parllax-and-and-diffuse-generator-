@@ -326,10 +326,19 @@ class TestScanNif(unittest.TestCase):
         assert header is not None
         _rewrite_user_version(nif, 11)
         infos, diagnostics = scan_nif_diagnostics(nif)
-        self.assertEqual(len(infos), 1)
+        self.assertEqual(len(infos), 0)
         joined = "\n".join(diagnostics).lower()
         self.assertIn("fallout", joined)
         self.assertIn("experimental", joined)
+        self.assertIn("skipped non-real-layout shader blocks", joined)
+
+    def test_scan_fallout_real_layout_returns_shader_info(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130, shader_layout="real")
+        _rewrite_user_version(nif, 11)
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(len(infos), 1)
+        joined = "\n".join(diagnostics).lower()
+        self.assertIn("fallout", joined)
 
     def test_validate_detects_fallout_profile(self) -> None:
         nif = _write_nif(self.tmp, user_ver2=130)
