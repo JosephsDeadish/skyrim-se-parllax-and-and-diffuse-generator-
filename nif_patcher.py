@@ -2369,7 +2369,12 @@ def _apply_patches(
             chk_header = _read_header_for_profiles(buf_check, allowed_profiles=reparse_profiles)
             if chk_header is None:
                 raise RuntimeError("Header corrupted after type-3 upgrade.")
-            fresh_props, _, _ = _build_block_map(data, chk_header, allow_num_extra_fallback=False)
+            fresh_props, _, _ = _build_block_map(
+                data,
+                chk_header,
+                opts.unknown_shader_type_map,
+                allow_num_extra_fallback=False,
+            )
             sp_to_upgrade = next(
                 (
                     sp
@@ -2399,7 +2404,12 @@ def _apply_patches(
             new_header = _read_header_for_profiles(buf, allowed_profiles=reparse_profiles)
             if new_header is None:
                 raise RuntimeError("Header corrupted after type-3 upgrade.")
-            shader_props, texture_sets, _ = _build_block_map(data, new_header, allow_num_extra_fallback=False)
+            shader_props, texture_sets, _ = _build_block_map(
+                data,
+                new_header,
+                opts.unknown_shader_type_map,
+                allow_num_extra_fallback=False,
+            )
             header = new_header
 
     # --- Phase 2: in-place flag + parallax scale + field patches --------------
@@ -2534,6 +2544,7 @@ def _apply_patches(
         _, new_texture_sets, _ = _build_block_map(
             new_data_local,
             new_header_local,
+            opts.unknown_shader_type_map,
             allow_num_extra_fallback=False,
         )
         return new_data_local, new_header_local, new_texture_sets, True
@@ -2628,7 +2639,12 @@ def _apply_patches(
         buf3 = _Buf(data)
         new_header = _read_header_for_profiles(buf3, allowed_profiles=reparse_profiles)
         if new_header:
-            _, texture_sets, _ = _build_block_map(data, new_header, allow_num_extra_fallback=False)
+            _, texture_sets, _ = _build_block_map(
+                data,
+                new_header,
+                opts.unknown_shader_type_map,
+                allow_num_extra_fallback=False,
+            )
             header = new_header
         sets_patched += 1
 
@@ -2719,11 +2735,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         result.message = str(exc)
         return result
     result.detected_game_profile = _detect_game_profile_from_bytes(original_data)
-    wants_fallout_profile = (
-        target_game == _GAME_PROFILE_FALLOUT
-        or (target_game == "auto" and result.detected_game_profile == _GAME_PROFILE_FALLOUT)
-    )
-    if wants_fallout_profile and not opts.experimental_fallout_write:
+    if target_game == _GAME_PROFILE_FALLOUT and not opts.experimental_fallout_write:
         result.errors.append(
             "Fallout profile detected/selected, but experimental_fallout_write is disabled."
         )
@@ -2735,7 +2747,13 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         return result
 
     buf = _Buf(original_data)
-    allowed_profiles = (_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT) if wants_fallout_profile else (_GAME_PROFILE_SKYRIM,)
+    allowed_profiles = (
+        (_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT)
+        if target_game == "auto"
+        else (_GAME_PROFILE_FALLOUT,)
+        if target_game == _GAME_PROFILE_FALLOUT
+        else (_GAME_PROFILE_SKYRIM,)
+    )
     try:
         header = _read_header_for_profiles(buf, allowed_profiles=allowed_profiles)
     except (ValueError, struct.error, IndexError) as exc:
@@ -2745,13 +2763,23 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         return result
     if header is None:
         header_diagnostics = _diagnose_header_parse_failure(
-            original_data, ValueError("Unsupported Skyrim NIF header values")
+            original_data, ValueError("Unsupported NIF header/profile values")
         )
         result.errors.extend(header_diagnostics)
         result.message = header_diagnostics[0]
         return result
     detected_profile = _detect_game_profile(header.user_version, header.user_version_2)
     result.detected_game_profile = detected_profile
+    if detected_profile == _GAME_PROFILE_FALLOUT and not opts.experimental_fallout_write:
+        result.errors.append(
+            "Fallout profile detected/selected, but experimental_fallout_write is disabled."
+        )
+        result.errors.append(
+            "Enable experimental_fallout_write for guarded best-effort patching, "
+            "or use validate-only checks."
+        )
+        result.message = result.errors[0]
+        return result
     if target_game == _GAME_PROFILE_SKYRIM and detected_profile != _GAME_PROFILE_SKYRIM:
         result.errors.append(
             f"target_game='skyrim' requires Skyrim-compatible headers; detected profile: {detected_profile}."
@@ -2933,7 +2961,7 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
         return [], _diagnose_header_parse_failure(data, exc)
     if header is None:
         return [], _diagnose_header_parse_failure(
-            data, ValueError("Unsupported Skyrim NIF header values")
+            data, ValueError("Unsupported NIF header/profile values")
         )
     detected_profile = _detect_game_profile(header.user_version, header.user_version_2)
     if detected_profile == _GAME_PROFILE_FALLOUT:
