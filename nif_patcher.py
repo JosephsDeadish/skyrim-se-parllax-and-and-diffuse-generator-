@@ -501,8 +501,13 @@ class NifPatchOptions:
     target_game:
         Cross-game profile selector. ``"auto"`` detects profile from NIF header.
         ``"skyrim"`` enforces Skyrim-compatible headers. ``"fallout"`` is
-        accepted for readiness diagnostics groundwork but patch-write support is
-        not enabled yet.
+        accepted for readiness diagnostics groundwork. Pair with
+        *experimental_fallout_write* for guarded best-effort Fallout writes.
+    experimental_fallout_write:
+        Enable an experimental Fallout write path (for ``target_game='fallout'``
+        or auto-detected Fallout headers). This mode is conservative:
+        no type-3 block expansion, no parallax scale writes, and no advanced
+        shader-field patches.
     """
 
     enable_parallax: bool = False
@@ -532,6 +537,7 @@ class NifPatchOptions:
     clear_env_mask_texture_path: bool = False
     clear_cubemap_texture_path: bool = False
     target_game: str = "auto"
+    experimental_fallout_write: bool = False
 
     # ----- Safety skip conditions -----
     skip_incompatible_shader_types: bool = True
@@ -1066,8 +1072,12 @@ def _summarize_non_patchable_block_types(header: _NifHeader) -> list[str]:
     return diagnostics
 
 
-def _read_header(buf: _Buf) -> _NifHeader | None:
-    """Parse the NIF header; return ``None`` if not a supported Skyrim NIF."""
+def _read_header_for_profiles(
+    buf: _Buf,
+    *,
+    allowed_profiles: tuple[str, ...],
+) -> _NifHeader | None:
+    """Parse a NIF header for one of *allowed_profiles*."""
     header_line: bytearray = bytearray()
     while buf.remaining() > 0:
         b = buf.read_u8()
@@ -1103,7 +1113,7 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
     # (notably CK-style 130 headers), causing real blocks to be misread and
     # skipped during patching.
     user_version_2 = buf.read_u32()
-    if _detect_game_profile(user_version, user_version_2) != _GAME_PROFILE_SKYRIM:
+    if _detect_game_profile(user_version, user_version_2) not in allowed_profiles:
         return None
     buf.read_sstring_u8()  # author
     if user_version_2 > 130:
@@ -1148,6 +1158,11 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
         blocks_start=buf.pos,
         block_sizes_offset=block_sizes_offset,
     )
+
+
+def _read_header(buf: _Buf) -> _NifHeader | None:
+    """Parse the NIF header; return ``None`` if not a supported Skyrim NIF."""
+    return _read_header_for_profiles(buf, allowed_profiles=(_GAME_PROFILE_SKYRIM,))
 
 
 # ---------------------------------------------------------------------------
@@ -2670,19 +2685,25 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         result.message = str(exc)
         return result
     result.detected_game_profile = _detect_game_profile_from_bytes(original_data)
-    if target_game == _GAME_PROFILE_FALLOUT:
+    wants_fallout_profile = (
+        target_game == _GAME_PROFILE_FALLOUT
+        or (target_game == "auto" and result.detected_game_profile == _GAME_PROFILE_FALLOUT)
+    )
+    if wants_fallout_profile and not opts.experimental_fallout_write:
         result.errors.append(
-            "target_game='fallout' selected, but Fallout patch-write support is not implemented yet."
+            "Fallout profile detected/selected, but experimental_fallout_write is disabled."
         )
         result.errors.append(
-            "Use validate-only checks for Fallout-era meshes or convert to Skyrim-compatible NIFs before patching."
+            "Enable experimental_fallout_write for guarded best-effort patching, "
+            "or use validate-only checks."
         )
         result.message = result.errors[0]
         return result
 
     buf = _Buf(original_data)
+    allowed_profiles = (_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT) if wants_fallout_profile else (_GAME_PROFILE_SKYRIM,)
     try:
-        header = _read_header(buf)
+        header = _read_header_for_profiles(buf, allowed_profiles=allowed_profiles)
     except (ValueError, struct.error, IndexError) as exc:
         header_diagnostics = _diagnose_header_parse_failure(original_data, exc)
         result.errors.extend(header_diagnostics)
@@ -2703,6 +2724,34 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         )
         result.message = result.errors[0]
         return result
+    if detected_profile == _GAME_PROFILE_FALLOUT:
+        unsupported_ops: list[str] = []
+        if opts.force_shader_type_3:
+            unsupported_ops.append("force_shader_type_3")
+        if opts.parallax_scale is not None:
+            unsupported_ops.append("parallax_scale")
+        if opts.fix_mesh_lighting:
+            unsupported_ops.append("fix_mesh_lighting")
+        if opts.spec_strength is not None:
+            unsupported_ops.append("spec_strength")
+        if opts.spec_color is not None:
+            unsupported_ops.append("spec_color")
+        if opts.env_map_scale is not None:
+            unsupported_ops.append("env_map_scale")
+        if unsupported_ops:
+            result.errors.append(
+                "Experimental Fallout patch mode does not support: "
+                + ", ".join(unsupported_ops)
+                + "."
+            )
+            result.errors.append(
+                "Use flag/texture-slot patch options only for Fallout until full profile support is implemented."
+            )
+            result.message = result.errors[0]
+            return result
+        result.warnings.append(
+            "Experimental Fallout patch mode active: applying only guarded flag/texture-slot writes."
+        )
 
     shader_props, texture_sets, parse_errors = _build_block_map(
         original_data, header, opts.unknown_shader_type_map
@@ -2715,6 +2764,12 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         result.message = "Strict unknown-shader check failed."
         return result
     result.shader_properties_found = len(shader_props)
+    if detected_profile == _GAME_PROFILE_FALLOUT and any(sp.layout_name != "real" for sp in shader_props):
+        result.errors.append(
+            "Experimental Fallout patch mode only supports real-layout shader blocks."
+        )
+        result.message = result.errors[0]
+        return result
 
     if not shader_props:
         if parse_errors:
@@ -2822,12 +2877,20 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
         return [], [f"Cannot read NIF: {exc}"]
     buf = _Buf(data)
     try:
-        header = _read_header(buf)
+        header = _read_header_for_profiles(
+            buf,
+            allowed_profiles=(_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT),
+        )
     except (ValueError, struct.error, IndexError) as exc:
         return [], _diagnose_header_parse_failure(data, exc)
     if header is None:
         return [], _diagnose_header_parse_failure(
             data, ValueError("Unsupported Skyrim NIF header values")
+        )
+    detected_profile = _detect_game_profile(header.user_version, header.user_version_2)
+    if detected_profile == _GAME_PROFILE_FALLOUT:
+        diagnostics.append(
+            "Detected Fallout-era profile. Patch-write support is experimental; keep backups and verify in-game."
         )
     shader_props, texture_sets, parse_errors = _build_block_map(data, header)
     diagnostics.extend(parse_errors)
@@ -3097,12 +3160,16 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
 
     if diagnostics:
         result.issues.extend(diagnostics[:6])
+    if result.detected_game_profile == _GAME_PROFILE_FALLOUT:
+        _append_unique(
+            result.suggestions,
+            "Fallout profile detected: use target_game='fallout' with experimental_fallout_write only for guarded flag/texture-slot patches.",
+        )
+        _append_unique(
+            result.suggestions,
+            "Keep backups and verify meshes in-game after patching; full Fallout profile support is still in progress.",
+        )
     if not infos:
-        if result.detected_game_profile == _GAME_PROFILE_FALLOUT:
-            _append_unique(
-                result.suggestions,
-                "Detected Fallout-era profile; patch-write support is pending. Use validate output only for now.",
-            )
         if not diagnostics:
             result.issues.append("No BSLightingShaderProperty blocks found or not a Skyrim SE NIF.")
         for diagnostic in diagnostics:
@@ -3832,7 +3899,13 @@ def _main() -> None:  # pragma: no cover
         choices=("auto", "skyrim", "fallout"),
         default="auto",
         help="Header profile target. 'auto' detects from NIF, 'skyrim' enforces Skyrim profile, "
-             "'fallout' is accepted for diagnostics groundwork but patch-write is not enabled yet.",
+             "'fallout' enables Fallout profile selection (requires --experimental-fallout-write to patch).",
+    )
+    parser.add_argument(
+        "--experimental-fallout-write",
+        action="store_true",
+        help="Enable guarded best-effort patch writes for Fallout profile headers. "
+             "This mode supports flag/texture-slot updates only.",
     )
     parser.add_argument("--strict-unknown-shader-types", action="store_true",
                         help="Fail patching only when an unknown raw shader_type value "
@@ -4002,6 +4075,7 @@ def _main() -> None:  # pragma: no cover
         strict_unknown_shader_types=args.strict_unknown_shader_types,
         unknown_shader_type_map=parsed_shader_map,
         target_game=args.target_game,
+        experimental_fallout_write=args.experimental_fallout_write,
     )
 
     ok = 0

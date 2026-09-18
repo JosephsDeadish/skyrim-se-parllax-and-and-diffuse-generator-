@@ -262,6 +262,13 @@ def _write_nif(tmp_dir: Path, **kwargs: object) -> Path:
     return p
 
 
+def _rewrite_user_version(path: Path, value: int) -> None:
+    raw = bytearray(path.read_bytes())
+    user_version_offset = len(b"Gamebryo File Format, Version 20.2.0.7\n") + 4 + 1
+    struct.pack_into("<I", raw, user_version_offset, value)
+    path.write_bytes(bytes(raw))
+
+
 def _texture_set_slot_count(nif_path: Path) -> int:
     data = nif_path.read_bytes()
     header = _read_header(_Buf(data))
@@ -313,38 +320,30 @@ class TestScanNif(unittest.TestCase):
 
     def test_scan_reports_fallout_header_as_experimental(self) -> None:
         nif = _write_nif(self.tmp, user_ver2=130)
-        raw = bytearray(nif.read_bytes())
-        header = _read_header(_Buf(bytes(raw)))
+        raw = nif.read_bytes()
+        header = _read_header(_Buf(raw))
         self.assertIsNotNone(header)
         assert header is not None
-        user_version_offset = len(b"Gamebryo File Format, Version 20.2.0.7\n") + 4 + 1
-        struct.pack_into("<I", raw, user_version_offset, 11)
-        nif.write_bytes(bytes(raw))
+        _rewrite_user_version(nif, 11)
         infos, diagnostics = scan_nif_diagnostics(nif)
-        self.assertEqual(infos, [])
+        self.assertEqual(len(infos), 1)
         joined = "\n".join(diagnostics).lower()
         self.assertIn("fallout", joined)
         self.assertIn("experimental", joined)
 
     def test_validate_detects_fallout_profile(self) -> None:
         nif = _write_nif(self.tmp, user_ver2=130)
-        raw = bytearray(nif.read_bytes())
-        user_version_offset = len(b"Gamebryo File Format, Version 20.2.0.7\n") + 4 + 1
-        struct.pack_into("<I", raw, user_version_offset, 11)
-        nif.write_bytes(bytes(raw))
+        _rewrite_user_version(nif, 11)
         validation = validate_nif_for_parallax(nif)
         self.assertEqual(validation.detected_game_profile, "fallout")
         self.assertTrue(
-            any("fallout-era profile" in s.lower() for s in validation.suggestions),
+            any("experimental_fallout_write" in s.lower() for s in validation.suggestions),
             validation.suggestions,
         )
 
     def test_validate_keeps_unknown_for_non_fallout_user11_combo(self) -> None:
         nif = _write_nif(self.tmp, user_ver2=83)
-        raw = bytearray(nif.read_bytes())
-        user_version_offset = len(b"Gamebryo File Format, Version 20.2.0.7\n") + 4 + 1
-        struct.pack_into("<I", raw, user_version_offset, 11)
-        nif.write_bytes(bytes(raw))
+        _rewrite_user_version(nif, 11)
         validation = validate_nif_for_parallax(nif)
         self.assertEqual(validation.detected_game_profile, "unknown")
 
@@ -1072,12 +1071,47 @@ class TestPatchNifFlags(unittest.TestCase):
         result = patch_nif(nif, NifPatchOptions(backup=False))
         self.assertFalse(result.success)  # success=False when nothing requested
 
-    def test_target_game_fallout_is_validate_only(self) -> None:
-        nif = _write_nif(self.tmp)
+    def test_target_game_fallout_requires_opt_in(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        _rewrite_user_version(nif, 11)
         result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False, target_game="fallout"))
         self.assertFalse(result.success)
-        self.assertIn("fallout patch-write support is not implemented yet", result.message.lower())
-        self.assertTrue(any("validate-only" in err.lower() for err in result.errors), result.errors)
+        self.assertIn("experimental_fallout_write is disabled", result.message.lower())
+
+    def test_target_game_fallout_with_opt_in_patches_flags(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130, shader_layout="real")
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                backup=False,
+                target_game="fallout",
+                experimental_fallout_write=True,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertEqual(result.detected_game_profile, "fallout")
+        self.assertTrue(any("experimental fallout patch mode active" in w.lower() for w in result.warnings), result.warnings)
+        infos = scan_nif(nif)
+        self.assertTrue(infos[0].has_parallax_flag)
+
+    def test_target_game_fallout_rejects_parallax_scale(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_scale=2.0,
+                backup=False,
+                target_game="fallout",
+                experimental_fallout_write=True,
+            ),
+        )
+        self.assertFalse(result.success)
+        self.assertIn("does not support", result.message.lower())
+        self.assertIn("parallax_scale", result.message)
 
     def test_invalid_target_game_option_fails_fast(self) -> None:
         nif = _write_nif(self.tmp)
