@@ -290,7 +290,9 @@ The **NIF Editor** (accessible from the toolbar button) patches Skyrim-format BS
 **This is an experimental feature.** Always keep backups of your NIF files before patching.
 The **Auto-patch NIFs after generation** checkbox (off by default) triggers NIF patching automatically after each generation run.
 For safety, parallax auto-patching skips known-problem cases by default (Havok-attached meshes, skinned/alpha meshes, decal/anisotropic/soft-lighting variants, and single-pass shader blocks).
-For CLI runs, `nif_patcher.py --target-game auto|skyrim|fallout` now makes profile intent explicit. Fallout writes require `--experimental-fallout-write` and are intentionally limited to guarded flag/texture-slot patching (no type-3 expansion or advanced shader-field writes yet).
+For CLI runs, `nif_patcher.py --target-game auto|skyrim|fallout` now makes profile intent explicit. Fallout writes require `--experimental-fallout-write` and default to guarded flag/texture-slot patching.
+If you explicitly accept higher-risk Fallout writes, per-operation safety gates are available:
+`--fallout-allow-parallax-scale`, `--fallout-allow-fix-mesh-lighting`, `--fallout-allow-spec-strength`, `--fallout-allow-spec-color`, and `--fallout-allow-env-map-scale`.
 The NIF Editor now exposes matching controls (**NIF game profile** + **Enable experimental Fallout writes**) so GUI patch behavior aligns with CLI behavior.
 Validation can now emit a grouped conflict-resolution view with `--validate --conflict-report`, listing conflict categories plus suggested auto-fix actions per file.
 For larger mod-folder runs, add `--conflict-report-summary` to print a cross-file top-conflict summary, and use the NIF Editor scan view's batch summary row to quickly identify the highest-frequency conflict groups.

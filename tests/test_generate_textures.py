@@ -1,4 +1,5 @@
 import json
+import queue
 import sys
 import tempfile
 import unittest
@@ -34,6 +35,7 @@ from generate_textures import (
     _normalize_gui_state,
     _save_with_dds_fallback,
     _to_dds_compatible_image,
+    TextureGeneratorGUI,
     analyze_image_content,
     auto_patch_related_nifs_for_texture,
     apply_recommendations_by_auto_flags,
@@ -3706,6 +3708,93 @@ class GenerateTexturesTests(unittest.TestCase):
                             exit_code = _run_cli()
         self.assertEqual(exit_code, 1)
         self.assertIn("no desktop display", "".join(call.args[0] for call in mock_stderr.write.call_args_list))
+
+    def test_gui_processing_queue_smoke_done_event_reports_outputs_failures_and_autopatch(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+
+        class _Var:
+            def __init__(self, value=None) -> None:
+                self._value = value
+
+            def get(self):
+                return self._value
+
+            def set(self, value) -> None:
+                self._value = value
+
+        class _Root:
+            def __init__(self) -> None:
+                self.after_calls: list[tuple[int, object]] = []
+
+            def after(self, delay: int, callback) -> None:
+                self.after_calls.append((delay, callback))
+
+        fake_gui = mock.Mock(spec=TextureGeneratorGUI)
+        fake_gui.is_processing = True
+        fake_gui.processing_queue = queue.Queue()
+        fake_gui.status_var = _Var("")
+        fake_gui.show_batch_preview_var = _Var(False)
+        fake_gui.batch_nif_patch_results = [("stone.dds", 2, 1)]
+        fake_gui.batch_failures = [("broken.dds", "decode error")]
+        fake_gui.root = _Root()
+        fake_gui._set_preview_source_by_path = mock.Mock()
+        fake_gui._set_processing_state = mock.Mock(side_effect=lambda active: setattr(fake_gui, "is_processing", bool(active)))
+        fake_gui._refresh_preview = mock.Mock()
+        fake_gui.processing_queue.put(("done", {Path("stone.dds"): {"diffuse": Path("stone_out.dds")}}))
+
+        with mock.patch("generate_textures.messagebox.showinfo") as showinfo:
+            TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        self.assertFalse(fake_gui.is_processing)
+        self.assertIn("Generated 1 file(s)", fake_gui.status_var.get())
+        self.assertIn("Failed: 1", fake_gui.status_var.get())
+        showinfo.assert_called_once()
+        shown_message = showinfo.call_args.args[1]
+        self.assertIn("Automatic NIF patching: 2 succeeded, 1 failed.", shown_message)
+        self.assertIn("broken.dds: decode error", shown_message)
+        fake_gui._refresh_preview.assert_called_once()
+
+    def test_gui_processing_queue_smoke_progress_event_updates_status_and_preview(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+
+        class _Var:
+            def __init__(self, value=None) -> None:
+                self._value = value
+
+            def get(self):
+                return self._value
+
+            def set(self, value) -> None:
+                self._value = value
+
+        class _Root:
+            def __init__(self) -> None:
+                self.after_calls: list[tuple[int, object]] = []
+
+            def after(self, delay: int, callback) -> None:
+                self.after_calls.append((delay, callback))
+
+        fake_gui = mock.Mock(spec=TextureGeneratorGUI)
+        fake_gui.is_processing = True
+        fake_gui.processing_queue = queue.Queue()
+        fake_gui.status_var = _Var("")
+        fake_gui.show_batch_preview_var = _Var(True)
+        fake_gui.batch_nif_patch_results = []
+        fake_gui.batch_failures = []
+        fake_gui.root = _Root()
+        fake_gui._set_preview_source_by_path = mock.Mock()
+        fake_gui._set_processing_state = mock.Mock()
+        fake_gui._refresh_preview = mock.Mock()
+        current = Path("textures/stone.dds")
+        fake_gui.processing_queue.put(("progress", (1, 3, current)))
+
+        TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        self.assertIn("Processing 1/3: stone.dds", fake_gui.status_var.get())
+        fake_gui._set_preview_source_by_path.assert_called_once_with(current)
+        self.assertEqual(fake_gui.root.after_calls[0][0], 100)
 
     def test_generate_normal_raises_clear_error_for_buffer_size_mismatch(self) -> None:
         with mock.patch("generate_textures.np.frombuffer", return_value=np.zeros(1, dtype=np.uint8)):

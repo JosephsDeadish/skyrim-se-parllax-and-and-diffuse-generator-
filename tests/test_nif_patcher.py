@@ -1204,6 +1204,23 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertIn("does not support", result.message.lower())
         self.assertIn("parallax_scale", result.message)
 
+    def test_target_game_fallout_allows_parallax_scale_with_safety_gate(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_scale=2.0,
+                backup=False,
+                target_game="fallout",
+                experimental_fallout_write=True,
+                fallout_allow_parallax_scale=True,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertTrue(any("per-operation safety gates enabled" in warning.lower() for warning in result.warnings))
+
     def test_target_game_fallout_rejects_force_type3(self) -> None:
         nif = _write_nif(self.tmp, user_ver2=130)
         _rewrite_user_version(nif, 11)
@@ -1219,6 +1236,45 @@ class TestPatchNifFlags(unittest.TestCase):
         )
         self.assertFalse(result.success)
         self.assertIn("force_shader_type_3", result.message)
+
+    def test_target_game_fallout_rejects_advanced_shader_fields_without_safety_gates(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130, shader_layout="real")
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                spec_strength=0.8,
+                env_map_scale=1.1,
+                backup=False,
+                target_game="fallout",
+                experimental_fallout_write=True,
+            ),
+        )
+        self.assertFalse(result.success)
+        self.assertIn("spec_strength", result.message)
+        self.assertIn("env_map_scale", result.message)
+
+    def test_target_game_fallout_allows_advanced_shader_fields_with_safety_gates(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130, shader_layout="real", shader_type=1, env_map_scale=0.5)
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                spec_strength=0.65,
+                env_map_scale=1.25,
+                fix_mesh_lighting=True,
+                backup=False,
+                target_game="fallout",
+                experimental_fallout_write=True,
+                fallout_allow_spec_strength=True,
+                fallout_allow_env_map_scale=True,
+                fallout_allow_fix_mesh_lighting=True,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertTrue(any("per-operation safety gates enabled" in warning.lower() for warning in result.warnings))
 
     def test_invalid_target_game_option_fails_fast(self) -> None:
         nif = _write_nif(self.tmp)

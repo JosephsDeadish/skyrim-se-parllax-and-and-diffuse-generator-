@@ -553,6 +553,16 @@ class NifPatchOptions:
         or auto-detected Fallout headers). This mode is conservative:
         no type-3 block expansion, no parallax scale writes, and no advanced
         shader-field patches.
+    fallout_allow_parallax_scale:
+        Explicitly allow parallax-scale writes in experimental Fallout mode.
+    fallout_allow_fix_mesh_lighting:
+        Explicitly allow ``fix_mesh_lighting`` writes in experimental Fallout mode.
+    fallout_allow_spec_strength:
+        Explicitly allow ``spec_strength`` writes in experimental Fallout mode.
+    fallout_allow_spec_color:
+        Explicitly allow ``spec_color`` writes in experimental Fallout mode.
+    fallout_allow_env_map_scale:
+        Explicitly allow ``env_map_scale`` writes in experimental Fallout mode.
     """
 
     enable_parallax: bool = False
@@ -583,6 +593,11 @@ class NifPatchOptions:
     clear_cubemap_texture_path: bool = False
     target_game: str = "auto"
     experimental_fallout_write: bool = False
+    fallout_allow_parallax_scale: bool = False
+    fallout_allow_fix_mesh_lighting: bool = False
+    fallout_allow_spec_strength: bool = False
+    fallout_allow_spec_color: bool = False
+    fallout_allow_env_map_scale: bool = False
 
     # ----- Safety skip conditions -----
     skip_incompatible_shader_types: bool = True
@@ -2883,19 +2898,30 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         return result
     if detected_profile == _GAME_PROFILE_FALLOUT:
         unsupported_ops: list[str] = []
+        enabled_fallout_gates: list[str] = []
         if opts.force_shader_type_3 and not capability.supports_force_type3:
             unsupported_ops.append("force_shader_type_3")
-        if opts.parallax_scale is not None and not capability.supports_parallax_scale:
+        if opts.parallax_scale is not None and not capability.supports_parallax_scale and not opts.fallout_allow_parallax_scale:
             unsupported_ops.append("parallax_scale")
+        elif opts.parallax_scale is not None and opts.fallout_allow_parallax_scale:
+            enabled_fallout_gates.append("parallax_scale")
         if not capability.supports_advanced_shader_fields:
-            if opts.fix_mesh_lighting:
+            if opts.fix_mesh_lighting and not opts.fallout_allow_fix_mesh_lighting:
                 unsupported_ops.append("fix_mesh_lighting")
-            if opts.spec_strength is not None:
+            elif opts.fix_mesh_lighting and opts.fallout_allow_fix_mesh_lighting:
+                enabled_fallout_gates.append("fix_mesh_lighting")
+            if opts.spec_strength is not None and not opts.fallout_allow_spec_strength:
                 unsupported_ops.append("spec_strength")
-            if opts.spec_color is not None:
+            elif opts.spec_strength is not None and opts.fallout_allow_spec_strength:
+                enabled_fallout_gates.append("spec_strength")
+            if opts.spec_color is not None and not opts.fallout_allow_spec_color:
                 unsupported_ops.append("spec_color")
-            if opts.env_map_scale is not None:
+            elif opts.spec_color is not None and opts.fallout_allow_spec_color:
+                enabled_fallout_gates.append("spec_color")
+            if opts.env_map_scale is not None and not opts.fallout_allow_env_map_scale:
                 unsupported_ops.append("env_map_scale")
+            elif opts.env_map_scale is not None and opts.fallout_allow_env_map_scale:
+                enabled_fallout_gates.append("env_map_scale")
         if unsupported_ops:
             result.errors.append(
                 "Experimental Fallout patch mode does not support: "
@@ -2903,13 +2929,20 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
                 + "."
             )
             result.errors.append(
-                "Use flag/texture-slot patch options only for Fallout until full profile support is implemented."
+                "Enable the matching --fallout-allow-* safety gates only when you explicitly accept risk, "
+                "or use flag/texture-slot patch options only."
             )
             result.message = result.errors[0]
             return result
         result.warnings.append(
             "Experimental Fallout patch mode active: applying only guarded flag/texture-slot writes."
         )
+        if enabled_fallout_gates:
+            result.warnings.append(
+                "Experimental Fallout per-operation safety gates enabled: "
+                + ", ".join(sorted(set(enabled_fallout_gates)))
+                + "."
+            )
 
     shader_props, texture_sets, parse_errors = _build_block_map(
         original_data,
@@ -4667,6 +4700,31 @@ def _main() -> None:  # pragma: no cover
         help="Enable guarded best-effort patch writes for Fallout profile headers. "
              "This mode supports flag/texture-slot updates only.",
     )
+    parser.add_argument(
+        "--fallout-allow-parallax-scale",
+        action="store_true",
+        help="Experimental Fallout mode only: allow parallax-scale writes (higher risk).",
+    )
+    parser.add_argument(
+        "--fallout-allow-fix-mesh-lighting",
+        action="store_true",
+        help="Experimental Fallout mode only: allow fix-mesh-lighting writes (higher risk).",
+    )
+    parser.add_argument(
+        "--fallout-allow-spec-strength",
+        action="store_true",
+        help="Experimental Fallout mode only: allow spec-strength writes (higher risk).",
+    )
+    parser.add_argument(
+        "--fallout-allow-spec-color",
+        action="store_true",
+        help="Experimental Fallout mode only: allow spec-color writes (higher risk).",
+    )
+    parser.add_argument(
+        "--fallout-allow-env-map-scale",
+        action="store_true",
+        help="Experimental Fallout mode only: allow env-map-scale writes (higher risk).",
+    )
     parser.add_argument("--strict-unknown-shader-types", action="store_true",
                         help="Fail patching only when an unknown raw shader_type value "
                              "is classified as UNRESOLVED after mapping, semantic, and "
@@ -4931,6 +4989,11 @@ def _main() -> None:  # pragma: no cover
         unknown_shader_type_map=parsed_shader_map,
         target_game=args.target_game,
         experimental_fallout_write=args.experimental_fallout_write,
+        fallout_allow_parallax_scale=args.fallout_allow_parallax_scale,
+        fallout_allow_fix_mesh_lighting=args.fallout_allow_fix_mesh_lighting,
+        fallout_allow_spec_strength=args.fallout_allow_spec_strength,
+        fallout_allow_spec_color=args.fallout_allow_spec_color,
+        fallout_allow_env_map_scale=args.fallout_allow_env_map_scale,
     )
 
     ok = 0
