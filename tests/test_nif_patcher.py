@@ -986,7 +986,7 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
         self.assertTrue(infos[0].has_parallax_flag)
 
-    def test_enable_parallax_does_not_retype_sentinel_default_block(self) -> None:
+    def test_enable_parallax_retypes_sentinel_default_block(self) -> None:
         nif = _write_nif(self.tmp)
         raw = bytearray(nif.read_bytes())
         shader_header = struct.pack("<IIiI", 0, 0, -1, SHADER_TYPE_DEFAULT)
@@ -998,8 +998,8 @@ class TestPatchNifFlags(unittest.TestCase):
         result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
         self.assertTrue(result.success, result.errors)
         infos = scan_nif(nif)
-        self.assertEqual(infos[0].raw_shader_type, 0xFFFFFFFF)
-        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
+        self.assertEqual(infos[0].raw_shader_type, SHADER_TYPE_HEIGHTMAP)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
         self.assertTrue(infos[0].has_parallax_flag)
 
     def test_enable_parallax_preserves_unknown_raw_shader_value(self) -> None:

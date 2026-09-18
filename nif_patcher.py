@@ -2102,9 +2102,9 @@ def _strict_unknown_shader_notes(shader_props: list[_ShaderPropBlock]) -> list[s
 
     A block is a violation only when, after all resolution strategies complete,
     its normalized resolution type is
-    ``UNRESOLVED``. ``WEAK_RESOLUTION`` paths (e.g. masked low-byte decoding or
-    cubemap-slot-only guesses) are accepted but surfaced as warnings by
-    diagnostics so strict mode can avoid hard-failing legacy meshes.
+    ``UNRESOLVED``. ``WEAK_RESOLUTION`` paths are accepted and will appear in
+    the generic shader-resolution diagnostics produced by
+    :func:`_shader_resolution_notes`.
     """
     violations: list[str] = []
     for sp in shader_props:
@@ -2354,7 +2354,7 @@ def _apply_patches(
                 sp.shader_type_offset is not None
                 and sp.shader_type == SHADER_TYPE_DEFAULT
                 and not (sp.flags1 & SLSF1_PARALLAX)
-                and sp.raw_shader_type == SHADER_TYPE_DEFAULT
+                and sp.shader_type_resolution in {"exact", "sentinel_default", "mapping_table"}
             ):
                 # Align legacy-layout behavior with common patchers: when
                 # enabling parallax on default shaders, set shader type
