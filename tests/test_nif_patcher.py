@@ -1214,9 +1214,9 @@ class TestPatchNifFlags(unittest.TestCase):
     def test_strict_pre_write_validation_blocks_write_on_validation_failure(self) -> None:
         nif = _write_nif(self.tmp)
         original = nif.read_bytes()
-        with mock.patch(
-            "nif_patcher._validate_patched_bytes_before_write",
-            return_value=["Pre-write block-map warning/error: synthetic failure"],
+        with mock.patch.dict(
+            patch_nif.__globals__,
+            {"_validate_patched_bytes_before_write": lambda *args, **kwargs: ["Pre-write block-map warning/error: synthetic failure"]},
         ):
             result = patch_nif(
                 nif,

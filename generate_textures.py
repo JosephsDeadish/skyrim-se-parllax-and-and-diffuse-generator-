@@ -9997,8 +9997,16 @@ if GUI_AVAILABLE:
 
             win = tk.Toplevel(self.root)
             win.title(self._tr("NIF Editor — Skyrim Texture Generator v{version}").format(version=APP_VERSION))
-            win.geometry("1120x820")
-            win.minsize(760, 620)
+            screen_width = max(1024, int(win.winfo_screenwidth()))
+            screen_height = max(720, int(win.winfo_screenheight()))
+            initial_width = min(1680, max(1180, int(screen_width * 0.9)))
+            initial_height = min(1120, max(820, int(screen_height * 0.88)))
+            min_width = max(900, min(initial_width, 980))
+            min_height = max(680, min(initial_height, 720))
+            pos_x = max(0, (screen_width - initial_width) // 2)
+            pos_y = max(0, (screen_height - initial_height) // 2)
+            win.geometry(f"{initial_width}x{initial_height}+{pos_x}+{pos_y}")
+            win.minsize(min_width, min_height)
             win.resizable(True, True)
             win.grab_set()
             try:
@@ -10231,12 +10239,14 @@ if GUI_AVAILABLE:
                     variable=enable_env_var,
                 )
                 enable_env_check.pack(side="left")
+                flag_row2b = ttk.Frame(opt_frame)
+                flag_row2b.pack(fill="x", pady=(2, 0))
                 force_type3_check = ttk.Checkbutton(
-                    flag_row2,
+                    flag_row2b,
                     text="Force shader type 3 (required for stronger parallax scale on some meshes)",
                     variable=force_type3_var,
                 )
-                force_type3_check.pack(side="left", padx=(12, 0))
+                force_type3_check.pack(side="left")
                 flag_row3 = ttk.Frame(opt_frame)
                 flag_row3.pack(fill="x", pady=(2, 0))
                 enable_glow_check = ttk.Checkbutton(
@@ -10258,14 +10268,16 @@ if GUI_AVAILABLE:
                 backup_check.pack(side="left")
                 dry_run_check = ttk.Checkbutton(misc_row, text="Dry run (scan/preview only)", variable=dry_run_var)
                 dry_run_check.pack(side="left", padx=(12, 0))
+                misc_row1b = ttk.Frame(opt_frame)
+                misc_row1b.pack(fill="x", pady=(2, 0))
                 conflict_report_check = ttk.Checkbutton(
-                    misc_row,
+                    misc_row1b,
                     text="Show grouped conflict report in scan details",
                     variable=conflict_report_var,
                 )
-                conflict_report_check.pack(side="left", padx=(12, 0))
+                conflict_report_check.pack(side="left")
                 conflict_examples_check = ttk.Checkbutton(
-                    misc_row,
+                    misc_row1b,
                     text="Include conflict examples",
                     variable=conflict_examples_var,
                 )
@@ -10338,14 +10350,16 @@ if GUI_AVAILABLE:
                     variable=disable_env_var,
                 )
                 disable_env_check.pack(side="left", padx=(12, 0))
+                unpatch_row1b = ttk.Frame(unpatch_frame)
+                unpatch_row1b.pack(fill="x", pady=(2, 0))
                 disable_glow_check = ttk.Checkbutton(
-                    unpatch_row,
+                    unpatch_row1b,
                     text="Disable glow-map flag",
                     variable=disable_glow_var,
                 )
-                disable_glow_check.pack(side="left", padx=(12, 0))
+                disable_glow_check.pack(side="left")
                 disable_pbr_check = ttk.Checkbutton(
-                    unpatch_row,
+                    unpatch_row1b,
                     text="Disable TruePBR / PBR flag",
                     variable=disable_pbr_var,
                 )
@@ -10920,6 +10934,20 @@ if GUI_AVAILABLE:
                 results_scroll.pack(side="right", fill="y")
                 results_scroll_x.pack(side="bottom", fill="x")
                 results_tree.pack(fill="both", expand=True, side="left")
+
+                def _resize_results_columns(event: tk.Event[tk.Misc]) -> None:
+                    try:
+                        available_width = max(560, int(getattr(event, "width", results_list_frame.winfo_width())) - 18)
+                        status_width = 90
+                        file_width = max(220, min(420, int(available_width * 0.28)))
+                        details_width = max(280, available_width - status_width - file_width)
+                        results_tree.column("status", width=status_width)
+                        results_tree.column("file", width=file_width)
+                        results_tree.column("details", width=details_width)
+                    except Exception:
+                        pass
+
+                results_list_frame.bind("<Configure>", _resize_results_columns, add="+")
                 self._add_tooltip(
                     results_tree,
                     "Single results log for scan/patch/restore actions. Use the Details column or copy actions for the full text.",
@@ -11859,49 +11887,53 @@ if GUI_AVAILABLE:
                     threading.Thread(target=_restore_worker, daemon=True).start()
 
                 scan_button = ttk.Button(btn_frame, text="Scan NIFs", command=_scan_nifs)
-                scan_button.pack(side="left", padx=(0, 6))
+                op_row1 = ttk.Frame(btn_frame)
+                op_row1.pack(fill="x", pady=(0, 4))
+                op_row2 = ttk.Frame(btn_frame)
+                op_row2.pack(fill="x")
+                scan_button.pack(in_=op_row1, side="left", padx=(0, 6))
                 rerun_conflicts_button = ttk.Button(
                     btn_frame,
                     text="Re-scan conflicts only",
                     command=_rerun_conflict_scan,
                 )
-                rerun_conflicts_button.pack(side="left", padx=(0, 6))
+                rerun_conflicts_button.pack(in_=op_row1, side="left", padx=(0, 6))
                 rerun_patch_conflicts_button = ttk.Button(
                     btn_frame,
                     text="Patch conflicts only",
                     command=_rerun_conflict_patch,
                 )
-                rerun_patch_conflicts_button.pack(side="left", padx=(0, 6))
+                rerun_patch_conflicts_button.pack(in_=op_row1, side="left", padx=(0, 6))
                 patch_button = ttk.Button(btn_frame, text="Apply patch", command=_run_patch)
-                patch_button.pack(side="left", padx=(0, 6))
+                patch_button.pack(in_=op_row1, side="left", padx=(0, 6))
                 auto_fix_button = ttk.Button(
                     btn_frame,
                     text="Auto-remediate conflicts",
                     command=_run_auto_remediate_conflicts,
                 )
-                auto_fix_button.pack(side="left", padx=(0, 6))
+                auto_fix_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 rerun_auto_fix_conflicts_button = ttk.Button(
                     btn_frame,
                     text="Auto-remediate conflict files only",
                     command=_rerun_conflict_auto_remediate,
                 )
-                rerun_auto_fix_conflicts_button.pack(side="left", padx=(0, 6))
+                rerun_auto_fix_conflicts_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 unpatch_button = ttk.Button(btn_frame, text="Remove features (unpatch)", command=_run_unpatch)
-                unpatch_button.pack(side="left", padx=(0, 6))
+                unpatch_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 restore_button = ttk.Button(btn_frame, text="Restore from .bak", command=_run_restore_backups)
-                restore_button.pack(side="left", padx=(0, 6))
+                restore_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 clear_button = ttk.Button(btn_frame, text="Clear log", command=_clear_log)
-                clear_button.pack(side="left")
+                clear_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 export_report_button = ttk.Button(btn_frame, text="Export report", command=_export_conflict_report)
-                export_report_button.pack(side="left", padx=(6, 0))
+                export_report_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 copy_selected_button = ttk.Button(btn_frame, text="Copy selected", command=_copy_selected_result)
-                copy_selected_button.pack(side="left", padx=(6, 0))
+                copy_selected_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 copy_all_button = ttk.Button(btn_frame, text="Copy all", command=_copy_all_results)
-                copy_all_button.pack(side="left", padx=(6, 0))
+                copy_all_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 cancel_ops_button = ttk.Button(btn_frame, text="Cancel operation", command=_request_cancel_nif_editor_ops, state=tk.DISABLED)
-                cancel_ops_button.pack(side="left", padx=(6, 0))
+                cancel_ops_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 close_button = ttk.Button(btn_frame, text="Close", command=win.destroy)
-                close_button.pack(side="right")
+                close_button.pack(in_=op_row2, side="right")
                 # Register action buttons so _set_ops_active can disable them during ops
                 _action_buttons_ref.extend(
                     [
@@ -11938,6 +11970,27 @@ if GUI_AVAILABLE:
                 _NIF_EDITOR_MIN_CONTROLS_PANE_HEIGHT = 340
                 _NIF_EDITOR_MIN_RESULTS_PANE_HEIGHT = 180
 
+                def _enforce_nif_editor_sash_bounds() -> None:
+                    try:
+                        if not win.winfo_exists():
+                            return
+                        pane_height = content_pane.winfo_height()
+                        if pane_height <= 1:
+                            return
+                        pane_upper = max(1, pane_height - 1)
+                        if pane_height > _NIF_EDITOR_MIN_RESULTS_PANE_HEIGHT + 1:
+                            max_sash = min(pane_upper, pane_height - _NIF_EDITOR_MIN_RESULTS_PANE_HEIGHT)
+                            min_sash = min(_NIF_EDITOR_MIN_CONTROLS_PANE_HEIGHT, max_sash)
+                        else:
+                            max_sash = max(1, pane_height // 2)
+                            min_sash = max_sash
+                        current_sash = content_pane.sashpos(0)
+                        clamped_sash = max(min_sash, min(current_sash, max_sash))
+                        if clamped_sash != current_sash:
+                            content_pane.sashpos(0, clamped_sash)
+                    except Exception:
+                        pass
+
                 def _apply_nif_editor_initial_pane_layout(attempt: int = 0) -> None:
                     try:
                         if not win.winfo_exists():
@@ -11964,10 +12017,15 @@ if GUI_AVAILABLE:
                             min_sash = max_sash
                         controls_height = max(min_sash, min(controls_height, max_sash))
                         content_pane.sashpos(0, controls_height)
+                        _enforce_nif_editor_sash_bounds()
                     except Exception:
                         pass
 
+                def _on_nif_editor_resize(_event: object | None = None) -> None:
+                    _enforce_nif_editor_sash_bounds()
+
                 win.after_idle(_apply_nif_editor_initial_pane_layout)
+                content_pane.bind("<Configure>", _on_nif_editor_resize, add="+")
             except Exception as exc:
                 try:
                     win.destroy()
