@@ -2973,16 +2973,6 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         result.message = str(exc)
         return result
     result.detected_game_profile = _detect_game_profile_from_bytes(original_data)
-    if target_game == _GAME_PROFILE_FALLOUT and not opts.experimental_fallout_write:
-        result.errors.append(
-            "Fallout profile detected/selected, but experimental_fallout_write is disabled."
-        )
-        result.errors.append(
-            "Enable experimental_fallout_write for guarded best-effort patching, "
-            "or use validate-only checks."
-        )
-        result.message = result.errors[0]
-        return result
 
     buf = _Buf(original_data)
     allowed_profiles = (
@@ -5114,6 +5104,8 @@ def _main() -> None:  # pragma: no cover
                     )
                     for err in rem_result.errors:
                         print(f"       {err}", file=sys.stderr)
+                    if rem_result.success and not args.dry_run:
+                        validation_results[-1] = validate_nif_for_parallax(nif)
         if args.conflict_report_summary:
             summary = summarize_validation_conflicts(validation_results)
             if summary:
