@@ -1183,11 +1183,12 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
         if profile == _GAME_PROFILE_FALLOUT:
             diagnostics.append(
                 "Detected user_version=11 (likely Fallout-era NIF header). "
-                "Fallout compatibility is still experimental and not patch-enabled yet."
+                "Fallout patching is available in guarded experimental mode."
             )
             diagnostics.append(
-                "Resolution: convert/export to a Skyrim-compatible mesh path first, "
-                "or use validate-only checks until Fallout patch support is implemented."
+                "Resolution: patch with --target-game fallout --experimental-fallout-write "
+                "(and optional --fallout-allow-* safety gates), "
+                "or convert/export to a Skyrim-compatible mesh if needed."
             )
             return diagnostics
         if profile != _GAME_PROFILE_SKYRIM:
@@ -1404,7 +1405,7 @@ class _TextureSetBlock:
 
 def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
                        block_size: int, num_blocks: int,
-                       *, allow_num_extra_fallback: bool = True) -> _ShaderPropBlock:
+                       *, allow_num_extra_fallback: bool = False) -> _ShaderPropBlock:
     """Parse a BSLightingShaderProperty block.
 
     Layout for Skyrim/SE BSLightingShaderProperty (NIF 20.2.0.7 / user_version=12):
@@ -2361,7 +2362,7 @@ def _build_block_map(
     header: _NifHeader,
     mapping_table: dict[int, int] | None = None,
     *,
-    allow_num_extra_fallback: bool = True,
+    allow_num_extra_fallback: bool = False,
 ) -> tuple[list[_ShaderPropBlock], dict[int, _TextureSetBlock], list[str]]:
     """Return (shader_props, texture_sets, errors)."""
     block_starts = _compute_block_starts(header.blocks_start, header.block_sizes)
@@ -2998,8 +2999,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         return result
     detected_profile = _detect_game_profile(header.user_version, header.user_version_2)
     result.detected_game_profile = detected_profile
-    selected_profile = detected_profile if target_game == "auto" else target_game
-    capability = _game_patch_capability(selected_profile)
+    capability = _game_patch_capability(detected_profile)
     if capability.requires_experimental_opt_in and not opts.experimental_fallout_write:
         result.errors.append(
             "Fallout profile detected/selected, but experimental_fallout_write is disabled."
@@ -3022,7 +3022,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         )
         result.message = result.errors[0]
         return result
-    if selected_profile == _GAME_PROFILE_FALLOUT:
+    if detected_profile == _GAME_PROFILE_FALLOUT:
         unsupported_ops: list[str] = []
         enabled_fallout_gates: list[str] = []
         if opts.force_shader_type_3 and not capability.supports_force_type3:
@@ -3124,7 +3124,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
                     original_data,
                     header,
                     fallback_opts.unknown_shader_type_map,
-                    allow_num_extra_fallback=False,
+                    allow_num_extra_fallback=True,
                 )
                 if not fallback_shader_props:
                     if fallback_parse_errors:
@@ -3927,6 +3927,7 @@ def build_auto_remediation_patch_options(
     fallout_allow_spec_color: bool = False,
     fallout_allow_env_map_scale: bool = False,
     allow_destructive: bool = False,
+    skip_single_pass: bool = True,
     backup: bool = True,
     dry_run: bool = False,
     strict_pre_write_validation: bool = True,
@@ -3943,6 +3944,7 @@ def build_auto_remediation_patch_options(
         fallout_allow_spec_strength=fallout_allow_spec_strength,
         fallout_allow_spec_color=fallout_allow_spec_color,
         fallout_allow_env_map_scale=fallout_allow_env_map_scale,
+        skip_single_pass=skip_single_pass,
         backup=backup,
         dry_run=dry_run,
         strict_pre_write_validation=strict_pre_write_validation,
@@ -4008,6 +4010,7 @@ def auto_remediate_nif_conflicts(
     fallout_allow_spec_color: bool = False,
     fallout_allow_env_map_scale: bool = False,
     allow_destructive: bool = False,
+    skip_single_pass: bool = True,
     backup: bool = True,
     dry_run: bool = False,
     strict_pre_write_validation: bool = True,
@@ -4024,6 +4027,7 @@ def auto_remediate_nif_conflicts(
         fallout_allow_spec_color=fallout_allow_spec_color,
         fallout_allow_env_map_scale=fallout_allow_env_map_scale,
         allow_destructive=allow_destructive,
+        skip_single_pass=skip_single_pass,
         backup=backup,
         dry_run=dry_run,
         strict_pre_write_validation=strict_pre_write_validation,
@@ -5085,6 +5089,7 @@ def _main() -> None:  # pragma: no cover
                     fallout_allow_spec_color=args.fallout_allow_spec_color,
                     fallout_allow_env_map_scale=args.fallout_allow_env_map_scale,
                     allow_destructive=args.allow_destructive_remediation,
+                    skip_single_pass=not args.no_skip_single_pass,
                     backup=not args.no_backup,
                     dry_run=args.dry_run,
                     strict_pre_write_validation=not args.no_strict_pre_write_validation,

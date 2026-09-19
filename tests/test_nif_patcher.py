@@ -2631,6 +2631,18 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertTrue(opts.fallout_allow_spec_color)
         self.assertTrue(opts.fallout_allow_env_map_scale)
 
+    def test_auto_remediation_build_options_propagates_single_pass_policy(self) -> None:
+        nif = _write_nif(self.tmp, flags1=SLSF1_SINGLE_PASS)
+        opts, _steps = build_auto_remediation_patch_options(
+            nif,
+            ["missing_parallax_flag.skyrim.real"],
+            skip_single_pass=False,
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertFalse(opts.skip_single_pass)
+
 
 class TestCompatibilityReport(unittest.TestCase):
     def test_game_profile_support_matrix_has_expected_profiles(self) -> None:
