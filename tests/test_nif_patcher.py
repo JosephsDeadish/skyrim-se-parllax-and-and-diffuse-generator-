@@ -3421,6 +3421,12 @@ class TestShaderFieldPatches(unittest.TestCase):
 
 
 class TestCliArgumentValidation(unittest.TestCase):
+    def test_missing_nif_paths_fails_fast(self) -> None:
+        with mock.patch("sys.argv", ["nif_patcher.py"]):
+            with self.assertRaises(SystemExit) as ctx:
+                nif_patcher_main()
+        self.assertEqual(ctx.exception.code, 2)
+
     def test_auto_remediate_requires_validate_mode(self) -> None:
         with mock.patch("sys.argv", ["nif_patcher.py", "dummy.nif", "--auto-remediate"]):
             with self.assertRaises(SystemExit) as ctx:

@@ -5047,6 +5047,9 @@ def _main() -> None:  # pragma: no cover
         print(build_compatibility_report_text())
         return
 
+    if not args.nif:
+        parser.error("the following arguments are required: nif")
+
     nif_files: list[Path] = []
     for p in args.nif:
         if p.is_dir():
