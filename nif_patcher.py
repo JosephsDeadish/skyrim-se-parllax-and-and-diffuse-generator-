@@ -1141,19 +1141,20 @@ def _game_patch_capability(profile: str) -> _GamePatchCapability:
 
 def _detect_game_profile_from_bytes(data: bytes) -> str:
     """Best-effort game profile detection for diagnostics and status UI."""
-    header_line_end = _find_header_terminator(data)
-    if header_line_end is None:
-        return _GAME_PROFILE_UNKNOWN
     try:
-        version_offset = header_line_end
-        version = struct.unpack_from("<I", data, version_offset)[0]
-        if version != _NIF_VERSION_20_2_0_7:
-            return _GAME_PROFILE_UNKNOWN
-        user_version = struct.unpack_from("<I", data, version_offset + 5)[0]
-        user_version_2 = struct.unpack_from("<I", data, version_offset + 13)[0]
+        header = _read_header_for_profiles(
+            _Buf(data),
+            allowed_profiles=(
+                _GAME_PROFILE_SKYRIM,
+                _GAME_PROFILE_FALLOUT,
+                _GAME_PROFILE_UNKNOWN,
+            ),
+        )
     except (struct.error, IndexError, ValueError):
         return _GAME_PROFILE_UNKNOWN
-    return _detect_game_profile(user_version, user_version_2)
+    if header is None:
+        return _GAME_PROFILE_UNKNOWN
+    return _detect_game_profile(header.user_version, header.user_version_2)
 
 
 def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
@@ -1177,8 +1178,24 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
         if version != _NIF_VERSION_20_2_0_7:
             diagnostics.append(f"NIF version is 0x{version:08X}, not Skyrim SE 20.2.0.7.")
             return diagnostics
-        user_version = struct.unpack_from("<I", data, version_offset + 5)[0]
-        user_version_2 = struct.unpack_from("<I", data, version_offset + 13)[0]
+        header = _read_header_for_profiles(
+            _Buf(data),
+            allowed_profiles=(
+                _GAME_PROFILE_SKYRIM,
+                _GAME_PROFILE_FALLOUT,
+                _GAME_PROFILE_UNKNOWN,
+            ),
+        )
+        if header is None:
+            diagnostics.append(
+                "Could not parse user version fields from header; the file may be truncated or malformed."
+            )
+            diagnostics.append(
+                "Resolution: open the mesh in NifSkope or the Creation Kit and re-save/export it as a clean Skyrim SE NIF, then run the patch again."
+            )
+            return diagnostics
+        user_version = header.user_version
+        user_version_2 = header.user_version_2
         profile = _detect_game_profile(user_version, user_version_2)
         if profile == _GAME_PROFILE_FALLOUT:
             diagnostics.append(
