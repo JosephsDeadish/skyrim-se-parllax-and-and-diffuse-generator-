@@ -1246,7 +1246,7 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("experimental_fallout_write is disabled", result.message.lower())
 
-    def test_target_game_fallout_rejects_skyrim_header(self) -> None:
+    def test_target_game_fallout_on_skyrim_header_warns_and_uses_fallout_policy(self) -> None:
         nif = _write_nif(self.tmp)
         result = patch_nif(
             nif,
@@ -1257,10 +1257,10 @@ class TestPatchNifFlags(unittest.TestCase):
                 experimental_fallout_write=True,
             ),
         )
-        self.assertFalse(result.success)
+        self.assertTrue(result.success, result.errors)
         self.assertTrue(
-            "unsupported nif header/profile values" in result.message.lower()
-            or "target_game='fallout' requires fallout-compatible headers" in result.message.lower()
+            any("differs from detected profile" in warning.lower() for warning in result.warnings),
+            result.warnings,
         )
 
     def test_target_game_fallout_with_opt_in_patches_flags(self) -> None:

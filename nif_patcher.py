@@ -2993,13 +2993,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
     result.detected_game_profile = _detect_game_profile_from_bytes(original_data)
 
     buf = _Buf(original_data)
-    allowed_profiles = (
-        (_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT)
-        if target_game == "auto"
-        else (_GAME_PROFILE_FALLOUT,)
-        if target_game == _GAME_PROFILE_FALLOUT
-        else (_GAME_PROFILE_SKYRIM,)
-    )
+    allowed_profiles = (_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT)
     try:
         header = _read_header_for_profiles(buf, allowed_profiles=allowed_profiles)
     except (ValueError, struct.error, IndexError) as exc:
@@ -3016,7 +3010,14 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         return result
     detected_profile = _detect_game_profile(header.user_version, header.user_version_2)
     result.detected_game_profile = detected_profile
-    capability = _game_patch_capability(detected_profile)
+    selected_profile = detected_profile if target_game == "auto" else target_game
+    policy_profile = detected_profile if detected_profile == _GAME_PROFILE_FALLOUT else selected_profile
+    capability = _game_patch_capability(policy_profile)
+    if target_game != "auto" and detected_profile != target_game:
+        result.warnings.append(
+            f"target_game='{target_game}' differs from detected profile '{detected_profile}'; "
+            f"applying {policy_profile} safety policy."
+        )
     if capability.requires_experimental_opt_in and not opts.experimental_fallout_write:
         result.errors.append(
             "Fallout profile detected/selected, but experimental_fallout_write is disabled."
@@ -3027,19 +3028,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         )
         result.message = result.errors[0]
         return result
-    if target_game == _GAME_PROFILE_SKYRIM and detected_profile != _GAME_PROFILE_SKYRIM:
-        result.errors.append(
-            f"target_game='skyrim' requires Skyrim-compatible headers; detected profile: {detected_profile}."
-        )
-        result.message = result.errors[0]
-        return result
-    if target_game == _GAME_PROFILE_FALLOUT and detected_profile != _GAME_PROFILE_FALLOUT:
-        result.errors.append(
-            f"target_game='fallout' requires Fallout-compatible headers; detected profile: {detected_profile}."
-        )
-        result.message = result.errors[0]
-        return result
-    if detected_profile == _GAME_PROFILE_FALLOUT:
+    if policy_profile == _GAME_PROFILE_FALLOUT:
         unsupported_ops: list[str] = []
         enabled_fallout_gates: list[str] = []
         if opts.force_shader_type_3 and not capability.supports_force_type3:
@@ -3201,7 +3190,10 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         )
         if pre_write_errors:
             result.errors.extend(pre_write_errors)
-            result.message = "Pre-write validation failed — refusing to write patched bytes."
+            result.message = (
+                "Pre-write validation failed — refusing to write patched bytes. "
+                + pre_write_errors[0]
+            )
             return result
 
     if opts.backup:
