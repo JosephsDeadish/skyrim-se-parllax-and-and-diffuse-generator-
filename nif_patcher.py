@@ -2525,10 +2525,13 @@ def _apply_patches(
 ) -> tuple[bytes, int, int, int]:
     """Return (new_data, props_patched, sets_patched, blocks_upgraded)."""
     source_profile = _detect_game_profile(header.user_version, header.user_version_2)
+    target_game = (opts.target_game or "auto").strip().lower()
     reparse_profiles = (
         (source_profile,)
         if source_profile in (_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT)
-        else (_GAME_PROFILE_SKYRIM,)
+        else (target_game,)
+        if target_game in (_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT)
+        else (_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT)
     )
 
     def _reparse_header(data_bytes: bytes) -> _NifHeader | None:
@@ -3011,6 +3014,12 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
     detected_profile = _detect_game_profile(header.user_version, header.user_version_2)
     result.detected_game_profile = detected_profile
     selected_profile = detected_profile if target_game == "auto" else target_game
+    if target_game == _GAME_PROFILE_SKYRIM and detected_profile != _GAME_PROFILE_SKYRIM:
+        result.errors.append(
+            f"target_game='skyrim' requires Skyrim-compatible headers; detected profile: {detected_profile}."
+        )
+        result.message = result.errors[0]
+        return result
     policy_profile = detected_profile if detected_profile == _GAME_PROFILE_FALLOUT else selected_profile
     capability = _game_patch_capability(policy_profile)
     if target_game != "auto" and detected_profile != target_game:
@@ -5011,6 +5020,28 @@ def _main() -> None:  # pragma: no cover
                     file=sys.stderr,
                 )
                 sys.exit(1)
+
+    if not args.validate:
+        validate_only_flags: list[str] = []
+        if args.conflict_report:
+            validate_only_flags.append("--conflict-report")
+        if args.conflict_report_summary:
+            validate_only_flags.append("--conflict-report-summary")
+        if args.plugin_conflict_context is not None:
+            validate_only_flags.append("--plugin-conflict-context")
+        if args.auto_remediate:
+            validate_only_flags.append("--auto-remediate")
+        if args.auto_remediate_codes:
+            validate_only_flags.append("--auto-remediate-codes")
+        if args.allow_destructive_remediation:
+            validate_only_flags.append("--allow-destructive-remediation")
+        if validate_only_flags:
+            print(
+                "Error: the following options require --validate: "
+                + ", ".join(validate_only_flags),
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     if args.compatibility_report:
         print(build_compatibility_report_text())

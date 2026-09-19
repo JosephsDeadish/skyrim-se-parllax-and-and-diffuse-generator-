@@ -48,6 +48,7 @@ from nif_patcher import (
     scan_nif_diagnostics,
     validate_nif_for_parallax,
     NifPluginConflictRef,
+    _main as nif_patcher_main,
     _Buf,
     _build_block_map,
     _classify_shader_type_resolution,
@@ -1245,6 +1246,20 @@ class TestPatchNifFlags(unittest.TestCase):
         result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False, target_game="fallout"))
         self.assertFalse(result.success)
         self.assertIn("experimental_fallout_write is disabled", result.message.lower())
+
+    def test_target_game_skyrim_rejects_fallout_header(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                backup=False,
+                target_game="skyrim",
+            ),
+        )
+        self.assertFalse(result.success)
+        self.assertIn("target_game='skyrim' requires skyrim-compatible headers", result.message.lower())
 
     def test_target_game_fallout_on_skyrim_header_warns_and_uses_fallout_policy(self) -> None:
         nif = _write_nif(self.tmp)
@@ -3403,6 +3418,14 @@ class TestShaderFieldPatches(unittest.TestCase):
         self.assertIsNotNone(sp.env_map_scale_offset)
         value = struct.unpack_from("<f", data, sp.env_map_scale_offset)[0]
         self.assertAlmostEqual(value, 1.0, places=4)
+
+
+class TestCliArgumentValidation(unittest.TestCase):
+    def test_auto_remediate_requires_validate_mode(self) -> None:
+        with mock.patch("sys.argv", ["nif_patcher.py", "dummy.nif", "--auto-remediate"]):
+            with self.assertRaises(SystemExit) as ctx:
+                nif_patcher_main()
+        self.assertEqual(ctx.exception.code, 1)
 
 
 if __name__ == "__main__":
