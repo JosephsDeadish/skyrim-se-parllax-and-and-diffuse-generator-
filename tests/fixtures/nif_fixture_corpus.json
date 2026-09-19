@@ -1,0 +1,151 @@
+{
+  "cases": [
+    {
+      "id": "skyrim_legacy_missing_parallax",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83
+    },
+    {
+      "id": "skyrim_real_missing_parallax",
+      "profile": "skyrim",
+      "shader_layout": "real",
+      "user_ver2": 130
+    },
+    {
+      "id": "skyrim_le_legacy_missing_parallax",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 34
+    },
+    {
+      "id": "skyrim_crlf_u16_export_like",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true
+    },
+    {
+      "id": "skyrim_diffuse_wrong_suffix",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\arch\\stone_n.dds",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_normal_wrong_suffix",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "textures\\arch\\stone_p.dds",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_cubemap_wrong_suffix",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "",
+        "textures\\arch\\stone_n.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_legacy_11_130",
+      "profile": "fallout",
+      "shader_layout": "legacy",
+      "user_version": 11,
+      "user_ver2": 130
+    },
+    {
+      "id": "fallout_real_11_131",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131
+    },
+    {
+      "id": "fallout_real_11_132",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 132
+    },
+    {
+      "id": "fallout_legacy_single_pass_11_139",
+      "profile": "fallout",
+      "shader_layout": "legacy",
+      "user_version": 11,
+      "user_ver2": 139,
+      "flags1": 32
+    },
+    {
+      "id": "fallout_real_11_133",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 133
+    },
+    {
+      "id": "fallout_real_12_131",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 12,
+      "user_ver2": 131
+    },
+    {
+      "id": "fallout_legacy_12_133",
+      "profile": "fallout",
+      "shader_layout": "legacy",
+      "user_version": 12,
+      "user_ver2": 133
+    },
+    {
+      "id": "unknown_header_signature",
+      "profile": "unknown",
+      "shader_layout": "legacy",
+      "user_ver2": 155
+    },
+    {
+      "id": "broken_header_truncated_72",
+      "profile": "unknown",
+      "shader_layout": "legacy",
+      "broken_header": true,
+      "truncated_bytes": 32
+    },
+    {
+      "id": "skyrim_shifted_texture_set_layout",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_set_layout_shift": 4
+    }
+  ]
+}

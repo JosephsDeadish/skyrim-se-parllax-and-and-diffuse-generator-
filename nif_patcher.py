@@ -1,7 +1,8 @@
-"""Skyrim SE NIF file patcher (v0.8).
+"""Skyrim NIF file patcher (v0.9).
 
-Reads Skyrim SE NIF files (format 20.2.0.7, user_version=12,
-user_version_2=83/100) and patches ``BSLightingShaderProperty`` shader flags and
+Reads Skyrim NIF files (format 20.2.0.7, user_version=12,
+covering LE/SE/AE/VR/CK ``user_version_2`` variants) and patches
+``BSLightingShaderProperty`` shader flags and
 ``BSShaderTextureSet`` texture paths to enable parallax, environment
 mapping, and ENB complex-material effects on meshes that shipped without
 those flags.
@@ -42,8 +43,9 @@ Usage (CLI)::
 
 from __future__ import annotations
 
+import re
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -56,17 +58,126 @@ _SKYRIM_SE_USER_VERSION_2: int = 83
 _SKYRIM_SE_USER_VERSION_2_ALT: int = 100
 _SKYRIM_SE_USER_VERSION_2_CK: int = 130
 _SKYRIM_LE_USER_VERSION_2: int = 34
-_SUPPORTED_USER_VERSION_2: tuple[int, ...] = (
+_KNOWN_SKYRIM_USER_VERSION_2: tuple[int, ...] = (
     _SKYRIM_SE_USER_VERSION_2,
     _SKYRIM_SE_USER_VERSION_2_ALT,
     _SKYRIM_SE_USER_VERSION_2_CK,
     _SKYRIM_LE_USER_VERSION_2,
 )
+_KNOWN_FALLOUT_USER_VERSION_SIGNATURES: tuple[tuple[int, int], ...] = tuple(
+    (user_version, user_version_2)
+    for user_version, min_user_version_2 in ((11, 130), (12, 131))
+    for user_version_2 in range(min_user_version_2, 140)
+)
+_GAME_PROFILE_SKYRIM: str = "skyrim"
+_GAME_PROFILE_FALLOUT: str = "fallout"
+_GAME_PROFILE_UNKNOWN: str = "unknown"
 
 _HEADER_PREFIXES: tuple[bytes, ...] = (
     b"Gamebryo File Format, Version 20.2.0.7",
     b"NetImmerse File Format, Version 20.2.0.7",
 )
+
+
+@dataclass(frozen=True)
+class _GamePatchCapability:
+    """Per-game patch capability policy."""
+
+    allowed_layouts: tuple[str, ...]
+    supports_force_type3: bool
+    supports_parallax_scale: bool
+    supports_advanced_shader_fields: bool
+    requires_experimental_opt_in: bool = False
+
+
+_GAME_PATCH_CAPABILITIES: dict[str, _GamePatchCapability] = {
+    _GAME_PROFILE_SKYRIM: _GamePatchCapability(
+        allowed_layouts=("legacy", "real"),
+        supports_force_type3=True,
+        supports_parallax_scale=True,
+        supports_advanced_shader_fields=True,
+        requires_experimental_opt_in=False,
+    ),
+    _GAME_PROFILE_FALLOUT: _GamePatchCapability(
+        allowed_layouts=("legacy", "real"),
+        supports_force_type3=False,
+        supports_parallax_scale=False,
+        supports_advanced_shader_fields=False,
+        requires_experimental_opt_in=True,
+    ),
+    _GAME_PROFILE_UNKNOWN: _GamePatchCapability(
+        allowed_layouts=(),
+        supports_force_type3=False,
+        supports_parallax_scale=False,
+        supports_advanced_shader_fields=False,
+        requires_experimental_opt_in=False,
+    ),
+}
+
+
+def build_game_profile_support_matrix() -> tuple[tuple[str, str, str, str, str], ...]:
+    """Return profile support matrix rows for CLI reporting."""
+    rows: list[tuple[str, str, str, str, str]] = []
+    for profile in (_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT, _GAME_PROFILE_UNKNOWN):
+        cap = _GAME_PATCH_CAPABILITIES[profile]
+        mode = "guarded" if cap.requires_experimental_opt_in else "supported"
+        if profile == _GAME_PROFILE_UNKNOWN:
+            mode = "unsupported"
+        layouts = ",".join(cap.allowed_layouts) if cap.allowed_layouts else "none"
+        rows.append(
+            (
+                profile,
+                mode,
+                layouts,
+                "yes" if cap.supports_force_type3 else "no",
+                "yes" if cap.supports_parallax_scale else "gated" if profile == _GAME_PROFILE_FALLOUT else "no",
+            )
+        )
+    return tuple(rows)
+
+
+def build_compatibility_report_text() -> str:
+    fallout_versions = sorted({u for u, _ in _KNOWN_FALLOUT_USER_VERSION_SIGNATURES})
+    fallout_user_ver2_values = sorted({u2 for _, u2 in _KNOWN_FALLOUT_USER_VERSION_SIGNATURES})
+    if fallout_user_ver2_values:
+        fallout_signature_summary = (
+            f"user_version in {fallout_versions}, user_version_2 in "
+            f"{fallout_user_ver2_values[0]}..{fallout_user_ver2_values[-1]}"
+        )
+    else:
+        fallout_signature_summary = "(none)"
+    lines = [
+        "NIF patch compatibility report",
+        "",
+        "Game profiles:",
+        "  - skyrim: Skyrim LE/SE/AE/VR/CK header families",
+        "  - fallout: Fallout header families (experimental, guarded writes)",
+        "",
+        "Header signatures:",
+        f"  - Skyrim user_version_2: {', '.join(str(v) for v in _KNOWN_SKYRIM_USER_VERSION_2)}",
+        f"  - Fallout signature range: {fallout_signature_summary}",
+        "  - Fallout explicit signatures: "
+        + ", ".join(f"({u},{u2})" for u, u2 in _KNOWN_FALLOUT_USER_VERSION_SIGNATURES),
+        "",
+        "Support matrix:",
+        "  profile   mode         layouts      force_type3   parallax_scale",
+    ]
+    for profile, mode, layouts, force_type3, parallax_scale in build_game_profile_support_matrix():
+        lines.append(
+            f"  {profile:<9} {mode:<12} {layouts:<12} {force_type3:<12} {parallax_scale}"
+        )
+    lines.extend(
+        (
+            "",
+            "Fallout gated advanced operations:",
+            "  --fallout-allow-parallax-scale",
+            "  --fallout-allow-fix-mesh-lighting",
+            "  --fallout-allow-spec-strength",
+            "  --fallout-allow-spec-color",
+            "  --fallout-allow-env-map-scale",
+        )
+    )
+    return "\n".join(lines)
 
 # Shader Flags 1 (BSLightingShaderProperty)
 SLSF1_SPECULAR: int = 0x00000001
@@ -493,6 +604,26 @@ class NifPatchOptions:
         Empty texture slot 5 (environment mask).
     clear_cubemap_texture_path:
         Empty texture slot 4 (cubemap).
+    target_game:
+        Cross-game profile selector. ``"auto"`` detects profile from NIF header.
+        ``"skyrim"`` enforces Skyrim-compatible headers. ``"fallout"`` is
+        accepted for readiness diagnostics groundwork. Pair with
+        *experimental_fallout_write* for guarded best-effort Fallout writes.
+    experimental_fallout_write:
+        Enable an experimental Fallout write path (for ``target_game='fallout'``
+        or auto-detected Fallout headers). This mode is conservative:
+        no type-3 block expansion, no parallax scale writes, and no advanced
+        shader-field patches.
+    fallout_allow_parallax_scale:
+        Explicitly allow parallax-scale writes in experimental Fallout mode.
+    fallout_allow_fix_mesh_lighting:
+        Explicitly allow ``fix_mesh_lighting`` writes in experimental Fallout mode.
+    fallout_allow_spec_strength:
+        Explicitly allow ``spec_strength`` writes in experimental Fallout mode.
+    fallout_allow_spec_color:
+        Explicitly allow ``spec_color`` writes in experimental Fallout mode.
+    fallout_allow_env_map_scale:
+        Explicitly allow ``env_map_scale`` writes in experimental Fallout mode.
     """
 
     enable_parallax: bool = False
@@ -510,6 +641,8 @@ class NifPatchOptions:
     cubemap_texture_path: str | None = None
     backup: bool = True
     dry_run: bool = False
+    dry_run_diff: bool = False
+    strict_pre_write_validation: bool = True
     disable_parallax: bool = False
     disable_pom: bool = False
     disable_env_mapping: bool = False
@@ -521,6 +654,13 @@ class NifPatchOptions:
     clear_diffuse_texture_path: bool = False
     clear_env_mask_texture_path: bool = False
     clear_cubemap_texture_path: bool = False
+    target_game: str = "auto"
+    experimental_fallout_write: bool = False
+    fallout_allow_parallax_scale: bool = False
+    fallout_allow_fix_mesh_lighting: bool = False
+    fallout_allow_spec_strength: bool = False
+    fallout_allow_spec_color: bool = False
+    fallout_allow_env_map_scale: bool = False
 
     # ----- Safety skip conditions -----
     skip_incompatible_shader_types: bool = True
@@ -541,6 +681,11 @@ class NifPatchOptions:
     skip_anisotropic: bool = True
     """Skip shader blocks with ``SLSF2_Anisotropic_Lighting`` when enabling
     parallax.  Anisotropic-lit shapes produce incorrect results with parallax."""
+
+    skip_single_pass: bool = True
+    """Skip shader blocks with ``SLSF1_Single_Pass`` when enabling parallax.
+    Single-pass material workflows are not compatible with standard parallax
+    flag patching and often produce broken rendering."""
 
     skip_if_havok: bool = True
     """Skip all parallax patching in NIFs that contain a
@@ -579,6 +724,21 @@ class NifPatchOptions:
     ``(1.0, 1.0, 1.0)`` (white) for complex-material textures that contain
     metalness data (non-black blue channel)."""
 
+    strict_unknown_shader_types: bool = False
+    """When True, require every unknown raw shader-type value to be explicitly
+    classified via a confidence model:
+    ``RESOLVED`` (mapping table / semantic flags / validated payload inference),
+    ``WEAK_RESOLUTION`` (ambiguous fallback heuristics), or ``UNRESOLVED``.
+    Strict mode rejects only ``UNRESOLVED`` blocks and keeps weak resolutions as
+    warnings so legacy meshes can still be patched with visibility."""
+
+    unknown_shader_type_map: dict[int, int] | None = None
+    """Optional mapping from raw (unknown) shader-type integer values to known
+    ``SHADER_TYPE_*`` constants.  Applied as the highest-priority resolution
+    step, before semantic-flag or texture-slot inference.  Only consulted for
+    raw values that are not already in ``_KNOWN_SHADER_TYPES`` and are not the
+    ``0xFFFFFFFF`` sentinel.  Example: ``{0x12345678: SHADER_TYPE_DEFAULT}``."""
+
 
 
 
@@ -597,6 +757,9 @@ class NifShaderInfo:
     parallax_scale: float | None   # None if block is not shader-type 3
     texture_paths: dict[int, str]  # slot → path
     env_map_scale: float | None = None
+    raw_shader_type: int | None = None
+    shader_type_resolution: str = "exact"
+    layout_name: str = ""
 
     # Shape-context fields — populated by scan_nif_diagnostics when a parent
     # BSTriShape-family block can be matched to this shader property.
@@ -652,6 +815,11 @@ class NifShaderInfo:
         return bool(self.flags1 & (SLSF1_DECAL | SLSF1_DYNAMIC_DECAL))
 
     @property
+    def has_single_pass_flag(self) -> bool:
+        """True when ``SLSF1_Single_Pass`` is set."""
+        return bool(self.flags1 & SLSF1_SINGLE_PASS)
+
+    @property
     def has_soft_lighting_flag(self) -> bool:
         return bool(self.flags2 & SLSF2_SOFT_LIGHTING)
 
@@ -701,6 +869,20 @@ class NifShaderInfo:
         return SHADER_TYPE_NAMES.get(self.shader_type, f"Unknown ({self.shader_type})")
 
 
+RESOLUTION_RESOLVED: str = "RESOLVED"
+RESOLUTION_WEAK: str = "WEAK_RESOLUTION"
+RESOLUTION_UNRESOLVED: str = "UNRESOLVED"
+
+
+@dataclass(frozen=True)
+class ShaderTypeResolutionResult:
+    """Normalized confidence metadata for shader-type resolution paths."""
+
+    type: str
+    confidence: float
+    method: str
+
+
 @dataclass
 class NifPatchResult:
     """Outcome of a :func:`patch_nif` call."""
@@ -715,6 +897,7 @@ class NifPatchResult:
     backup_path: Path | None = None
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    detected_game_profile: str = _GAME_PROFILE_UNKNOWN
 
 
 @dataclass
@@ -727,6 +910,7 @@ class NifValidationResult:
     needs_patch_count: int = 0    # shaders present but missing flags/texture
     skip_count: int = 0           # shaders skipped due to hard incompatibilities
     has_havok: bool = False       # True if a BSBehaviorGraphExtraData block exists
+    detected_game_profile: str = _GAME_PROFILE_UNKNOWN
     issues: list[str] = field(default_factory=list)
     suggestions: list[str] = field(default_factory=list)
     skip_reasons: list[str] = field(default_factory=list)
@@ -745,6 +929,57 @@ class NifValidationResult:
     """
     renderer_verdicts: dict[str, str] = field(default_factory=dict)
     """High-level in-game verdicts keyed by renderer name."""
+    conflict_report: list["NifConflictSummary"] = field(default_factory=list)
+    """Structured grouped conflicts with suggested remediation actions."""
+
+
+@dataclass(frozen=True)
+class NifConflictSummary:
+    """Grouped conflict summary for validation output."""
+
+    code: str
+    count: int
+    game_profile: str
+    shader_layout: str
+    examples: tuple[str, ...]
+    suggested_actions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class NifBatchConflictSummary:
+    """Cross-file grouped conflict summary for large validation batches."""
+
+    code: str
+    count: int
+    file_count: int
+    game_profile: str
+    shader_layout: str
+    example_files: tuple[str, ...]
+    suggested_actions: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class NifPluginConflictRef:
+    """Plugin context entry linked to a mesh conflict."""
+
+    plugin_name: str
+    record_id: str = ""
+    record_type: str = ""
+
+
+@dataclass(frozen=True)
+class NifPluginAwareConflictSummary:
+    """Cross-file conflict summary with plugin-record context."""
+
+    code: str
+    count: int
+    file_count: int
+    plugin_count: int
+    game_profile: str
+    shader_layout: str
+    example_files: tuple[str, ...]
+    example_plugins: tuple[str, ...]
+    suggested_actions: tuple[str, ...]
 
 
 # ---------------------------------------------------------------------------
@@ -890,6 +1125,38 @@ class _NifHeader:
     block_sizes_offset: int  # byte offset of block_sizes[0] in the file
 
 
+def _detect_game_profile(user_version: int, user_version_2: int) -> str:
+    """Classify a NIF into a coarse game profile using user-version fields."""
+    if (user_version, user_version_2) in _KNOWN_FALLOUT_USER_VERSION_SIGNATURES:
+        return _GAME_PROFILE_FALLOUT
+    if user_version == _SKYRIM_USER_VERSION and _is_supported_skyrim_user_version_2(user_version_2):
+        return _GAME_PROFILE_SKYRIM
+    return _GAME_PROFILE_UNKNOWN
+
+
+def _game_patch_capability(profile: str) -> _GamePatchCapability:
+    """Return patch capability policy for a detected game profile."""
+    return _GAME_PATCH_CAPABILITIES.get(profile, _GAME_PATCH_CAPABILITIES[_GAME_PROFILE_UNKNOWN])
+
+
+def _detect_game_profile_from_bytes(data: bytes) -> str:
+    """Best-effort game profile detection for diagnostics and status UI."""
+    try:
+        header = _read_header_for_profiles(
+            _Buf(data),
+            allowed_profiles=(
+                _GAME_PROFILE_SKYRIM,
+                _GAME_PROFILE_FALLOUT,
+                _GAME_PROFILE_UNKNOWN,
+            ),
+        )
+    except (struct.error, IndexError, ValueError):
+        return _GAME_PROFILE_UNKNOWN
+    if header is None:
+        return _GAME_PROFILE_UNKNOWN
+    return _detect_game_profile(header.user_version, header.user_version_2)
+
+
 def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
     diagnostics = [f"Malformed or truncated NIF: {exc}"]
     if len(data) < 64:
@@ -911,11 +1178,37 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
         if version != _NIF_VERSION_20_2_0_7:
             diagnostics.append(f"NIF version is 0x{version:08X}, not Skyrim SE 20.2.0.7.")
             return diagnostics
-        user_version = struct.unpack_from("<I", data, version_offset + 5)[0]
-        user_version_2 = struct.unpack_from("<I", data, version_offset + 13)[0]
-        if user_version_2 == _SKYRIM_LE_USER_VERSION_2:
-            diagnostics.append("This looks like a Skyrim Legendary Edition / Oldrim NIF. Convert it to SSE before patching.")
-        elif user_version != _SKYRIM_USER_VERSION or user_version_2 not in _SUPPORTED_USER_VERSION_2:
+        header = _read_header_for_profiles(
+            _Buf(data),
+            allowed_profiles=(
+                _GAME_PROFILE_SKYRIM,
+                _GAME_PROFILE_FALLOUT,
+                _GAME_PROFILE_UNKNOWN,
+            ),
+        )
+        if header is None:
+            diagnostics.append(
+                "Could not parse user version fields from header; the file may be truncated or malformed."
+            )
+            diagnostics.append(
+                "Resolution: open the mesh in NifSkope or the Creation Kit and re-save/export it as a clean Skyrim SE NIF, then run the patch again."
+            )
+            return diagnostics
+        user_version = header.user_version
+        user_version_2 = header.user_version_2
+        profile = _detect_game_profile(user_version, user_version_2)
+        if profile == _GAME_PROFILE_FALLOUT:
+            diagnostics.append(
+                "Detected user_version=11 (likely Fallout-era NIF header). "
+                "Fallout patching is available in guarded experimental mode."
+            )
+            diagnostics.append(
+                "Resolution: patch with --target-game fallout --experimental-fallout-write "
+                "(and optional --fallout-allow-* safety gates), "
+                "or convert/export to a Skyrim-compatible mesh if needed."
+            )
+            return diagnostics
+        if profile != _GAME_PROFILE_SKYRIM:
             diagnostics.append(
                 f"Unexpected user version values ({user_version}, {user_version_2}). The file may use a different game/export format."
             )
@@ -939,6 +1232,11 @@ def _has_supported_header_prefix(header_line: bytes) -> bool:
     """Return True when the header line starts with a known Skyrim NIF prefix."""
     normalized = header_line.rstrip(b"\r\n\x00 ")
     return any(normalized.startswith(prefix) for prefix in _HEADER_PREFIXES)
+
+
+def _is_supported_skyrim_user_version_2(user_version_2: int) -> bool:
+    """Return True when *user_version_2* matches Skyrim LE/SE/AE/VR/CK exports."""
+    return user_version_2 in _KNOWN_SKYRIM_USER_VERSION_2
 
 
 def _summarize_non_patchable_block_types(header: _NifHeader) -> list[str]:
@@ -972,8 +1270,12 @@ def _summarize_non_patchable_block_types(header: _NifHeader) -> list[str]:
     return diagnostics
 
 
-def _read_header(buf: _Buf) -> _NifHeader | None:
-    """Parse the NIF header; return ``None`` if not a supported Skyrim SE NIF."""
+def _read_header_for_profiles(
+    buf: _Buf,
+    *,
+    allowed_profiles: tuple[str, ...],
+) -> _NifHeader | None:
+    """Parse a NIF header for one of *allowed_profiles*."""
     header_line: bytearray = bytearray()
     while buf.remaining() > 0:
         b = buf.read_u8()
@@ -994,9 +1296,6 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
         return None
 
     user_version = buf.read_u32()
-    if user_version != _SKYRIM_USER_VERSION:
-        return None
-
     num_blocks = buf.read_u32()
 
     # Bethesda stream header (BSStreamHeader):
@@ -1012,7 +1311,7 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
     # (notably CK-style 130 headers), causing real blocks to be misread and
     # skipped during patching.
     user_version_2 = buf.read_u32()
-    if user_version_2 not in _SUPPORTED_USER_VERSION_2:
+    if _detect_game_profile(user_version, user_version_2) not in allowed_profiles:
         return None
     buf.read_sstring_u8()  # author
     if user_version_2 > 130:
@@ -1059,6 +1358,11 @@ def _read_header(buf: _Buf) -> _NifHeader | None:
     )
 
 
+def _read_header(buf: _Buf) -> _NifHeader | None:
+    """Parse the NIF header; return ``None`` if not a supported Skyrim NIF."""
+    return _read_header_for_profiles(buf, allowed_profiles=(_GAME_PROFILE_SKYRIM,))
+
+
 # ---------------------------------------------------------------------------
 # Block parsers
 # ---------------------------------------------------------------------------
@@ -1078,7 +1382,10 @@ class _ShaderPropBlock:
     flags1: int
     flags2: int
     shader_type: int
+    raw_shader_type: int
+    shader_type_resolution: str
     texture_set_ref: int       # block index of linked BSShaderTextureSet
+    layout_name: str
     layout_shift: int
     common_end_offset: int
 
@@ -1114,7 +1421,8 @@ class _TextureSetBlock:
 
 
 def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
-                       block_size: int, num_blocks: int) -> _ShaderPropBlock | None:
+                       block_size: int, num_blocks: int,
+                       *, allow_num_extra_fallback: bool = False) -> _ShaderPropBlock:
     """Parse a BSLightingShaderProperty block.
 
     Layout for Skyrim/SE BSLightingShaderProperty (NIF 20.2.0.7 / user_version=12):
@@ -1131,48 +1439,101 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
       [type-3 only] parallax_max_passes 4 B + parallax_scale 4 B
     """
     block_end = block_start + block_size
-    if block_size < _REAL_COMMON_FIELDS_SIZE or block_end > len(buf._b):
-        return None
+    if block_size < _REAL_COMMON_FIELDS_SIZE:
+        raise ValueError(
+            f"block too small for BSLightingShaderProperty: "
+            f"size={block_size} < {_REAL_COMMON_FIELDS_SIZE} "
+            f"(block_start=0x{block_start:X})"
+        )
+    if block_end > len(buf._b):
+        raise ValueError(
+            f"block extends past end of file: "
+            f"block_end=0x{block_end:X} > file_size={len(buf._b)} "
+            f"(block_start=0x{block_start:X}, block_size={block_size})"
+        )
     if block_start + _OFFSET_CONTROLLER + 4 > block_end:
-        return None
+        raise ValueError(
+            f"NiObjectNET header truncated at controller field: "
+            f"block_size={block_size}, block_start=0x{block_start:X}"
+        )
 
-    num_extra = buf.read_u32_at(block_start + _OFFSET_NUM_EXTRA)
+    raw_num_extra = buf.read_u32_at(block_start + _OFFSET_NUM_EXTRA)
     max_extra_refs = max((block_size - (_REAL_OFFSET_FLAGS1 + 4)) // 4, 0)
-    if num_extra > max_extra_refs:
-        return None
-    controller_offset = block_start + _OFFSET_CONTROLLER + num_extra * 4
-    if controller_offset + 4 > block_end:
-        return None
-    controller_ref = struct.unpack_from("<i", buf._b, controller_offset)[0]
-    if controller_ref != -1 and not (0 <= controller_ref < num_blocks):
-        return None
+
+    # Try to resolve num_extra: prefer the declared value when plausible, but
+    # fall back to 0 so that blocks whose NiObjectNET header reads unexpectedly
+    # (e.g. from tools that write a non-standard or slightly offset header) can
+    # still be parsed.  The first candidate whose controller_ref also validates
+    # is used; if none work we raise with diagnostic details.
+    num_extra_candidates: list[int] = []
+    if raw_num_extra <= max_extra_refs:
+        num_extra_candidates.append(raw_num_extra)
+    if allow_num_extra_fallback and 0 not in num_extra_candidates:
+        num_extra_candidates.append(0)
+
+    num_extra: int | None = None
+    controller_ref: int = -1
+    for _try_extra in num_extra_candidates:
+        _ctrl_off = block_start + _OFFSET_CONTROLLER + _try_extra * 4
+        if _ctrl_off + 4 > block_end:
+            continue
+        _ctrl = struct.unpack_from("<i", buf._b, _ctrl_off)[0]
+        if _ctrl == -1 or (0 <= _ctrl < num_blocks):
+            num_extra = _try_extra
+            controller_ref = _ctrl
+            break
+
+    if num_extra is None:
+        raise ValueError(
+            f"NiObjectNET header unresolvable "
+            f"(raw_num_extra={raw_num_extra}, max_extra_refs={max_extra_refs}, "
+            f"block_size={block_size}, block_start=0x{block_start:X}, "
+            f"num_blocks={num_blocks})"
+        )
 
     extra_shift = num_extra * 4
     raw_shader_type = buf.read_u32_at(block_start + _OFFSET_SHADER_TYPE + extra_shift)
 
-    def _decode_shader_type(raw_value: int) -> int:
+    def _decode_shader_type(raw_value: int) -> tuple[int | None, str]:
         if raw_value in _KNOWN_SHADER_TYPES:
-            return raw_value
+            return raw_value, "exact"
+        # 0xFFFFFFFF is Bethesda's universal null/unset sentinel (-1 as i32).
+        # Treat it as the default shader type rather than an unknown value so
+        # that vanilla clutter NIFs (barrel, chest, coin, …) whose shader_type
+        # field was left as 0xFFFFFFFF can still be parsed and patched.
+        if raw_value == 0xFFFFFFFF:
+            return SHADER_TYPE_DEFAULT, "sentinel_default"
         low8 = raw_value & 0xFF
         if low8 in _KNOWN_SHADER_TYPES:
-            return low8
+            return low8, "masked_low8"
         low16 = raw_value & 0xFFFF
         if low16 in _KNOWN_SHADER_TYPES:
-            return low16
-        return raw_value
+            return low16, "masked_low16"
+        return None, "unknown"
 
-    def _infer_real_shader_type(flags1: int, payload_size: int) -> int | None:
+    def _infer_real_shader_type(flags1: int, payload_size: int) -> tuple[int | None, str]:
         if payload_size < 0:
-            return None
+            return None, "unknown"
+        if payload_size >= 8 and (flags1 & SLSF1_PARALLAX_OCCLUSION):
+            return SHADER_TYPE_PARALLAX_OCC, "semantic_flag_parallax_occ"
+        if payload_size >= 8 and (flags1 & SLSF1_PARALLAX):
+            return SHADER_TYPE_HEIGHTMAP, "semantic_flag_parallax"
+        if payload_size >= 4 and (flags1 & SLSF1_ENVIRONMENT_MAPPING):
+            return SHADER_TYPE_ENVMAP, "semantic_flag_envmap"
         if payload_size == 0:
-            return SHADER_TYPE_DEFAULT
+            return SHADER_TYPE_DEFAULT, "real_payload_default"
         if payload_size == 4:
-            return SHADER_TYPE_ENVMAP
+            return SHADER_TYPE_ENVMAP, "real_payload_envmap"
         if payload_size == 8:
-            return SHADER_TYPE_HEIGHTMAP
+            return SHADER_TYPE_HEIGHTMAP, "real_payload_heightmap"
         if payload_size == 24:
-            return SHADER_TYPE_MULTILAYER
-        return None
+            return SHADER_TYPE_MULTILAYER, "real_payload_multilayer"
+        if payload_size % 4 == 0 and payload_size <= 64:
+            # Payload shape is structurally aligned but unknown. Keep this
+            # unresolved so scan/patch flows can still handle flag/texture
+            # operations without reclassifying the shader type.
+            return None, "real_payload_unknown_aligned"
+        return None, "unknown"
 
     def _build_candidate(
         *,
@@ -1186,6 +1547,7 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         common_size: int,
         shader_type_offset: int | None,
         shader_type_value: int | None,
+        shader_type_resolution: str,
     ) -> tuple[int, _ShaderPropBlock] | None:
         flags1_offset = block_start + flags1_base + extra_shift
         flags2_offset = block_start + flags2_base + extra_shift
@@ -1204,7 +1566,14 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
 
         shader_type = shader_type_value
         if shader_type is None or shader_type not in _KNOWN_SHADER_TYPES:
-            return None
+            if layout_name == "real":
+                # Preserve unresolved real-layout classifications as raw values
+                # so diagnostics remain accurate for unknown payload variants.
+                shader_type = raw_shader_type
+            else:
+                # For legacy layouts, keep backward-compatible fallback.
+                shader_type = SHADER_TYPE_DEFAULT
+                shader_type_resolution = "fallback_default"
 
         common_end = block_start + common_size + extra_shift
         payload_size = block_size - (common_size + extra_shift)
@@ -1251,7 +1620,7 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         else:
             if raw_shader_type in _KNOWN_SHADER_TYPES:
                 score += 20
-            elif _decode_shader_type(raw_shader_type) in _KNOWN_SHADER_TYPES:
+            elif (_decode_shader_type(raw_shader_type)[0] or -1) in _KNOWN_SHADER_TYPES:
                 score += 8
             if payload_size in (0, 4, 8):
                 score += 2
@@ -1267,7 +1636,10 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
             flags1=flags1,
             flags2=flags2,
             shader_type=shader_type,
+            raw_shader_type=raw_shader_type,
+            shader_type_resolution=shader_type_resolution,
             texture_set_ref=texture_set_ref,
+            layout_name=layout_name,
             layout_shift=0,
             common_end_offset=common_end,
             parallax_max_passes_offset=pmx_offset,
@@ -1286,7 +1658,7 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
 
     candidates: list[tuple[int, _ShaderPropBlock]] = []
     real_payload_size = block_size - (_REAL_COMMON_FIELDS_SIZE + extra_shift)
-    real_shader_type = _infer_real_shader_type(
+    real_shader_type, real_resolution = _infer_real_shader_type(
         buf.read_u32_at(block_start + _REAL_OFFSET_FLAGS1 + extra_shift),
         real_payload_size,
     )
@@ -1301,10 +1673,12 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         common_size=_REAL_COMMON_FIELDS_SIZE,
         shader_type_offset=None,
         shader_type_value=real_shader_type,
+        shader_type_resolution=real_resolution,
     )
     if real_candidate is not None:
         candidates.append(real_candidate)
 
+    legacy_shader_type, legacy_resolution = _decode_shader_type(raw_shader_type)
     legacy_candidate = _build_candidate(
         layout_name="legacy",
         flags1_base=_OFFSET_FLAGS1,
@@ -1315,7 +1689,8 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         light_eff1_base=_OFFSET_LIGHT_EFF1,
         common_size=_COMMON_FIELDS_SIZE,
         shader_type_offset=block_start + _OFFSET_SHADER_TYPE + extra_shift,
-        shader_type_value=_decode_shader_type(raw_shader_type),
+        shader_type_value=legacy_shader_type,
+        shader_type_resolution=legacy_resolution,
     )
     if legacy_candidate is not None:
         candidates.append(legacy_candidate)
@@ -1795,9 +2170,216 @@ def _build_renderer_verdicts(
     return verdicts
 
 
+def _infer_shader_type_from_semantics(flags1: int, flags2: int) -> tuple[int | None, str]:
+    """Infer shader type from flag semantics when raw shader type is unknown."""
+    if flags2 & SLSF2_GLOW_MAP:
+        return SHADER_TYPE_GLOW, "semantic_flag_glow"
+    if flags1 & SLSF1_PARALLAX_OCCLUSION:
+        return SHADER_TYPE_PARALLAX_OCC, "semantic_flag_parallax_occ"
+    if flags1 & SLSF1_PARALLAX:
+        return SHADER_TYPE_HEIGHTMAP, "semantic_flag_parallax"
+    if flags1 & SLSF1_ENVIRONMENT_MAPPING:
+        return SHADER_TYPE_ENVMAP, "semantic_flag_envmap"
+    return None, "unknown"
+
+
+def _infer_shader_type_from_textures(slot_paths: dict[int, str]) -> tuple[int | None, str]:
+    """Infer shader type from common Skyrim texture suffix patterns."""
+    slot2 = _normalise_slot_path(slot_paths.get(TEXTURE_SLOT_GLOW, ""))
+    if slot2.endswith(("_g.dds", "_sk.dds")) or slot2.endswith(_GENERIC_GLOW_ALIAS_SUFFIXES):
+        return SHADER_TYPE_GLOW, "texture_suffix_glow"
+
+    slot3 = _normalise_slot_path(slot_paths.get(TEXTURE_SLOT_PARALLAX, ""))
+    if slot3.endswith("_p.dds"):
+        return SHADER_TYPE_HEIGHTMAP, "texture_suffix_parallax"
+
+    slot5 = _normalise_slot_path(slot_paths.get(TEXTURE_SLOT_ENV_MASK, ""))
+    if slot5.endswith(_ENV_MASK_SLOT_EXPECTED_SUFFIXES):
+        return SHADER_TYPE_ENVMAP, "texture_suffix_envmask"
+
+    slot4 = _normalise_slot_path(slot_paths.get(TEXTURE_SLOT_CUBEMAP, ""))
+    if slot4.endswith(".dds"):
+        return SHADER_TYPE_ENVMAP, "texture_slot_cubemap"
+
+    slot1 = _normalise_slot_path(slot_paths.get(TEXTURE_SLOT_NORMAL, ""))
+    if slot1.endswith(("_n.dds", "_msn.dds")):
+        return SHADER_TYPE_DEFAULT, "texture_suffix_normal"
+    return None, "unknown"
+
+
+def _classify_shader_type_resolution(resolution: str) -> ShaderTypeResolutionResult:
+    """Classify a resolution path as resolved/weak/unresolved with confidence."""
+    if resolution == "mapping_table":
+        return ShaderTypeResolutionResult(RESOLUTION_RESOLVED, 1.0, "mapping")
+    if resolution.startswith("semantic_flag_"):
+        return ShaderTypeResolutionResult(RESOLUTION_RESOLVED, 0.95, "semantic")
+    if resolution in {
+        "real_payload_default",
+        "real_payload_envmap",
+        "real_payload_heightmap",
+        "real_payload_multilayer",
+        "sentinel_default",
+        "masked_low8",
+        "masked_low16",
+    }:
+        return ShaderTypeResolutionResult(RESOLUTION_RESOLVED, 0.92, "payload")
+    if resolution in {
+        "texture_suffix_glow",
+        "texture_suffix_parallax",
+        "texture_suffix_envmask",
+        "texture_suffix_normal",
+        "texture_slot_cubemap",
+    }:
+        return ShaderTypeResolutionResult(RESOLUTION_WEAK, 0.65, "heuristic")
+    if resolution in {"fallback_default", "default_fallback", "unknown", "real_payload_default_fallback"}:
+        return ShaderTypeResolutionResult(RESOLUTION_UNRESOLVED, 0.0, "fallback")
+    return ShaderTypeResolutionResult(RESOLUTION_UNRESOLVED, 0.0, "fallback")
+
+
+def _try_assign_shader_type_resolution(
+    sp: _ShaderPropBlock,
+    *,
+    shader_type: int,
+    resolution: str,
+) -> bool:
+    """Assign shader classification only if it does not downgrade confidence."""
+    current = _classify_shader_type_resolution(sp.shader_type_resolution)
+    proposed = _classify_shader_type_resolution(resolution)
+    rank = {
+        RESOLUTION_UNRESOLVED: 0,
+        RESOLUTION_WEAK: 1,
+        RESOLUTION_RESOLVED: 2,
+    }
+    if rank[proposed.type] < rank[current.type]:
+        return False
+    if rank[proposed.type] == rank[current.type]:
+        if proposed.confidence < current.confidence:
+            return False
+        if proposed.confidence == current.confidence:
+            method_rank = {
+                "fallback": 0,
+                "heuristic": 1,
+                "payload": 2,
+                "semantic": 3,
+                "mapping": 4,
+            }
+            if method_rank.get(proposed.method, 0) < method_rank.get(current.method, 0):
+                return False
+            if (
+                method_rank.get(proposed.method, 0) == method_rank.get(current.method, 0)
+                and sp.shader_type_resolution != "fallback_default"
+            ):
+                return False
+    sp.shader_type = shader_type
+    sp.shader_type_resolution = resolution
+    return True
+
+
+def _resolve_unknown_shader_types(
+    shader_props: list[_ShaderPropBlock],
+    texture_sets: dict[int, _TextureSetBlock],
+    mapping_table: dict[int, int] | None = None,
+) -> None:
+    """Apply a resolution chain for unknown raw shader types.
+
+    Resolution priority (highest to lowest):
+    1. User-supplied *mapping_table* (``raw_value → known SHADER_TYPE_*``)
+    2. Semantic-flag inference (parallax / env-map / glow flags)
+    3. Texture-slot suffix inference
+    4. Default fallback (``SHADER_TYPE_DEFAULT``) — sets ``"default_fallback"``
+
+    Mapping-table overrides are always applied first for unknown raw values,
+    even when a weak built-in heuristic was already assigned.
+    """
+    for sp in shader_props:
+        if sp.raw_shader_type in _KNOWN_SHADER_TYPES or sp.raw_shader_type == 0xFFFFFFFF:
+            continue
+
+        # 1. User-provided mapping table
+        if mapping_table and sp.raw_shader_type in mapping_table:
+            mapped = mapping_table[sp.raw_shader_type]
+            if mapped in _KNOWN_SHADER_TYPES:
+                _try_assign_shader_type_resolution(
+                    sp,
+                    shader_type=mapped,
+                    resolution="mapping_table",
+                )
+                continue
+
+        if _classify_shader_type_resolution(sp.shader_type_resolution).type != RESOLUTION_UNRESOLVED:
+            continue
+
+        # 2. Semantic-flag inference
+        shader_type, resolution = _infer_shader_type_from_semantics(sp.flags1, sp.flags2)
+
+        # 3. Texture-slot suffix inference
+        if shader_type is None:
+            ts = texture_sets.get(sp.texture_set_ref)
+            slots = {i: p for i, p in enumerate(ts.slot_paths)} if ts else {}
+            shader_type, resolution = _infer_shader_type_from_textures(slots)
+
+        # 4. Final fallback
+        if shader_type is None:
+            shader_type = SHADER_TYPE_DEFAULT
+            resolution = "default_fallback"
+
+        _try_assign_shader_type_resolution(
+            sp,
+            shader_type=shader_type,
+            resolution=resolution,
+        )
+
+
+def _shader_resolution_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
+    notes: list[str] = []
+    seen: set[str] = set()
+    for sp in shader_props:
+        if sp.raw_shader_type in _KNOWN_SHADER_TYPES or sp.raw_shader_type == 0xFFFFFFFF:
+            continue
+        resolution = _classify_shader_type_resolution(sp.shader_type_resolution)
+        note = (
+            f"Block {sp.block_index}: raw shader_type 0x{sp.raw_shader_type:08X} "
+            f"resolved to {SHADER_TYPE_NAMES.get(sp.shader_type, sp.shader_type)} "
+            f"via {sp.shader_type_resolution} "
+            f"({resolution.type}, confidence={resolution.confidence:.2f}, method={resolution.method})."
+        )
+        if note not in seen:
+            seen.add(note)
+            notes.append(note)
+    return notes
+
+
+def _strict_unknown_shader_notes(shader_props: list[_ShaderPropBlock]) -> list[str]:
+    """Return strict-mode violations for unknown raw shader values with no resolution.
+
+    A block is a violation only when, after all resolution strategies complete,
+    its normalized resolution type is
+    ``UNRESOLVED``. ``WEAK_RESOLUTION`` paths are accepted and will appear in
+    the generic shader-resolution diagnostics produced by
+    :func:`_shader_resolution_notes`.
+    """
+    violations: list[str] = []
+    for sp in shader_props:
+        if sp.raw_shader_type in _KNOWN_SHADER_TYPES or sp.raw_shader_type == 0xFFFFFFFF:
+            continue
+        resolution = _classify_shader_type_resolution(sp.shader_type_resolution)
+        if resolution.type != RESOLUTION_UNRESOLVED:
+            continue
+        violations.append(
+            f"Block {sp.block_index}: unknown raw shader_type 0x{sp.raw_shader_type:08X} "
+            f"could not be resolved (no mapping table entry, no semantic flag match, "
+            f"no texture-slot match). Add an explicit entry to unknown_shader_type_map "
+            f"or check the NIF for corruption."
+        )
+    return violations
+
+
 def _build_block_map(
     data: bytes,
     header: _NifHeader,
+    mapping_table: dict[int, int] | None = None,
+    *,
+    allow_num_extra_fallback: bool = False,
 ) -> tuple[list[_ShaderPropBlock], dict[int, _TextureSetBlock], list[str]]:
     """Return (shader_props, texture_sets, errors)."""
     block_starts = _compute_block_starts(header.blocks_start, header.block_sizes)
@@ -1813,13 +2395,20 @@ def _build_block_map(
 
         if btype == "BSLightingShaderProperty":
             try:
-                sp = _parse_shader_prop(buf, bi, bstart, bsize, header.num_blocks)
-                if sp is not None:
-                    shader_props.append(sp)
-                else:
-                    errors.append(f"Block {bi}: failed to parse BSLightingShaderProperty.")
+                sp = _parse_shader_prop(
+                    buf,
+                    bi,
+                    bstart,
+                    bsize,
+                    header.num_blocks,
+                    allow_num_extra_fallback=allow_num_extra_fallback,
+                )
+                shader_props.append(sp)
             except (ValueError, struct.error, IndexError) as exc:
-                errors.append(f"Block {bi}: shader parse error: {exc}")
+                errors.append(
+                    f"Block {bi}: failed to parse BSLightingShaderProperty"
+                    f" — {type(exc).__name__}: {exc}"
+                )
         elif btype == "BSShaderTextureSet":
             try:
                 ts = _parse_texture_set(buf, bi, bstart, bsize)
@@ -1830,6 +2419,7 @@ def _build_block_map(
             except (ValueError, struct.error, IndexError) as exc:
                 errors.append(f"Block {bi}: texture-set parse error: {exc}")
 
+    _resolve_unknown_shader_types(shader_props, texture_sets, mapping_table)
     return shader_props, texture_sets, errors
 
 
@@ -1916,6 +2506,8 @@ def _should_enable_parallax_on_shader(
         return False
     if opts.skip_anisotropic and (sp.flags2 & SLSF2_ANISOTROPIC_LIGHTING):
         return False
+    if opts.skip_single_pass and (sp.flags1 & SLSF1_SINGLE_PASS):
+        return False
     shape = shader_to_shape.get(sp.block_index)
     if opts.skip_if_skinned and shape is not None and shape.skin_instance_ref >= 0:
         return False
@@ -1932,6 +2524,19 @@ def _apply_patches(
     opts: NifPatchOptions,
 ) -> tuple[bytes, int, int, int]:
     """Return (new_data, props_patched, sets_patched, blocks_upgraded)."""
+    source_profile = _detect_game_profile(header.user_version, header.user_version_2)
+    target_game = (opts.target_game or "auto").strip().lower()
+    reparse_profiles = (
+        (source_profile,)
+        if source_profile in (_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT)
+        else (target_game,)
+        if target_game in (_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT)
+        else (_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT)
+    )
+
+    def _reparse_header(data_bytes: bytes) -> _NifHeader | None:
+        return _read_header_for_profiles(_Buf(data_bytes), allowed_profiles=reparse_profiles)
+
     upgraded = 0
     effective_parallax = opts.enable_parallax or opts.enable_pom
     want_scale = opts.parallax_scale is not None and opts.parallax_scale > 0
@@ -1954,10 +2559,15 @@ def _apply_patches(
         # there are two or more type-0 shader blocks to upgrade.
         while True:
             buf_check = _Buf(data)
-            chk_header = _read_header(buf_check)
+            chk_header = _read_header_for_profiles(buf_check, allowed_profiles=reparse_profiles)
             if chk_header is None:
                 raise RuntimeError("Header corrupted after type-3 upgrade.")
-            fresh_props, _, _ = _build_block_map(data, chk_header)
+            fresh_props, _, _ = _build_block_map(
+                data,
+                chk_header,
+                opts.unknown_shader_type_map,
+                allow_num_extra_fallback=False,
+            )
             sp_to_upgrade = next(
                 (
                     sp
@@ -1984,10 +2594,15 @@ def _apply_patches(
         if upgraded:
             # Final reparse to give phase 2 fresh offsets.
             buf = _Buf(data)
-            new_header = _read_header(buf)
+            new_header = _read_header_for_profiles(buf, allowed_profiles=reparse_profiles)
             if new_header is None:
                 raise RuntimeError("Header corrupted after type-3 upgrade.")
-            shader_props, texture_sets, _ = _build_block_map(data, new_header)
+            shader_props, texture_sets, _ = _build_block_map(
+                data,
+                new_header,
+                opts.unknown_shader_type_map,
+                allow_num_extra_fallback=False,
+            )
             header = new_header
 
     # --- Phase 2: in-place flag + parallax scale + field patches --------------
@@ -2004,6 +2619,7 @@ def _apply_patches(
     for sp in shader_props:
         new_flags1 = sp.flags1
         new_flags2 = sp.flags2
+        shader_type_changed = False
 
         # ---- Determine whether parallax is safe to enable on this block ----
         enabling_parallax = _should_enable_parallax_on_shader(
@@ -2042,7 +2658,7 @@ def _apply_patches(
             new_flags2 &= ~SLSF2_UNUSED01
 
         flags_changed = (new_flags1 != sp.flags1) or (new_flags2 != sp.flags2)
-        if flags_changed:
+        if flags_changed or shader_type_changed:
             buf.write_u32_at(sp.flags1_offset, new_flags1)
             buf.write_u32_at(sp.flags2_offset, new_flags2)
             props_patched += 1
@@ -2115,10 +2731,15 @@ def _apply_patches(
         buf_local.write_u32_at(ts_bsize_off, old_ts_size + (needed * 4))
         new_data_local = buf_local.to_bytes()
 
-        new_header_local = _read_header(_Buf(new_data_local))
+        new_header_local = _reparse_header(new_data_local)
         if new_header_local is None:
             raise RuntimeError("Header corrupted after texture slot extension.")
-        _, new_texture_sets, _ = _build_block_map(new_data_local, new_header_local)
+        _, new_texture_sets, _ = _build_block_map(
+            new_data_local,
+            new_header_local,
+            opts.unknown_shader_type_map,
+            allow_num_extra_fallback=False,
+        )
         return new_data_local, new_header_local, new_texture_sets, True
 
     for sp in shader_props:
@@ -2209,13 +2830,95 @@ def _apply_patches(
 
         # Reparse so subsequent shader props (if any) get fresh offsets.
         buf3 = _Buf(data)
-        new_header = _read_header(buf3)
+        new_header = _read_header_for_profiles(buf3, allowed_profiles=reparse_profiles)
         if new_header:
-            _, texture_sets, _ = _build_block_map(data, new_header)
+            _, texture_sets, _ = _build_block_map(
+                data,
+                new_header,
+                opts.unknown_shader_type_map,
+                allow_num_extra_fallback=False,
+            )
             header = new_header
         sets_patched += 1
 
     return data, props_patched, sets_patched, upgraded
+
+
+def _is_retryable_force_type3_error(exc: Exception) -> bool:
+    if not isinstance(exc, ValueError):
+        return False
+    text = str(exc).lower()
+    return (
+        "recorded block size" in text and "expected type-0 size" in text
+    ) or (
+        "cannot force shader type 3 on a real-layout skyrim shader block" in text
+    )
+
+
+def _summarize_binary_diff(
+    original_data: bytes,
+    new_data: bytes,
+    *,
+    max_ranges: int = 8,
+) -> tuple[int, list[tuple[int, int]]]:
+    changed_ranges: list[tuple[int, int]] = []
+    changed_bytes = 0
+    limit = min(len(original_data), len(new_data))
+    start: int | None = None
+    end = -1
+    for idx in range(limit):
+        if original_data[idx] != new_data[idx]:
+            changed_bytes += 1
+            if start is None:
+                start = idx
+            end = idx
+        elif start is not None:
+            changed_ranges.append((start, end))
+            start = None
+            if len(changed_ranges) >= max_ranges:
+                break
+    if start is not None and len(changed_ranges) < max_ranges:
+        changed_ranges.append((start, end))
+    if len(original_data) != len(new_data):
+        changed_bytes += abs(len(original_data) - len(new_data))
+        if len(changed_ranges) < max_ranges:
+            start_idx = limit
+            end_idx = max(len(original_data), len(new_data)) - 1
+            changed_ranges.append((start_idx, end_idx))
+    return changed_bytes, changed_ranges
+
+
+def _validate_patched_bytes_before_write(
+    new_data: bytes,
+    *,
+    allowed_profiles: tuple[str, ...],
+    unknown_shader_type_map: dict[int, int] | None,
+) -> list[str]:
+    errors: list[str] = []
+    try:
+        header = _read_header_for_profiles(
+            _Buf(new_data),
+            allowed_profiles=allowed_profiles,
+        )
+    except (ValueError, struct.error, IndexError) as exc:
+        errors.append(f"Pre-write header validation failed: {exc}")
+        return errors
+    if header is None:
+        errors.append("Pre-write header validation failed: unsupported NIF header/profile values.")
+        return errors
+    try:
+        _shader_props, _texture_sets, parse_errors = _build_block_map(
+            new_data,
+            header,
+            unknown_shader_type_map,
+            allow_num_extra_fallback=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"Pre-write block-map validation failed: {exc}")
+        return errors
+    if parse_errors:
+        errors.extend(f"Pre-write block-map warning/error: {item}" for item in parse_errors)
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -2263,6 +2966,13 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
     if not has_any_toggle:
         result.message = "Nothing to patch — all options are disabled."
         return result
+    target_game = (opts.target_game or "auto").strip().lower()
+    if target_game not in {"auto", _GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT}:
+        result.errors.append(
+            f"Unsupported target_game {opts.target_game!r}. Expected one of: auto, skyrim, fallout."
+        )
+        result.message = "Unsupported target_game option."
+        return result
 
     for field_name, path_value in (
         ("parallax_texture_path", opts.parallax_texture_path),
@@ -2283,10 +2993,12 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         result.errors.append(f"Cannot read: {exc}")
         result.message = str(exc)
         return result
+    result.detected_game_profile = _detect_game_profile_from_bytes(original_data)
 
     buf = _Buf(original_data)
+    allowed_profiles = (_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT)
     try:
-        header = _read_header(buf)
+        header = _read_header_for_profiles(buf, allowed_profiles=allowed_profiles)
     except (ValueError, struct.error, IndexError) as exc:
         header_diagnostics = _diagnose_header_parse_failure(original_data, exc)
         result.errors.extend(header_diagnostics)
@@ -2294,21 +3006,121 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         return result
     if header is None:
         header_diagnostics = _diagnose_header_parse_failure(
-            original_data, ValueError("Unsupported Skyrim NIF header values")
+            original_data, ValueError("Unsupported NIF header/profile values")
         )
         result.errors.extend(header_diagnostics)
         result.message = header_diagnostics[0]
         return result
+    detected_profile = _detect_game_profile(header.user_version, header.user_version_2)
+    result.detected_game_profile = detected_profile
+    selected_profile = detected_profile if target_game == "auto" else target_game
+    if target_game == _GAME_PROFILE_SKYRIM and detected_profile != _GAME_PROFILE_SKYRIM:
+        result.errors.append(
+            f"target_game='skyrim' requires Skyrim-compatible headers; detected profile: {detected_profile}."
+        )
+        result.message = result.errors[0]
+        return result
+    policy_profile = detected_profile if detected_profile == _GAME_PROFILE_FALLOUT else selected_profile
+    capability = _game_patch_capability(policy_profile)
+    if target_game != "auto" and detected_profile != target_game:
+        result.warnings.append(
+            f"target_game='{target_game}' differs from detected profile '{detected_profile}'; "
+            f"applying {policy_profile} safety policy."
+        )
+    if capability.requires_experimental_opt_in and not opts.experimental_fallout_write:
+        result.errors.append(
+            "Fallout profile detected/selected, but experimental_fallout_write is disabled."
+        )
+        result.errors.append(
+            "Enable experimental_fallout_write for guarded best-effort patching, "
+            "or use validate-only checks."
+        )
+        result.message = result.errors[0]
+        return result
+    if policy_profile == _GAME_PROFILE_FALLOUT:
+        unsupported_ops: list[str] = []
+        enabled_fallout_gates: list[str] = []
+        if opts.force_shader_type_3 and not capability.supports_force_type3:
+            unsupported_ops.append("force_shader_type_3")
+        if opts.parallax_scale is not None and not capability.supports_parallax_scale and not opts.fallout_allow_parallax_scale:
+            unsupported_ops.append("parallax_scale")
+        elif opts.parallax_scale is not None and opts.fallout_allow_parallax_scale:
+            enabled_fallout_gates.append("parallax_scale")
+        if not capability.supports_advanced_shader_fields:
+            if opts.fix_mesh_lighting and not opts.fallout_allow_fix_mesh_lighting:
+                unsupported_ops.append("fix_mesh_lighting")
+            elif opts.fix_mesh_lighting and opts.fallout_allow_fix_mesh_lighting:
+                enabled_fallout_gates.append("fix_mesh_lighting")
+            if opts.spec_strength is not None and not opts.fallout_allow_spec_strength:
+                unsupported_ops.append("spec_strength")
+            elif opts.spec_strength is not None and opts.fallout_allow_spec_strength:
+                enabled_fallout_gates.append("spec_strength")
+            if opts.spec_color is not None and not opts.fallout_allow_spec_color:
+                unsupported_ops.append("spec_color")
+            elif opts.spec_color is not None and opts.fallout_allow_spec_color:
+                enabled_fallout_gates.append("spec_color")
+            if opts.env_map_scale is not None and not opts.fallout_allow_env_map_scale:
+                unsupported_ops.append("env_map_scale")
+            elif opts.env_map_scale is not None and opts.fallout_allow_env_map_scale:
+                enabled_fallout_gates.append("env_map_scale")
+        if unsupported_ops:
+            result.errors.append(
+                "Experimental Fallout patch mode does not support: "
+                + ", ".join(unsupported_ops)
+                + "."
+            )
+            result.errors.append(
+                "Enable the matching --fallout-allow-* safety gates only when you explicitly accept risk, "
+                "or use flag/texture-slot patch options only."
+            )
+            result.message = result.errors[0]
+            return result
+        result.warnings.append(
+            "Experimental Fallout patch mode active: applying only guarded flag/texture-slot writes."
+        )
+        if enabled_fallout_gates:
+            result.warnings.append(
+                "Experimental Fallout per-operation safety gates enabled: "
+                + ", ".join(sorted(set(enabled_fallout_gates)))
+                + "."
+            )
 
-    shader_props, texture_sets, parse_errors = _build_block_map(original_data, header)
+    shader_props, texture_sets, parse_errors = _build_block_map(
+        original_data,
+        header,
+        opts.unknown_shader_type_map,
+        allow_num_extra_fallback=False,
+    )
     result.errors.extend(parse_errors)
+    result.warnings.extend(_shader_resolution_notes(shader_props))
+    strict_unknowns = _strict_unknown_shader_notes(shader_props)
+    if opts.strict_unknown_shader_types and strict_unknowns:
+        result.errors.extend(strict_unknowns)
+        result.message = "Strict unknown-shader check failed."
+        return result
+    if detected_profile == _GAME_PROFILE_FALLOUT:
+        unsupported_layout_blocks = [
+            sp.block_index for sp in shader_props if sp.layout_name not in capability.allowed_layouts
+        ]
+        if unsupported_layout_blocks:
+            shader_props = [sp for sp in shader_props if sp.layout_name in capability.allowed_layouts]
+            result.warnings.append(
+                "Skipped unsupported-layout shader blocks in experimental Fallout mode: "
+                + ", ".join(str(idx) for idx in unsupported_layout_blocks[:12])
+                + ("..." if len(unsupported_layout_blocks) > 12 else "")
+            )
     result.shader_properties_found = len(shader_props)
 
     if not shader_props:
         if parse_errors:
             result.message = f"No patchable BSLightingShaderProperty blocks found ({parse_errors[0]})."
         else:
-            result.message = "No BSLightingShaderProperty blocks found — nothing to patch."
+            if detected_profile == _GAME_PROFILE_FALLOUT:
+                result.message = (
+                    "No Fallout-compatible BSLightingShaderProperty blocks found for experimental patch mode."
+                )
+            else:
+                result.message = "No BSLightingShaderProperty blocks found — nothing to patch."
         extra_hints = _summarize_non_patchable_block_types(header)
         if extra_hints:
             result.errors.extend(extra_hints)
@@ -2320,9 +3132,38 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
             original_data, header, shader_props, texture_sets, opts
         )
     except Exception as exc:  # noqa: BLE001
-        result.errors.append(f"Patch error: {exc}")
-        result.message = str(exc)
-        return result
+        if opts.force_shader_type_3 and effective_parallax and _is_retryable_force_type3_error(exc):
+            try:
+                fallback_opts = replace(opts, force_shader_type_3=False)
+                fallback_shader_props, fallback_texture_sets, fallback_parse_errors = _build_block_map(
+                    original_data,
+                    header,
+                    fallback_opts.unknown_shader_type_map,
+                    allow_num_extra_fallback=True,
+                )
+                if not fallback_shader_props:
+                    if fallback_parse_errors:
+                        result.errors.extend(fallback_parse_errors)
+                    if fallback_parse_errors:
+                        result.message = f"No patchable BSLightingShaderProperty blocks found ({fallback_parse_errors[0]})."
+                    else:
+                        result.message = "No BSLightingShaderProperty blocks found — nothing to patch."
+                    return result
+                new_data, props_patched, sets_patched, upgraded = _apply_patches(
+                    original_data, header, fallback_shader_props, fallback_texture_sets, fallback_opts
+                )
+                result.warnings.append(
+                    "Skipped shader type-3 block expansion due to layout mismatch; "
+                    "continued with compatible flag/texture patching."
+                )
+            except Exception as fallback_exc:  # noqa: BLE001
+                result.errors.append(f"Patch error: {fallback_exc}")
+                result.message = str(fallback_exc)
+                return result
+        else:
+            result.errors.append(f"Patch error: {exc}")
+            result.message = str(exc)
+            return result
 
     result.shader_properties_patched = props_patched
     result.texture_sets_patched = sets_patched
@@ -2335,12 +3176,34 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         return result
 
     if opts.dry_run:
+        diff_suffix = ""
+        if opts.dry_run_diff:
+            changed_bytes, changed_ranges = _summarize_binary_diff(original_data, new_data)
+            range_summary = ", ".join(f"{start}-{end}" for start, end in changed_ranges) if changed_ranges else "none"
+            diff_suffix = (
+                f" Diff: {changed_bytes} byte(s) differ across range(s): {range_summary}."
+            )
         result.success = True
         result.message = (
             f"[DRY RUN] Would patch {props_patched} shader(s), "
             f"{sets_patched} texture set(s), upgrade {upgraded} block(s) to type 3."
+            + diff_suffix
         )
         return result
+
+    if opts.strict_pre_write_validation:
+        pre_write_errors = _validate_patched_bytes_before_write(
+            new_data,
+            allowed_profiles=allowed_profiles,
+            unknown_shader_type_map=opts.unknown_shader_type_map,
+        )
+        if pre_write_errors:
+            result.errors.extend(pre_write_errors)
+            result.message = (
+                "Pre-write validation failed — refusing to write patched bytes. "
+                + pre_write_errors[0]
+            )
+            return result
 
     if opts.backup:
         backup_path = nif_path.with_suffix(".nif.bak")
@@ -2384,15 +3247,24 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
         return [], [f"Cannot read NIF: {exc}"]
     buf = _Buf(data)
     try:
-        header = _read_header(buf)
+        header = _read_header_for_profiles(
+            buf,
+            allowed_profiles=(_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT),
+        )
     except (ValueError, struct.error, IndexError) as exc:
         return [], _diagnose_header_parse_failure(data, exc)
     if header is None:
         return [], _diagnose_header_parse_failure(
-            data, ValueError("Unsupported Skyrim NIF header values")
+            data, ValueError("Unsupported NIF header/profile values")
+        )
+    detected_profile = _detect_game_profile(header.user_version, header.user_version_2)
+    if detected_profile == _GAME_PROFILE_FALLOUT:
+        diagnostics.append(
+            "Detected Fallout-era profile. Patch-write support is experimental; keep backups and verify in-game."
         )
     shader_props, texture_sets, parse_errors = _build_block_map(data, header)
     diagnostics.extend(parse_errors)
+    diagnostics.extend(_shader_resolution_notes(shader_props))
     if not shader_props:
         diagnostics.extend(_summarize_non_patchable_block_types(header))
 
@@ -2416,6 +3288,9 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
             parallax_scale=sp.parallax_scale,
             texture_paths=tex_paths,
             env_map_scale=sp.env_map_scale,
+            raw_shader_type=sp.raw_shader_type,
+            shader_type_resolution=sp.shader_type_resolution,
+            layout_name=sp.layout_name,
         )
         if shape is not None:
             info.parent_block_type = shape.block_type
@@ -2621,7 +3496,570 @@ def _renderer_compatibility(info: NifShaderInfo) -> dict[str, list[str]]:
     return notes
 
 
-def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
+_CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
+    "unsupported_header": (
+        "Re-export or convert the mesh to a supported Skyrim/Fallout header profile.",
+        "Use validate mode first to confirm header/profile diagnostics are clean.",
+    ),
+    "fallout_profile": (
+        "Enable target_game='fallout' with experimental_fallout_write for guarded patching.",
+        "Avoid force_shader_type_3/parallax_scale/advanced shader-field writes in Fallout mode.",
+    ),
+    "incompatible_shader_type": (
+        "Patch only Default(0), Heightmap(3), or EnvMap(1) shader blocks.",
+        "Use unknown_shader_type_map for explicit raw shader-type overrides when safe.",
+    ),
+    "skip_skinned_or_havok.havok_graph": (
+        "Do not enable parallax on Havok-driven meshes due to CTD/glitch risk.",
+    ),
+    "skip_alpha_decal_lighting.decal_flag": (
+        "Disable parallax on decal-tagged shader blocks or separate them into non-parallax materials.",
+    ),
+    "skip_alpha_decal_lighting.subsurface_flags": (
+        "Disable parallax on soft/rim/back-lighting blocks; those lighting models conflict with parallax.",
+    ),
+    "skip_alpha_decal_lighting.anisotropic_flag": (
+        "Disable parallax on anisotropic-lighting blocks or use a compatible shader setup.",
+    ),
+    "skip_single_pass": (
+        "Keep skip_single_pass enabled for safety, or disable it only for known-good meshes.",
+    ),
+    "skip_skinned_or_havok": (
+        "Do not enable parallax on skinned/Havok-driven meshes due to CTD/glitch risk.",
+    ),
+    "skip_alpha_decal_lighting": (
+        "Disable parallax for alpha/decal/soft-lighting/anisotropic blocks or separate them into non-parallax materials.",
+    ),
+    "missing_parallax_flag": (
+        "Enable SLSF1_Parallax on patchable shader blocks.",
+    ),
+    "missing_parallax_slot3.empty": (
+        "Set texture slot 3 to a valid _p.dds height map path.",
+        "Verify slot 3 is not blank after exports/conversions from DCC tools.",
+    ),
+    "missing_parallax_slot3": (
+        "Set texture slot 3 to a valid _p.dds height map path.",
+    ),
+    "path_slot_diffuse": (
+        "Use slot 0 for diffuse/albedo only and keep runtime paths as textures\\... .dds.",
+    ),
+    "path_slot_normal": (
+        "Use slot 1 for _n.dds/_msn.dds normal maps and avoid packed/non-normal suffixes.",
+    ),
+    "path_slot_parallax": (
+        "Use slot 3 for _p.dds height maps only.",
+    ),
+    "path_slot_glow": (
+        "Use slot 2 for _g.dds emissive maps and align the glow flag with slot usage.",
+    ),
+    "path_slot_cubemap": (
+        "Use slot 4 for cubemap textures (_e/_env/_cube naming).",
+    ),
+    "path_slot_env_mask": (
+        "Use slot 5 for _m (ENB/vanilla), _cm/_c (CS), or _rmaos/_ramos (TruePBR).",
+    ),
+    "path_slot_env_mask.generic_alias_suffix": (
+        "Replace generic packed aliases (_orm/_mrao) with explicit workflow suffixes such as _m, _cm/_c, or _rmaos/_ramos.",
+    ),
+    "flag_glow_map.slot2_filled_without_flag": (
+        "Enable SLSF2_Glow_Map when slot 2 emissive is present, or clear slot 2.",
+    ),
+    "flag_env_mapping.slot5_filled_without_flag": (
+        "Enable SLSF1_Environment_Mapping when slot 5 is populated, or clear slot 5.",
+    ),
+    "flag_pom.without_base_parallax": (
+        "Enable SLSF1_Parallax when POM is enabled, or disable POM for the block.",
+    ),
+    "flag_pom.non_heightmap_shader": (
+        "Prefer Heightmap shader type (3) when using POM for best compatibility.",
+    ),
+    "fallback_or_unknown": (
+        "Review the listed block diagnostics and apply targeted fixes before repatching.",
+    ),
+}
+
+
+_BLOCK_INDEX_RE = re.compile(r"block\s+(\d+)", re.IGNORECASE)
+
+
+def _extract_block_index(message: str) -> int | None:
+    match = _BLOCK_INDEX_RE.search(message)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _classify_conflict_code(message: str) -> str:
+    lowered = message.lower()
+    if "unsupported nif header/profile values" in lowered or "unexpected user version values" in lowered:
+        return "unsupported_header"
+    if "fallout profile" in lowered or "experimental_fallout_write" in lowered:
+        return "fallout_profile"
+    if "incompatible shader type" in lowered:
+        return "incompatible_shader_type"
+    if "bsbehaviorgraphextradata" in lowered or "havok animation graph" in lowered:
+        return "skip_skinned_or_havok.havok_graph"
+    if "decal flag" in lowered:
+        return "skip_alpha_decal_lighting.decal_flag"
+    if "subsurface-scattering lighting flags active" in lowered:
+        return "skip_alpha_decal_lighting.subsurface_flags"
+    if "slsf2_anisotropic_lighting is set" in lowered:
+        return "skip_alpha_decal_lighting.anisotropic_flag"
+    if "single_pass" in lowered:
+        return "skip_single_pass"
+    if "havok" in lowered or "skinned/animated mesh" in lowered or "skinned mesh" in lowered:
+        return "skip_skinned_or_havok"
+    if "alpha" in lowered or "decal" in lowered or "anisotropic" in lowered or "subsurface-scattering" in lowered:
+        return "skip_alpha_decal_lighting"
+    if "parallax flag not set" in lowered:
+        return "missing_parallax_flag.flag1_not_set"
+    if "texture slot 3 (parallax) is empty" in lowered:
+        return "missing_parallax_slot3.empty"
+    if "slot 0 diffuse path" in lowered and "not a .dds texture path" in lowered:
+        return "path_slot_diffuse.non_dds"
+    if "slot 0 diffuse path" in lowered and "authoring suffix naming" in lowered:
+        return "path_slot_diffuse.authoring_suffix"
+    if "slot 0 diffuse path" in lowered and "looks like a non-diffuse map" in lowered:
+        return "path_slot_diffuse.wrong_suffix"
+    if "slot 1 normal path" in lowered and "not a .dds texture path" in lowered:
+        return "path_slot_normal.non_dds"
+    if "slot 1 normal path" in lowered and "does not look like a normal map path" in lowered:
+        return "path_slot_normal.wrong_suffix"
+    if "slot 2 glow path" in lowered and "not a .dds texture path" in lowered:
+        return "path_slot_glow.non_dds"
+    if "slot 2 glow path" in lowered and "does not look like an emissive/glow texture" in lowered:
+        return "path_slot_glow.wrong_suffix"
+    if "slot 3 parallax path" in lowered and "not a .dds texture path" in lowered:
+        return "path_slot_parallax.non_dds"
+    if "parallax path '" in lowered and "not a skyrim-relative textures\\" in lowered:
+        return "path_slot_parallax.non_relative"
+    if "parallax path '" in lowered and "does not use the expected _p.dds naming" in lowered:
+        return "path_slot_parallax.wrong_suffix"
+    if "slot 3 parallax path" in lowered and "looks like a cubemap path" in lowered:
+        return "path_slot_parallax.cubemap_like"
+    if "parallax slot 3 points at the diffuse texture" in lowered:
+        return "path_slot_parallax.matches_diffuse"
+    if "parallax slot 3 points at the normal texture" in lowered:
+        return "path_slot_parallax.matches_normal"
+    if "slot 5 environment-mask path" in lowered and "not a .dds texture path" in lowered:
+        return "path_slot_env_mask.non_dds"
+    if "slot 5 environment-mask path" in lowered and "does not look like an environment mask" in lowered:
+        return "path_slot_env_mask.wrong_suffix"
+    if "slot 5 environment-mask path" in lowered and "generic packed alias suffix" in lowered:
+        return "path_slot_env_mask.generic_alias_suffix"
+    if "slot 4 cubemap path" in lowered and "not a .dds texture path" in lowered:
+        return "path_slot_cubemap.non_dds"
+    if "slot 4 cubemap path" in lowered and "looks like a non-cubemap texture" in lowered:
+        return "path_slot_cubemap.wrong_suffix"
+    if "slot 2 is filled" in lowered and "slsf2_glow_map is not set" in lowered:
+        return "flag_glow_map.slot2_filled_without_flag"
+    if "slot 5 is filled" in lowered and "slsf1_environment_mapping is not enabled" in lowered:
+        return "flag_env_mapping.slot5_filled_without_flag"
+    if "pom flag is set on shader type" in lowered:
+        return "flag_pom.non_heightmap_shader"
+    if "pom flag is enabled without the base slsf1_parallax flag" in lowered:
+        return "flag_pom.without_base_parallax"
+    if "slot 0 " in lowered:
+        return "path_slot_diffuse"
+    if "slot 1 " in lowered:
+        return "path_slot_normal"
+    if "slot 2 " in lowered:
+        return "path_slot_glow"
+    if "slot 3 " in lowered or "parallax path" in lowered:
+        return "path_slot_parallax"
+    if "slot 4 " in lowered:
+        return "path_slot_cubemap"
+    if "slot 5 " in lowered:
+        return "path_slot_env_mask"
+    if "slot " in lowered or "path '" in lowered:
+        return "fallback_or_unknown"
+    return "fallback_or_unknown"
+
+
+def _actions_for_conflict_code(base_code: str) -> tuple[str, ...]:
+    probe = base_code
+    while probe:
+        actions = _CONFLICT_ACTIONS.get(probe)
+        if actions:
+            return actions
+        if "." not in probe:
+            break
+        probe = probe.rsplit(".", 1)[0]
+    return _CONFLICT_ACTIONS["fallback_or_unknown"]
+
+
+def _resolve_conflict_actions(
+    *,
+    base_code: str,
+    game_profile: str,
+    shader_layout: str,
+) -> tuple[str, ...]:
+    actions = list(_actions_for_conflict_code(base_code))
+    if game_profile == _GAME_PROFILE_FALLOUT:
+        if "fallout" not in " ".join(actions).lower():
+            actions.append(
+                "For Fallout profiles, keep experimental_fallout_write enabled and stay within guarded operation limits."
+            )
+    if shader_layout == "legacy" and base_code in {"incompatible_shader_type", "path_slot_parallax"}:
+        actions.append("Legacy-layout blocks should prefer conservative flag + slot edits before advanced mutations.")
+    if shader_layout == "real" and base_code == "path_slot_normal":
+        actions.append("Real-layout blocks should verify slot-1 normal path consistency before parallax tuning.")
+    deduped: list[str] = []
+    for action in actions:
+        if action not in deduped:
+            deduped.append(action)
+    return tuple(deduped)
+
+
+def _build_conflict_report(
+    result: NifValidationResult,
+    infos: list[NifShaderInfo] | None = None,
+) -> list[NifConflictSummary]:
+    info_by_block = {info.block_index: info for info in (infos or [])}
+    grouped: dict[tuple[str, str, str], list[str]] = {}
+    for message in [*result.skip_reasons, *result.issues]:
+        base_code = _classify_conflict_code(message)
+        block_idx = _extract_block_index(message)
+        layout = "global"
+        if block_idx is not None:
+            block_info = info_by_block.get(block_idx)
+            if block_info is not None and block_info.layout_name:
+                layout = block_info.layout_name
+            else:
+                layout = "unknown"
+        profile = result.detected_game_profile or _GAME_PROFILE_UNKNOWN
+        grouped.setdefault((base_code, profile, layout), []).append(message)
+    summaries: list[NifConflictSummary] = []
+    for (base_code, profile, layout), messages in sorted(
+        grouped.items(),
+        key=lambda item: (-len(item[1]), item[0][0], item[0][1], item[0][2]),
+    ):
+        examples = tuple(messages[:3])
+        summaries.append(
+            NifConflictSummary(
+                code=f"{base_code}.{profile}.{layout}",
+                count=len(messages),
+                game_profile=profile,
+                shader_layout=layout,
+                examples=examples,
+                suggested_actions=_resolve_conflict_actions(
+                    base_code=base_code,
+                    game_profile=profile,
+                    shader_layout=layout,
+                ),
+            )
+        )
+    return summaries
+
+
+def summarize_validation_conflicts(
+    validations: list[NifValidationResult],
+    *,
+    max_example_files: int = 3,
+) -> list[NifBatchConflictSummary]:
+    """Aggregate per-file conflict reports into grouped batch diagnostics."""
+    grouped: dict[str, dict[str, object]] = {}
+    for validation in validations:
+        report = getattr(validation, "conflict_report", None) or []
+        seen_codes_for_file: set[str] = set()
+        file_name = validation.nif_path.name
+        for group in report:
+            code = group.code
+            bucket = grouped.setdefault(
+                code,
+                {
+                    "count": 0,
+                    "file_count": 0,
+                    "game_profile": group.game_profile,
+                    "shader_layout": group.shader_layout,
+                    "example_files": [],
+                    "actions": [],
+                },
+            )
+            bucket["count"] = int(bucket["count"]) + max(1, int(group.count))
+            if code not in seen_codes_for_file:
+                bucket["file_count"] = int(bucket["file_count"]) + 1
+                seen_codes_for_file.add(code)
+            file_examples = bucket["example_files"]
+            if not isinstance(file_examples, list):
+                file_examples = []
+                bucket["example_files"] = file_examples
+            if file_name not in file_examples and len(file_examples) < max(1, max_example_files):
+                file_examples.append(file_name)
+            actions = bucket["actions"]
+            if not isinstance(actions, list):
+                actions = []
+                bucket["actions"] = actions
+            for action in group.suggested_actions:
+                if action not in actions:
+                    actions.append(action)
+
+    summaries: list[NifBatchConflictSummary] = []
+    for code, payload in sorted(
+        grouped.items(),
+        key=lambda item: (
+            -int(item[1]["count"]),
+            -int(item[1]["file_count"]),
+            item[0],
+        ),
+    ):
+        summaries.append(
+            NifBatchConflictSummary(
+                code=code,
+                count=int(payload["count"]),
+                file_count=int(payload["file_count"]),
+                game_profile=str(payload["game_profile"]),
+                shader_layout=str(payload["shader_layout"]),
+                example_files=tuple(
+                    payload["example_files"] if isinstance(payload["example_files"], list) else []
+                ),
+                suggested_actions=tuple(
+                    payload["actions"] if isinstance(payload["actions"], list) else []
+                ),
+            )
+        )
+    return summaries
+
+
+def summarize_plugin_aware_validation_conflicts(
+    validations: list[NifValidationResult],
+    *,
+    plugin_context: dict[str, list[NifPluginConflictRef]] | None = None,
+    max_example_files: int = 3,
+    max_example_plugins: int = 5,
+) -> list[NifPluginAwareConflictSummary]:
+    """Aggregate conflicts with optional plugin/record linkage by mesh path."""
+    plugin_context = plugin_context or {}
+    grouped: dict[str, dict[str, object]] = {}
+    for validation in validations:
+        file_key = str(validation.nif_path).lower()
+        refs = plugin_context.get(file_key, [])
+        report = getattr(validation, "conflict_report", None) or []
+        seen_codes_for_file: set[str] = set()
+        seen_plugin_for_code: dict[str, set[str]] = {}
+        for group in report:
+            code = group.code
+            bucket = grouped.setdefault(
+                code,
+                {
+                    "count": 0,
+                    "file_count": 0,
+                    "plugin_names": set(),
+                    "game_profile": group.game_profile,
+                    "shader_layout": group.shader_layout,
+                    "example_files": [],
+                    "example_plugins": [],
+                    "actions": [],
+                },
+            )
+            bucket["count"] = int(bucket["count"]) + max(1, int(group.count))
+            if code not in seen_codes_for_file:
+                bucket["file_count"] = int(bucket["file_count"]) + 1
+                seen_codes_for_file.add(code)
+
+            file_examples = bucket["example_files"]
+            if not isinstance(file_examples, list):
+                file_examples = []
+                bucket["example_files"] = file_examples
+            if validation.nif_path.name not in file_examples and len(file_examples) < max(1, max_example_files):
+                file_examples.append(validation.nif_path.name)
+
+            plugin_names = bucket["plugin_names"]
+            if not isinstance(plugin_names, set):
+                plugin_names = set()
+                bucket["plugin_names"] = plugin_names
+            plugin_examples = bucket["example_plugins"]
+            if not isinstance(plugin_examples, list):
+                plugin_examples = []
+                bucket["example_plugins"] = plugin_examples
+            seen_for_code = seen_plugin_for_code.setdefault(code, set())
+            for ref in refs:
+                plugin_name = ref.plugin_name.strip()
+                if not plugin_name or plugin_name in seen_for_code:
+                    continue
+                plugin_names.add(plugin_name)
+                if plugin_name not in plugin_examples and len(plugin_examples) < max(1, max_example_plugins):
+                    plugin_examples.append(plugin_name)
+                seen_for_code.add(plugin_name)
+
+            actions = bucket["actions"]
+            if not isinstance(actions, list):
+                actions = []
+                bucket["actions"] = actions
+            for action in group.suggested_actions:
+                if action not in actions:
+                    actions.append(action)
+
+    summaries: list[NifPluginAwareConflictSummary] = []
+    for code, payload in sorted(
+        grouped.items(),
+        key=lambda item: (
+            -int(item[1]["count"]),
+            -int(item[1]["file_count"]),
+            -len(item[1]["plugin_names"]) if isinstance(item[1]["plugin_names"], set) else 0,
+            item[0],
+        ),
+    ):
+        plugin_names = payload["plugin_names"] if isinstance(payload["plugin_names"], set) else set()
+        summaries.append(
+            NifPluginAwareConflictSummary(
+                code=code,
+                count=int(payload["count"]),
+                file_count=int(payload["file_count"]),
+                plugin_count=len(plugin_names),
+                game_profile=str(payload["game_profile"]),
+                shader_layout=str(payload["shader_layout"]),
+                example_files=tuple(
+                    payload["example_files"] if isinstance(payload["example_files"], list) else []
+                ),
+                example_plugins=tuple(
+                    payload["example_plugins"] if isinstance(payload["example_plugins"], list) else []
+                ),
+                suggested_actions=tuple(
+                    payload["actions"] if isinstance(payload["actions"], list) else []
+                ),
+            )
+        )
+    return summaries
+
+
+def _conflict_base_code(conflict_code: str) -> str:
+    parts = conflict_code.split(".")
+    if len(parts) >= 3:
+        return ".".join(parts[:-2])
+    return conflict_code
+
+
+def build_auto_remediation_patch_options(
+    nif_path: Path,
+    conflict_codes: list[str],
+    *,
+    target_game: str = "auto",
+    experimental_fallout_write: bool = False,
+    fallout_allow_parallax_scale: bool = False,
+    fallout_allow_fix_mesh_lighting: bool = False,
+    fallout_allow_spec_strength: bool = False,
+    fallout_allow_spec_color: bool = False,
+    fallout_allow_env_map_scale: bool = False,
+    allow_destructive: bool = False,
+    skip_single_pass: bool = True,
+    backup: bool = True,
+    dry_run: bool = False,
+    strict_pre_write_validation: bool = True,
+) -> tuple[NifPatchOptions | None, tuple[str, ...]]:
+    """Build a safe patch option set for selected conflict codes."""
+    if not conflict_codes:
+        return None, ("No conflict codes were provided for auto-remediation.",)
+    base_codes = {_conflict_base_code(code) for code in conflict_codes}
+    opts = NifPatchOptions(
+        target_game=target_game,
+        experimental_fallout_write=experimental_fallout_write,
+        fallout_allow_parallax_scale=fallout_allow_parallax_scale,
+        fallout_allow_fix_mesh_lighting=fallout_allow_fix_mesh_lighting,
+        fallout_allow_spec_strength=fallout_allow_spec_strength,
+        fallout_allow_spec_color=fallout_allow_spec_color,
+        fallout_allow_env_map_scale=fallout_allow_env_map_scale,
+        skip_single_pass=skip_single_pass,
+        backup=backup,
+        dry_run=dry_run,
+        strict_pre_write_validation=strict_pre_write_validation,
+    )
+    applied_steps: list[str] = []
+    guessed_parallax = guess_parallax_path_for_nif(nif_path)
+    guessed_normal = guess_normal_path_for_nif(nif_path)
+    guessed_glow = guess_glow_path_for_nif(nif_path)
+    guessed_env = guess_env_mask_path_for_nif(nif_path)
+
+    if any(code.startswith("missing_parallax_flag") for code in base_codes):
+        opts.enable_parallax = True
+        applied_steps.append("enable_parallax")
+    if any(code.startswith("flag_pom.without_base_parallax") for code in base_codes):
+        opts.enable_parallax = True
+        applied_steps.append("enable_parallax_for_pom")
+    if any(code.startswith("flag_env_mapping.slot5_filled_without_flag") for code in base_codes):
+        opts.enable_env_mapping = True
+        applied_steps.append("enable_env_mapping")
+    if any(code.startswith("flag_glow_map.slot2_filled_without_flag") for code in base_codes):
+        opts.enable_glow_map = True
+        applied_steps.append("enable_glow_map")
+    if any(code.startswith("path_slot_parallax") or code.startswith("missing_parallax_slot3") for code in base_codes):
+        if guessed_parallax:
+            opts.parallax_texture_path = guessed_parallax
+            applied_steps.append("set_slot3_parallax")
+    if any(code.startswith("path_slot_normal") for code in base_codes):
+        if guessed_normal:
+            opts.normal_texture_path = guessed_normal
+            applied_steps.append("set_slot1_normal")
+    if any(code.startswith("path_slot_glow") for code in base_codes):
+        if guessed_glow:
+            opts.glow_texture_path = guessed_glow
+            applied_steps.append("set_slot2_glow")
+    if any(code.startswith("path_slot_env_mask") for code in base_codes):
+        if guessed_env:
+            opts.env_mask_texture_path = guessed_env
+            applied_steps.append("set_slot5_env_mask")
+    if any(code.startswith("path_slot_cubemap") for code in base_codes) and allow_destructive:
+        opts.clear_cubemap_texture_path = True
+        applied_steps.append("clear_slot4_cubemap")
+    if any(code.startswith("path_slot_diffuse") for code in base_codes) and allow_destructive:
+        opts.clear_diffuse_texture_path = True
+        applied_steps.append("clear_slot0_diffuse")
+
+    if not applied_steps:
+        return None, (
+            "No safe auto-remediation actions matched the selected conflict codes.",
+            "Use targeted patch options manually for unsupported conflict categories.",
+        )
+    return opts, tuple(applied_steps)
+
+
+def auto_remediate_nif_conflicts(
+    nif_path: Path,
+    conflict_codes: list[str],
+    *,
+    target_game: str = "auto",
+    experimental_fallout_write: bool = False,
+    fallout_allow_parallax_scale: bool = False,
+    fallout_allow_fix_mesh_lighting: bool = False,
+    fallout_allow_spec_strength: bool = False,
+    fallout_allow_spec_color: bool = False,
+    fallout_allow_env_map_scale: bool = False,
+    allow_destructive: bool = False,
+    skip_single_pass: bool = True,
+    backup: bool = True,
+    dry_run: bool = False,
+    strict_pre_write_validation: bool = True,
+) -> tuple[NifPatchResult | None, tuple[str, ...]]:
+    """Apply selected conflict-code remediations to one NIF."""
+    opts, steps = build_auto_remediation_patch_options(
+        nif_path,
+        conflict_codes,
+        target_game=target_game,
+        experimental_fallout_write=experimental_fallout_write,
+        fallout_allow_parallax_scale=fallout_allow_parallax_scale,
+        fallout_allow_fix_mesh_lighting=fallout_allow_fix_mesh_lighting,
+        fallout_allow_spec_strength=fallout_allow_spec_strength,
+        fallout_allow_spec_color=fallout_allow_spec_color,
+        fallout_allow_env_map_scale=fallout_allow_env_map_scale,
+        allow_destructive=allow_destructive,
+        skip_single_pass=skip_single_pass,
+        backup=backup,
+        dry_run=dry_run,
+        strict_pre_write_validation=strict_pre_write_validation,
+    )
+    if opts is None:
+        return None, steps
+    return patch_nif(nif_path, opts), steps
+
+
+def validate_nif_for_parallax(
+    nif_path: Path,
+    *,
+    skip_single_pass: bool = True,
+) -> NifValidationResult:
     """Check whether a NIF is ready for parallax, and suggest fixes.
 
     The result now carries per-block :attr:`~NifValidationResult.skip_reasons`
@@ -2643,7 +4081,9 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
         raw = nif_path.read_bytes()
     except OSError as exc:
         result.issues.append(f"Cannot read NIF: {exc}")
+        result.conflict_report = _build_conflict_report(result)
         return result
+    result.detected_game_profile = _detect_game_profile_from_bytes(raw)
     result.has_havok = b"BSBehaviorGraphExtraData" in raw
 
     infos, diagnostics = scan_nif_diagnostics(nif_path)
@@ -2655,6 +4095,15 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
 
     if diagnostics:
         result.issues.extend(diagnostics[:6])
+    if result.detected_game_profile == _GAME_PROFILE_FALLOUT:
+        _append_unique(
+            result.suggestions,
+            "Fallout profile detected: use target_game='fallout' with experimental_fallout_write only for guarded flag/texture-slot patches.",
+        )
+        _append_unique(
+            result.suggestions,
+            "Keep backups and verify meshes in-game after patching; full Fallout profile support is still in progress.",
+        )
     if not infos:
         if not diagnostics:
             result.issues.append("No BSLightingShaderProperty blocks found or not a Skyrim SE NIF.")
@@ -2662,6 +4111,7 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
             lowered = diagnostic.lower()
             if "resolution:" in lowered or "convert" in lowered or "re-save" in lowered or "re-export" in lowered:
                 _append_unique(result.suggestions, diagnostic)
+        result.conflict_report = _build_conflict_report(result)
         return result
 
     if result.has_havok:
@@ -2730,6 +4180,14 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
             reason = (
                 f"{bname}: SLSF2_Anisotropic_Lighting is set — "
                 f"anisotropic shading and parallax produce incorrect results together"
+            )
+            _append_unique(result.skip_reasons, reason)
+            block_skipped = True
+
+        if skip_single_pass and info.has_single_pass_flag:
+            reason = (
+                f"{bname}: SLSF1_Single_Pass is set — "
+                f"single-pass materials are incompatible with standard parallax patching"
             )
             _append_unique(result.skip_reasons, reason)
             block_skipped = True
@@ -3099,6 +4557,7 @@ def validate_nif_for_parallax(nif_path: Path) -> NifValidationResult:
 
     result.renderer_notes = agg_renderer_notes
     result.renderer_verdicts = _build_renderer_verdicts(infos, has_havok=result.has_havok)
+    result.conflict_report = _build_conflict_report(result, infos)
     result.valid = result.shader_count > 0
     return result
 
@@ -3315,12 +4774,13 @@ def batch_patch_nif(
 
 def _main() -> None:  # pragma: no cover
     import argparse
+    import json
     import sys
 
     parser = argparse.ArgumentParser(
         description="Patch Skyrim SE NIF files to enable parallax / env mapping.",
     )
-    parser.add_argument("nif", nargs="+", type=Path,
+    parser.add_argument("nif", nargs="*", type=Path,
                         help="NIF file(s) or folder(s) to patch.")
     parser.add_argument("--parallax", metavar="PATH",
                         help="Parallax height-map texture path (slot 3).")
@@ -3370,8 +4830,108 @@ def _main() -> None:  # pragma: no cover
                         help="Skip .nif.bak backup.")
     parser.add_argument("--dry-run", action="store_true",
                         help="Preview changes without writing.")
+    parser.add_argument(
+        "--dry-run-diff",
+        action="store_true",
+        help="With --dry-run, include changed-byte range summary for proposed patch bytes.",
+    )
+    parser.add_argument(
+        "--no-strict-pre-write-validation",
+        action="store_true",
+        help="Disable strict pre-write structural validation of patched bytes before file write.",
+    )
     parser.add_argument("--validate", action="store_true",
                         help="Just validate and report, do not patch.")
+    parser.add_argument(
+        "--conflict-report",
+        action="store_true",
+        help="With --validate, print grouped conflict summaries with suggested auto-fix actions.",
+    )
+    parser.add_argument(
+        "--conflict-report-summary",
+        action="store_true",
+        help="With --validate, print a cross-file grouped conflict summary for large batches.",
+    )
+    parser.add_argument(
+        "--plugin-conflict-context",
+        type=Path,
+        default=None,
+        metavar="JSON",
+        help="Optional JSON file mapping NIF paths to plugin references for plugin-aware conflict summaries.",
+    )
+    parser.add_argument(
+        "--compatibility-report",
+        action="store_true",
+        help="Print the current game/version support matrix and guarded-operation policy, then exit.",
+    )
+    parser.add_argument(
+        "--auto-remediate",
+        action="store_true",
+        help="With --validate, apply safe best-effort fixes inferred from detected conflict codes.",
+    )
+    parser.add_argument(
+        "--auto-remediate-codes",
+        nargs="*",
+        default=None,
+        metavar="CODE",
+        help="Optional list of conflict codes/prefixes to auto-remediate. Defaults to all detected codes.",
+    )
+    parser.add_argument(
+        "--allow-destructive-remediation",
+        action="store_true",
+        help="Allow clear-slot remediations for some path-conflict categories.",
+    )
+    parser.add_argument(
+        "--target-game",
+        choices=("auto", "skyrim", "fallout"),
+        default="auto",
+        help="Header profile target. 'auto' detects from NIF, 'skyrim' enforces Skyrim profile, "
+             "'fallout' enables Fallout profile selection (requires --experimental-fallout-write to patch).",
+    )
+    parser.add_argument(
+        "--experimental-fallout-write",
+        action="store_true",
+        help="Enable guarded best-effort patch writes for Fallout profile headers. "
+             "This mode supports flag/texture-slot updates only.",
+    )
+    parser.add_argument(
+        "--fallout-allow-parallax-scale",
+        action="store_true",
+        help="Experimental Fallout mode only: allow parallax-scale writes (higher risk).",
+    )
+    parser.add_argument(
+        "--fallout-allow-fix-mesh-lighting",
+        action="store_true",
+        help="Experimental Fallout mode only: allow fix-mesh-lighting writes (higher risk).",
+    )
+    parser.add_argument(
+        "--fallout-allow-spec-strength",
+        action="store_true",
+        help="Experimental Fallout mode only: allow spec-strength writes (higher risk).",
+    )
+    parser.add_argument(
+        "--fallout-allow-spec-color",
+        action="store_true",
+        help="Experimental Fallout mode only: allow spec-color writes (higher risk).",
+    )
+    parser.add_argument(
+        "--fallout-allow-env-map-scale",
+        action="store_true",
+        help="Experimental Fallout mode only: allow env-map-scale writes (higher risk).",
+    )
+    parser.add_argument("--strict-unknown-shader-types", action="store_true",
+                        help="Fail patching only when an unknown raw shader_type value "
+                             "is classified as UNRESOLVED after mapping, semantic, and "
+                             "texture-signature checks. Weak heuristic resolutions are "
+                             "kept as warnings; use --unknown-shader-type-map for explicit "
+                             "overrides.")
+    parser.add_argument("--unknown-shader-type-map", nargs="*", default=None,
+                        metavar="RAW:TYPE",
+                        help="Explicit mapping from unknown raw shader-type values to "
+                             "known SHADER_TYPE_* constants. Provide one or more "
+                             "RAW:TYPE pairs where both values are integers (decimal or "
+                             "0x-prefixed hex). Example: "
+                             "--unknown-shader-type-map 0x12345678:0 305419896:3")
 
     # ---- Safety skip options ----
     parser.add_argument("--no-skip-incompatible", action="store_true",
@@ -3385,6 +4945,9 @@ def _main() -> None:  # pragma: no cover
                              "back-lit shaders when enabling parallax).")
     parser.add_argument("--no-skip-anisotropic", action="store_true",
                         help="Disable anisotropic-lighting skip when enabling parallax.")
+    parser.add_argument("--no-skip-single-pass", action="store_true",
+                        help="Disable single-pass skip (default: skip shaders with "
+                             "SLSF1_Single_Pass when enabling parallax).")
     parser.add_argument("--no-skip-havok", action="store_true",
                         help="Disable Havok-NIF skip (default: skip parallax patching "
                              "for NIFs with BSBehaviorGraphExtraData blocks).")
@@ -3432,6 +4995,61 @@ def _main() -> None:  # pragma: no cover
             )
             sys.exit(1)
 
+    # Parse --unknown-shader-type-map
+    parsed_shader_map: dict[int, int] | None = None
+    if args.unknown_shader_type_map is not None:
+        parsed_shader_map = {}
+        for pair in args.unknown_shader_type_map:
+            try:
+                raw_str, type_str = pair.split(":", 1)
+                raw_val = int(raw_str, 0)
+                type_val = int(type_str, 0)
+                if type_val not in _KNOWN_SHADER_TYPES:
+                    print(
+                        f"Error: --unknown-shader-type-map target {type_val!r} is not a "
+                        f"known SHADER_TYPE_* constant. Known values: "
+                        f"{sorted(_KNOWN_SHADER_TYPES)}",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                parsed_shader_map[raw_val] = type_val
+            except (ValueError, TypeError):
+                print(
+                    f"Error: --unknown-shader-type-map entry {pair!r} is not a valid "
+                    f"RAW:TYPE pair. Use decimal or 0x-prefixed hex, e.g. 0x12345678:0",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+
+    if not args.validate:
+        validate_only_flags: list[str] = []
+        if args.conflict_report:
+            validate_only_flags.append("--conflict-report")
+        if args.conflict_report_summary:
+            validate_only_flags.append("--conflict-report-summary")
+        if args.plugin_conflict_context is not None:
+            validate_only_flags.append("--plugin-conflict-context")
+        if args.auto_remediate:
+            validate_only_flags.append("--auto-remediate")
+        if args.auto_remediate_codes:
+            validate_only_flags.append("--auto-remediate-codes")
+        if args.allow_destructive_remediation:
+            validate_only_flags.append("--allow-destructive-remediation")
+        if validate_only_flags:
+            print(
+                "Error: the following options require --validate: "
+                + ", ".join(validate_only_flags),
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    if args.compatibility_report:
+        print(build_compatibility_report_text())
+        return
+
+    if not args.nif:
+        parser.error("the following arguments are required: nif")
+
     nif_files: list[Path] = []
     for p in args.nif:
         if p.is_dir():
@@ -3446,15 +5064,120 @@ def _main() -> None:  # pragma: no cover
         sys.exit(1)
 
     if args.validate:
+        validation_results: list[NifValidationResult] = []
+        plugin_context: dict[str, list[NifPluginConflictRef]] = {}
+        if args.plugin_conflict_context:
+            try:
+                payload = json.loads(args.plugin_conflict_context.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                print(f"Error: failed to read plugin context JSON: {exc}", file=sys.stderr)
+                sys.exit(1)
+            if isinstance(payload, dict):
+                for nif_key, refs in payload.items():
+                    if not isinstance(nif_key, str) or not isinstance(refs, list):
+                        continue
+                    parsed_refs: list[NifPluginConflictRef] = []
+                    for ref in refs:
+                        if isinstance(ref, dict):
+                            parsed_refs.append(
+                                NifPluginConflictRef(
+                                    plugin_name=str(ref.get("plugin_name", "")).strip(),
+                                    record_id=str(ref.get("record_id", "")).strip(),
+                                    record_type=str(ref.get("record_type", "")).strip(),
+                                )
+                            )
+                        elif isinstance(ref, str):
+                            parsed_refs.append(NifPluginConflictRef(plugin_name=ref.strip()))
+                    plugin_context[str(Path(nif_key)).lower()] = [r for r in parsed_refs if r.plugin_name]
         for nif in nif_files:
             v = validate_nif_for_parallax(nif)
+            validation_results.append(v)
             status = "READY" if v.ready_count == v.shader_count else "NEEDS PATCH"
             print(f"[{status}] {nif.name}: "
-                  f"{v.ready_count}/{v.shader_count} shaders ready for parallax")
+                  f"{v.ready_count}/{v.shader_count} shaders ready for parallax "
+                  f"(profile={v.detected_game_profile})")
             for issue in v.issues:
                 print(f"  ⚠ {issue}")
             for sug in v.suggestions:
                 print(f"  → {sug}")
+            if args.conflict_report and v.conflict_report:
+                print("  Conflict report:")
+                for group in v.conflict_report:
+                    print(
+                        f"    - {group.code}: {group.count} "
+                        f"(profile={group.game_profile}, layout={group.shader_layout})"
+                    )
+                    for example in group.examples:
+                        print(f"      example: {example}")
+                    for action in group.suggested_actions:
+                        print(f"      auto-fix: {action}")
+            if args.auto_remediate:
+                selected_codes: list[str]
+                report_codes = [group.code for group in v.conflict_report]
+                if args.auto_remediate_codes:
+                    selected_codes = [
+                        code for code in report_codes
+                        if any(code.startswith(prefix) for prefix in args.auto_remediate_codes)
+                    ]
+                else:
+                    selected_codes = report_codes
+                rem_result, rem_steps = auto_remediate_nif_conflicts(
+                    nif,
+                    selected_codes,
+                    target_game=args.target_game,
+                    experimental_fallout_write=args.experimental_fallout_write,
+                    fallout_allow_parallax_scale=args.fallout_allow_parallax_scale,
+                    fallout_allow_fix_mesh_lighting=args.fallout_allow_fix_mesh_lighting,
+                    fallout_allow_spec_strength=args.fallout_allow_spec_strength,
+                    fallout_allow_spec_color=args.fallout_allow_spec_color,
+                    fallout_allow_env_map_scale=args.fallout_allow_env_map_scale,
+                    allow_destructive=args.allow_destructive_remediation,
+                    skip_single_pass=not args.no_skip_single_pass,
+                    backup=not args.no_backup,
+                    dry_run=args.dry_run,
+                    strict_pre_write_validation=not args.no_strict_pre_write_validation,
+                )
+                if rem_result is None:
+                    print(f"  [AUTO-REMEDIATE SKIP] {nif.name}: {' | '.join(rem_steps)}")
+                else:
+                    rem_status = "OK" if rem_result.success else "FAIL"
+                    print(
+                        f"  [AUTO-REMEDIATE {rem_status}] {nif.name}: {rem_result.message} "
+                        f"(steps={', '.join(rem_steps)})"
+                    )
+                    for err in rem_result.errors:
+                        print(f"       {err}", file=sys.stderr)
+                    if rem_result.success and not args.dry_run:
+                        validation_results[-1] = validate_nif_for_parallax(nif)
+        if args.conflict_report_summary:
+            summary = summarize_validation_conflicts(validation_results)
+            if summary:
+                print("\nBatch conflict summary:")
+                for group in summary[:12]:
+                    files = ", ".join(group.example_files)
+                    print(
+                        f"  - {group.code}: {group.count} across {group.file_count} file(s) "
+                        f"(examples: {files})"
+                    )
+                    for action in group.suggested_actions[:2]:
+                        print(f"      auto-fix: {action}")
+        if args.conflict_report_summary and plugin_context:
+            plugin_summary = summarize_plugin_aware_validation_conflicts(
+                validation_results,
+                plugin_context=plugin_context,
+            )
+            if plugin_summary:
+                print("\nPlugin-aware conflict summary:")
+                for group in plugin_summary[:12]:
+                    plugins = ", ".join(group.example_plugins)
+                    files = ", ".join(group.example_files)
+                    print(
+                        f"  - {group.code}: {group.count} across {group.file_count} file(s), "
+                        f"{group.plugin_count} plugin(s) "
+                        f"(files: {files}; plugins: {plugins})"
+                    )
+                    for action in group.suggested_actions[:2]:
+                        print(f"      auto-fix: {action}")
         return
 
     opts = NifPatchOptions(
@@ -3472,6 +5195,8 @@ def _main() -> None:  # pragma: no cover
         cubemap_texture_path=args.cubemap,
         backup=not args.no_backup,
         dry_run=args.dry_run,
+        dry_run_diff=args.dry_run_diff,
+        strict_pre_write_validation=not args.no_strict_pre_write_validation,
         disable_parallax=args.disable_parallax,
         disable_pom=args.disable_pom,
         disable_env_mapping=args.disable_env_mapping,
@@ -3486,6 +5211,7 @@ def _main() -> None:  # pragma: no cover
         skip_decal=not args.no_skip_decal,
         skip_lighting_effects=not args.no_skip_lighting_effects,
         skip_anisotropic=not args.no_skip_anisotropic,
+        skip_single_pass=not args.no_skip_single_pass,
         skip_if_havok=not args.no_skip_havok,
         skip_if_skinned=not args.no_skip_skinned,
         skip_if_alpha=not args.no_skip_alpha,
@@ -3493,6 +5219,15 @@ def _main() -> None:  # pragma: no cover
         env_map_scale=args.env_map_scale,
         spec_strength=args.spec_strength,
         spec_color=parsed_spec_color,
+        strict_unknown_shader_types=args.strict_unknown_shader_types,
+        unknown_shader_type_map=parsed_shader_map,
+        target_game=args.target_game,
+        experimental_fallout_write=args.experimental_fallout_write,
+        fallout_allow_parallax_scale=args.fallout_allow_parallax_scale,
+        fallout_allow_fix_mesh_lighting=args.fallout_allow_fix_mesh_lighting,
+        fallout_allow_spec_strength=args.fallout_allow_spec_strength,
+        fallout_allow_spec_color=args.fallout_allow_spec_color,
+        fallout_allow_env_map_scale=args.fallout_allow_env_map_scale,
     )
 
     ok = 0
@@ -3502,6 +5237,8 @@ def _main() -> None:  # pragma: no cover
         print(f"[{status}] {nif.name}: {res.message}")
         for err in res.errors:
             print(f"       {err}", file=sys.stderr)
+        for warning in res.warnings:
+            print(f"       warning: {warning}")
         if res.success and not res.already_up_to_date:
             ok += 1
 

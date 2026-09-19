@@ -1,4 +1,5 @@
 import json
+import queue
 import sys
 import tempfile
 import unittest
@@ -16,9 +17,15 @@ from generate_textures import (
     _map_parallax_strength_to_nif_scale,
     _compute_tooltip_position,
     _candidate_nif_patcher_search_dirs,
+    compute_effective_ui_scale,
     _compute_nif_editor_controls_pane_height,
     _compute_nif_editor_result_details_height,
     _format_nif_result_row_details,
+    discover_plugin_conflict_context_from_manager,
+    discover_ui_languages,
+    extract_mesh_paths_from_plugin_bytes,
+    extract_plugin_mesh_record_refs,
+    load_ui_translations,
     _normalize_nif_editor_texture_input_path,
     _load_nif_patcher_exports,
     _normalize_nif_result_details,
@@ -28,6 +35,7 @@ from generate_textures import (
     _normalize_gui_state,
     _save_with_dds_fallback,
     _to_dds_compatible_image,
+    TextureGeneratorGUI,
     analyze_image_content,
     auto_patch_related_nifs_for_texture,
     apply_recommendations_by_auto_flags,
@@ -90,7 +98,9 @@ from generate_textures import (
     save_gui_state,
     should_apply_preview_recommendations,
     select_generation_context_source,
+    translate_ui_text,
     get_output_folder_format_warnings,
+    write_batch_failure_artifacts,
     generate_ambient_occlusion,
     generate_roughness,
     analyze_material_type_from_image,
@@ -129,7 +139,13 @@ class TestNifPatcherLoading(unittest.TestCase):
             module_path.write_text(
                 "\n".join(
                     [
+                        "class NifPluginConflictRef:",
+                        "    def __init__(self, plugin_name, record_id='', record_type=''):",
+                        "        self.plugin_name = plugin_name",
+                        "        self.record_id = record_id",
+                        "        self.record_type = record_type",
                         "class NifPatchOptions: pass",
+                        "def auto_remediate_nif_conflicts(*args, **kwargs): return (None, ())",
                         "def find_nif_files(*args, **kwargs): return []",
                         "def guess_cubemap_path_for_nif(*args, **kwargs): return None",
                         "def guess_env_mask_path_for_nif(*args, **kwargs): return None",
@@ -138,6 +154,8 @@ class TestNifPatcherLoading(unittest.TestCase):
                         "def guess_parallax_path_for_nif(*args, **kwargs): return None",
                         "def patch_nif(*args, **kwargs): return None",
                         "def scan_nif(*args, **kwargs): return None",
+                        "def summarize_plugin_aware_validation_conflicts(*args, **kwargs): return []",
+                        "def summarize_validation_conflicts(*args, **kwargs): return []",
                         "def validate_nif_for_parallax(*args, **kwargs): return None",
                     ]
                 ),
@@ -303,8 +321,8 @@ def _shield_art_image() -> Image.Image:
 
 
 class GenerateTexturesTests(unittest.TestCase):
-    def test_app_version_is_0_7(self) -> None:
-        self.assertEqual(APP_VERSION, "0.7")
+    def test_app_version_is_0_9(self) -> None:
+        self.assertEqual(APP_VERSION, "0.9")
 
     def test_normalize_gui_state_turns_off_individual_auto_flags_when_master_off(self) -> None:
         normalized = _normalize_gui_state(
@@ -446,6 +464,170 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertAlmostEqual(float(normalized["environment_mask_strength"]), 8.0)
         self.assertAlmostEqual(float(normalized["complex_strength"]), 0.1)
         self.assertAlmostEqual(float(normalized["specular_strength"]), 0.1)
+
+    def test_discover_ui_languages_includes_default_and_detects_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            translations_dir = Path(temp_dir)
+            (translations_dir / "de.json").write_text(
+                json.dumps({"meta": {"display_name": "Deutsch"}}), encoding="utf-8"
+            )
+            languages = discover_ui_languages(translations_dir)
+        self.assertIn("en", languages)
+        self.assertIn("de", languages)
+
+    def test_load_ui_translations_reads_string_map(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            translations_dir = Path(temp_dir)
+            (translations_dir / "en.json").write_text(
+                json.dumps({"strings": {"Hello": "Hi"}}), encoding="utf-8"
+            )
+            translations = load_ui_translations("en", translations_dir)
+        self.assertEqual(translations.get("Hello"), "Hi")
+
+    def test_default_translation_catalog_offers_multiple_languages(self) -> None:
+        languages = discover_ui_languages()
+        self.assertIn("en", languages)
+        self.assertIn("de", languages)
+        self.assertIn("es", languages)
+
+    def test_translate_ui_text_formats_tokens(self) -> None:
+        self.assertEqual(
+            translate_ui_text("Ready {value}", {"Ready {value}": "Done {value}"}),
+            "Done {value}",
+        )
+
+    def test_compute_effective_ui_scale_clamps_range(self) -> None:
+        self.assertAlmostEqual(compute_effective_ui_scale(pixels_per_inch=40, user_scale=0.1), 0.8)
+        self.assertAlmostEqual(compute_effective_ui_scale(pixels_per_inch=800, user_scale=5), 2.5)
+        self.assertAlmostEqual(compute_effective_ui_scale(pixels_per_inch=96, user_scale=1.25), 1.25)
+
+    def test_extract_mesh_paths_from_plugin_bytes_parses_nif_paths(self) -> None:
+        blob = (
+            b"meshes\\architecture\\stone.nif\x00"
+            b"meshes/architecture/stone.nif\x00"
+            b"meshes\\effects\\bad.txt\x00"
+        )
+        paths = extract_mesh_paths_from_plugin_bytes(blob)
+        self.assertEqual(paths, ("meshes\\architecture\\stone.nif",))
+
+    def test_extract_plugin_mesh_record_refs_parses_record_id_and_type(self) -> None:
+        mesh_bytes = b"meshes\\architecture\\stone.nif\x00"
+        record_payload = (
+            b"EDID"
+            + (4).to_bytes(2, "little")
+            + b"Test"
+            + b"MODL"
+            + len(mesh_bytes).to_bytes(2, "little")
+            + mesh_bytes
+        )
+        record = (
+            b"STAT"
+            + len(record_payload).to_bytes(4, "little")
+            + (0).to_bytes(4, "little")
+            + int("1234ABCD", 16).to_bytes(4, "little")
+            + (0).to_bytes(4, "little")
+            + (0).to_bytes(4, "little")
+            + record_payload
+        )
+        refs = extract_plugin_mesh_record_refs(record)
+        self.assertEqual(len(refs), 1)
+        self.assertEqual(refs[0].mesh_path, "meshes\\architecture\\stone.nif")
+        self.assertEqual(refs[0].record_id, "1234ABCD")
+        self.assertEqual(refs[0].record_type, "STAT")
+
+    def test_discover_plugin_conflict_context_from_manager_collects_mesh_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game_root = Path(temp_dir) / "Skyrim"
+            plugin_path = game_root / "Data" / "Example.esp"
+            plugin_path.parent.mkdir(parents=True)
+            plugin_path.write_bytes(b"meshes\\architecture\\stone.nif\x00")
+            context = ModManagerContext(
+                manager="Vortex",
+                game_root=game_root,
+                enabled_plugins=("Example.esp",),
+            )
+            discovered = discover_plugin_conflict_context_from_manager(
+                [Path("meshes/architecture/stone.nif")],
+                context,
+            )
+        self.assertIn("meshes/architecture/stone.nif", discovered)
+        self.assertEqual(
+            discovered["meshes/architecture/stone.nif"][0].plugin_name,
+            "Example.esp",
+        )
+        self.assertEqual(
+            discovered["meshes/architecture/stone.nif"][0].record_type,
+            "",
+        )
+
+    def test_discover_plugin_conflict_context_from_manager_records_metadata_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game_root = Path(temp_dir) / "Skyrim"
+            plugin_path = game_root / "Data" / "Example.esp"
+            plugin_path.parent.mkdir(parents=True)
+            mesh_bytes = b"meshes\\architecture\\stone.nif\x00"
+            payload = (
+                b"MODL"
+                + len(mesh_bytes).to_bytes(2, "little")
+                + mesh_bytes
+            )
+            plugin_path.write_bytes(
+                b"STAT"
+                + len(payload).to_bytes(4, "little")
+                + (0).to_bytes(4, "little")
+                + int("00000ABC", 16).to_bytes(4, "little")
+                + (0).to_bytes(4, "little")
+                + (0).to_bytes(4, "little")
+                + payload
+            )
+            context = ModManagerContext(
+                manager="Vortex",
+                game_root=game_root,
+                enabled_plugins=("Example.esp",),
+            )
+            discovered = discover_plugin_conflict_context_from_manager(
+                [Path("meshes/architecture/stone.nif")],
+                context,
+            )
+        self.assertEqual(discovered["meshes/architecture/stone.nif"][0].record_id, "00000ABC")
+        self.assertEqual(discovered["meshes/architecture/stone.nif"][0].record_type, "STAT")
+
+    def test_discover_plugin_conflict_context_normalizes_starred_plugin_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game_root = Path(temp_dir) / "Skyrim"
+            plugin_path = game_root / "Data" / "Example.esp"
+            plugin_path.parent.mkdir(parents=True)
+            plugin_path.write_bytes(b"meshes\\architecture\\stone.nif\x00")
+            context = ModManagerContext(
+                manager="Vortex",
+                game_root=game_root,
+                enabled_plugins=("*Example.esp",),
+                load_order=("Example.esp # active",),
+            )
+            discovered = discover_plugin_conflict_context_from_manager(
+                [Path("meshes/architecture/stone.nif")],
+                context,
+            )
+        self.assertIn("meshes/architecture/stone.nif", discovered)
+        self.assertEqual(discovered["meshes/architecture/stone.nif"][0].plugin_name, "Example.esp")
+
+    def test_discover_plugin_conflict_context_resolves_case_insensitive_plugin_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game_root = Path(temp_dir) / "Skyrim"
+            plugin_path = game_root / "Data" / "Example.ESP"
+            plugin_path.parent.mkdir(parents=True)
+            plugin_path.write_bytes(b"meshes\\architecture\\stone.nif\x00")
+            context = ModManagerContext(
+                manager="Vortex",
+                game_root=game_root,
+                enabled_plugins=("example.esp",),
+            )
+            discovered = discover_plugin_conflict_context_from_manager(
+                [Path("meshes/architecture/stone.nif")],
+                context,
+            )
+        self.assertIn("meshes/architecture/stone.nif", discovered)
+        self.assertEqual(discovered["meshes/architecture/stone.nif"][0].plugin_name.lower(), "example.esp")
 
     def test_normalize_gui_state_accepts_truepbr_alias(self) -> None:
         normalized = _normalize_gui_state({"render_profile": "true pbr"})
@@ -2297,6 +2479,21 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(diffuse_path.name, "brick.dds")
             self.assertEqual(parallax_path.name, "brick_p.dds")
 
+    def test_build_output_paths_fallout4_defaults_to_d_diffuse_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.dds"
+            input_path.write_bytes(b"stub")
+
+            diffuse_path, parallax_path = build_output_paths(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+                target_game="fallout4",
+            )
+
+            self.assertEqual(diffuse_path.name, "brick_d.dds")
+            self.assertEqual(parallax_path.name, "brick_p.dds")
+
     def test_custom_output_paths_preserve_textures_subfolders_for_skyrim_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -2372,6 +2569,21 @@ class GenerateTexturesTests(unittest.TestCase):
             )
 
             self.assertEqual(environment_mask_path.name, "brick_m.dds")
+
+    def test_build_environment_mask_output_path_fallout4_defaults_to_s_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.dds"
+            input_path.write_bytes(b"stub")
+
+            environment_mask_path = build_environment_mask_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+                environment_mask_name=None,
+                target_game="fallout4",
+            )
+
+            self.assertEqual(environment_mask_path.name, "brick_s.dds")
 
     def test_build_environment_mask_output_path_uses_m_name_for_enb_complex_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2997,6 +3209,7 @@ class GenerateTexturesTests(unittest.TestCase):
             cubemap_texture_path="textures\\cubemaps\\chrome_e.dds",
             backup=False,
             dry_run=True,
+            dry_run_diff=True,
             disable_parallax=True,
             disable_pom=True,
             disable_env_mapping=True,
@@ -3031,6 +3244,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(options.clear_cubemap_texture_path)
         self.assertFalse(options.backup)
         self.assertTrue(options.dry_run)
+        self.assertTrue(options.dry_run_diff)
 
     def test_build_nif_patch_options_for_nif_editor_normalizes_manual_paths_to_dds(self) -> None:
         options = build_nif_patch_options_for_nif_editor(
@@ -3054,6 +3268,29 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(options.normal_texture_path, r"textures\architecture\stone\stone_n.dds")
         self.assertEqual(options.env_mask_texture_path, r"textures\architecture\stone\stone_cm.dds")
         self.assertEqual(options.cubemap_texture_path, r"textures\cubemaps\chrome_e.dds")
+
+    def test_build_nif_patch_options_for_nif_editor_carries_fallout_gate_flags(self) -> None:
+        options = build_nif_patch_options_for_nif_editor(
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=False,
+            enable_glow_map=False,
+            enable_pbr=False,
+            parallax_scale=2.0,
+            force_shader_type_3=False,
+            target_game="fallout",
+            experimental_fallout_write=True,
+            fallout_allow_parallax_scale=True,
+            fallout_allow_fix_mesh_lighting=True,
+            fallout_allow_spec_strength=True,
+            fallout_allow_spec_color=True,
+            fallout_allow_env_map_scale=True,
+        )
+        self.assertTrue(options.fallout_allow_parallax_scale)
+        self.assertTrue(options.fallout_allow_fix_mesh_lighting)
+        self.assertTrue(options.fallout_allow_spec_strength)
+        self.assertTrue(options.fallout_allow_spec_color)
+        self.assertTrue(options.fallout_allow_env_map_scale)
 
     def test_build_nif_patch_options_for_nif_editor_prefixes_relative_paths_with_textures(self) -> None:
         options = build_nif_patch_options_for_nif_editor(
@@ -3404,6 +3641,292 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(sorted(path.name for path in outputs.keys()), ["a.dds", "b.dds", "c.dds", "d.dds"])
             self.assertEqual(sorted(path.name for path in output_dir.iterdir()), ["a.dds", "b.dds", "c.dds", "d.dds"])
 
+    def test_run_batch_with_options_writes_checkpoint_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            checkpoint = temp_path / "state" / "batch_checkpoint.json"
+            input_dir.mkdir()
+            for name in ("a.dds", "b.dds"):
+                _sample_image().save(input_dir / name, format="DDS", pixel_format="DXT5")
+
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                batch_workers=1,
+                checkpoint_file=checkpoint,
+            )
+
+            payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(payload["version"], APP_VERSION)
+            self.assertEqual(payload["completed_success_count"], 2)
+            self.assertEqual(payload["resumed_completed_count"], 0)
+            self.assertEqual(len(payload["completed_success_files"]), 2)
+            self.assertEqual(len(outputs), 2)
+
+    def test_run_batch_with_options_resume_checkpoint_skips_completed_successes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            checkpoint = temp_path / "batch_checkpoint.json"
+            input_dir.mkdir()
+            a_path = input_dir / "a.dds"
+            b_path = input_dir / "b.dds"
+            _sample_image().save(a_path, format="DDS", pixel_format="DXT5")
+            _sample_image().save(b_path, format="DDS", pixel_format="DXT5")
+            checkpoint.write_text(
+                json.dumps(
+                    {
+                        "completed_success_files": [str(a_path.resolve())],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                batch_workers=1,
+                checkpoint_file=checkpoint,
+                resume_from_checkpoint=True,
+            )
+
+            self.assertEqual(sorted(path.name for path in outputs.keys()), ["b.dds"])
+            payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(payload["resumed_completed_count"], 1)
+            self.assertEqual(payload["completed_success_count"], 2)
+
+    def test_run_batch_with_options_writes_batch_telemetry_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            telemetry = temp_path / "reports" / "batch_telemetry.json"
+            input_dir.mkdir()
+            for name in ("a.dds", "b.dds"):
+                _sample_image().save(input_dir / name, format="DDS", pixel_format="DXT5")
+
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                batch_workers=1,
+                batch_telemetry_file=telemetry,
+            )
+
+            self.assertEqual(len(outputs), 2)
+            payload = json.loads(telemetry.read_text(encoding="utf-8"))
+            self.assertEqual(payload["tool"], "generate_textures")
+            self.assertEqual(payload["version"], APP_VERSION)
+            summary = payload["summary"]
+            self.assertEqual(summary["processed_files"], 2)
+            self.assertEqual(summary["successful_files"], 2)
+            self.assertEqual(summary["failed_files"], 0)
+            self.assertEqual(summary["workers"], 1)
+            self.assertGreaterEqual(summary["total_duration_seconds"], 0.0)
+            self.assertEqual(len(payload["per_file_duration_seconds"]), 2)
+
+    def test_run_batch_with_options_records_failed_files_in_telemetry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            telemetry = temp_path / "batch_telemetry.json"
+            input_dir.mkdir()
+            _sample_image().save(input_dir / "good.dds", format="DDS", pixel_format="DXT5")
+            (input_dir / "bad.dds").write_bytes(b"this is not a valid dds")
+
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                continue_on_error=True,
+                batch_workers=1,
+                batch_telemetry_file=telemetry,
+            )
+
+            self.assertEqual(sorted(path.name for path in outputs.keys()), ["good.dds"])
+            payload = json.loads(telemetry.read_text(encoding="utf-8"))
+            summary = payload["summary"]
+            self.assertEqual(summary["processed_files"], 2)
+            self.assertEqual(summary["successful_files"], 1)
+            self.assertEqual(summary["failed_files"], 1)
+            self.assertEqual(len(payload["per_file_duration_seconds"]), 2)
+
+    def test_write_batch_failure_artifacts_writes_structured_json_and_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            failures = [
+                (root / "textures" / "b.dds", "decode error"),
+                (root / "textures" / "a.dds", "unsupported format"),
+            ]
+            outputs = {root / "textures" / "ok.dds": {"diffuse": root / "out" / "ok.dds"}}
+            json_path, csv_path = write_batch_failure_artifacts(
+                artifact_dir=root,
+                failures=failures,
+                batch_outputs=outputs,
+            )
+            self.assertTrue(json_path.exists())
+            self.assertTrue(csv_path.exists())
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["version"], APP_VERSION)
+            self.assertEqual(payload["summary"]["failed_files"], 2)
+            self.assertEqual(payload["summary"]["successful_files"], 1)
+            self.assertEqual(payload["summary"]["successful_outputs"], 1)
+            self.assertEqual([Path(row["file"]).name for row in payload["failures"]], ["a.dds", "b.dds"])
+            csv_lines = csv_path.read_text(encoding="utf-8").splitlines()
+            self.assertIn("file,error,action,conflict_code,conflict_action,outputs_generated", csv_lines[0])
+            self.assertTrue(any("a.dds" in line for line in csv_lines[1:]))
+            self.assertTrue(any("b.dds" in line for line in csv_lines[1:]))
+
+    def test_main_writes_failure_artifacts_for_batch_directory_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "textures"
+            input_dir.mkdir()
+            good = input_dir / "good.dds"
+            good.write_bytes(b"dds")
+            args = mock.Mock(
+                gui=False,
+                input_file=input_dir,
+                output_dir=None,
+                diffuse_name=None,
+                normal_name=None,
+                parallax_name=None,
+                glow_name=None,
+                environment_mask_name=None,
+                rmaos_name=None,
+                complex_name=None,
+                normal_strength=None,
+                parallax_strength=None,
+                glow_threshold=None,
+                environment_mask_strength=None,
+                rmaos_strength=None,
+                complex_strength=None,
+                specular_strength=None,
+                complex_format="msn",
+                environment_mask_mode="standard",
+                emboss_mode=False,
+                relief_mode=False,
+                parallax_mode="standard",
+                no_diffuse=False,
+                no_normal=True,
+                no_parallax=True,
+                glow_map=False,
+                environment_mask=False,
+                rmaos=False,
+                wetness_mask=False,
+                wetness_mask_strength=None,
+                snow_mask=False,
+                snow_mask_strength=None,
+                ao_map=False,
+                ao_strength=None,
+                roughness_map=False,
+                roughness_strength=None,
+                complex_material=False,
+                pbr_material=False,
+                render_profile="auto",
+                batch_workers=1,
+            )
+
+            def _fake_run_batch_with_options(**kwargs):
+                kwargs["error_callback"](1, 2, input_dir / "bad.dds", RuntimeError("decode error"))
+                return {good: {"diffuse": root / "out" / "good.dds"}}
+
+            with mock.patch("generate_textures.parse_args", return_value=args):
+                with mock.patch("generate_textures.run_batch_with_options", side_effect=_fake_run_batch_with_options):
+                    exit_code = main()
+
+            self.assertEqual(exit_code, 1)
+            json_report = input_dir / "batch_failure_report.json"
+            csv_report = input_dir / "batch_failure_report.csv"
+            self.assertTrue(json_report.exists())
+            self.assertTrue(csv_report.exists())
+            payload = json.loads(json_report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["summary"]["failed_files"], 1)
+            self.assertEqual(Path(payload["failures"][0]["file"]).name, "bad.dds")
+
+    def test_main_passes_checkpoint_options_to_batch_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "textures"
+            input_dir.mkdir()
+            checkpoint = root / "checkpoint.json"
+            args = mock.Mock(
+                gui=False,
+                input_file=input_dir,
+                output_dir=None,
+                diffuse_name=None,
+                normal_name=None,
+                parallax_name=None,
+                glow_name=None,
+                environment_mask_name=None,
+                rmaos_name=None,
+                complex_name=None,
+                normal_strength=None,
+                parallax_strength=None,
+                glow_threshold=None,
+                environment_mask_strength=None,
+                rmaos_strength=None,
+                complex_strength=None,
+                specular_strength=None,
+                complex_format="msn",
+                environment_mask_mode="standard",
+                emboss_mode=False,
+                relief_mode=False,
+                parallax_mode="standard",
+                no_diffuse=False,
+                no_normal=True,
+                no_parallax=True,
+                glow_map=False,
+                environment_mask=False,
+                rmaos=False,
+                wetness_mask=False,
+                wetness_mask_strength=None,
+                snow_mask=False,
+                snow_mask_strength=None,
+                ao_map=False,
+                ao_strength=None,
+                roughness_map=False,
+                roughness_strength=None,
+                complex_material=False,
+                pbr_material=False,
+                render_profile="auto",
+                batch_workers=2,
+                checkpoint_file=checkpoint,
+                resume_checkpoint=True,
+            )
+            with mock.patch("generate_textures.parse_args", return_value=args):
+                with mock.patch("generate_textures.run_batch_with_options", return_value={}) as batch_mock:
+                    exit_code = main()
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(batch_mock.call_args.kwargs["checkpoint_file"], checkpoint)
+            self.assertTrue(batch_mock.call_args.kwargs["resume_from_checkpoint"])
+
     def test_create_panda_icon_image_returns_rgba_square(self) -> None:
         for size in (16, 32, 64, 128, 256):
             icon = _create_panda_icon_image(size=size)
@@ -3448,6 +3971,25 @@ class GenerateTexturesTests(unittest.TestCase):
             with mock.patch("sys.argv", ["generate_textures.py", str(input_file), "--render-profile", "architecture"]):
                 args = parse_args()
         self.assertEqual(str(args.render_profile), "architecture")
+
+    def test_parse_args_accepts_checkpoint_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_dir = Path(temp_dir) / "textures"
+            input_dir.mkdir()
+            checkpoint = Path(temp_dir) / "checkpoint.json"
+            with mock.patch(
+                "sys.argv",
+                [
+                    "generate_textures.py",
+                    str(input_dir),
+                    "--checkpoint-file",
+                    str(checkpoint),
+                    "--resume-checkpoint",
+                ],
+            ):
+                args = parse_args()
+        self.assertEqual(args.checkpoint_file, checkpoint)
+        self.assertTrue(args.resume_checkpoint)
 
     def test_main_pbr_material_forces_complex_material_cm_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3570,6 +4112,273 @@ class GenerateTexturesTests(unittest.TestCase):
                             exit_code = _run_cli()
         self.assertEqual(exit_code, 1)
         self.assertIn("no desktop display", "".join(call.args[0] for call in mock_stderr.write.call_args_list))
+
+    def _build_fake_gui_for_queue_smoke(
+        self,
+        *,
+        show_batch_preview: bool = False,
+        is_processing: bool = True,
+    ) -> object:
+        class _Var:
+            def __init__(self, value=None) -> None:
+                self._value = value
+
+            def get(self):
+                return self._value
+
+            def set(self, value) -> None:
+                self._value = value
+
+        class _Root:
+            def __init__(self) -> None:
+                self.after_calls: list[tuple[int, object]] = []
+
+            def after(self, delay: int, callback) -> None:
+                self.after_calls.append((delay, callback))
+
+        fake_gui = mock.Mock(spec=TextureGeneratorGUI)
+        fake_gui.is_processing = is_processing
+        fake_gui.processing_queue = queue.Queue()
+        fake_gui.status_var = _Var("")
+        fake_gui.show_batch_preview_var = _Var(show_batch_preview)
+        fake_gui.batch_nif_patch_results = []
+        fake_gui.batch_failures = []
+        fake_gui.root = _Root()
+        fake_gui._set_preview_source_by_path = mock.Mock()
+        fake_gui._set_processing_state = mock.Mock(
+            side_effect=lambda active: setattr(fake_gui, "is_processing", bool(active))
+        )
+        fake_gui._refresh_preview = mock.Mock()
+        return fake_gui
+
+    def test_gui_processing_queue_smoke_done_event_reports_outputs_failures_and_autopatch(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False)
+        fake_gui.batch_nif_patch_results = [("stone.dds", 2, 1)]
+        fake_gui.batch_failures = [("broken.dds", "decode error")]
+        fake_gui.processing_queue.put(("done", {Path("stone.dds"): {"diffuse": Path("stone_out.dds")}}))
+
+        with mock.patch("generate_textures.messagebox.showinfo") as showinfo:
+            TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        self.assertFalse(fake_gui.is_processing)
+        self.assertIn("Generated 1 file(s)", fake_gui.status_var.get())
+        self.assertIn("Failed: 1", fake_gui.status_var.get())
+        showinfo.assert_called_once()
+        shown_message = showinfo.call_args.args[1]
+        self.assertIn("Automatic NIF patching: 2 succeeded, 1 failed.", shown_message)
+        self.assertIn("broken.dds: decode error", shown_message)
+        fake_gui._refresh_preview.assert_called_once()
+
+    def test_gui_processing_queue_smoke_progress_event_updates_status_and_preview(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=True)
+        current = Path("textures/stone.dds")
+        fake_gui.processing_queue.put(("progress", (1, 3, current)))
+
+        TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        self.assertIn("Processing 1/3: stone.dds", fake_gui.status_var.get())
+        fake_gui._set_preview_source_by_path.assert_called_once_with(current)
+        self.assertEqual(fake_gui.root.after_calls[0][0], 100)
+
+    def test_gui_processing_queue_smoke_nif_patch_event_updates_status_and_counts(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False)
+        fake_gui.processing_queue.put(("nif_patch", ("stone.dds", 3, 1)))
+
+        TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        self.assertEqual(fake_gui.batch_nif_patch_results, [("stone.dds", 3, 1)])
+        self.assertIn("Patched related NIFs for stone.dds: 3 succeeded, 1 failed.", fake_gui.status_var.get())
+        self.assertEqual(fake_gui.root.after_calls[0][0], 100)
+
+    def test_gui_processing_queue_smoke_file_error_event_tracks_failure(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False)
+        fake_gui.processing_queue.put(("file_error", (2, 4, "broken.dds", "decode error")))
+
+        TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        self.assertEqual(fake_gui.batch_failures, [("broken.dds", "decode error")])
+        self.assertIn("Skipped failed file 2/4: broken.dds", fake_gui.status_var.get())
+        self.assertEqual(fake_gui.root.after_calls[0][0], 100)
+
+    def test_gui_processing_queue_smoke_cancelled_event_stops_polling(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False, is_processing=True)
+        fake_gui.processing_queue.put(("cancelled", {Path("stone.dds"): {"diffuse": Path("stone_out.dds")}}))
+
+        with mock.patch("generate_textures.messagebox.showinfo") as showinfo:
+            TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        fake_gui._set_processing_state.assert_called_once_with(False)
+        showinfo.assert_called_once()
+        self.assertFalse(fake_gui.root.after_calls)
+
+    def test_gui_processing_queue_smoke_error_event_stops_polling_and_shows_error(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False, is_processing=True)
+        fake_gui.processing_queue.put(("error", "boom"))
+
+        with mock.patch("generate_textures.messagebox.showerror") as showerror:
+            TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        fake_gui._set_processing_state.assert_called_once_with(False)
+        showerror.assert_called_once()
+        self.assertFalse(fake_gui.root.after_calls)
+
+    def test_gui_processing_queue_smoke_terminal_done_event_short_circuits_remaining_events(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False, is_processing=True)
+        fake_gui.processing_queue.put(("done", {Path("stone.dds"): {"diffuse": Path("stone_out.dds")}}))
+        fake_gui.processing_queue.put(("error", "should-not-run"))
+
+        with mock.patch("generate_textures.messagebox.showinfo") as showinfo:
+            with mock.patch("generate_textures.messagebox.showerror") as showerror:
+                TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        showinfo.assert_called_once()
+        showerror.assert_not_called()
+        self.assertEqual(fake_gui.processing_queue.qsize(), 1)
+        self.assertFalse(fake_gui.root.after_calls)
+
+    def test_gui_processing_queue_smoke_terminal_error_event_short_circuits_remaining_events(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False, is_processing=True)
+        fake_gui.processing_queue.put(("error", "boom"))
+        fake_gui.processing_queue.put(("progress", (1, 1, Path("textures/stone.dds"))))
+
+        with mock.patch("generate_textures.messagebox.showerror") as showerror:
+            TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        showerror.assert_called_once()
+        fake_gui._set_preview_source_by_path.assert_not_called()
+        self.assertEqual(fake_gui.processing_queue.qsize(), 1)
+        self.assertFalse(fake_gui.root.after_calls)
+
+    def test_revert_last_generation_removes_created_and_restores_backups(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_revert_last_generation"):
+            self.skipTest("GUI revert workflow is unavailable in this environment.")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            created = root / "created.dds"
+            created.write_text("new", encoding="utf-8")
+            original = root / "original.dds"
+            original.write_text("modified", encoding="utf-8")
+            backup_dir = root / "backup"
+            backup_dir.mkdir()
+            backup_copy = backup_dir / "original.dds"
+            backup_copy.write_text("original", encoding="utf-8")
+
+            class _Button:
+                def __init__(self) -> None:
+                    self.configure = mock.Mock()
+
+            class _FakeGui:
+                def __init__(self) -> None:
+                    self.is_processing = False
+                    self.revert_button = _Button()
+                    self.last_generation_backup_dir = backup_dir
+                    self.last_generation_backups = {original: backup_copy}
+                    self.last_generation_created_files = {created}
+                    self.status_var = mock.Mock()
+
+                def _has_revert_snapshot(self) -> bool:
+                    return bool(self.last_generation_backups or self.last_generation_created_files)
+
+                def _discard_last_generation_snapshot(self) -> None:
+                    TextureGeneratorGUI._discard_last_generation_snapshot(self)
+
+                def _set_processing_state(self, _processing: bool) -> None:
+                    return None
+
+                def _refresh_preview(self) -> None:
+                    return None
+
+            fake_gui = _FakeGui()
+            with mock.patch("generate_textures.messagebox.askyesno", return_value=True):
+                with mock.patch("generate_textures.messagebox.showinfo") as showinfo:
+                    with mock.patch("generate_textures.messagebox.showerror") as showerror:
+                        TextureGeneratorGUI._revert_last_generation(fake_gui)
+            self.assertFalse(created.exists())
+            self.assertEqual(original.read_text(encoding="utf-8"), "original")
+            self.assertFalse(fake_gui.last_generation_backups)
+            self.assertFalse(fake_gui.last_generation_created_files)
+            self.assertIsNone(fake_gui.last_generation_backup_dir)
+            showinfo.assert_called_once()
+            showerror.assert_not_called()
+
+    def test_revert_last_generation_reports_partial_failures_but_restores_remaining_files(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_revert_last_generation"):
+            self.skipTest("GUI revert workflow is unavailable in this environment.")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            keep_created = root / "created_keep.dds"
+            fail_created = root / "created_fail.dds"
+            keep_created.write_text("new-a", encoding="utf-8")
+            fail_created.write_text("new-b", encoding="utf-8")
+            original = root / "original.dds"
+            original.write_text("modified", encoding="utf-8")
+            backup_dir = root / "backup"
+            backup_dir.mkdir()
+            backup_copy = backup_dir / "original.dds"
+            backup_copy.write_text("original", encoding="utf-8")
+
+            class _Button:
+                def __init__(self) -> None:
+                    self.configure = mock.Mock()
+
+            class _FakeGui:
+                def __init__(self) -> None:
+                    self.is_processing = False
+                    self.revert_button = _Button()
+                    self.last_generation_backup_dir = backup_dir
+                    self.last_generation_backups = {original: backup_copy}
+                    self.last_generation_created_files = {keep_created, fail_created}
+                    self.status_var = mock.Mock()
+
+                def _has_revert_snapshot(self) -> bool:
+                    return bool(self.last_generation_backups or self.last_generation_created_files)
+
+                def _discard_last_generation_snapshot(self) -> None:
+                    TextureGeneratorGUI._discard_last_generation_snapshot(self)
+
+                def _set_processing_state(self, _processing: bool) -> None:
+                    return None
+
+                def _refresh_preview(self) -> None:
+                    return None
+
+            fake_gui = _FakeGui()
+            original_unlink = Path.unlink
+
+            def _unlink_with_failure(path: Path, *args, **kwargs):
+                if path == fail_created:
+                    raise PermissionError("locked")
+                return original_unlink(path, *args, **kwargs)
+
+            with mock.patch("pathlib.Path.unlink", autospec=True, side_effect=_unlink_with_failure):
+                with mock.patch("generate_textures.messagebox.askyesno", return_value=True):
+                    with mock.patch("generate_textures.messagebox.showinfo") as showinfo:
+                        with mock.patch("generate_textures.messagebox.showerror") as showerror:
+                            TextureGeneratorGUI._revert_last_generation(fake_gui)
+            self.assertFalse(keep_created.exists())
+            self.assertTrue(fail_created.exists())
+            self.assertEqual(original.read_text(encoding="utf-8"), "original")
+            self.assertFalse(fake_gui.last_generation_backups)
+            self.assertFalse(fake_gui.last_generation_created_files)
+            self.assertIsNone(fake_gui.last_generation_backup_dir)
+            showinfo.assert_not_called()
+            showerror.assert_called_once()
 
     def test_generate_normal_raises_clear_error_for_buffer_size_mismatch(self) -> None:
         with mock.patch("generate_textures.np.frombuffer", return_value=np.zeros(1, dtype=np.uint8)):

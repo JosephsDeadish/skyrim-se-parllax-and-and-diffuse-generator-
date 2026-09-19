@@ -1,14 +1,17 @@
 """Tests for nif_patcher.py."""
 from __future__ import annotations
 
+import json
 import shutil
 import struct
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from nif_patcher import (
     SLSF1_ENVIRONMENT_MAPPING,
+    SLSF1_SINGLE_PASS,
     SLSF1_PARALLAX,
     SLSF1_PARALLAX_OCCLUSION,
     SLSF2_GLOW_MAP,
@@ -36,13 +39,30 @@ from nif_patcher import (
     batch_patch_nif,
     patch_nif,
     scan_nif,
+    summarize_plugin_aware_validation_conflicts,
+    summarize_validation_conflicts,
+    build_auto_remediation_patch_options,
+    build_compatibility_report_text,
+    build_game_profile_support_matrix,
+    auto_remediate_nif_conflicts,
     scan_nif_diagnostics,
     validate_nif_for_parallax,
+    NifPluginConflictRef,
+    _main as nif_patcher_main,
     _Buf,
     _build_block_map,
+    _classify_shader_type_resolution,
+    _is_retryable_force_type3_error,
     _renderer_compatibility,
     _read_header,
+    RESOLUTION_RESOLVED,
+    RESOLUTION_UNRESOLVED,
+    RESOLUTION_WEAK,
 )
+
+_FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
+_FIXTURE_CORPUS_MANIFEST = _FIXTURE_DIR / "nif_fixture_corpus.json"
+_FIXTURE_CORPUS_BASELINE = _FIXTURE_DIR / "nif_fixture_corpus_baseline.json"
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +276,62 @@ def _write_nif(tmp_dir: Path, **kwargs: object) -> Path:
     return p
 
 
+def _rewrite_user_version(path: Path, value: int) -> None:
+    raw = bytearray(path.read_bytes())
+    user_version_offset = len(b"Gamebryo File Format, Version 20.2.0.7\n") + 4 + 1
+    struct.pack_into("<I", raw, user_version_offset, value)
+    path.write_bytes(bytes(raw))
+
+
+def _load_fixture_corpus_payload(path: Path) -> dict[str, object]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise AssertionError(f"Invalid fixture payload in {path}: expected object root.")
+    return raw
+
+
+def _materialize_fixture_corpus(temp_root: Path, payload: dict[str, object]) -> list[Path]:
+    cases = payload.get("cases", [])
+    if not isinstance(cases, list):
+        raise AssertionError("Fixture payload must include a list under 'cases'.")
+    created: list[Path] = []
+    for entry in cases:
+        if not isinstance(entry, dict):
+            continue
+        case_id = str(entry.get("id", "case")).strip() or "case"
+        target = temp_root / f"{case_id}.nif"
+        if bool(entry.get("broken_header", False)):
+            truncated = int(entry.get("truncated_bytes", 90))
+            target.write_bytes(_build_minimal_nif()[: max(16, truncated)])
+            created.append(target)
+            continue
+
+        line_ending = b"\r\n" if str(entry.get("header_line_ending", "lf")).lower() == "crlf" else b"\n"
+        raw_texture_paths = entry.get("texture_paths")
+        texture_paths = (
+            [str(path) for path in raw_texture_paths]
+            if isinstance(raw_texture_paths, list) and len(raw_texture_paths) == 9
+            else ["textures\\arch\\stone.dds"] + [""] * 8
+        )
+        raw = _build_minimal_nif(
+            shader_layout=str(entry.get("shader_layout", "legacy")),
+            shader_type=int(entry.get("shader_type", SHADER_TYPE_DEFAULT)),
+            flags1=int(entry.get("flags1", 0)),
+            flags2=int(entry.get("flags2", 0)),
+            user_ver2=int(entry.get("user_ver2", 83)),
+            header_line_ending=line_ending,
+            texture_set_layout_shift=int(entry.get("texture_set_layout_shift", 0)),
+            texture_set_count_u16=bool(entry.get("texture_set_count_u16", False)),
+            texture_paths=texture_paths,
+        )
+        target.write_bytes(raw)
+        user_version = entry.get("user_version")
+        if user_version is not None:
+            _rewrite_user_version(target, int(user_version))
+        created.append(target)
+    return created
+
+
 def _texture_set_slot_count(nif_path: Path) -> int:
     data = nif_path.read_bytes()
     header = _read_header(_Buf(data))
@@ -293,6 +369,76 @@ class TestScanNif(unittest.TestCase):
         nif = _write_nif(self.tmp, user_ver2=130)
         infos = scan_nif(nif)
         self.assertEqual(len(infos), 1)
+
+    def test_scan_accepts_user_version_2_34(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=34)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+
+    def test_scan_rejects_unknown_user_version_2(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=155)
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(infos, [])
+        self.assertTrue(any("unexpected user version values" in d.lower() for d in diagnostics), diagnostics)
+
+    def test_scan_reports_fallout_header_as_experimental(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        raw = nif.read_bytes()
+        header = _read_header(_Buf(raw))
+        self.assertIsNotNone(header)
+        assert header is not None
+        _rewrite_user_version(nif, 11)
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(len(infos), 1)
+        joined = "\n".join(diagnostics).lower()
+        self.assertIn("fallout", joined)
+        self.assertIn("experimental", joined)
+        self.assertNotIn("skipped unsupported-layout shader blocks", joined)
+
+    def test_scan_fallout_real_layout_returns_shader_info(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130, shader_layout="real")
+        _rewrite_user_version(nif, 11)
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(len(infos), 1)
+        joined = "\n".join(diagnostics).lower()
+        self.assertIn("fallout", joined)
+
+    def test_validate_detects_fallout_profile(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        _rewrite_user_version(nif, 11)
+        validation = validate_nif_for_parallax(nif)
+        self.assertEqual(validation.detected_game_profile, "fallout")
+        self.assertTrue(
+            any("experimental_fallout_write" in s.lower() for s in validation.suggestions),
+            validation.suggestions,
+        )
+
+    def test_validate_keeps_unknown_for_non_fallout_user11_combo(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=83)
+        _rewrite_user_version(nif, 11)
+        validation = validate_nif_for_parallax(nif)
+        self.assertEqual(validation.detected_game_profile, "unknown")
+
+    def test_validate_treats_user12_130_as_skyrim_profile(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        validation = validate_nif_for_parallax(nif)
+        self.assertEqual(validation.detected_game_profile, "skyrim")
+
+    def test_validate_treats_user12_131_as_fallout_profile(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=131)
+        validation = validate_nif_for_parallax(nif)
+        self.assertEqual(validation.detected_game_profile, "fallout")
+
+    def test_validate_treats_user11_133_as_fallout_profile(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=133)
+        _rewrite_user_version(nif, 11)
+        validation = validate_nif_for_parallax(nif)
+        self.assertEqual(validation.detected_game_profile, "fallout")
+
+    def test_validate_treats_user12_133_as_fallout_profile(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=133)
+        validation = validate_nif_for_parallax(nif)
+        self.assertEqual(validation.detected_game_profile, "fallout")
 
     def test_scan_accepts_crlf_header_line(self) -> None:
         nif = _write_nif(self.tmp, header_line_ending=b"\r\n")
@@ -340,6 +486,61 @@ class TestScanNif(unittest.TestCase):
         self.assertEqual(len(infos), 1)
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
         self.assertAlmostEqual(infos[0].env_map_scale or 0.0, 2.5, places=3)
+
+    def test_scan_real_layout_tolerates_extended_shader_payload(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            flags1=SLSF1_PARALLAX,
+        )
+        raw = bytearray(nif.read_bytes())
+        header = _read_header(_Buf(bytes(raw)))
+        self.assertIsNotNone(header)
+        assert header is not None
+        block_starts = [header.blocks_start]
+        for size in header.block_sizes[:-1]:
+            block_starts.append(block_starts[-1] + size)
+        shader_block_index = 1
+        shader_start = block_starts[shader_block_index]
+        shader_end = shader_start + header.block_sizes[shader_block_index]
+        raw[shader_end:shader_end] = struct.pack("<III", 1, 2, 3)
+        shader_size_offset = header.block_sizes_offset + shader_block_index * 4
+        struct.pack_into("<I", raw, shader_size_offset, header.block_sizes[shader_block_index] + 12)
+        nif.write_bytes(bytes(raw))
+
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertFalse(
+            any("failed to parse BSLightingShaderProperty" in line for line in diagnostics),
+            diagnostics,
+        )
+
+    def test_scan_real_layout_extended_envmap_payload_keeps_envmap(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            env_map_scale=1.0,
+        )
+        raw = bytearray(nif.read_bytes())
+        header = _read_header(_Buf(bytes(raw)))
+        self.assertIsNotNone(header)
+        assert header is not None
+        block_starts = [header.blocks_start]
+        for size in header.block_sizes[:-1]:
+            block_starts.append(block_starts[-1] + size)
+        shader_block_index = 1
+        shader_start = block_starts[shader_block_index]
+        shader_end = shader_start + header.block_sizes[shader_block_index]
+        raw[shader_end:shader_end] = struct.pack("<I", 1234)
+        shader_size_offset = header.block_sizes_offset + shader_block_index * 4
+        struct.pack_into("<I", raw, shader_size_offset, header.block_sizes[shader_block_index] + 4)
+        nif.write_bytes(bytes(raw))
+
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
 
     def test_scan_reads_texture_paths(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8
@@ -391,10 +592,106 @@ class TestScanNif(unittest.TestCase):
         self.assertNotEqual(shader_start, -1)
         struct.pack_into("<I", raw, shader_start + 4, 0xFFFFFFFF)
         nif.write_bytes(raw)
-        infos, diagnostics = scan_nif_diagnostics(nif)
-        self.assertEqual(infos, [])
+        # Must not crash and must not produce a "u32 read out of range" error.
+        # The block may be parsed successfully via the num_extra=0 fallback
+        # (because the underlying data is still valid) or rejected with a
+        # descriptive diagnostic — both outcomes are acceptable.
+        _infos, diagnostics = scan_nif_diagnostics(nif)
         self.assertFalse(any("u32 read out of range" in d.lower() for d in diagnostics))
-        self.assertTrue(any("failed to parse bslightingshaderproperty" in d.lower() for d in diagnostics))
+
+    def test_scan_parses_legacy_block_with_null_shader_type(self) -> None:
+        """Legacy BSLightingShaderProperty blocks where shader_type=0xFFFFFFFF
+        (Bethesda null/unset sentinel) must be parsed successfully, not rejected
+        with 'unsupported BSLightingShaderProperty layout'.
+
+        This reproduces vanilla clutter assets like barrel01.nif / chest01.nif
+        that use 0xFFFFFFFF as a null shader-type field.
+        """
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=["textures\\dungeons\\barrels\\barrel01_d.dds"] + [""] * 8,
+        )
+        raw = bytearray(nif.read_bytes())
+        # Find the shader_type field in the legacy block (NiObjectNET header is
+        # 12 bytes, so shader_type is at block_start+12) and overwrite it.
+        shader_header = struct.pack("<IIiI", 0, 0, -1, SHADER_TYPE_DEFAULT)
+        shader_start = raw.find(shader_header)
+        self.assertNotEqual(shader_start, -1, "could not locate legacy shader block")
+        # Overwrite shader_type (offset +12 from block start) with 0xFFFFFFFF
+        struct.pack_into("<I", raw, shader_start + 12, 0xFFFFFFFF)
+        nif.write_bytes(bytes(raw))
+
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        layout_errors = [d for d in diagnostics if "unsupported bslightingshaderproperty" in d.lower()]
+        self.assertEqual(
+            layout_errors, [],
+            msg=f"Parser rejected 0xFFFFFFFF shader_type: {layout_errors}",
+        )
+        self.assertEqual(len(infos), 1, f"Expected 1 shader info, diagnostics: {diagnostics}")
+        self.assertEqual(
+            infos[0].texture_paths.get(TEXTURE_SLOT_DIFFUSE),
+            "textures\\dungeons\\barrels\\barrel01_d.dds",
+        )
+
+    def test_patch_succeeds_on_legacy_block_with_null_shader_type(self) -> None:
+        """patch_nif must be able to write texture paths on a legacy block
+        whose shader_type was left as the 0xFFFFFFFF null sentinel (e.g. vanilla
+        clutter NIFs such as barrel01.nif / coin01.nif).
+        """
+        nif = _write_nif(self.tmp)
+        raw = bytearray(nif.read_bytes())
+        shader_header = struct.pack("<IIiI", 0, 0, -1, SHADER_TYPE_DEFAULT)
+        shader_start = raw.find(shader_header)
+        self.assertNotEqual(shader_start, -1)
+        struct.pack_into("<I", raw, shader_start + 12, 0xFFFFFFFF)
+        nif.write_bytes(bytes(raw))
+
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_texture_path="textures\\dungeons\\barrels\\barrel01_p.dds",
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(
+            infos[0].texture_paths.get(TEXTURE_SLOT_PARALLAX),
+            "textures\\dungeons\\barrels\\barrel01_p.dds",
+        )
+
+    def test_scan_reports_unknown_shader_fallback(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=0x12345678)
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
+        self.assertTrue(any("0x12345678" in d for d in diagnostics), diagnostics)
+
+    def test_scan_uses_texture_suffix_inference_for_unknown_shader(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_type=0x12345678,
+            texture_paths=["textures\\dungeons\\barrels\\barrel01.dds", "", "", "textures\\dungeons\\barrels\\barrel01_p.dds"] + [""] * 5,
+        )
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+        self.assertTrue(any("texture_suffix_parallax" in d for d in diagnostics), diagnostics)
+
+    def test_mapping_table_overrides_existing_weak_classification(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=0x12340003)
+        data = nif.read_bytes()
+        header = _read_header(_Buf(data))
+        self.assertIsNotNone(header)
+        shader_props, _, _ = _build_block_map(
+            data,
+            header,  # type: ignore[arg-type]
+            mapping_table={0x12340003: SHADER_TYPE_DEFAULT},
+        )
+        self.assertEqual(shader_props[0].shader_type_resolution, "mapping_table")
+        self.assertEqual(shader_props[0].shader_type, SHADER_TYPE_DEFAULT)
 
     def test_patch_nif_with_u16_count_texture_set(self) -> None:
         """patch_nif must work correctly on a NIF whose texture set uses a u16 count."""
@@ -452,6 +749,63 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertTrue(v.valid)
         self.assertEqual(v.needs_patch_count, 1)
         self.assertTrue(any("flag" in i.lower() for i in v.issues))
+        self.assertTrue(any(group.code.startswith("missing_parallax_flag.") for group in v.conflict_report))
+        conflict = next(group for group in v.conflict_report if group.code.startswith("missing_parallax_flag."))
+        self.assertEqual(conflict.game_profile, "skyrim")
+        self.assertEqual(conflict.shader_layout, "legacy")
+
+    def test_reports_single_pass_skip_reason(self) -> None:
+        nif = _write_nif(self.tmp, flags1=SLSF1_SINGLE_PASS)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.skip_reasons).lower()
+        self.assertIn("single_pass", joined)
+
+    def test_skip_single_pass_reason_can_be_disabled(self) -> None:
+        nif = _write_nif(self.tmp, flags1=SLSF1_SINGLE_PASS)
+        v = validate_nif_for_parallax(nif, skip_single_pass=False)
+        joined = "\n".join(v.skip_reasons).lower()
+        self.assertNotIn("single_pass", joined)
+        self.assertFalse(any(group.code.startswith("skip_single_pass.") for group in v.conflict_report))
+
+    def test_conflict_report_uses_fallout_profile_suffix(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130, shader_layout="legacy")
+        _rewrite_user_version(nif, 11)
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(any(".fallout." in group.code for group in v.conflict_report))
+
+    def test_conflict_report_classifies_slot_specific_paths(self) -> None:
+        paths = ["textures\\arch\\stone_n.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(any(group.code.startswith("path_slot_diffuse.wrong_suffix.") for group in v.conflict_report))
+
+    def test_conflict_report_uses_granular_per_slot_path_codes(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_NORMAL] = "textures\\arch\\stone_n.dds"
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone_n.dds"
+        nif = _write_nif(self.tmp, flags1=SLSF1_PARALLAX, texture_paths=paths)
+        v = validate_nif_for_parallax(nif)
+        codes = {group.code for group in v.conflict_report}
+        self.assertTrue(any(code.startswith("path_slot_parallax.wrong_suffix.") for code in codes))
+        self.assertTrue(any(code.startswith("path_slot_parallax.matches_normal.") for code in codes))
+
+    def test_conflict_report_uses_granular_per_flag_codes(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_g.dds"
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_m.dds"
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone_p.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=SLSF1_PARALLAX_OCCLUSION,
+            shader_type=SHADER_TYPE_DEFAULT,
+        )
+        v = validate_nif_for_parallax(nif)
+        codes = {group.code for group in v.conflict_report}
+        self.assertTrue(any(code.startswith("flag_glow_map.slot2_filled_without_flag.") for code in codes))
+        self.assertTrue(any(code.startswith("flag_env_mapping.slot5_filled_without_flag.") for code in codes))
+        self.assertTrue(any(code.startswith("flag_pom.without_base_parallax.") for code in codes))
+        self.assertTrue(any(code.startswith("flag_pom.non_heightmap_shader.") for code in codes))
 
     def test_ready_when_flag_and_texture_set(self) -> None:
         paths = [""] * 9
@@ -771,6 +1125,7 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertTrue(result.success, result.errors)
         infos = scan_nif(nif)
         self.assertTrue(infos[0].has_parallax_flag)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
 
     def test_enable_pom_sets_both_parallax_and_occlusion_flags(self) -> None:
         nif = _write_nif(self.tmp)
@@ -779,6 +1134,48 @@ class TestPatchNifFlags(unittest.TestCase):
         infos = scan_nif(nif)
         self.assertTrue(infos[0].has_parallax_flag)
         self.assertTrue(infos[0].has_pom_flag)
+
+    def test_enable_parallax_real_layout_keeps_inferred_shader_type(self) -> None:
+        nif = _write_nif(self.tmp, shader_layout="real", shader_type=SHADER_TYPE_DEFAULT)
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
+        self.assertTrue(infos[0].has_parallax_flag)
+
+    def test_enable_parallax_does_not_retype_envmap_block(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP)
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
+        self.assertTrue(infos[0].has_parallax_flag)
+
+    def test_enable_parallax_preserves_sentinel_default_block_type(self) -> None:
+        nif = _write_nif(self.tmp)
+        raw = bytearray(nif.read_bytes())
+        shader_header = struct.pack("<IIiI", 0, 0, -1, SHADER_TYPE_DEFAULT)
+        shader_start = raw.find(shader_header)
+        self.assertNotEqual(shader_start, -1)
+        struct.pack_into("<I", raw, shader_start + 12, 0xFFFFFFFF)
+        nif.write_bytes(bytes(raw))
+
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].raw_shader_type, 0xFFFFFFFF)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
+        self.assertTrue(infos[0].has_parallax_flag)
+
+    def test_enable_parallax_preserves_unknown_raw_shader_value(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=0x12345678)
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos, diagnostics = scan_nif_diagnostics(nif)
+        self.assertEqual(infos[0].raw_shader_type, 0x12345678)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+        self.assertTrue(infos[0].has_parallax_flag)
+        self.assertTrue(any("0x12345678" in d for d in diagnostics), diagnostics)
 
     def test_enable_env_mapping_sets_flag(self) -> None:
         nif = _write_nif(self.tmp)
@@ -805,6 +1202,31 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(nif.read_bytes(), original)
 
+    def test_dry_run_diff_reports_changed_ranges(self) -> None:
+        nif = _write_nif(self.tmp)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(enable_parallax=True, backup=False, dry_run=True, dry_run_diff=True),
+        )
+        self.assertTrue(result.success)
+        self.assertIn("Diff:", result.message)
+        self.assertIn("range(s)", result.message)
+
+    def test_strict_pre_write_validation_blocks_write_on_validation_failure(self) -> None:
+        nif = _write_nif(self.tmp)
+        original = nif.read_bytes()
+        with mock.patch.dict(
+            patch_nif.__globals__,
+            {"_validate_patched_bytes_before_write": lambda *args, **kwargs: ["Pre-write block-map warning/error: synthetic failure"]},
+        ):
+            result = patch_nif(
+                nif,
+                NifPatchOptions(enable_parallax=True, backup=False, strict_pre_write_validation=True),
+            )
+        self.assertFalse(result.success)
+        self.assertIn("Pre-write validation failed", result.message)
+        self.assertEqual(nif.read_bytes(), original)
+
     def test_backup_is_written(self) -> None:
         nif = _write_nif(self.tmp)
         original = nif.read_bytes()
@@ -817,6 +1239,173 @@ class TestPatchNifFlags(unittest.TestCase):
         nif = _write_nif(self.tmp)
         result = patch_nif(nif, NifPatchOptions(backup=False))
         self.assertFalse(result.success)  # success=False when nothing requested
+
+    def test_target_game_fallout_requires_opt_in(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False, target_game="fallout"))
+        self.assertFalse(result.success)
+        self.assertIn("experimental_fallout_write is disabled", result.message.lower())
+
+    def test_target_game_skyrim_rejects_fallout_header(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                backup=False,
+                target_game="skyrim",
+            ),
+        )
+        self.assertFalse(result.success)
+        self.assertIn("target_game='skyrim' requires skyrim-compatible headers", result.message.lower())
+
+    def test_target_game_fallout_on_skyrim_header_warns_and_uses_fallout_policy(self) -> None:
+        nif = _write_nif(self.tmp)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                backup=False,
+                target_game="fallout",
+                experimental_fallout_write=True,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertTrue(
+            any("differs from detected profile" in warning.lower() for warning in result.warnings),
+            result.warnings,
+        )
+
+    def test_target_game_fallout_with_opt_in_patches_flags(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130, shader_layout="real")
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                backup=False,
+                target_game="fallout",
+                experimental_fallout_write=True,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertEqual(result.detected_game_profile, "fallout")
+        self.assertTrue(any("experimental fallout patch mode active" in w.lower() for w in result.warnings), result.warnings)
+        infos = scan_nif(nif)
+        self.assertTrue(infos[0].has_parallax_flag)
+
+    def test_target_game_fallout_legacy_layout_with_opt_in_patches_flags(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130, shader_layout="legacy")
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                backup=False,
+                target_game="fallout",
+                experimental_fallout_write=True,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertTrue(infos[0].has_parallax_flag)
+
+    def test_target_game_fallout_rejects_parallax_scale(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_scale=2.0,
+                backup=False,
+                target_game="fallout",
+                experimental_fallout_write=True,
+            ),
+        )
+        self.assertFalse(result.success)
+        self.assertIn("does not support", result.message.lower())
+        self.assertIn("parallax_scale", result.message)
+
+    def test_target_game_fallout_allows_parallax_scale_with_safety_gate(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_scale=2.0,
+                backup=False,
+                target_game="fallout",
+                experimental_fallout_write=True,
+                fallout_allow_parallax_scale=True,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertTrue(any("per-operation safety gates enabled" in warning.lower() for warning in result.warnings))
+
+    def test_target_game_fallout_rejects_force_type3(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                force_shader_type_3=True,
+                backup=False,
+                target_game="fallout",
+                experimental_fallout_write=True,
+            ),
+        )
+        self.assertFalse(result.success)
+        self.assertIn("force_shader_type_3", result.message)
+
+    def test_target_game_fallout_rejects_advanced_shader_fields_without_safety_gates(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130, shader_layout="real")
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                spec_strength=0.8,
+                env_map_scale=1.1,
+                backup=False,
+                target_game="fallout",
+                experimental_fallout_write=True,
+            ),
+        )
+        self.assertFalse(result.success)
+        self.assertIn("spec_strength", result.message)
+        self.assertIn("env_map_scale", result.message)
+
+    def test_target_game_fallout_allows_advanced_shader_fields_with_safety_gates(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130, shader_layout="real", shader_type=1, env_map_scale=0.5)
+        _rewrite_user_version(nif, 11)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                spec_strength=0.65,
+                env_map_scale=1.25,
+                fix_mesh_lighting=True,
+                backup=False,
+                target_game="fallout",
+                experimental_fallout_write=True,
+                fallout_allow_spec_strength=True,
+                fallout_allow_env_map_scale=True,
+                fallout_allow_fix_mesh_lighting=True,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertTrue(any("per-operation safety gates enabled" in warning.lower() for warning in result.warnings))
+
+    def test_invalid_target_game_option_fails_fast(self) -> None:
+        nif = _write_nif(self.tmp)
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False, target_game="oblivion"))
+        self.assertFalse(result.success)
+        self.assertIn("unsupported target_game", result.message.lower())
 
     def test_disable_parallax_clears_parallax_and_pom_flags(self) -> None:
         nif = _write_nif(self.tmp, flags1=SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION)
@@ -832,6 +1421,164 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertTrue(result.success, result.errors)
         infos = scan_nif(nif)
         self.assertFalse(infos[0].has_env_mapping_flag)
+
+    def test_strict_unknown_shader_types_fails_patch(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=0x12345678)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                backup=False,
+            ),
+        )
+        self.assertFalse(result.success)
+        self.assertIn("Strict unknown-shader check failed", result.message)
+        self.assertTrue(any("0x12345678" in e for e in result.errors), result.errors)
+
+    def test_strict_unknown_shader_resolved_by_semantic_flag_passes(self) -> None:
+        # Unknown raw shader_type but SLSF1_PARALLAX set → resolves via
+        # semantic inference → strict mode must NOT reject this block.
+        nif = _write_nif(self.tmp, shader_type=0x12345678, flags1=SLSF1_PARALLAX)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+
+    def test_strict_unknown_shader_resolved_by_envmap_flag_passes(self) -> None:
+        # Unknown raw shader_type but SLSF1_ENVIRONMENT_MAPPING set → resolves
+        # via semantic inference → strict mode must NOT reject this.
+        nif = _write_nif(self.tmp, shader_type=0x12345678, flags1=SLSF1_ENVIRONMENT_MAPPING)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+
+    def test_strict_unknown_shader_resolved_by_mapping_table_passes(self) -> None:
+        # Unknown raw shader_type with no flags, but a user mapping table entry
+        # → resolved via mapping_table → strict mode must NOT reject this.
+        nif = _write_nif(self.tmp, shader_type=0x12345678)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                unknown_shader_type_map={0x12345678: SHADER_TYPE_DEFAULT},
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+
+    def test_strict_unknown_shader_mapping_table_without_strict_also_works(self) -> None:
+        # The mapping table should also work in non-strict mode to guide resolution.
+        nif = _write_nif(self.tmp, shader_type=0x12345678)
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=False,
+                unknown_shader_type_map={0x12345678: SHADER_TYPE_DEFAULT},
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+
+    def test_strict_unknown_shader_weak_texture_guess_warns_but_passes(self) -> None:
+        # Slot-4-only cubemap inference is intentionally weak; strict mode should
+        # still pass while surfacing WEAK_RESOLUTION in diagnostics.
+        nif = _write_nif(
+            self.tmp,
+            shader_type=0x12345678,
+            texture_paths=[
+                "textures\\dungeons\\barrels\\barrel01.dds",
+                "",
+                "",
+                "",
+                "textures\\cubemaps\\custom_cube.dds",
+            ] + [""] * 4,
+        )
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertTrue(
+            any("WEAK_RESOLUTION" in warning and "texture_slot_cubemap" in warning for warning in result.warnings),
+            result.warnings,
+        )
+
+    def test_strict_unknown_shader_texture_suffix_guess_is_weak(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_type=0x12345678,
+            texture_paths=[
+                "textures\\dungeons\\barrels\\barrel01.dds",
+                "",
+                "",
+                "textures\\dungeons\\barrels\\barrel01_p.dds",
+            ] + [""] * 5,
+        )
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                strict_unknown_shader_types=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertTrue(
+            any("WEAK_RESOLUTION" in warning and "texture_suffix_parallax" in warning for warning in result.warnings),
+            result.warnings,
+        )
+
+    def test_resolution_classifier_boundaries(self) -> None:
+        self.assertEqual(
+            _classify_shader_type_resolution("mapping_table").type,
+            RESOLUTION_RESOLVED,
+        )
+        self.assertEqual(
+            _classify_shader_type_resolution("texture_suffix_parallax").type,
+            RESOLUTION_WEAK,
+        )
+        self.assertEqual(
+            _classify_shader_type_resolution("default_fallback").type,
+            RESOLUTION_UNRESOLVED,
+        )
+        self.assertEqual(
+            _classify_shader_type_resolution("future_unknown_resolution").type,
+            RESOLUTION_UNRESOLVED,
+        )
+
+    def test_retryable_force_type3_error_detection(self) -> None:
+        self.assertTrue(
+            _is_retryable_force_type3_error(
+                ValueError("recorded block size 104 does not match expected type-0 size 100")
+            )
+        )
+        self.assertTrue(
+            _is_retryable_force_type3_error(
+                ValueError("cannot force shader type 3 on a real-layout Skyrim shader block")
+            )
+        )
+
+    def test_non_retryable_patch_error_detection(self) -> None:
+        self.assertFalse(_is_retryable_force_type3_error(RuntimeError("boom")))
+        self.assertFalse(_is_retryable_force_type3_error(ValueError("some other parse issue")))
 
 
 # ---------------------------------------------------------------------------
@@ -1161,7 +1908,8 @@ class TestParallaxScale(unittest.TestCase):
         )
         self.assertTrue(result.success)
         infos = scan_nif(nif)
-        # Type is still 0 — no scale field exists in the block
+        # Without force_shader_type_3, legacy type-0 blocks keep their type
+        # and only receive compatible flag updates.
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
         self.assertIsNone(infos[0].parallax_scale)
 
@@ -1242,6 +1990,25 @@ class TestForceShaderType3(unittest.TestCase):
         infos = scan_nif(nif)
         self.assertEqual(len(infos), 1)
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+
+    def test_force_upgrade_falls_back_when_layout_mismatch(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT, shader_layout="real")
+
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_scale=3.0,
+                force_shader_type_3=True,
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertEqual(result.blocks_upgraded_to_type3, 0)
+        self.assertTrue(any("Skipped shader type-3 block expansion" in w for w in result.warnings))
+        info = scan_nif(nif)[0]
+        self.assertEqual(info.shader_type, SHADER_TYPE_DEFAULT)
+        self.assertTrue(info.has_parallax_flag)
 
     def test_skip_if_havok_does_not_upgrade_default_shader(self) -> None:
         nif = self.tmp / "havok_default.nif"
@@ -1648,6 +2415,351 @@ class TestBatchPatchNif(unittest.TestCase):
         results = batch_patch_nif(nifs, NifPatchOptions(enable_parallax=True, backup=False))
         for i, r in enumerate(results):
             self.assertEqual(r.nif_path, nifs[i])
+
+
+class TestMixedModValidationBatches(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_large_mixed_mod_fixture_batch_surfaces_granular_codes(self) -> None:
+        fixtures: list[tuple[dict, tuple[str, ...], bool]] = [
+            ({}, ("missing_parallax_flag.flag1_not_set.",), False),
+            ({"flags1": SLSF1_SINGLE_PASS}, ("skip_single_pass.",), False),
+            ({"texture_paths": ["textures\\arch\\stone_n.dds"] + [""] * 8}, ("path_slot_diffuse.wrong_suffix.",), False),
+            ({"texture_paths": [""] * 9, "shader_layout": "real"}, ("missing_parallax_flag.flag1_not_set.",), False),
+            ({"texture_paths": [""] * 9, "flags1": SLSF1_PARALLAX_OCCLUSION, "shader_type": SHADER_TYPE_DEFAULT}, ("flag_pom.without_base_parallax.", "flag_pom.non_heightmap_shader."), False),
+            ({"texture_paths": [""] * 9}, ("missing_parallax_slot3.empty.",), False),
+            ({"texture_paths": ["textures\\arch\\stone.dds", "textures\\arch\\stone_p.dds"] + [""] * 7}, ("path_slot_normal.wrong_suffix.",), False),
+            ({"texture_paths": ["textures\\arch\\stone.dds"] + [""] * 8, "user_ver2": 130}, ("missing_parallax_flag.flag1_not_set.",), True),
+            ({"texture_paths": [""] * 9, "user_ver2": 130}, ("missing_parallax_flag.flag1_not_set.",), True),
+            ({"texture_paths": [""] * 9}, ("missing_parallax_flag.flag1_not_set.",), False),
+            ({"texture_paths": [""] * 4 + ["textures\\arch\\stone_n.dds"] + [""] * 4}, ("path_slot_cubemap.wrong_suffix.",), False),
+            ({"texture_paths": [""] * 9}, ("missing_parallax_flag.flag1_not_set.",), False),
+        ]
+        reports: list[tuple[Path, list[str]]] = []
+        for idx, (kwargs, expected_prefixes, make_fallout) in enumerate(fixtures):
+            nif = self.tmp / f"batch_{idx}.nif"
+            nif.write_bytes(_build_minimal_nif(**kwargs))
+            if make_fallout:
+                _rewrite_user_version(nif, 11)
+            validation = validate_nif_for_parallax(nif)
+            codes = [group.code for group in validation.conflict_report]
+            reports.append((nif, codes))
+            for prefix in expected_prefixes:
+                self.assertTrue(
+                    any(code.startswith(prefix) for code in codes),
+                    f"{nif.name} missing {prefix}; got {codes}",
+                )
+
+        all_codes = [code for _, codes in reports for code in codes]
+        self.assertGreaterEqual(len(reports), 12)
+        self.assertTrue(any(".skyrim.legacy" in code for code in all_codes))
+        self.assertTrue(any(".skyrim.real" in code for code in all_codes))
+        self.assertTrue(any(".fallout." in code for code in all_codes))
+
+
+class TestBatchConflictSummaries(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_summarize_validation_conflicts_groups_across_files(self) -> None:
+        nif_a = _write_nif(
+            self.tmp,
+            texture_paths=["textures\\arch\\stone_n.dds"] + [""] * 8,
+        )
+        nif_b = self.tmp / "b.nif"
+        nif_b.write_bytes(
+            _build_minimal_nif(
+                texture_paths=["textures\\arch\\stone_n.dds"] + [""] * 8
+            )
+        )
+        v_a = validate_nif_for_parallax(nif_a)
+        v_b = validate_nif_for_parallax(nif_b)
+        summary = summarize_validation_conflicts([v_a, v_b])
+        target = next(group for group in summary if group.code.startswith("path_slot_diffuse.wrong_suffix."))
+        self.assertEqual(target.file_count, 2)
+        self.assertGreaterEqual(target.count, 2)
+        self.assertIn("test.nif", target.example_files)
+        self.assertIn("b.nif", target.example_files)
+        self.assertTrue(any("slot 0" in action.lower() for action in target.suggested_actions))
+
+    def test_summarize_validation_conflicts_limits_example_files(self) -> None:
+        validations = []
+        for idx in range(5):
+            p = self.tmp / f"many_{idx}.nif"
+            p.write_bytes(
+                _build_minimal_nif(
+                    texture_paths=["textures\\arch\\stone_n.dds"] + [""] * 8
+                )
+            )
+            validations.append(validate_nif_for_parallax(p))
+        summary = summarize_validation_conflicts(validations, max_example_files=2)
+        target = next(group for group in summary if group.code.startswith("path_slot_diffuse.wrong_suffix."))
+        self.assertEqual(target.file_count, 5)
+        self.assertEqual(len(target.example_files), 2)
+
+
+class TestPluginAwareConflictSummaries(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_plugin_aware_summary_counts_plugins_per_conflict(self) -> None:
+        a = self.tmp / "a.nif"
+        b = self.tmp / "b.nif"
+        a.write_bytes(_build_minimal_nif(texture_paths=["textures\\arch\\stone_n.dds"] + [""] * 8))
+        b.write_bytes(_build_minimal_nif(texture_paths=["textures\\arch\\stone_n.dds"] + [""] * 8))
+        v_a = validate_nif_for_parallax(a)
+        v_b = validate_nif_for_parallax(b)
+        summary = summarize_plugin_aware_validation_conflicts(
+            [v_a, v_b],
+            plugin_context={
+                str(a).lower(): [
+                    NifPluginConflictRef(plugin_name="MyMod.esp", record_id="0x0001", record_type="STAT"),
+                    NifPluginConflictRef(plugin_name="Patch.esp", record_id="0x1001", record_type="STAT"),
+                ],
+                str(b).lower(): [
+                    NifPluginConflictRef(plugin_name="Patch.esp", record_id="0x1002", record_type="STAT"),
+                ],
+            },
+        )
+        target = next(group for group in summary if group.code.startswith("path_slot_diffuse.wrong_suffix."))
+        self.assertEqual(target.file_count, 2)
+        self.assertEqual(target.plugin_count, 2)
+        self.assertIn("MyMod.esp", target.example_plugins)
+        self.assertIn("Patch.esp", target.example_plugins)
+
+
+class TestAutoRemediationExecutor(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_build_auto_remediation_options_enables_matching_flags(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_m.dds"
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_g.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths, flags1=0, flags2=0)
+        v = validate_nif_for_parallax(nif)
+        codes = [group.code for group in v.conflict_report]
+        opts, steps = build_auto_remediation_patch_options(nif, codes)
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(opts.enable_parallax)
+        self.assertTrue(opts.enable_env_mapping)
+        self.assertTrue(opts.enable_glow_map)
+        self.assertIn("enable_parallax", steps)
+        self.assertIn("enable_env_mapping", steps)
+        self.assertIn("enable_glow_map", steps)
+
+    def test_auto_remediate_conflicts_applies_changes(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone_p.dds"
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_m.dds"
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_g.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=SLSF1_PARALLAX_OCCLUSION,
+            flags2=0,
+            shader_type=SHADER_TYPE_DEFAULT,
+        )
+        before = validate_nif_for_parallax(nif)
+        before_codes = [group.code for group in before.conflict_report]
+        result, steps = auto_remediate_nif_conflicts(nif, before_codes, backup=False)
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertTrue(result.success, result.errors)
+        after = scan_nif(nif)[0]
+        self.assertTrue(after.has_parallax_flag)
+        self.assertTrue(after.has_env_mapping_flag)
+        self.assertTrue(after.has_glow_map_flag)
+        self.assertIn("enable_parallax", steps)
+
+    def test_auto_remediate_conflicts_end_to_end_validate_report_rerun(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone_p.dds"
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_m.dds"
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_g.dds"
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=paths,
+            flags1=0,
+            flags2=0,
+            shader_type=SHADER_TYPE_DEFAULT,
+        )
+        before = validate_nif_for_parallax(nif)
+        before_codes = [group.code for group in before.conflict_report]
+        self.assertTrue(any(code.startswith("missing_parallax_flag.") for code in before_codes))
+        self.assertTrue(any(code.startswith("flag_env_mapping.") for code in before_codes))
+        self.assertTrue(any(code.startswith("flag_glow_map.") for code in before_codes))
+
+        result, steps = auto_remediate_nif_conflicts(nif, before_codes, backup=False)
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertTrue(result.success, result.errors)
+        self.assertIn("enable_parallax", steps)
+        self.assertIn("enable_env_mapping", steps)
+        self.assertIn("enable_glow_map", steps)
+
+        after = validate_nif_for_parallax(nif)
+        after_codes = [group.code for group in after.conflict_report]
+        self.assertLessEqual(len(after_codes), len(before_codes))
+        self.assertFalse(any(code.startswith("missing_parallax_flag.") for code in after_codes))
+        self.assertFalse(any(code.startswith("flag_env_mapping.") for code in after_codes))
+        self.assertFalse(any(code.startswith("flag_glow_map.") for code in after_codes))
+
+    def test_auto_remediation_build_options_carries_fallout_gate_flags(self) -> None:
+        nif = _write_nif(self.tmp, user_ver2=130)
+        _rewrite_user_version(nif, 11)
+        opts, _steps = build_auto_remediation_patch_options(
+            nif,
+            ["missing_parallax_flag.fallout.legacy"],
+            target_game="fallout",
+            experimental_fallout_write=True,
+            fallout_allow_parallax_scale=True,
+            fallout_allow_fix_mesh_lighting=True,
+            fallout_allow_spec_strength=True,
+            fallout_allow_spec_color=True,
+            fallout_allow_env_map_scale=True,
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(opts.fallout_allow_parallax_scale)
+        self.assertTrue(opts.fallout_allow_fix_mesh_lighting)
+        self.assertTrue(opts.fallout_allow_spec_strength)
+        self.assertTrue(opts.fallout_allow_spec_color)
+        self.assertTrue(opts.fallout_allow_env_map_scale)
+
+    def test_auto_remediation_build_options_propagates_single_pass_policy(self) -> None:
+        nif = _write_nif(self.tmp, flags1=SLSF1_SINGLE_PASS)
+        opts, _steps = build_auto_remediation_patch_options(
+            nif,
+            ["missing_parallax_flag.skyrim.real"],
+            skip_single_pass=False,
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertFalse(opts.skip_single_pass)
+
+
+class TestCompatibilityReport(unittest.TestCase):
+    def test_game_profile_support_matrix_has_expected_profiles(self) -> None:
+        matrix = build_game_profile_support_matrix()
+        profiles = {row[0]: row for row in matrix}
+        self.assertIn("skyrim", profiles)
+        self.assertIn("fallout", profiles)
+        self.assertIn("unknown", profiles)
+        self.assertEqual(profiles["fallout"][1], "guarded")
+
+    def test_compatibility_report_mentions_fallout_safety_gate_flags(self) -> None:
+        report = build_compatibility_report_text()
+        self.assertIn("NIF patch compatibility report", report)
+        self.assertIn("Fallout signature range", report)
+        self.assertIn("--fallout-allow-parallax-scale", report)
+        self.assertIn("--fallout-allow-env-map-scale", report)
+
+
+class TestFixtureCorpusCompatibilityMatrix(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_profile_layout_corpus_matrix_and_broken_headers(self) -> None:
+        corpus: list[Path] = []
+        for profile in ("skyrim", "fallout"):
+            for layout in ("legacy", "real"):
+                for idx in range(5):
+                    p = self.tmp / f"{profile}_{layout}_{idx}.nif"
+                    p.write_bytes(
+                        _build_minimal_nif(
+                            shader_layout=layout,
+                            user_ver2=130 if layout == "real" else 83,
+                            texture_paths=["textures\\arch\\stone.dds"] + [""] * 8,
+                        )
+                    )
+                    if profile == "fallout":
+                        _rewrite_user_version(p, 11)
+                    corpus.append(p)
+        broken = self.tmp / "broken_header.nif"
+        broken.write_bytes((_build_minimal_nif())[:90])
+        corpus.append(broken)
+
+        validations = [validate_nif_for_parallax(p) for p in corpus]
+        self.assertEqual(len(validations), 21)
+        self.assertTrue(any(v.detected_game_profile == "skyrim" for v in validations))
+        self.assertTrue(any(v.detected_game_profile == "fallout" for v in validations))
+        self.assertTrue(any("unsupported nif header/profile values" in "\n".join(v.issues).lower() for v in validations))
+        summary = summarize_validation_conflicts(validations)
+        self.assertTrue(any(group.code.startswith("unsupported_header.") for group in summary))
+        self.assertTrue(any(".skyrim.legacy" in group.code for group in summary))
+        self.assertTrue(any(".fallout.real" in group.code for group in summary))
+
+
+class TestFixtureCorpusBaselinePack(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_fixture_manifest_and_baseline_are_consistent(self) -> None:
+        payload = _load_fixture_corpus_payload(_FIXTURE_CORPUS_MANIFEST)
+        baseline = _load_fixture_corpus_payload(_FIXTURE_CORPUS_BASELINE)
+        cases = payload.get("cases", [])
+        self.assertIsInstance(cases, list)
+        case_ids = [str(case.get("id", "")).strip() for case in cases if isinstance(case, dict)]
+        self.assertEqual(len(case_ids), len(set(case_ids)), "Fixture case ids must be unique.")
+        self.assertEqual(len(case_ids), int(baseline.get("expected_total_cases", 0)))
+
+    def test_fixture_pack_matches_baseline_conflict_matrix(self) -> None:
+        payload = _load_fixture_corpus_payload(_FIXTURE_CORPUS_MANIFEST)
+        baseline = _load_fixture_corpus_payload(_FIXTURE_CORPUS_BASELINE)
+        corpus = _materialize_fixture_corpus(self.tmp, payload)
+        validations = [validate_nif_for_parallax(path) for path in corpus]
+        self.assertEqual(len(validations), int(baseline.get("expected_total_cases", 0)))
+
+        expected_profile_counts = baseline.get("expected_profile_counts", {})
+        self.assertIsInstance(expected_profile_counts, dict)
+        observed_profile_counts: dict[str, int] = {}
+        for validation in validations:
+            key = validation.detected_game_profile or "unknown"
+            observed_profile_counts[key] = observed_profile_counts.get(key, 0) + 1
+        self.assertEqual(observed_profile_counts, {str(k): int(v) for k, v in expected_profile_counts.items()})
+        self.assertTrue(
+            any("unexpected user version values" in "\n".join(v.issues).lower() for v in validations),
+            "Fixture corpus should include at least one unknown-header signature case.",
+        )
+
+        summary = summarize_validation_conflicts(validations)
+        summary_codes = tuple(group.code for group in summary)
+        required_prefixes = baseline.get("required_summary_code_prefixes", [])
+        self.assertIsInstance(required_prefixes, list)
+        for prefix in required_prefixes:
+            self.assertTrue(
+                any(code.startswith(str(prefix)) for code in summary_codes),
+                f"Missing required summary code prefix: {prefix!r}",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -2140,6 +3252,13 @@ class TestSkipConditions(unittest.TestCase):
         info = scan_nif(nif)[0]
         self.assertFalse(info.has_parallax_flag, "Anisotropic-lit shader must not get parallax")
 
+    def test_skip_single_pass_flag(self) -> None:
+        """Shaders with SLSF1_SINGLE_PASS must not receive parallax."""
+        nif = self._write(shader_flags1=SLSF1_SINGLE_PASS)
+        patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.has_parallax_flag, "Single-pass shader must not get parallax")
+
     def test_skip_incompatible_shader_type(self) -> None:
         """Shaders with types other than Default/Parallax/EnvMap must be skipped."""
         nif = self._write(shader_type=SHADER_TYPE_MULTILAYER)
@@ -2188,6 +3307,17 @@ class TestSkipConditions(unittest.TestCase):
         info = scan_nif(nif)[0]
         self.assertTrue(info.has_parallax_flag,
                         "Decal shader should get parallax when skip_decal=False")
+
+    def test_no_skip_single_pass_when_disabled(self) -> None:
+        nif = self._write(shader_flags1=SLSF1_SINGLE_PASS)
+        patch_nif(nif, NifPatchOptions(
+            enable_parallax=True,
+            backup=False,
+            skip_single_pass=False,
+        ))
+        info = scan_nif(nif)[0]
+        self.assertTrue(info.has_parallax_flag,
+                        "Single-pass shader should get parallax when skip_single_pass=False")
 
     def test_havok_skip_does_not_affect_env_mapping(self) -> None:
         """Havok skip only blocks parallax; env-mapping patching must still work."""
@@ -2288,6 +3418,20 @@ class TestShaderFieldPatches(unittest.TestCase):
         self.assertIsNotNone(sp.env_map_scale_offset)
         value = struct.unpack_from("<f", data, sp.env_map_scale_offset)[0]
         self.assertAlmostEqual(value, 1.0, places=4)
+
+
+class TestCliArgumentValidation(unittest.TestCase):
+    def test_missing_nif_paths_fails_fast(self) -> None:
+        with mock.patch("sys.argv", ["nif_patcher.py"]):
+            with self.assertRaises(SystemExit) as ctx:
+                nif_patcher_main()
+        self.assertEqual(ctx.exception.code, 2)
+
+    def test_auto_remediate_requires_validate_mode(self) -> None:
+        with mock.patch("sys.argv", ["nif_patcher.py", "dummy.nif", "--auto-remediate"]):
+            with self.assertRaises(SystemExit) as ctx:
+                nif_patcher_main()
+        self.assertEqual(ctx.exception.code, 1)
 
 
 if __name__ == "__main__":

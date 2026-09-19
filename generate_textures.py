@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import csv
 import gc
 import importlib
 import json
@@ -13,6 +14,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, replace
@@ -26,12 +28,14 @@ from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageOp
 
 try:
     import tkinter as tk
+    import tkinter.font as tkfont
     from tkinter import filedialog, messagebox, ttk
     from PIL import ImageTk
 
     GUI_AVAILABLE = True
 except Exception:
     tk = None
+    tkfont = None
     filedialog = None
     messagebox = None
     ttk = None
@@ -66,7 +70,9 @@ try:
 
     def _load_nif_patcher_exports(search_dirs: tuple[Path, ...] | None = None) -> dict[str, object]:
         required_exports = (
+            "NifPluginConflictRef",
             "NifPatchOptions",
+            "auto_remediate_nif_conflicts",
             "find_nif_files",
             "guess_cubemap_path_for_nif",
             "guess_env_mask_path_for_nif",
@@ -75,6 +81,8 @@ try:
             "guess_parallax_path_for_nif",
             "patch_nif",
             "scan_nif",
+            "summarize_plugin_aware_validation_conflicts",
+            "summarize_validation_conflicts",
             "validate_nif_for_parallax",
         )
         last_error: ImportError | None = None
@@ -117,7 +125,7 @@ except ImportError as exc:
 
 
 DDS_EXTENSION = ".dds"
-APP_VERSION = "0.7"
+APP_VERSION = "0.9"
 SUPPORTED_INPUT_EXTENSIONS = {DDS_EXTENSION, ".png", ".jpg", ".jpeg", ".tga", ".bmp"}
 GENERATED_TEXTURE_SUFFIXES = (
     "_msn",
@@ -169,6 +177,7 @@ PREVIEW_SIZE_PRESETS: dict[str, tuple[int, int]] = {
     "XL": (620, 460),
 }
 GUI_STATE_FILE = Path.home() / ".skyrim_texture_generator_gui_state.json"
+UI_TRANSLATIONS_DIR = Path(__file__).resolve().parent / "assets" / "translations"
 _GUI_STATE_DEFAULTS: dict[str, object] = {
     "input_path": "",
     "output_path": "",
@@ -181,6 +190,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "env_mask_mode": "standard",
     "parallax_mode": "standard",
     "render_profile": "custom",
+    "target_game": "skyrim",
     "emboss_mode": False,
     "relief_mode": False,
     "include_diffuse": True,
@@ -216,7 +226,61 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "ao_strength": 1.2,
     "roughness_strength": 1.0,
     "dismissed_warnings": [],
+    "ui_language": "en",
+    "ui_scale": 1.0,
+    "nif_retry_count": 1,
 }
+
+_TEXTURE_TARGET_GAME_VALUES: tuple[str, ...] = (
+    "skyrim",
+    "fallout3",
+    "falloutnv",
+    "fallout4",
+    "fallout76",
+)
+_FALLOUT_TEXTURE_TARGET_GAMES: frozenset[str] = frozenset(_TEXTURE_TARGET_GAME_VALUES[1:])
+
+
+def _normalize_texture_target_game(value: str | None) -> str:
+    normalized = str(value or "skyrim").strip().lower()
+    aliases = {
+        "fo3": "fallout3",
+        "fo:nv": "falloutnv",
+        "fonv": "falloutnv",
+        "fnv": "falloutnv",
+        "new vegas": "falloutnv",
+        "fo4": "fallout4",
+        "fallout 4": "fallout4",
+        "fo76": "fallout76",
+        "fallout 76": "fallout76",
+    }
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in _TEXTURE_TARGET_GAME_VALUES:
+        return "skyrim"
+    return normalized
+
+
+def _strip_known_diffuse_suffix(stem: str) -> str:
+    lowered = stem.lower()
+    for suffix in (
+        "_d",
+        "_diff",
+        "_diffuse",
+        "_albedo",
+        "_basecolor",
+        "_base_color",
+    ):
+        if lowered.endswith(suffix):
+            return stem[: -len(suffix)]
+    return stem
+
+
+def _build_default_output_stem(base_stem: str, suffix: str) -> str:
+    if not suffix:
+        return base_stem
+    if base_stem.lower().endswith(suffix.lower()):
+        return base_stem
+    return f"{base_stem}{suffix}"
 
 
 def _coerce_bool(value: object, default: bool) -> bool:
@@ -445,6 +509,7 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
             state["render_profile"] = render_profile
     else:
         state["render_profile"] = str(_GUI_STATE_DEFAULTS["render_profile"])
+    state["target_game"] = _normalize_texture_target_game(str(raw.get("target_game", state["target_game"]) or state["target_game"]))
     state["normal_strength"] = _coerce_float(raw.get("normal_strength"), float(state["normal_strength"]), 0.1, 8.0)
     state["parallax_strength"] = _coerce_float(raw.get("parallax_strength"), float(state["parallax_strength"]), 0.1, 6.0)
     state["glow_threshold"] = _coerce_int(raw.get("glow_threshold"), int(state["glow_threshold"]), 0, 255)
@@ -472,6 +537,10 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         state["dismissed_warnings"] = [str(w) for w in raw_dismissed if isinstance(w, str)]
     else:
         state["dismissed_warnings"] = []
+    ui_language = str(raw.get("ui_language", state["ui_language"]) or state["ui_language"]).strip().lower()
+    state["ui_language"] = ui_language or "en"
+    state["ui_scale"] = _coerce_float(raw.get("ui_scale"), float(state["ui_scale"]), 0.8, 2.5)
+    state["nif_retry_count"] = _coerce_int(raw.get("nif_retry_count"), int(state["nif_retry_count"]), 0, 3)
     return state
 
 
@@ -494,6 +563,67 @@ def save_gui_state(state: Mapping[str, object], state_file: Path = GUI_STATE_FIL
         state_file.write_text(json.dumps(normalized, indent=2, sort_keys=True), encoding="utf-8")
     except Exception:
         pass
+
+
+def discover_ui_languages(translations_dir: Path = UI_TRANSLATIONS_DIR) -> tuple[str, ...]:
+    if not translations_dir.exists():
+        return ("en",)
+    names = sorted(
+        path.stem
+        for path in translations_dir.glob("*.json")
+        if path.is_file() and path.stem.strip()
+    )
+    if "en" not in names:
+        names.insert(0, "en")
+    return tuple(dict.fromkeys(names))
+
+
+def load_ui_translations(language: str, translations_dir: Path = UI_TRANSLATIONS_DIR) -> dict[str, str]:
+    resolved_language = (language or "en").strip().lower() or "en"
+    catalog_path = translations_dir / f"{resolved_language}.json"
+    if not catalog_path.exists():
+        return {}
+    try:
+        payload = json.loads(catalog_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(payload, Mapping):
+        return {}
+    raw_strings = payload.get("strings", {})
+    if isinstance(raw_strings, Mapping):
+        return {
+            str(source): str(target)
+            for source, target in raw_strings.items()
+            if isinstance(source, str) and isinstance(target, str)
+        }
+    return {}
+
+
+def translate_ui_text(text: str, catalog: Mapping[str, str] | None) -> str:
+    if not text:
+        return text
+    if not catalog:
+        return text
+    return str(catalog.get(text, text))
+
+
+def _enable_process_dpi_awareness() -> None:
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        except Exception:
+            ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        return
+
+
+def compute_effective_ui_scale(*, pixels_per_inch: float, user_scale: float) -> float:
+    baseline = max(1.0, pixels_per_inch / 96.0)
+    return max(0.8, min(2.5, baseline * user_scale))
 
 
 @dataclass(frozen=True)
@@ -588,6 +718,32 @@ def _parse_enabled_modlist(modlist_path: Path) -> tuple[str, ...]:
     return tuple(enabled_mods)
 
 
+def _normalize_plugin_list_entry(raw_value: str) -> str:
+    cleaned = str(raw_value or "").strip().strip('"').strip("'")
+    if not cleaned:
+        return ""
+    # Typical load-order prefixes from various manager/export formats.
+    cleaned = re.sub(r"^\s*(?:\[[0-9a-fA-F]{2,3}\]|\([0-9a-fA-F]{2,3}\)|[0-9a-fA-F]{2,3}:)\s*", "", cleaned)
+    if cleaned.startswith("*"):
+        cleaned = cleaned[1:].strip()
+    lowered = cleaned.lower()
+    if lowered.startswith("ghosted:"):
+        cleaned = cleaned.split(":", 1)[1].strip()
+        lowered = cleaned.lower()
+    for marker in ("#", ";", "|"):
+        if marker in cleaned:
+            cleaned = cleaned.split(marker, 1)[0].strip()
+            lowered = cleaned.lower()
+    if lowered.startswith("-"):
+        return ""
+    if cleaned.lower().endswith(".ghost"):
+        cleaned = cleaned[:-6]
+    normalized = cleaned.strip()
+    if not normalized.lower().endswith((".esp", ".esm", ".esl")):
+        return ""
+    return normalized
+
+
 def _parse_enabled_plugins(plugins_path: Path) -> tuple[str, ...]:
     plugins: list[str] = []
     if not plugins_path.exists():
@@ -596,13 +752,14 @@ def _parse_enabled_plugins(plugins_path: Path) -> tuple[str, ...]:
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
-        if line[0] in {";", "-"}:
+        if line.startswith(";"):
             continue
-        if line[0] in {"+", "*"}:
+        if line[0] in {"+"}:
             line = line[1:].strip()
-        if line:
-            plugins.append(line)
-    return tuple(plugins)
+        normalized = _normalize_plugin_list_entry(line)
+        if normalized:
+            plugins.append(normalized)
+    return tuple(dict.fromkeys(plugins))
 
 
 def _parse_load_order(loadorder_path: Path) -> tuple[str, ...]:
@@ -613,11 +770,12 @@ def _parse_load_order(loadorder_path: Path) -> tuple[str, ...]:
         line = raw_line.strip()
         if not line or line.startswith("#") or line.startswith(";"):
             continue
-        if line[0] in {"+", "*", "-"}:
+        if line[0] in {"+", "*"}:
             line = line[1:].strip()
-        if line:
-            entries.append(line)
-    return tuple(entries)
+        normalized = _normalize_plugin_list_entry(line)
+        if normalized:
+            entries.append(normalized)
+    return tuple(dict.fromkeys(entries))
 
 
 _BODY_PROFILE_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -874,6 +1032,225 @@ def detect_mod_manager_context(
     if mo2_context.manager is not None:
         return mo2_context
     return _detect_vortex_context(resolved_env, executable_path=resolved_executable)
+
+
+_PLUGIN_MESH_PATH_RE = re.compile(rb"meshes\\[ -~]{1,260}?\.nif", re.IGNORECASE)
+_PLUGIN_MESH_SUBRECORDS = {b"MODL", b"MOD2", b"MOD3", b"MOD4", b"DMDL", b"DNAM", b"MNAM"}
+
+
+@dataclass(frozen=True)
+class PluginMeshRecordRef:
+    mesh_path: str
+    record_id: str = ""
+    record_type: str = ""
+
+
+def extract_mesh_paths_from_plugin_bytes(raw: bytes) -> tuple[str, ...]:
+    matches: list[str] = []
+    for found in _PLUGIN_MESH_PATH_RE.findall(raw):
+        try:
+            text = found.decode("latin-1", errors="ignore").replace("/", "\\").lower()
+        except Exception:
+            continue
+        if text and text not in matches:
+            matches.append(text)
+    return tuple(matches)
+
+
+def extract_plugin_mesh_record_refs(raw: bytes) -> tuple[PluginMeshRecordRef, ...]:
+    refs: list[PluginMeshRecordRef] = []
+    seen: set[tuple[str, str, str]] = set()
+    by_path_has_detailed: set[str] = set()
+    data_len = len(raw)
+    if data_len < 24:
+        return ()
+
+    def _record_type_name(token: bytes) -> str:
+        try:
+            name = token.decode("ascii", errors="ignore").strip().upper()
+        except Exception:
+            return ""
+        if len(name) != 4 or not name.isalnum():
+            return ""
+        return name
+
+    def _decode_mesh_path(payload: bytes) -> str:
+        if not payload:
+            return ""
+        try:
+            text = payload.split(b"\x00", 1)[0].decode("latin-1", errors="ignore")
+        except Exception:
+            return ""
+        normalized = text.replace("/", "\\").strip().lower()
+        if not normalized:
+            return ""
+        if "meshes\\" in normalized:
+            normalized = "meshes\\" + normalized.split("meshes\\", 1)[1]
+        if not normalized.startswith("meshes\\"):
+            return ""
+        if not normalized.endswith(".nif"):
+            return ""
+        return normalized
+
+    def _append_ref(mesh_path: str, record_id: str = "", record_type: str = "") -> None:
+        if not (record_id or record_type) and mesh_path in by_path_has_detailed:
+            return
+        key = (mesh_path, record_id, record_type)
+        if key in seen:
+            return
+        seen.add(key)
+        if record_id or record_type:
+            by_path_has_detailed.add(mesh_path)
+            generic_key = (mesh_path, "", "")
+            if generic_key in seen:
+                seen.discard(generic_key)
+                refs[:] = [ref for ref in refs if not (ref.mesh_path == mesh_path and not ref.record_id and not ref.record_type)]
+        refs.append(PluginMeshRecordRef(mesh_path=mesh_path, record_id=record_id, record_type=record_type))
+
+    def _scan_record_payload(payload: bytes, record_id: str, record_type: str) -> None:
+        cursor = 0
+        pending_size: int | None = None
+        payload_len = len(payload)
+        while cursor + 6 <= payload_len:
+            token = payload[cursor : cursor + 4]
+            token_size = int.from_bytes(payload[cursor + 4 : cursor + 6], "little", signed=False)
+            if token == b"XXXX":
+                if cursor + 10 > payload_len:
+                    break
+                pending_size = int.from_bytes(payload[cursor + 6 : cursor + 10], "little", signed=False)
+                cursor += 10
+                continue
+            cursor += 6
+            subrecord_size = pending_size if pending_size is not None else token_size
+            pending_size = None
+            if subrecord_size < 0 or cursor + subrecord_size > payload_len:
+                break
+            if token in _PLUGIN_MESH_SUBRECORDS:
+                mesh_path = _decode_mesh_path(payload[cursor : cursor + subrecord_size])
+                if mesh_path:
+                    _append_ref(mesh_path, record_id=record_id, record_type=record_type)
+            cursor += subrecord_size
+
+    stack: list[tuple[int, int]] = [(0, data_len)]
+    while stack:
+        region_start, region_end = stack.pop()
+        offset = region_start
+        while offset + 24 <= region_end:
+            signature = raw[offset : offset + 4]
+            block_size = int.from_bytes(raw[offset + 4 : offset + 8], "little", signed=False)
+            if signature == b"GRUP":
+                if block_size < 24:
+                    offset += 1
+                    continue
+                group_end = offset + block_size
+                if group_end > region_end:
+                    offset += 1
+                    continue
+                nested_start = offset + 24
+                if nested_start < group_end:
+                    stack.append((nested_start, group_end))
+                offset = group_end
+                continue
+
+            record_type = _record_type_name(signature)
+            if not record_type:
+                offset += 1
+                continue
+            if block_size <= 0:
+                offset += 1
+                continue
+            record_end = offset + 24 + block_size
+            if record_end > region_end:
+                offset += 1
+                continue
+            flags = int.from_bytes(raw[offset + 8 : offset + 12], "little", signed=False)
+            form_id = int.from_bytes(raw[offset + 12 : offset + 16], "little", signed=False)
+            payload = raw[offset + 24 : record_end]
+            if not (flags & 0x00040000):
+                _scan_record_payload(payload, f"{form_id:08X}", record_type)
+            offset = record_end
+
+    for path in extract_mesh_paths_from_plugin_bytes(raw):
+        _append_ref(path)
+    return tuple(refs)
+
+
+def discover_plugin_conflict_context_from_manager(
+    nif_paths: list[Path],
+    context: ModManagerContext,
+) -> dict[str, list[object]]:
+    def _resolve_plugin_path(plugin_name: str, search_roots: list[Path]) -> Path | None:
+        lowered_name = plugin_name.lower()
+        for root in search_roots:
+            direct = root / plugin_name
+            if direct.exists():
+                return direct
+            direct_ghost = root / f"{plugin_name}.ghost"
+            if direct_ghost.exists():
+                return direct_ghost
+            try:
+                for candidate in root.rglob("*"):
+                    if not candidate.is_file():
+                        continue
+                    candidate_name = candidate.name.lower()
+                    if candidate_name != lowered_name and candidate_name != f"{lowered_name}.ghost":
+                        continue
+                    return candidate
+            except Exception:
+                continue
+        return None
+
+    plugin_names = tuple(
+        dict.fromkeys(
+            normalized_name
+            for name in (*context.enabled_plugins, *context.load_order)
+            if isinstance(name, str)
+            for normalized_name in (_normalize_plugin_list_entry(name),)
+            if normalized_name.lower().endswith((".esp", ".esm", ".esl"))
+        )
+    )
+    if not plugin_names:
+        return {}
+    roots = [
+        context.game_root / "Data" if context.game_root is not None else None,
+        context.instance_root / "mods" if context.instance_root is not None else None,
+        context.staging_root if context.staging_root is not None else None,
+    ]
+    search_roots = [root for root in roots if root is not None and root.exists()]
+    if not search_roots:
+        return {}
+
+    normalized_nif_keys = {str(path).lower() for path in nif_paths}
+    if not normalized_nif_keys:
+        return {}
+    nif_by_relative_tail = {
+        str(path).replace("/", "\\").lower().split("meshes\\", 1)[-1]: str(path).lower()
+        for path in nif_paths
+    }
+    discovered: dict[str, list[object]] = {}
+    for plugin_name in plugin_names:
+        plugin_path = _resolve_plugin_path(plugin_name, search_roots)
+        if plugin_path is None:
+            continue
+        try:
+            raw = plugin_path.read_bytes()
+        except OSError:
+            continue
+        for mesh_ref in extract_plugin_mesh_record_refs(raw):
+            tail = mesh_ref.mesh_path.split("meshes\\", 1)[-1]
+            nif_key = nif_by_relative_tail.get(tail)
+            if nif_key is None:
+                continue
+            if nif_key not in normalized_nif_keys:
+                continue
+            discovered.setdefault(nif_key, []).append(
+                NifPluginConflictRef(
+                    plugin_name=plugin_name,
+                    record_id=mesh_ref.record_id,
+                    record_type=mesh_ref.record_type,
+                )
+            )
+    return discovered
 
 
 def _histogram_percentile(histogram: list[int], percentile: float) -> float:
@@ -2000,6 +2377,8 @@ def get_nif_patch_option_warnings(
     clear_glow_texture_path: bool = False,
     clear_diffuse_texture_path: bool = False,
     clear_cubemap_texture_path: bool = False,
+    target_game: str = "auto",
+    experimental_fallout_write: bool = False,
 ) -> list[str]:
     warnings: list[str] = []
     normalized_selected_profile = _normalize_render_profile(str(selected_profile or "auto"))
@@ -2013,6 +2392,16 @@ def get_nif_patch_option_warnings(
         effective_profile = "vanilla"
     if effective_profile == "vanilla" and enable_pom:
         warnings.append("ENB POM is usually incorrect for vanilla meshes.")
+    normalized_target_game = str(target_game or "auto").strip().lower()
+    if normalized_target_game == "fallout":
+        if not experimental_fallout_write:
+            warnings.append("Fallout target selected but experimental Fallout write mode is disabled.")
+        if force_shader_type_3:
+            warnings.append("Fallout experimental mode does not support force shader type 3.")
+        if enable_parallax and not parallax_texture_path.strip():
+            warnings.append("Fallout parallax enabled without a slot 3 _p.dds path.")
+    elif experimental_fallout_write:
+        warnings.append("Experimental Fallout write mode is enabled while target game is not Fallout.")
     if effective_profile in {"performance", "vr"} and enable_parallax:
         warnings.append("Performance/VR workflows usually keep parallax disabled to reduce shimmer and GPU cost.")
     if effective_profile == "characters" and enable_parallax:
@@ -3968,13 +4357,16 @@ def build_output_paths(
     output_dir: Path | None,
     diffuse_name: str | None = None,
     parallax_name: str | None = None,
+    target_game: str = "skyrim",
 ) -> tuple[Path, Path]:
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
-
-    diffuse_stem = diffuse_name or input_path.stem
-    parallax_stem = parallax_name or f"{input_path.stem}_p"
+    normalized_target_game = _normalize_texture_target_game(target_game)
+    base_stem = _strip_known_diffuse_suffix(input_path.stem)
+    diffuse_suffix = "_d" if normalized_target_game in {"fallout4", "fallout76"} else ""
+    diffuse_stem = diffuse_name or _build_default_output_stem(base_stem, diffuse_suffix)
+    parallax_stem = parallax_name or f"{base_stem}_p"
     return base_output_dir / f"{diffuse_stem}{ext}", base_output_dir / f"{parallax_stem}{ext}"
 
 
@@ -3982,11 +4374,13 @@ def build_normal_output_path(
     input_path: Path,
     output_dir: Path | None,
     normal_name: str | None = None,
+    target_game: str = "skyrim",
 ) -> Path:
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
-    normal_stem = normal_name or f"{input_path.stem}_n"
+    del target_game
+    normal_stem = normal_name or f"{_strip_known_diffuse_suffix(input_path.stem)}_n"
     return base_output_dir / f"{normal_stem}{ext}"
 
 
@@ -3994,11 +4388,13 @@ def build_glow_output_path(
     input_path: Path,
     output_dir: Path | None,
     glow_name: str | None = None,
+    target_game: str = "skyrim",
 ) -> Path:
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
-    glow_stem = glow_name or f"{input_path.stem}_g"
+    del target_game
+    glow_stem = glow_name or f"{_strip_known_diffuse_suffix(input_path.stem)}_g"
     return base_output_dir / f"{glow_stem}{ext}"
 
 
@@ -4010,12 +4406,15 @@ def build_environment_mask_output_path(
     complex_format: str = "msn",
     render_profile: str = "auto",
     include_complex: bool | None = None,
+    target_game: str = "skyrim",
 ) -> Path:
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
-    default_suffix = "_m"
-    mask_stem = environment_mask_name or f"{input_path.stem}{default_suffix}"
+    del env_mask_mode, complex_format, render_profile, include_complex
+    normalized_target_game = _normalize_texture_target_game(target_game)
+    default_suffix = "_s" if normalized_target_game in {"fallout4", "fallout76"} else "_m"
+    mask_stem = environment_mask_name or f"{_strip_known_diffuse_suffix(input_path.stem)}{default_suffix}"
     return base_output_dir / f"{mask_stem}{ext}"
 
 
@@ -4023,11 +4422,13 @@ def build_rmaos_output_path(
     input_path: Path,
     output_dir: Path | None,
     rmaos_name: str | None = None,
+    target_game: str = "skyrim",
 ) -> Path:
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
-    rmaos_stem = rmaos_name or f"{input_path.stem}_rmaos"
+    del target_game
+    rmaos_stem = rmaos_name or f"{_strip_known_diffuse_suffix(input_path.stem)}_rmaos"
     return base_output_dir / f"{rmaos_stem}{ext}"
 
 
@@ -4421,14 +4822,16 @@ def build_complex_output_path(
     output_dir: Path | None,
     complex_name: str | None = None,
     complex_format: str = "msn",
+    target_game: str = "skyrim",
 ) -> Path:
     base_output_dir = _resolve_output_base_dir(input_path, output_dir)
     base_output_dir.mkdir(parents=True, exist_ok=True)
     ext = DDS_EXTENSION
     if complex_format not in {"msn", "cm"}:
         raise ValueError("complex_format must be 'msn' or 'cm'.")
+    del target_game
     suffix = "_msn" if complex_format == "msn" else "_cm"
-    complex_stem = complex_name or f"{input_path.stem}{suffix}"
+    complex_stem = complex_name or f"{_strip_known_diffuse_suffix(input_path.stem)}{suffix}"
     return base_output_dir / f"{complex_stem}{ext}"
 
 
@@ -4461,6 +4864,7 @@ def _collect_planned_output_paths(
     include_snow_mask: bool = False,
     include_ao: bool = False,
     include_roughness: bool = False,
+    target_game: str = "skyrim",
 ) -> dict[str, Path]:
     planned: dict[str, Path] = {}
     if include_diffuse or include_parallax:
@@ -4469,6 +4873,7 @@ def _collect_planned_output_paths(
             output_dir=output_dir,
             diffuse_name=diffuse_name,
             parallax_name=parallax_name,
+            target_game=target_game,
         )
         if include_diffuse:
             planned["diffuse"] = diffuse_path
@@ -4479,12 +4884,14 @@ def _collect_planned_output_paths(
             input_path=input_file,
             output_dir=output_dir,
             normal_name=normal_name,
+            target_game=target_game,
         )
     if include_glow:
         planned["glow"] = build_glow_output_path(
             input_path=input_file,
             output_dir=output_dir,
             glow_name=glow_name,
+            target_game=target_game,
         )
     if include_environment_mask:
         planned["environment_mask"] = build_environment_mask_output_path(
@@ -4495,12 +4902,14 @@ def _collect_planned_output_paths(
             complex_format=complex_format,
             render_profile=render_profile,
             include_complex=include_complex,
+            target_game=target_game,
         )
     if include_rmaos:
         planned["rmaos"] = build_rmaos_output_path(
             input_path=input_file,
             output_dir=output_dir,
             rmaos_name=rmaos_name,
+            target_game=target_game,
         )
     if include_wetness_mask:
         planned["wetness_mask"] = build_wetness_mask_output_path(
@@ -4532,6 +4941,7 @@ def _collect_planned_output_paths(
             output_dir=output_dir,
             complex_name=complex_name,
             complex_format=complex_format,
+            target_game=target_game,
         )
     return planned
 
@@ -4923,6 +5333,7 @@ def build_nif_patch_options_for_nif_editor(
     cubemap_texture_path: str = "",
     backup: bool = True,
     dry_run: bool = False,
+    dry_run_diff: bool = False,
     disable_parallax: bool = False,
     disable_pom: bool = False,
     disable_env_mapping: bool = False,
@@ -4934,6 +5345,13 @@ def build_nif_patch_options_for_nif_editor(
     clear_glow_texture_path: bool = False,
     clear_diffuse_texture_path: bool = False,
     clear_cubemap_texture_path: bool = False,
+    target_game: str = "auto",
+    experimental_fallout_write: bool = False,
+    fallout_allow_parallax_scale: bool = False,
+    fallout_allow_fix_mesh_lighting: bool = False,
+    fallout_allow_spec_strength: bool = False,
+    fallout_allow_spec_color: bool = False,
+    fallout_allow_env_map_scale: bool = False,
 ) -> NifPatchOptions:
     return NifPatchOptions(
         enable_parallax=enable_parallax,
@@ -4951,6 +5369,7 @@ def build_nif_patch_options_for_nif_editor(
         cubemap_texture_path=_normalize_nif_editor_texture_input_path(cubemap_texture_path),
         backup=backup,
         dry_run=dry_run,
+        dry_run_diff=dry_run_diff,
         disable_parallax=disable_parallax,
         disable_pom=disable_pom,
         disable_env_mapping=disable_env_mapping,
@@ -4962,6 +5381,13 @@ def build_nif_patch_options_for_nif_editor(
         clear_glow_texture_path=clear_glow_texture_path,
         clear_diffuse_texture_path=clear_diffuse_texture_path,
         clear_cubemap_texture_path=clear_cubemap_texture_path,
+        target_game=str(target_game or "auto").strip().lower(),
+        experimental_fallout_write=bool(experimental_fallout_write),
+        fallout_allow_parallax_scale=bool(fallout_allow_parallax_scale),
+        fallout_allow_fix_mesh_lighting=bool(fallout_allow_fix_mesh_lighting),
+        fallout_allow_spec_strength=bool(fallout_allow_spec_strength),
+        fallout_allow_spec_color=bool(fallout_allow_spec_color),
+        fallout_allow_env_map_scale=bool(fallout_allow_env_map_scale),
     )
 
 
@@ -6048,6 +6474,7 @@ def run_with_options(
     include_rmaos: bool = False,
     include_complex: bool = False,
     render_profile: str = "auto",
+    target_game: str = "skyrim",
     include_wetness_mask: bool = False,
     wetness_mask_strength: float | None = None,
     wetness_name: str | None = None,
@@ -6081,6 +6508,7 @@ def run_with_options(
         raise ValueError("Select at least one output.")
     if parallax_mode not in {"standard", "occlusion"}:
         raise ValueError("parallax_mode must be 'standard' or 'occlusion'.")
+    normalized_target_game = _normalize_texture_target_game(target_game)
     planned_paths = _collect_planned_output_paths(
         input_file=input_file,
         output_dir=output_dir,
@@ -6109,6 +6537,7 @@ def run_with_options(
         include_snow_mask=include_snow_mask,
         include_ao=include_ao,
         include_roughness=include_roughness,
+        target_game=normalized_target_game,
     )
     _validate_output_path_conflicts(planned_paths)
     resolved_env_complex_workflow = resolve_env_mask_complex_workflow(
@@ -6155,6 +6584,7 @@ def run_with_options(
                 output_dir=output_dir,
                 diffuse_name=diffuse_name,
                 parallax_name=parallax_name,
+                target_game=normalized_target_game,
             )
             outputs["diffuse"] = _save_with_dds_fallback(
                 diffuse,
@@ -6170,6 +6600,7 @@ def run_with_options(
                 input_path=input_file,
                 output_dir=output_dir,
                 normal_name=normal_name,
+                target_game=normalized_target_game,
             )
             outputs["normal"] = _save_with_dds_fallback(
                 normal,
@@ -6192,6 +6623,7 @@ def run_with_options(
                 output_dir=output_dir,
                 diffuse_name=diffuse_name,
                 parallax_name=parallax_name,
+                target_game=normalized_target_game,
             )
             outputs["parallax"] = _save_with_dds_fallback(
                 parallax,
@@ -6206,6 +6638,7 @@ def run_with_options(
                 input_path=input_file,
                 output_dir=output_dir,
                 glow_name=glow_name,
+                target_game=normalized_target_game,
             )
             outputs["glow"] = _save_with_dds_fallback(
                 glow,
@@ -6232,6 +6665,7 @@ def run_with_options(
                 complex_format=complex_format,
                 render_profile=render_profile,
                 include_complex=include_complex,
+                target_game=normalized_target_game,
             )
             outputs["environment_mask"] = _save_with_dds_fallback(
                 environment_mask,
@@ -6258,6 +6692,7 @@ def run_with_options(
                 input_path=input_file,
                 output_dir=output_dir,
                 rmaos_name=rmaos_name,
+                target_game=normalized_target_game,
             )
             outputs["rmaos"] = _save_with_dds_fallback(
                 rmaos_map,
@@ -6360,6 +6795,7 @@ def run_with_options(
                 output_dir=output_dir,
                 complex_name=complex_name,
                 complex_format=complex_format,
+                target_game=normalized_target_game,
             )
             outputs["complex_material"] = _save_with_dds_fallback(
                 complex_material,
@@ -6405,6 +6841,7 @@ def run_batch_with_options(
     include_rmaos: bool = False,
     include_complex: bool = False,
     render_profile: str = "auto",
+    target_game: str = "skyrim",
     include_wetness_mask: bool = False,
     wetness_mask_strength: float | None = None,
     wetness_name: str | None = None,
@@ -6421,66 +6858,86 @@ def run_batch_with_options(
     error_callback: Callable[[int, int, Path, Exception], None] | None = None,
     continue_on_error: bool = False,
     batch_workers: int | None = None,
+    checkpoint_file: Path | None = None,
+    resume_from_checkpoint: bool = False,
+    batch_telemetry_file: Path | None = None,
 ) -> dict[Path, dict[str, Path]]:
+    batch_start_time = time.perf_counter()
     input_files = collect_source_textures(input_path)
+    completed_success_files: set[str] = set()
+    resumed_completed_count = 0
+    per_file_durations: list[float] = []
+    failure_count = 0
+
+    def _checkpoint_key(path: Path) -> str:
+        return str(path.resolve())
+
+    def _write_checkpoint_state() -> None:
+        if checkpoint_file is None:
+            return
+        checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "tool": "generate_textures",
+            "version": APP_VERSION,
+            "input_root": _checkpoint_key(input_path),
+            "completed_success_count": len(completed_success_files),
+            "resumed_completed_count": resumed_completed_count,
+            "completed_success_files": sorted(completed_success_files),
+        }
+        checkpoint_file.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    if checkpoint_file is not None and resume_from_checkpoint and checkpoint_file.exists():
+        try:
+            payload = json.loads(checkpoint_file.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+        if isinstance(payload, dict):
+            raw_completed = payload.get("completed_success_files", [])
+            if isinstance(raw_completed, list):
+                completed_success_files = {str(entry) for entry in raw_completed if isinstance(entry, str)}
+        resumed_completed_count = len(completed_success_files)
+        input_files = [path for path in input_files if _checkpoint_key(path) not in completed_success_files]
+
     results: dict[Path, dict[str, Path]] = {}
     total = len(input_files)
     workers = _resolve_batch_workers(batch_workers, total)
 
-    if workers == 1:
-        for index, input_file in enumerate(input_files, start=1):
-            if progress_callback is not None:
-                progress_callback(index, total, input_file)
-            try:
-                results[input_file] = run_with_options(
-                    input_file=input_file,
-                    output_dir=output_dir,
-                    diffuse_name=diffuse_name,
-                    normal_name=normal_name,
-                    parallax_name=parallax_name,
-                    glow_name=glow_name,
-                    environment_mask_name=environment_mask_name,
-                    rmaos_name=rmaos_name,
-                    complex_name=complex_name,
-                    normal_strength=normal_strength,
-                    parallax_strength=parallax_strength,
-                    glow_threshold=glow_threshold,
-                    environment_mask_strength=environment_mask_strength,
-                    rmaos_strength=rmaos_strength,
-                    complex_strength=complex_strength,
-                    specular_strength=specular_strength,
-                    complex_format=complex_format,
-                    env_mask_mode=env_mask_mode,
-                    emboss_mode=emboss_mode,
-                    relief_mode=relief_mode,
-                    parallax_mode=parallax_mode,
-                    include_diffuse=include_diffuse,
-                    include_normal=include_normal,
-                    include_parallax=include_parallax,
-                    include_glow=include_glow,
-                    include_environment_mask=include_environment_mask,
-                    include_rmaos=include_rmaos,
-                    include_complex=include_complex,
-                    render_profile=render_profile,
-                    include_wetness_mask=include_wetness_mask,
-                    wetness_mask_strength=wetness_mask_strength,
-                    wetness_name=wetness_name,
-                    include_snow_mask=include_snow_mask,
-                    snow_mask_strength=snow_mask_strength,
-                    snow_name=snow_name,
-                    include_ao=include_ao,
-                    ao_strength=ao_strength,
-                    ao_name=ao_name,
-                    include_roughness=include_roughness,
-                    roughness_strength=roughness_strength,
-                    roughness_name=roughness_name,
-                )
-            except Exception as exc:
-                if error_callback is not None:
-                    error_callback(index, total, input_file, exc)
-                if not continue_on_error:
-                    raise
-        return results
+    def _write_batch_telemetry() -> None:
+        if batch_telemetry_file is None:
+            return
+        durations = sorted(value for value in per_file_durations if value >= 0.0)
+        duration_count = len(durations)
+        total_seconds = max(0.0, time.perf_counter() - batch_start_time)
+        if duration_count:
+            p95_index = min(duration_count - 1, max(0, math.ceil(duration_count * 0.95) - 1))
+            p95_seconds = durations[p95_index]
+            avg_seconds = sum(durations) / duration_count
+        else:
+            p95_seconds = 0.0
+            avg_seconds = 0.0
+        payload = {
+            "tool": "generate_textures",
+            "version": APP_VERSION,
+            "input_root": _checkpoint_key(input_path),
+            "summary": {
+                "workers": workers,
+                "total_files_considered": total + resumed_completed_count,
+                "resumed_completed_count": resumed_completed_count,
+                "processed_files": total,
+                "successful_files": len(results),
+                "failed_files": failure_count,
+                "total_duration_seconds": round(total_seconds, 6),
+                "avg_file_duration_seconds": round(avg_seconds, 6),
+                "p95_file_duration_seconds": round(p95_seconds, 6),
+                "max_file_duration_seconds": round(durations[-1], 6) if durations else 0.0,
+                "min_file_duration_seconds": round(durations[0], 6) if durations else 0.0,
+                "checkpoint_enabled": checkpoint_file is not None,
+                "resumed_from_checkpoint": bool(resume_from_checkpoint),
+            },
+            "per_file_duration_seconds": [round(value, 6) for value in durations],
+        }
+        batch_telemetry_file.parent.mkdir(parents=True, exist_ok=True)
+        batch_telemetry_file.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def _process_one(target_file: Path) -> dict[str, Path]:
         return run_with_options(
@@ -6513,6 +6970,7 @@ def run_batch_with_options(
             include_rmaos=include_rmaos,
             include_complex=include_complex,
             render_profile=render_profile,
+            target_game=target_game,
             include_wetness_mask=include_wetness_mask,
             wetness_mask_strength=wetness_mask_strength,
             wetness_name=wetness_name,
@@ -6526,29 +6984,59 @@ def run_batch_with_options(
             roughness_strength=roughness_strength,
             roughness_name=roughness_name,
         )
+    try:
+        if workers == 1:
+            for index, input_file in enumerate(input_files, start=1):
+                if progress_callback is not None:
+                    progress_callback(index, total, input_file)
+                started = time.perf_counter()
+                try:
+                    results[input_file] = _process_one(input_file)
+                    completed_success_files.add(_checkpoint_key(input_file))
+                    _write_checkpoint_state()
+                except Exception as exc:
+                    failure_count += 1
+                    if error_callback is not None:
+                        error_callback(index, total, input_file, exc)
+                    if not continue_on_error:
+                        raise
+                finally:
+                    per_file_durations.append(max(0.0, time.perf_counter() - started))
+            return results
 
-    completed = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-        future_to_file = {executor.submit(_process_one, input_file): input_file for input_file in input_files}
-        for future in concurrent.futures.as_completed(future_to_file):
-            input_file = future_to_file[future]
-            completed += 1
-            if progress_callback is not None:
-                progress_callback(completed, total, input_file)
-            try:
-                results[input_file] = future.result()
-            except Exception as exc:
-                if error_callback is not None:
-                    error_callback(completed, total, input_file, exc)
-                if not continue_on_error:
-                    raise
+        completed = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_file = {executor.submit(_process_one, input_file): input_file for input_file in input_files}
+            start_times: dict[concurrent.futures.Future[dict[str, Path]], float] = {
+                future: time.perf_counter() for future in future_to_file
+            }
+            for future in concurrent.futures.as_completed(future_to_file):
+                input_file = future_to_file[future]
+                completed += 1
+                if progress_callback is not None:
+                    progress_callback(completed, total, input_file)
+                started = start_times.get(future, time.perf_counter())
+                try:
+                    results[input_file] = future.result()
+                    completed_success_files.add(_checkpoint_key(input_file))
+                    _write_checkpoint_state()
+                except Exception as exc:
+                    failure_count += 1
+                    if error_callback is not None:
+                        error_callback(completed, total, input_file, exc)
+                    if not continue_on_error:
+                        raise
+                finally:
+                    per_file_durations.append(max(0.0, time.perf_counter() - started))
 
-    return results
+        return results
+    finally:
+        _write_batch_telemetry()
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Generate Skyrim texture maps from an input texture or a folder of source DDS textures."
+        description="Generate Skyrim/Fallout texture maps from an input texture or a folder of source DDS textures."
     )
     parser.add_argument(
         "input_file",
@@ -6717,10 +7205,36 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--target-game",
+        choices=_TEXTURE_TARGET_GAME_VALUES,
+        default="skyrim",
+        help=(
+            "Target game naming scheme for generated textures. "
+            "skyrim keeps diffuse as <stem>.dds; fallout4/fallout76 use <stem>_d.dds and default env mask <stem>_s.dds."
+        ),
+    )
+    parser.add_argument(
         "--batch-workers",
         type=int,
         default=0,
         help="Parallel workers for folder batch mode (0 = automatic).",
+    )
+    parser.add_argument(
+        "--checkpoint-file",
+        type=Path,
+        default=None,
+        help="Write batch progress checkpoint JSON to this path during folder runs.",
+    )
+    parser.add_argument(
+        "--resume-checkpoint",
+        action="store_true",
+        help="Resume a folder run by skipping files already marked as successful in --checkpoint-file.",
+    )
+    parser.add_argument(
+        "--batch-telemetry-file",
+        type=Path,
+        default=None,
+        help="Write batch performance telemetry JSON to this path for folder runs.",
     )
     parser.add_argument("--gui", action="store_true", help="Launch graphical interface.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {APP_VERSION}")
@@ -6735,6 +7249,48 @@ def _apply_cli_pbr_overrides(args: argparse.Namespace) -> argparse.Namespace:
         if getattr(args, "parallax_mode", "standard") == "occlusion":
             args.parallax_mode = "standard"
     return args
+
+
+def write_batch_failure_artifacts(
+    *,
+    artifact_dir: Path,
+    failures: list[tuple[Path, str]],
+    batch_outputs: Mapping[Path, Mapping[str, Path]],
+) -> tuple[Path, Path]:
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    json_path = artifact_dir / "batch_failure_report.json"
+    csv_path = artifact_dir / "batch_failure_report.csv"
+    successful_output_count = sum(len(outputs) for outputs in batch_outputs.values())
+    rows = [
+        {
+            "file": str(path),
+            "error": str(message),
+            "action": "generate_textures",
+            "conflict_code": "",
+            "conflict_action": "",
+            "outputs_generated": 0,
+        }
+        for path, message in sorted(failures, key=lambda item: str(item[0]).lower())
+    ]
+    payload = {
+        "tool": "generate_textures",
+        "version": APP_VERSION,
+        "summary": {
+            "failed_files": len(rows),
+            "successful_files": len(batch_outputs),
+            "successful_outputs": successful_output_count,
+        },
+        "failures": rows,
+    }
+    json_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    with csv_path.open("w", encoding="utf-8", newline="") as fh:
+        writer = csv.DictWriter(
+            fh,
+            fieldnames=("file", "error", "action", "conflict_code", "conflict_action", "outputs_generated"),
+        )
+        writer.writeheader()
+        writer.writerows(rows)
+    return json_path, csv_path
 
 
 PATREON_URL = "https://www.patreon.com/cw/DeadOnTheInside"
@@ -6817,6 +7373,7 @@ _DARK_THEME: dict[str, str] = {
 if GUI_AVAILABLE:
     class TextureGeneratorGUI:
         def __init__(self) -> None:
+            _enable_process_dpi_awareness()
             self.root = tk.Tk()
             self.root.title(f"Skyrim Texture Generator v{APP_VERSION}")
             self.root.geometry("960x700")
@@ -6841,6 +7398,11 @@ if GUI_AVAILABLE:
             self.show_batch_preview_var = tk.BooleanVar(value=False)
             self.auto_patch_nifs_var = tk.BooleanVar(value=False)
             self.dark_mode_var = tk.BooleanVar(value=False)
+            self.ui_language_var = tk.StringVar(value="en")
+            self.ui_scale_var = tk.DoubleVar(value=1.0)
+            self.nif_retry_count_var = tk.IntVar(value=1)
+            self._ui_translations: dict[str, str] = {}
+            self._available_ui_languages: tuple[str, ...] = discover_ui_languages()
             self._tooltip_bg = _LIGHT_THEME["tooltip_bg"]
             self._tooltip_fg = _LIGHT_THEME["tooltip_fg"]
             self.dismissed_warnings: set[str] = set()
@@ -6877,6 +7439,7 @@ if GUI_AVAILABLE:
             self.relief_mode_manual_override = False
             self.parallax_mode_var = tk.StringVar(value="standard")
             self.render_profile_var = tk.StringVar(value="custom")
+            self.target_game_var = tk.StringVar(value="skyrim")
             self.render_profile_suggestion_var = tk.StringVar(
                 value=build_render_profile_brief_message("custom")
             )
@@ -6907,7 +7470,11 @@ if GUI_AVAILABLE:
             self.status_var = tk.StringVar(
                 value=self.manager_context.summary if self.manager_context.manager is not None else "Select a DDS file to begin."
             )
+            self._base_named_font_sizes: dict[str, tuple[int, bool]] = {}
             self._apply_persisted_gui_state()
+            self._reload_ui_translations()
+            self._capture_base_named_font_sizes()
+            self._apply_ui_scaling()
             self._update_theme_toggle_text()
             self._update_slider_value_labels()
 
@@ -6916,7 +7483,9 @@ if GUI_AVAILABLE:
             container.pack(fill=tk.BOTH, expand=True)
 
             canvas = tk.Canvas(container, highlightthickness=0)
-            scrollbar = ttk.Scrollbar(container, orient=tk.VERTICAL, command=canvas.yview)
+            scrollbar = ttk.Scrollbar(container, orient=tk.VERTICAL, command=canvas.yview, style="Main.Vertical.TScrollbar")
+            self._main_canvas = canvas
+            self._main_scrollbar = scrollbar
             wrapper = ttk.Frame(canvas, padding=12)
 
             canvas.configure(yscrollcommand=scrollbar.set)
@@ -6939,7 +7508,7 @@ if GUI_AVAILABLE:
             top_bar.pack(fill=tk.X)
             top_bar_message = ttk.Label(
                 top_bar,
-                text="Generate Skyrim-ready texture maps from one source image (single file or full folder batch).",
+                text="Generate Skyrim/Fallout-ready texture maps from one source image (single file or full folder batch).",
                 justify=tk.LEFT,
                 anchor=tk.W,
             )
@@ -6969,7 +7538,49 @@ if GUI_AVAILABLE:
                 command=self._toggle_theme,
             )
             _theme_top_check.pack(side=tk.RIGHT, padx=(0, 8))
+            _language_label = ttk.Label(top_bar, text="Language")
+            _language_label.pack(side=tk.RIGHT, padx=(12, 4))
+            self.language_combo = ttk.Combobox(
+                top_bar,
+                textvariable=self.ui_language_var,
+                values=self._available_ui_languages,
+                state="readonly",
+                width=8,
+            )
+            self.language_combo.pack(side=tk.RIGHT, padx=(0, 6))
+            self.language_combo.bind("<<ComboboxSelected>>", self._on_ui_language_changed)
+            _ui_scale_label = ttk.Label(top_bar, text="UI scale")
+            _ui_scale_label.pack(side=tk.RIGHT, padx=(12, 4))
+            self.ui_scale_combo = ttk.Combobox(
+                top_bar,
+                values=("0.9", "1.0", "1.15", "1.3", "1.5"),
+                state="readonly",
+                width=6,
+            )
+            self.ui_scale_combo.set(f"{self.ui_scale_var.get():.2f}".rstrip("0").rstrip("."))
+            self.ui_scale_combo.pack(side=tk.RIGHT, padx=(0, 8))
+            self.ui_scale_combo.bind("<<ComboboxSelected>>", self._on_ui_scale_changed)
+            _target_game_label = ttk.Label(top_bar, text="Game")
+            _target_game_label.pack(side=tk.RIGHT, padx=(12, 4))
+            self.target_game_combo = ttk.Combobox(
+                top_bar,
+                textvariable=self.target_game_var,
+                values=_TEXTURE_TARGET_GAME_VALUES,
+                state="readonly",
+                width=10,
+            )
+            self.target_game_combo.pack(side=tk.RIGHT, padx=(0, 6))
+            self.target_game_combo.bind("<<ComboboxSelected>>", lambda _event: self._save_persisted_gui_state())
             self._add_tooltip(_theme_top_check, "🌙 Toggle dark/light mode.\nEasy on the eyes during those 3am modding sessions.")
+            self._add_tooltip(_language_label, "Choose the interface language from available translation files.")
+            self._add_tooltip(self.language_combo, "Switch language for labels, buttons, and tooltips.")
+            self._add_tooltip(_ui_scale_label, "Manual UI scale multiplier for high-DPI displays.")
+            self._add_tooltip(self.ui_scale_combo, "Increase this on 4K/high-DPI displays if controls look too small.")
+            self._add_tooltip(_target_game_label, "Select Skyrim or Fallout naming mode for generated texture filenames.")
+            self._add_tooltip(
+                self.target_game_combo,
+                "Skyrim keeps diffuse as <stem>.dds. Fallout 4/76 defaults diffuse to <stem>_d.dds and env mask to <stem>_s.dds.",
+            )
             self._add_tooltip(
                 _patreon_button,
                 "❤ Fuel the project on Patreon.\n"
@@ -7276,15 +7887,15 @@ if GUI_AVAILABLE:
 
             _complex_label = ttk.Label(options_frame, text="Complex strength")
             _complex_label.grid(row=9, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_complex_label, "🔮 Controls complex-material contrast.\nHigher = punchier ENB material response. Lower = subtle, civilized vibes.")
+            self._add_tooltip(_complex_label, "Controls complex-material contrast.\nHigher = stronger ENB material response. Lower = subtler output.")
             self.complex_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.complex_strength_var, command=lambda _: self._on_slider_changed())
             self.complex_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
-            self._add_tooltip(self.complex_scale, "🔮 Right = louder material definition.\nLeft = quieter output for restrained legends.")
+            self._add_tooltip(self.complex_scale, "Move right for stronger material definition.\nMove left for subtler output.")
             self.complex_strength_display_label = ttk.Label(options_frame, textvariable=self.complex_strength_display_var)
             self.complex_strength_display_label.grid(row=9, column=3, sticky=tk.W, padx=8)
             self.auto_complex_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_complex_suggestion_var, command=self._on_auto_slider_preference_changed)
             self.auto_complex_check.grid(row=9, column=4, sticky=tk.W)
-            self._add_tooltip(self.auto_complex_check, "🤖 Auto-set complex strength. Let the algorithm\nscrutinise your texture's material complexity.")
+            self._add_tooltip(self.auto_complex_check, "Automatically choose complex-material strength from source texture analysis.")
 
             _specular_label = ttk.Label(options_frame, text="Specular strength (_msn alpha)")
             _specular_label.grid(row=10, column=0, sticky=tk.W, pady=8)
@@ -7296,7 +7907,7 @@ if GUI_AVAILABLE:
             self.specular_strength_display_label.grid(row=10, column=3, sticky=tk.W, padx=8)
             self.auto_specular_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_specular_suggestion_var, command=self._on_auto_slider_preference_changed)
             self.auto_specular_check.grid(row=10, column=4, sticky=tk.W)
-            self._add_tooltip(self.auto_specular_check, "🤖 Auto-set specular strength. The AI ponders how shiny\nyour texture DESERVES to be.")
+            self._add_tooltip(self.auto_specular_check, "Automatically choose specular strength from source texture analysis.")
 
             _ao_label = ttk.Label(options_frame, text="AO strength")
             _ao_label.grid(row=11, column=0, sticky=tk.W, pady=8)
@@ -7405,28 +8016,27 @@ if GUI_AVAILABLE:
             actions.pack(fill=tk.X)
             self.generate_button = ttk.Button(actions, text="Generate", command=self._generate)
             self.generate_button.pack(side=tk.LEFT)
-            self._add_tooltip(self.generate_button, "🚀 ENGAGE! Click to process your textures.\nWARNING: May cause excitement, temporary CPU warming, and beautiful Skyrim textures.")
+            self._add_tooltip(self.generate_button, "Start texture generation for the selected input and output settings.")
             self.cancel_button = ttk.Button(actions, text="Cancel Process", command=self._cancel_processing, state=tk.DISABLED)
             self.cancel_button.pack(side=tk.LEFT, padx=(6, 0))
-            self._add_tooltip(self.cancel_button, "🛑 Ask the current batch to stop after the active file completes.\nUseful when you realize things have gone terribly wrong.")
+            self._add_tooltip(self.cancel_button, "Stop the current batch after the active file finishes.")
             self.revert_button = ttk.Button(actions, text="Revert Process", command=self._revert_last_generation, state=tk.DISABLED)
             self.revert_button.pack(side=tk.LEFT, padx=(6, 0))
             self._add_tooltip(self.revert_button, "↩ Restore files from the most recent generation run.\nDisabled until a generation run has something to undo.")
-            nif_editor_button = ttk.Button(actions, text="NIF Editor… [Experimental]", command=self._open_nif_editor)
+            nif_editor_button = ttk.Button(actions, text="NIF Editor (Skyrim/Fallout)… [Experimental]", command=self._open_nif_editor)
             nif_editor_button.pack(side=tk.LEFT, padx=(12, 0))
             self._add_tooltip(
                 nif_editor_button,
                 "🔧 Open the NIF Editor window. ⚠ Experimental feature.\n"
-                "Patch BSLightingShaderProperty flags and texture slots in Skyrim SE\n"
-                "mesh files so mods that shipped without parallax/ENB support gain it.\n"
+                "Patch BSLightingShaderProperty flags and texture slots in Skyrim/Fallout mesh files.\n"
+                "Use 'NIF game profile' inside the editor to switch Auto/Skyrim/Fallout mode.\n"
                 "Always keep backups before patching NIFs.",
             )
             _status_label = ttk.Label(actions, textvariable=self.status_var, justify=tk.LEFT, anchor=tk.W)
             _status_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=14)
             self._add_tooltip(
                 _status_label,
-                "📢 Live status feed.\n"
-                "If something explodes, this line tells you what and where before panic mode fully activates.",
+                "Live status updates for generation and patching tasks.",
             )
             self._bind_responsive_wrap(top_bar, top_bar_message, horizontal_padding=260, min_wrap=220)
             self._bind_responsive_wrap(file_frame, _detected_context_label, horizontal_padding=28, min_wrap=220)
@@ -7442,15 +8052,13 @@ if GUI_AVAILABLE:
             )
             self._add_tooltip(
                 _before_title,
-                "🧾 Source preview header.\n"
-                "This is your control sample — the 'before' shot before sliders and wizardry get involved.",
+                "Source texture preview used as the baseline before generation.",
             )
             self.before_image_label = ttk.Label(preview_frame, text="No source loaded", anchor=tk.CENTER, justify=tk.CENTER)
             self.before_image_label.grid(row=2, column=0, columnspan=2, padx=6, pady=(0, 3), sticky="")
             self._add_tooltip(
                 self.before_image_label,
-                "👀 This is the original input texture.\n"
-                "Use it as your baseline: if the generated maps look weird, compare here first before blaming your GPU, ENB, or moon phases.",
+                "Original input texture preview. Compare generated outputs here when tuning settings.",
             )
 
             source_controls = ttk.Frame(preview_frame)
@@ -7459,22 +8067,19 @@ if GUI_AVAILABLE:
             self.prev_source_button.pack(side=tk.LEFT, padx=4)
             self._add_tooltip(
                 self.prev_source_button,
-                "⏮ Show the previous source file in folder mode.\n"
-                "Perfect for side-eyeing what your last texture looked like before your artistic decisions escalated.",
+                "Show the previous source file in folder mode.",
             )
             _source_name_label = ttk.Label(source_controls, textvariable=self.preview_source_name_var)
             _source_name_label.pack(side=tk.LEFT, padx=8)
             self._add_tooltip(
                 _source_name_label,
-                "🏷 Shows which source file you're previewing right now.\n"
-                "In folder mode it's index/total, so you can keep your sanity during big batches.",
+                "Shows the currently previewed source file and folder index.",
             )
             self.next_source_button = ttk.Button(source_controls, text="Next ▶", command=self._show_next_preview_source)
             self.next_source_button.pack(side=tk.LEFT, padx=4)
             self._add_tooltip(
                 self.next_source_button,
-                "⏭ Show the next source file in folder mode.\n"
-                "Use this to QA your batch without opening fifty windows like a chaos wizard.",
+                "Show the next source file in folder mode.",
             )
             _jump_label = ttk.Label(source_controls, text="Go to #")
             _jump_label.pack(side=tk.LEFT, padx=(12, 4))
@@ -7495,8 +8100,7 @@ if GUI_AVAILABLE:
             self.preview_jump_button.pack(side=tk.LEFT, padx=(0, 4))
             self._add_tooltip(
                 self.preview_jump_button,
-                "🚀 Jump to the typed preview number.\n"
-                "Great for large folders where clicking Next 200 times is cruel and unusual punishment.",
+                "Jump directly to the typed preview index.",
             )
             _preview_size_label = ttk.Label(source_controls, text="Preview size")
             _preview_size_label.pack(side=tk.LEFT, padx=(14, 4))
@@ -7516,8 +8120,7 @@ if GUI_AVAILABLE:
             preview_size_combo.bind("<<ComboboxSelected>>", lambda _event: self._on_preview_size_changed())
             self._add_tooltip(
                 preview_size_combo,
-                "📐 XS→XL changes how big previews look in this window.\n"
-                "It does NOT change generated file quality, but XL can make you feel like a very serious texture scientist.",
+                "XS→XL changes preview size in this window only.\nGenerated output quality is unchanged.",
             )
             _batch_prev_check = ttk.Checkbutton(
                 source_controls,
@@ -7528,9 +8131,7 @@ if GUI_AVAILABLE:
             _batch_prev_check.pack(side=tk.LEFT, padx=(14, 4))
             self._add_tooltip(
                 _batch_prev_check,
-                "🎬 Live preview while batch-processing.\n"
-                "Heads-up: enabling this can slow processing, especially with big textures and huge folders.\n"
-                "Default is OFF for speed; enable only when you want to watch the magic happen.",
+                "Show live preview while batch-processing.\nThis can slow large batches, so it is disabled by default.",
             )
             _auto_patch_nifs_check = ttk.Checkbutton(
                 source_controls,
@@ -7553,8 +8154,7 @@ if GUI_AVAILABLE:
             )
             self._add_tooltip(
                 _generated_title,
-                "🧪 These are previews of what will be written to disk.\n"
-                "If one pane looks cursed, fix settings now instead of discovering it in-game three load screens later.",
+                "Preview of generated outputs that will be written to disk.",
             )
             self.preview_output_labels: dict[str, ttk.Label] = {}
             output_grid = ttk.Frame(preview_frame)
@@ -7573,17 +8173,17 @@ if GUI_AVAILABLE:
                 ("complex_material", "Complex Material"),
             )
             _output_tooltips = {
-                "diffuse": "🎨 Final colour/albedo preview.\nIf this looks off, every other map will inherit the drama. Start here.",
-                "normal": "🗻 Normal-map preview (fake surface depth).\nBlue-purple space magic that tells light where bumps should pretend to exist.",
-                "parallax": "🏔 Height/parallax preview.\nDarker = lower, lighter = higher. Think of it as tiny grayscale topography for your texture.",
-                "glow": "✨ Emissive/glow preview.\nBright pixels glow in darkness; dark pixels mind their own business like respectable citizens.",
-                "environment_mask": "🪞 Reflection mask preview.\nBrighter = shinier, darker = matte. Basically a \"where may I sparkle\" permit.",
+                "diffuse": "Final colour/albedo preview.",
+                "normal": "Normal-map preview used for surface lighting direction.",
+                "parallax": "Height/parallax preview. Darker = lower, lighter = higher.",
+                "glow": "Emissive/glow preview. Brighter pixels emit more light.",
+                "environment_mask": "Reflection mask preview. Brighter = shinier, darker = more matte.",
                 "rmaos": "🧩 TruePBR RMAOS preview (_rmaos/_ramos).\nPacked grayscale channels (not purple normal-map colors). Generator also writes a JSON sidecar in PBRNifPatcher/.",
-                "wetness_mask": "🌧 Wetness-mask preview (_wt).\nDarker areas are more rain-friendly; lighter areas stay less puddly.",
-                "snow_mask": "❄ Dynamic-snow mask preview (_sm).\nBrighter areas collect more snow; darker zones stay more sheltered.",
-                "ao": "🕳 Ambient-occlusion preview (_ao).\nDarker crevices, brighter open surfaces. Cheap fake shadows that make things look pleasingly real.",
+                "wetness_mask": "Wetness-mask preview (_wt).",
+                "snow_mask": "Dynamic-snow mask preview (_sm).",
+                "ao": "Ambient-occlusion preview (_ao). Darker crevices indicate stronger cavity shading.",
                 "roughness": "🪵 Roughness/microsurface preview (_rough).\nBrighter = rougher (matte), darker = smoother (glossy). Controls how blurry reflections look.",
-                "complex_material": "🔮 Complex-material preview.\nFor MSN format this pane is split: LEFT = RGB normal channels, RIGHT = alpha/specular channel.\nFor CM format it shows the packed texture directly. Not a bug — just advanced wizard math.",
+                "complex_material": "Complex-material preview.\nFor MSN format this pane is split: LEFT = RGB normal channels, RIGHT = alpha/specular channel.\nFor CM format it shows the packed texture directly.",
             }
             for index, (output_key, output_label) in enumerate(output_specs):
                 row = (index // 2) * 2
@@ -7606,6 +8206,7 @@ if GUI_AVAILABLE:
             self._apply_theme()
             self._on_render_profile_changed()
             self._restore_startup_selection()
+            self._apply_runtime_localization()
 
         def _set_app_icon(self) -> None:
             try:
@@ -7614,6 +8215,115 @@ if GUI_AVAILABLE:
                 self.root.iconphoto(True, self._panda_icon_photo)
             except Exception:
                 pass
+
+        def _reload_ui_translations(self) -> None:
+            resolved_language = (self.ui_language_var.get() or "en").strip().lower() or "en"
+            if resolved_language not in self._available_ui_languages:
+                resolved_language = "en"
+                self.ui_language_var.set(resolved_language)
+            self._ui_translations = load_ui_translations(resolved_language)
+
+        def _tr(self, text: str) -> str:
+            return translate_ui_text(text, self._ui_translations)
+
+        def _capture_base_named_font_sizes(self) -> None:
+            if tkfont is None:
+                self._base_named_font_sizes = {}
+                return
+            captured: dict[str, tuple[int, bool]] = {}
+            for name in (
+                "TkDefaultFont",
+                "TkTextFont",
+                "TkFixedFont",
+                "TkMenuFont",
+                "TkHeadingFont",
+                "TkCaptionFont",
+                "TkSmallCaptionFont",
+                "TkIconFont",
+                "TkTooltipFont",
+            ):
+                try:
+                    font_obj = tkfont.nametofont(name)
+                    size = int(font_obj.cget("size"))
+                    captured[name] = (abs(size), bool(size < 0))
+                except Exception:
+                    continue
+            self._base_named_font_sizes = captured
+
+        def _apply_named_font_scaling(self, ui_scale: float) -> None:
+            if tkfont is None or not self._base_named_font_sizes:
+                return
+            for name, (base_size, pixel_sized) in self._base_named_font_sizes.items():
+                try:
+                    font_obj = tkfont.nametofont(name)
+                    scaled = max(1, int(round(base_size * ui_scale)))
+                    font_obj.configure(size=(-scaled if pixel_sized else scaled))
+                except Exception:
+                    continue
+
+        def _apply_ui_scaling(self) -> None:
+            try:
+                pixels_per_inch = float(self.root.winfo_fpixels("1i"))
+            except Exception:
+                pixels_per_inch = 96.0
+            scale = compute_effective_ui_scale(
+                pixels_per_inch=pixels_per_inch,
+                user_scale=float(self.ui_scale_var.get()),
+            )
+            try:
+                self.root.tk.call("tk", "scaling", scale)
+            except Exception:
+                return
+            self._apply_named_font_scaling(float(self.ui_scale_var.get()))
+            try:
+                self.root.update_idletasks()
+            except Exception:
+                pass
+
+        def _apply_runtime_localization(self) -> None:
+            self.root.title(self._tr("Skyrim Texture Generator v{version}").format(version=APP_VERSION))
+            self._localize_widget_tree(self.root)
+            self._update_theme_toggle_text()
+
+        def _localize_widget_tree(self, widget: tk.Widget) -> None:
+            try:
+                text = widget.cget("text")
+                if isinstance(text, str) and text:
+                    source_text = getattr(widget, "_i18n_source_text", "")
+                    if not source_text:
+                        source_text = text
+                        setattr(widget, "_i18n_source_text", source_text)
+                    localized = self._tr(source_text)
+                    if localized != text:
+                        widget.configure(text=localized)
+            except Exception:
+                pass
+            for child in widget.winfo_children():
+                self._localize_widget_tree(child)
+
+        def _on_ui_language_changed(self, _event: object | None = None) -> None:
+            self._reload_ui_translations()
+            self._apply_runtime_localization()
+            self._save_persisted_gui_state()
+            self.status_var.set(
+                self._tr("Interface language set to {language}.").format(
+                    language=self.ui_language_var.get()
+                )
+            )
+
+        def _on_ui_scale_changed(self, _event: object | None = None) -> None:
+            value = str(self.ui_scale_combo.get()).strip()
+            try:
+                self.ui_scale_var.set(float(value))
+            except ValueError:
+                self.ui_scale_var.set(float(_GUI_STATE_DEFAULTS["ui_scale"]))
+                self.ui_scale_combo.set(f"{self.ui_scale_var.get():.2f}".rstrip("0").rstrip("."))
+            self._apply_ui_scaling()
+            self._apply_theme()
+            self._save_persisted_gui_state()
+            self.status_var.set(
+                self._tr("UI scale set to {scale:.2f}x.").format(scale=float(self.ui_scale_var.get()))
+            )
 
         def _bind_mousewheel(self, canvas: tk.Canvas) -> None:
             def _on_mousewheel(event: tk.Event[tk.Misc]) -> None:
@@ -7647,6 +8357,7 @@ if GUI_AVAILABLE:
             self.root.after_idle(_update_wrap)
 
         def _add_tooltip(self, widget: tk.Widget, text: str) -> None:
+            source_text = text
             tip_window: list[tk.Toplevel | None] = [None]
 
             def _position_tip(tip: tk.Toplevel, pointer_x: int, pointer_y: int) -> None:
@@ -7673,7 +8384,7 @@ if GUI_AVAILABLE:
                             pass
                         label = tk.Label(
                             tip,
-                            text=text,
+                            text=self._tr(source_text),
                             justify=tk.LEFT,
                             background=self._tooltip_bg,
                             foreground=self._tooltip_fg,
@@ -7688,6 +8399,12 @@ if GUI_AVAILABLE:
                         tip_window[0] = tip
                     pointer_x = int(getattr(event, "x_root", widget.winfo_pointerx()))
                     pointer_y = int(getattr(event, "y_root", widget.winfo_pointery()))
+                    try:
+                        first_child = tip.winfo_children()[0] if tip.winfo_children() else None
+                        if first_child is not None:
+                            first_child.configure(text=self._tr(source_text))
+                    except Exception:
+                        pass
                     _position_tip(tip, pointer_x, pointer_y)
                 except Exception:
                     tip_window[0] = None
@@ -7731,15 +8448,35 @@ if GUI_AVAILABLE:
             style.configure("Auto.Horizontal.TScale", background=colors["bg"], troughcolor=colors["auto_trough"])
             style.configure("TScrollbar", background=colors["button_bg"], troughcolor=colors["bg"])
             style.map("TScrollbar", background=[("active", colors["trough"])])
+            style.configure(
+                "Main.Vertical.TScrollbar",
+                background=colors["button_bg"],
+                troughcolor=colors["trough"],
+                arrowcolor=colors["fg"],
+                width=18,
+                arrowsize=18,
+            )
+            style.map("Main.Vertical.TScrollbar", background=[("active", colors["auto_trough"])])
+            if hasattr(self, "_main_canvas"):
+                try:
+                    self._main_canvas.configure(
+                        highlightthickness=1,
+                        highlightbackground=colors["trough"],
+                        background=colors["bg"],
+                    )
+                except Exception:
+                    pass
             self._update_slider_auto_states()
 
         def _toggle_theme(self) -> None:
             self._apply_theme()
             theme_name = "dark" if self.dark_mode_var.get() else "light"
-            self.status_var.set(f"Switched to {theme_name} mode.")
+            self.status_var.set(self._tr("Switched to {theme_name} mode.").format(theme_name=theme_name))
 
         def _update_theme_toggle_text(self) -> None:
-            self.theme_mode_label_var.set("🌙 Dark mode" if self.dark_mode_var.get() else "☀ Light mode")
+            self.theme_mode_label_var.set(
+                self._tr("🌙 Dark mode") if self.dark_mode_var.get() else self._tr("☀ Light mode")
+            )
 
         def _apply_persisted_gui_state(self) -> None:
             state = load_gui_state()
@@ -7749,6 +8486,9 @@ if GUI_AVAILABLE:
             self.dark_mode_var.set(bool(state["dark_mode"]))
             self.show_batch_preview_var.set(bool(state["show_batch_preview"]))
             self.auto_patch_nifs_var.set(bool(state["auto_patch_nifs"]))
+            self.ui_language_var.set(str(state.get("ui_language", "en") or "en"))
+            self.ui_scale_var.set(float(state.get("ui_scale", 1.0)))
+            self.nif_retry_count_var.set(int(state.get("nif_retry_count", 1)))
             self.preview_size_var.set(str(state["preview_size"]))
             self.complex_format_var.set(str(state["complex_format"]))
             self.env_mask_mode_var.set(str(state["env_mask_mode"]))
@@ -7757,6 +8497,7 @@ if GUI_AVAILABLE:
             if persisted_profile not in _RENDER_PROFILE_GUI_VALUES:
                 persisted_profile = "custom"
             self.render_profile_var.set(persisted_profile)
+            self.target_game_var.set(_normalize_texture_target_game(str(state.get("target_game", "skyrim"))))
             self.emboss_mode_var.set(bool(state["emboss_mode"]))
             self.relief_mode_var.set(bool(state["relief_mode"]))
             self.include_diffuse_var.set(bool(state["include_diffuse"]))
@@ -7801,11 +8542,15 @@ if GUI_AVAILABLE:
                 "dark_mode": self.dark_mode_var.get(),
                 "show_batch_preview": self.show_batch_preview_var.get(),
                 "auto_patch_nifs": self.auto_patch_nifs_var.get(),
+                "ui_language": self.ui_language_var.get(),
+                "ui_scale": self.ui_scale_var.get(),
+                "nif_retry_count": self.nif_retry_count_var.get(),
                 "preview_size": self.preview_size_var.get(),
                 "complex_format": self.complex_format_var.get(),
                 "env_mask_mode": self.env_mask_mode_var.get(),
                 "parallax_mode": self.parallax_mode_var.get(),
                 "render_profile": _normalize_render_profile(self.render_profile_var.get()),
+                "target_game": _normalize_texture_target_game(self.target_game_var.get()),
                 "emboss_mode": self.emboss_mode_var.get(),
                 "relief_mode": self.relief_mode_var.get(),
                 "include_diffuse": self.include_diffuse_var.get(),
@@ -8066,6 +8811,7 @@ if GUI_AVAILABLE:
                         output_dir=generation_kwargs["output_dir"],
                         diffuse_name=generation_kwargs.get("diffuse_name"),
                         parallax_name=generation_kwargs.get("parallax_name"),
+                        target_game=str(generation_kwargs.get("target_game", "skyrim")),
                     )
                     expected_paths.append(diffuse_path)
                 if includes["normal"]:
@@ -8073,6 +8819,7 @@ if GUI_AVAILABLE:
                         build_normal_output_path(
                             input_path=input_file,
                             output_dir=generation_kwargs["output_dir"],
+                            target_game=str(generation_kwargs.get("target_game", "skyrim")),
                         )
                     )
                 if includes["parallax"]:
@@ -8081,6 +8828,7 @@ if GUI_AVAILABLE:
                         output_dir=generation_kwargs["output_dir"],
                         diffuse_name=generation_kwargs.get("diffuse_name"),
                         parallax_name=generation_kwargs.get("parallax_name"),
+                        target_game=str(generation_kwargs.get("target_game", "skyrim")),
                     )
                     expected_paths.append(parallax_path)
                 if includes["glow"]:
@@ -8088,6 +8836,7 @@ if GUI_AVAILABLE:
                         build_glow_output_path(
                             input_path=input_file,
                             output_dir=generation_kwargs["output_dir"],
+                            target_game=str(generation_kwargs.get("target_game", "skyrim")),
                         )
                     )
                 if includes["environment_mask"]:
@@ -8099,6 +8848,7 @@ if GUI_AVAILABLE:
                             complex_format=str(generation_kwargs.get("complex_format", "msn")),
                             render_profile=str(generation_kwargs.get("render_profile", "auto")),
                             include_complex=bool(generation_kwargs.get("include_complex", False)),
+                            target_game=str(generation_kwargs.get("target_game", "skyrim")),
                         )
                     )
                 if includes["complex_material"]:
@@ -8107,6 +8857,7 @@ if GUI_AVAILABLE:
                             input_path=input_file,
                             output_dir=generation_kwargs["output_dir"],
                             complex_format=str(generation_kwargs["complex_format"]),
+                            target_game=str(generation_kwargs.get("target_game", "skyrim")),
                         )
                     )
                 if includes["rmaos"]:
@@ -8114,6 +8865,7 @@ if GUI_AVAILABLE:
                         build_rmaos_output_path(
                             input_path=input_file,
                             output_dir=generation_kwargs["output_dir"],
+                            target_game=str(generation_kwargs.get("target_game", "skyrim")),
                         )
                     )
                 if includes["ao"]:
@@ -8256,6 +9008,7 @@ if GUI_AVAILABLE:
                     messagebox.showinfo("Generation complete", "\n".join(lines), parent=self.root)
                     self._refresh_preview()
                     keep_polling = False
+                    break
                 elif event_type == "cancelled":
                     results = payload
                     self._set_processing_state(False)
@@ -8270,10 +9023,12 @@ if GUI_AVAILABLE:
                         parent=self.root,
                     )
                     keep_polling = False
+                    break
                 elif event_type == "error":
                     self._set_processing_state(False)
                     messagebox.showerror("Generation failed", str(payload), parent=self.root)
                     keep_polling = False
+                    break
 
             if keep_polling and self.is_processing:
                 self.root.after(100, self._poll_processing_queue)
@@ -8506,8 +9261,8 @@ if GUI_AVAILABLE:
 
             win = tk.Toplevel(self.root)
             win.title("Renderer / Channel Help")
-            win.geometry("860x620")
-            win.minsize(620, 420)
+            win.geometry("980x700")
+            win.minsize(700, 480)
             win.transient(self.root)
             self.render_profile_help_window = win
 
@@ -8519,8 +9274,14 @@ if GUI_AVAILABLE:
                 justify=tk.LEFT,
                 anchor=tk.W,
             ).pack(fill=tk.X, pady=(0, 8))
+            ttk.Label(
+                container,
+                text="Quick tip: choose a target renderer first, then match slot/path suffixes shown below.",
+                justify=tk.LEFT,
+                anchor=tk.W,
+            ).pack(fill=tk.X, pady=(0, 8))
             text = tk.Text(container, wrap=tk.WORD)
-            y_scroll = ttk.Scrollbar(container, orient=tk.VERTICAL, command=text.yview)
+            y_scroll = ttk.Scrollbar(container, orient=tk.VERTICAL, command=text.yview, style="Main.Vertical.TScrollbar")
             text.configure(yscrollcommand=y_scroll.set)
             text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
             y_scroll.pack(side=tk.RIGHT, fill=tk.Y)
@@ -9182,6 +9943,7 @@ if GUI_AVAILABLE:
                     "auto_patch_nifs": self.auto_patch_nifs_var.get(),
                     "manager_context": self.manager_context,
                     "render_profile": self.render_profile_var.get(),
+                    "target_game": self.target_game_var.get(),
                     "include_diffuse": include_diffuse,
                     "include_normal": include_normal,
                     "include_parallax": include_parallax,
@@ -9271,9 +10033,17 @@ if GUI_AVAILABLE:
                 return
 
             win = tk.Toplevel(self.root)
-            win.title(f"NIF Editor — Skyrim Texture Generator v{APP_VERSION}")
-            win.geometry("1120x820")
-            win.minsize(760, 620)
+            win.title(self._tr("NIF Editor — Skyrim Texture Generator v{version}").format(version=APP_VERSION))
+            screen_width = max(1024, int(win.winfo_screenwidth()))
+            screen_height = max(720, int(win.winfo_screenheight()))
+            initial_width = min(1680, max(1180, int(screen_width * 0.9)))
+            initial_height = min(1120, max(820, int(screen_height * 0.88)))
+            min_width = max(900, min(initial_width, 980))
+            min_height = max(680, min(initial_height, 720))
+            pos_x = max(0, (screen_width - initial_width) // 2)
+            pos_y = max(0, (screen_height - initial_height) // 2)
+            win.geometry(f"{initial_width}x{initial_height}+{pos_x}+{pos_y}")
+            win.minsize(min_width, min_height)
             win.resizable(True, True)
             win.grab_set()
             try:
@@ -9289,7 +10059,12 @@ if GUI_AVAILABLE:
                 content_pane.pack(fill="both", expand=True, padx=10, pady=(8, 0))
                 controls_container = ttk.Frame(content_pane)
                 controls_canvas = tk.Canvas(controls_container, highlightthickness=0, background=bg)
-                controls_scrollbar = ttk.Scrollbar(controls_container, orient="vertical", command=controls_canvas.yview)
+                controls_scrollbar = ttk.Scrollbar(
+                    controls_container,
+                    orient="vertical",
+                    command=controls_canvas.yview,
+                    style="Main.Vertical.TScrollbar",
+                )
                 controls_wrapper = ttk.Frame(controls_canvas, padding=(0, 0, 0, 8))
                 controls_canvas.configure(yscrollcommand=controls_scrollbar.set)
                 controls_canvas.pack(side="left", fill="both", expand=True)
@@ -9364,8 +10139,8 @@ if GUI_AVAILABLE:
                 browse_nif_button = ttk.Button(row1, text="Browse…", command=_browse_nif)
                 browse_nif_button.pack(side="left")
                 self._add_tooltip(path_label, "📍 Pick the NIF file/folder you want to scan or patch.")
-                self._add_tooltip(nif_path_entry, "⌨ Paste a full path here. Yes, even that scary MO2 path with 400 folders.")
-                self._add_tooltip(browse_nif_button, "🧭 Opens file/folder picker so your fingers don’t have to type all that.")
+                self._add_tooltip(nif_path_entry, "Paste or edit the full NIF file/folder path here.")
+                self._add_tooltip(browse_nif_button, "Open a file/folder picker for the NIF path.")
 
                 opt_frame = ttk.LabelFrame(controls_wrapper, text="Patch Options (what to enable)", padding=6)
                 opt_frame.pack(fill="x", pady=4)
@@ -9391,6 +10166,17 @@ if GUI_AVAILABLE:
                 clear_cubemap_var = tk.BooleanVar(value=False)
                 backup_var = tk.BooleanVar(value=True)
                 dry_run_var = tk.BooleanVar(value=False)
+                dry_run_diff_var = tk.BooleanVar(value=False)
+                target_game_var = tk.StringVar(value="auto")
+                experimental_fallout_write_var = tk.BooleanVar(value=False)
+                fallout_allow_parallax_scale_var = tk.BooleanVar(value=False)
+                fallout_allow_fix_mesh_lighting_var = tk.BooleanVar(value=False)
+                fallout_allow_spec_strength_var = tk.BooleanVar(value=False)
+                fallout_allow_spec_color_var = tk.BooleanVar(value=False)
+                fallout_allow_env_map_scale_var = tk.BooleanVar(value=False)
+                conflict_report_var = tk.BooleanVar(value=True)
+                conflict_examples_var = tk.BooleanVar(value=False)
+                retry_count_var = tk.IntVar(value=max(0, min(3, int(self.nif_retry_count_var.get()))))
                 option_warning_var = tk.StringVar(value="")
 
                 render_row = ttk.Frame(opt_frame)
@@ -9405,6 +10191,67 @@ if GUI_AVAILABLE:
                     width=20,
                 )
                 renderer_combo.pack(side="left", padx=(6, 6))
+
+                game_row = ttk.Frame(opt_frame)
+                game_row.pack(fill="x", pady=(2, 0))
+                target_game_label = ttk.Label(game_row, text="NIF game profile:")
+                target_game_label.pack(side="left")
+                target_game_combo = ttk.Combobox(
+                    game_row,
+                    textvariable=target_game_var,
+                    values=("auto", "skyrim", "fallout"),
+                    state="readonly",
+                    width=14,
+                )
+                target_game_combo.pack(side="left", padx=(6, 10))
+                game_hint_label = ttk.Label(game_row, text="(Switch to fallout here)")
+                game_hint_label.pack(side="left")
+                fallout_mode_row = ttk.Frame(opt_frame)
+                fallout_mode_row.pack(fill="x", pady=(2, 0))
+                experimental_fallout_check = ttk.Checkbutton(
+                    fallout_mode_row,
+                    text="Enable experimental Fallout writes",
+                    variable=experimental_fallout_write_var,
+                )
+                experimental_fallout_check.pack(side="left")
+                fallout_gate_frame = ttk.LabelFrame(opt_frame, text="Fallout safety gates", padding=6)
+                fallout_gate_frame.pack(fill="x", pady=(2, 0))
+                fallout_gate_label = ttk.Label(fallout_gate_frame, text="Opt in per operation (higher risk):")
+                fallout_gate_label.pack(anchor=tk.W, pady=(0, 4))
+                fallout_gate_row1 = ttk.Frame(fallout_gate_frame)
+                fallout_gate_row1.pack(fill="x")
+                fallout_gate_row2 = ttk.Frame(fallout_gate_frame)
+                fallout_gate_row2.pack(fill="x", pady=(2, 0))
+                fallout_allow_parallax_scale_check = ttk.Checkbutton(
+                    fallout_gate_row1,
+                    text="Allow parallax-scale",
+                    variable=fallout_allow_parallax_scale_var,
+                )
+                fallout_allow_parallax_scale_check.pack(side="left", padx=(0, 8))
+                fallout_allow_fix_mesh_lighting_check = ttk.Checkbutton(
+                    fallout_gate_row1,
+                    text="Allow fix-mesh-lighting",
+                    variable=fallout_allow_fix_mesh_lighting_var,
+                )
+                fallout_allow_fix_mesh_lighting_check.pack(side="left", padx=(0, 8))
+                fallout_allow_spec_strength_check = ttk.Checkbutton(
+                    fallout_gate_row1,
+                    text="Allow spec-strength",
+                    variable=fallout_allow_spec_strength_var,
+                )
+                fallout_allow_spec_strength_check.pack(side="left", padx=(0, 8))
+                fallout_allow_spec_color_check = ttk.Checkbutton(
+                    fallout_gate_row2,
+                    text="Allow spec-color",
+                    variable=fallout_allow_spec_color_var,
+                )
+                fallout_allow_spec_color_check.pack(side="left", padx=(0, 8))
+                fallout_allow_env_map_scale_check = ttk.Checkbutton(
+                    fallout_gate_row2,
+                    text="Allow env-map-scale",
+                    variable=fallout_allow_env_map_scale_var,
+                )
+                fallout_allow_env_map_scale_check.pack(side="left", padx=(0, 8))
 
                 flag_row = ttk.Frame(opt_frame)
                 flag_row.pack(fill="x")
@@ -9429,12 +10276,14 @@ if GUI_AVAILABLE:
                     variable=enable_env_var,
                 )
                 enable_env_check.pack(side="left")
+                flag_row2b = ttk.Frame(opt_frame)
+                flag_row2b.pack(fill="x", pady=(2, 0))
                 force_type3_check = ttk.Checkbutton(
-                    flag_row2,
+                    flag_row2b,
                     text="Force shader type 3 (required for stronger parallax scale on some meshes)",
                     variable=force_type3_var,
                 )
-                force_type3_check.pack(side="left", padx=(12, 0))
+                force_type3_check.pack(side="left")
                 flag_row3 = ttk.Frame(opt_frame)
                 flag_row3.pack(fill="x", pady=(2, 0))
                 enable_glow_check = ttk.Checkbutton(
@@ -9456,6 +10305,37 @@ if GUI_AVAILABLE:
                 backup_check.pack(side="left")
                 dry_run_check = ttk.Checkbutton(misc_row, text="Dry run (scan/preview only)", variable=dry_run_var)
                 dry_run_check.pack(side="left", padx=(12, 0))
+                misc_row1b = ttk.Frame(opt_frame)
+                misc_row1b.pack(fill="x", pady=(2, 0))
+                conflict_report_check = ttk.Checkbutton(
+                    misc_row1b,
+                    text="Show grouped conflict report in scan details",
+                    variable=conflict_report_var,
+                )
+                conflict_report_check.pack(side="left")
+                conflict_examples_check = ttk.Checkbutton(
+                    misc_row1b,
+                    text="Include conflict examples",
+                    variable=conflict_examples_var,
+                )
+                conflict_examples_check.pack(side="left", padx=(12, 0))
+                misc_row2 = ttk.Frame(opt_frame)
+                misc_row2.pack(fill="x", pady=(2, 0))
+                dry_run_diff_check = ttk.Checkbutton(
+                    misc_row2,
+                    text="Dry-run diff summary",
+                    variable=dry_run_diff_var,
+                )
+                dry_run_diff_check.pack(side="left", padx=(0, 12))
+                ttk.Label(misc_row2, text="Retries per file:").pack(side="left")
+                retry_count_combo = ttk.Combobox(
+                    misc_row2,
+                    textvariable=retry_count_var,
+                    values=(0, 1, 2, 3),
+                    width=4,
+                    state="readonly",
+                )
+                retry_count_combo.pack(side="left", padx=(6, 10))
                 guide_label = ttk.Label(
                     opt_frame,
                     text=(
@@ -9507,14 +10387,16 @@ if GUI_AVAILABLE:
                     variable=disable_env_var,
                 )
                 disable_env_check.pack(side="left", padx=(12, 0))
+                unpatch_row1b = ttk.Frame(unpatch_frame)
+                unpatch_row1b.pack(fill="x", pady=(2, 0))
                 disable_glow_check = ttk.Checkbutton(
-                    unpatch_row,
+                    unpatch_row1b,
                     text="Disable glow-map flag",
                     variable=disable_glow_var,
                 )
-                disable_glow_check.pack(side="left", padx=(12, 0))
+                disable_glow_check.pack(side="left")
                 disable_pbr_check = ttk.Checkbutton(
-                    unpatch_row,
+                    unpatch_row1b,
                     text="Disable TruePBR / PBR flag",
                     variable=disable_pbr_var,
                 )
@@ -9596,6 +10478,8 @@ if GUI_AVAILABLE:
                         clear_glow_texture_path=clear_glow_var.get(),
                         clear_diffuse_texture_path=clear_diffuse_var.get(),
                         clear_cubemap_texture_path=clear_cubemap_var.get(),
+                        target_game=target_game_var.get(),
+                        experimental_fallout_write=experimental_fallout_write_var.get(),
                     )
                     option_warning_var.set("⚠ " + " | ".join(warnings[:3]) if warnings else "")
 
@@ -9614,6 +10498,32 @@ if GUI_AVAILABLE:
                     if _normalize_render_profile(renderer_profile_var.get()) == "auto":
                         _apply_renderer_defaults()
                     _update_checkbox_warnings()
+
+                def _sync_target_game_controls(*_: object) -> None:
+                    selected_game = (target_game_var.get() or "auto").strip().lower()
+                    allow_fallout_controls = selected_game != "skyrim"
+                    if not allow_fallout_controls:
+                        experimental_fallout_write_var.set(False)
+                    experimental_fallout_check.configure(state=(tk.NORMAL if allow_fallout_controls else tk.DISABLED))
+                    gate_enabled = allow_fallout_controls and experimental_fallout_write_var.get()
+                    for gate_var in (
+                        fallout_allow_parallax_scale_var,
+                        fallout_allow_fix_mesh_lighting_var,
+                        fallout_allow_spec_strength_var,
+                        fallout_allow_spec_color_var,
+                        fallout_allow_env_map_scale_var,
+                    ):
+                        if not gate_enabled:
+                            gate_var.set(False)
+                    gate_state = tk.NORMAL if gate_enabled else tk.DISABLED
+                    for gate_check in (
+                        fallout_allow_parallax_scale_check,
+                        fallout_allow_fix_mesh_lighting_check,
+                        fallout_allow_spec_strength_check,
+                        fallout_allow_spec_color_check,
+                        fallout_allow_env_map_scale_check,
+                    ):
+                        gate_check.configure(state=gate_state)
 
                 nif_path_var.trace_add("write", _on_nif_target_changed)
                 nif_scan_mode.trace_add("write", _on_nif_target_changed)
@@ -9635,8 +10545,13 @@ if GUI_AVAILABLE:
                     clear_glow_var,
                     clear_diffuse_var,
                     clear_cubemap_var,
+                    experimental_fallout_write_var,
                 ):
                     watch_var.trace_add("write", _update_checkbox_warnings)
+                target_game_var.trace_add("write", _update_checkbox_warnings)
+                target_game_var.trace_add("write", _sync_target_game_controls)
+                experimental_fallout_write_var.trace_add("write", _sync_target_game_controls)
+                _sync_target_game_controls()
                 self._add_tooltip(
                     renderer_label,
                     "🎮 Pick your target renderer to auto-apply sane NIF patch toggles for that workflow.",
@@ -9653,6 +10568,49 @@ if GUI_AVAILABLE:
                 self._add_tooltip(force_type3_check, "💪 Upgrades shader type so stronger parallax scale can be written.")
                 self._add_tooltip(backup_check, "🧷 Writes .nif.bak safety copies before patching.")
                 self._add_tooltip(dry_run_check, "🧪 Scan and simulate changes without writing file edits.")
+                self._add_tooltip(
+                    dry_run_diff_check,
+                    "With Dry run enabled, include changed-byte ranges in the summary.",
+                )
+                self._add_tooltip(
+                    conflict_report_check,
+                    "Include grouped conflict categories with suggested auto-fix actions in scan result details.",
+                )
+                self._add_tooltip(
+                    conflict_examples_check,
+                    "When enabled, include example conflict lines under each grouped conflict code.",
+                )
+                self._add_tooltip(retry_count_combo, "Retries transient per-file failures during scan/patch operations.")
+                self._add_tooltip(target_game_label, "Set game-header profile handling for NIF patching.")
+                self._add_tooltip(target_game_combo, "auto detects profile from the NIF header; use fallout for Fallout-target patching.")
+                self._add_tooltip(
+                    experimental_fallout_check,
+                    "Required for Fallout-target patch writes. Use only with backups; some Fallout paths are still limited.",
+                )
+                self._add_tooltip(
+                    fallout_gate_label,
+                    "Explicitly opt in to higher-risk Fallout writes per operation.",
+                )
+                self._add_tooltip(
+                    fallout_allow_parallax_scale_check,
+                    "Allow parallax-scale writes in Fallout mode (higher risk).",
+                )
+                self._add_tooltip(
+                    fallout_allow_fix_mesh_lighting_check,
+                    "Allow fix-mesh-lighting writes in Fallout mode (higher risk).",
+                )
+                self._add_tooltip(
+                    fallout_allow_spec_strength_check,
+                    "Allow spec-strength writes in Fallout mode (higher risk).",
+                )
+                self._add_tooltip(
+                    fallout_allow_spec_color_check,
+                    "Allow spec-color writes in Fallout mode (higher risk).",
+                )
+                self._add_tooltip(
+                    fallout_allow_env_map_scale_check,
+                    "Allow env-map-scale writes in Fallout mode (higher risk).",
+                )
                 self._add_tooltip(guide_label, "📘 Fast BSLighting checkbox reference so you can patch without guessing.")
                 self._add_tooltip(option_warning_label, "⚠ Compatibility warnings for current checkbox combinations.")
                 self._add_tooltip(disable_parallax_check, "🚫 Removes parallax and POM flags from BSLightingShaderProperty.")
@@ -9950,6 +10908,32 @@ if GUI_AVAILABLE:
                     wraplength=860,
                 )
                 results_hint_label.pack(fill="x", pady=(0, 6))
+                filter_frame = ttk.Frame(res_frame)
+                filter_frame.pack(fill="x", pady=(0, 6))
+                ttk.Label(filter_frame, text="Filter:").pack(side="left")
+                result_filter_var = tk.StringVar(value="")
+                result_filter_entry = ttk.Entry(filter_frame, textvariable=result_filter_var, width=32)
+                result_filter_entry.pack(side="left", padx=(6, 8))
+                ttk.Label(filter_frame, text="Status:").pack(side="left")
+                result_status_filter_var = tk.StringVar(value="All")
+                result_status_combo = ttk.Combobox(
+                    filter_frame,
+                    textvariable=result_status_filter_var,
+                    values=("All", "OK", "WARN", "FAIL", "SKIP"),
+                    width=8,
+                    state="readonly",
+                )
+                result_status_combo.pack(side="left", padx=(6, 8))
+                ttk.Label(filter_frame, text="Sort:").pack(side="left")
+                result_sort_var = tk.StringVar(value="Newest")
+                result_sort_combo = ttk.Combobox(
+                    filter_frame,
+                    textvariable=result_sort_var,
+                    values=("Newest", "Status", "File"),
+                    width=10,
+                    state="readonly",
+                )
+                result_sort_combo.pack(side="left", padx=(6, 0))
                 results_list_frame = ttk.Frame(res_frame)
                 results_list_frame.pack(fill="both", expand=True)
                 style = ttk.Style(win)
@@ -9987,6 +10971,20 @@ if GUI_AVAILABLE:
                 results_scroll.pack(side="right", fill="y")
                 results_scroll_x.pack(side="bottom", fill="x")
                 results_tree.pack(fill="both", expand=True, side="left")
+
+                def _resize_results_columns(event: tk.Event[tk.Misc]) -> None:
+                    try:
+                        available_width = max(560, int(getattr(event, "width", results_list_frame.winfo_width())) - 18)
+                        status_width = 90
+                        file_width = max(220, min(420, int(available_width * 0.28)))
+                        details_width = max(280, available_width - status_width - file_width)
+                        results_tree.column("status", width=status_width)
+                        results_tree.column("file", width=file_width)
+                        results_tree.column("details", width=details_width)
+                    except Exception:
+                        pass
+
+                results_list_frame.bind("<Configure>", _resize_results_columns, add="+")
                 self._add_tooltip(
                     results_tree,
                     "Single results log for scan/patch/restore actions. Use the Details column or copy actions for the full text.",
@@ -9995,23 +10993,117 @@ if GUI_AVAILABLE:
                     results_hint_label,
                     "⇳ The divider above this panel is draggable, so the log does not have to take over the whole window.",
                 )
+                self._add_tooltip(
+                    result_filter_entry,
+                    "Filter rows by status/detail text, conflict code, profile, or file path.",
+                )
+                self._add_tooltip(
+                    result_status_combo,
+                    "Show only a specific result status or all rows.",
+                )
+                self._add_tooltip(
+                    result_sort_combo,
+                    "Sort rows by newest first, status, or file name.",
+                )
 
                 full_row_details: dict[str, str] = {}
+                all_result_rows: list[dict[str, str]] = []
+                latest_validation_codes: dict[str, list[str]] = {}
+                latest_conflict_files: set[str] = set()
+
+                def _status_sort_rank(status_value: str) -> int:
+                    ranks = {"FAIL": 0, "WARN": 1, "SKIP": 2, "OK": 3}
+                    return ranks.get(status_value.upper(), 4)
+
+                def _filtered_rows() -> list[dict[str, str]]:
+                    keyword = (result_filter_var.get() or "").strip().lower()
+                    status_filter = (result_status_filter_var.get() or "All").strip().upper()
+                    rows = all_result_rows
+                    if status_filter != "ALL":
+                        rows = [row for row in rows if row["status"].upper() == status_filter]
+                    if keyword:
+                        rows = [
+                            row
+                            for row in rows
+                            if keyword in row["status"].lower()
+                            or keyword in row["file_name"].lower()
+                            or keyword in row["details"].lower()
+                            or keyword in row["preview"].lower()
+                        ]
+                    sort_mode = (result_sort_var.get() or "Newest").strip().lower()
+                    if sort_mode == "status":
+                        rows = sorted(rows, key=lambda row: (_status_sort_rank(row["status"]), row["file_name"].lower()))
+                    elif sort_mode == "file":
+                        rows = sorted(rows, key=lambda row: row["file_name"].lower())
+                    return rows
+
+                def _render_results_tree(*_: object) -> None:
+                    for item in results_tree.get_children():
+                        results_tree.delete(item)
+                    full_row_details.clear()
+                    rows = _filtered_rows()
+                    for row in rows:
+                        item_id = results_tree.insert("", "end", values=(row["status"], row["file_name"], row["preview"]))
+                        full_row_details[str(item_id)] = row["details"]
+                    if rows:
+                        last = results_tree.get_children()[-1]
+                        results_tree.selection_set(last)
+                        results_tree.focus(last)
+                        results_tree.yview_moveto(1.0)
 
                 def _add_result_row(status: str, file_name: str, details: str) -> None:
                     normalized_details = _normalize_nif_result_details(details)
                     row_preview = _format_nif_result_row_details(normalized_details)
-                    item_id = results_tree.insert("", "end", values=(status, file_name, row_preview))
-                    full_row_details[str(item_id)] = normalized_details
-                    results_tree.selection_set(item_id)
-                    results_tree.focus(item_id)
+                    all_result_rows.append(
+                        {
+                            "status": status,
+                            "file_name": file_name,
+                            "details": normalized_details,
+                            "preview": row_preview,
+                        }
+                    )
+                    _render_results_tree()
                     status_var.set(f"{status}: {file_name} — {row_preview}")
-                    results_tree.yview_moveto(1.0)
+
+                def _batch_failure_key(details: str) -> str:
+                    normalized = _normalize_nif_result_details(details)
+                    first_line = next((line.strip() for line in normalized.splitlines() if line.strip()), "")
+                    if not first_line:
+                        return "Unknown error"
+                    lowered = first_line.lower()
+                    if "experimental_fallout_write is disabled" in lowered:
+                        return "Fallout profile requires experimental write opt-in"
+                    if "target_game='fallout'" in lowered or "fallout patch-write support" in lowered:
+                        return "Fallout profile not writable with current options"
+                    if "unsupported skyrim nif header values" in lowered or "unexpected user version values" in lowered:
+                        return "Unsupported or non-Skyrim header values"
+                    if "no patchable bslightingshaderproperty blocks found" in lowered:
+                        return "No patchable BSLightingShaderProperty blocks"
+                    return first_line[:160]
+
+                def _emit_failure_summary_row(
+                    failure_groups: dict[str, int],
+                    *,
+                    label: str,
+                    max_groups: int = 6,
+                ) -> None:
+                    if not failure_groups:
+                        return
+                    ranked = sorted(failure_groups.items(), key=lambda item: (-item[1], item[0]))
+                    shown = ranked[:max_groups]
+                    lines = [f"{count}× {reason}" for reason, count in shown]
+                    remaining = len(ranked) - len(shown)
+                    if remaining > 0:
+                        lines.append(f"...and {remaining} more reason group(s).")
+                    _safe_add_row("WARN", "Batch summary", f"{label}\n" + "\n".join(lines))
 
                 def _clear_log() -> None:
                     for item in results_tree.get_children():
                         results_tree.delete(item)
                     full_row_details.clear()
+                    all_result_rows.clear()
+                    latest_validation_codes.clear()
+                    latest_conflict_files.clear()
                     status_var.set("Results cleared.")
                     progress_var.set(0.0)
 
@@ -10041,19 +11133,42 @@ if GUI_AVAILABLE:
                     status_var.set("Copied selected result to clipboard.")
 
                 def _copy_all_results() -> None:
-                    items = results_tree.get_children()
-                    if not items:
+                    rows = _filtered_rows()
+                    if not rows:
                         status_var.set("No results to copy yet.")
                         return
                     lines: list[str] = []
-                    for item in items:
-                        row_values = results_tree.item(item, "values")
-                        if row_values:
-                            full_details = full_row_details.get(str(item), str(row_values[2]))
-                            lines.append(f"[{row_values[0]}] {row_values[1]} — {full_details}")
+                    for row in rows:
+                        lines.append(f"[{row['status']}] {row['file_name']} — {row['details']}")
                     win.clipboard_clear()
                     win.clipboard_append("\n".join(lines))
-                    status_var.set(f"Copied {len(lines)} result row(s) to clipboard.")
+                    status_var.set(f"Copied {len(lines)} filtered result row(s) to clipboard.")
+
+                def _export_conflict_report() -> None:
+                    rows = _filtered_rows()
+                    if not rows:
+                        status_var.set("No filtered rows to export.")
+                        return
+                    default_name = "nif_conflict_report.txt"
+                    target = filedialog.asksaveasfilename(
+                        title="Export conflict report",
+                        defaultextension=".txt",
+                        initialfile=default_name,
+                        filetypes=[("Text report", "*.txt"), ("All files", "*.*")],
+                    )
+                    if not target:
+                        return
+                    lines: list[str] = []
+                    for row in rows:
+                        lines.append(f"[{row['status']}] {row['file_name']}")
+                        lines.append(row["details"])
+                        lines.append("")
+                    try:
+                        Path(target).write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+                    except OSError as exc:
+                        status_var.set(f"Export failed: {exc}")
+                        return
+                    status_var.set(f"Exported {len(rows)} row(s) to {Path(target).name}.")
 
                 context_menu = tk.Menu(win, tearoff=False)
                 context_menu.add_command(label="Copy selected row", command=_copy_selected_result)
@@ -10069,12 +11184,16 @@ if GUI_AVAILABLE:
 
                 results_tree.bind("<<TreeviewSelect>>", _on_result_selected)
                 results_tree.bind("<Button-3>", _show_tree_context_menu)
+                result_filter_var.trace_add("write", _render_results_tree)
+                result_status_filter_var.trace_add("write", _render_results_tree)
+                result_sort_var.trace_add("write", _render_results_tree)
 
                 # ---- Threading helpers -----------------------------------------------
                 # Scan/patch/restore operations run in daemon threads so the UI stays
                 # responsive.  All tkinter mutations are posted back via win.after(0, ...)
                 # rather than called directly from the worker thread.
                 _is_running = [False]
+                _cancel_requested = [False]
                 _action_buttons_ref: list[Any] = []  # populated after button creation
 
                 def _set_ops_active(active: bool) -> None:
@@ -10084,10 +11203,22 @@ if GUI_AVAILABLE:
                             _btn.configure(state=state)
                         except Exception:
                             pass
+                    try:
+                        cancel_ops_button.configure(state=(tk.DISABLED if active else tk.NORMAL))
+                    except Exception:
+                        pass
 
                 def _finish_op() -> None:
                     _is_running[0] = False
+                    _cancel_requested[0] = False
                     _set_ops_active(True)
+
+                def _request_cancel_nif_editor_ops() -> None:
+                    if not _is_running[0]:
+                        status_var.set("No NIF Editor operation is currently running.")
+                        return
+                    _cancel_requested[0] = True
+                    status_var.set("Cancellation requested. Current file will finish, then operation stops.")
 
                 def _queue_ui_update(callback: Callable[[], None]) -> None:
                     try:
@@ -10119,26 +11250,72 @@ if GUI_AVAILABLE:
                         return [root_path]
                     return []
 
-                def _scan_nifs() -> None:
-                    nifs = _resolve_nifs()
-                    _clear_log()
+                def _resolve_conflict_nifs() -> list[Path]:
+                    resolved: list[Path] = []
+                    for raw_path in sorted(latest_conflict_files):
+                        path = Path(raw_path)
+                        if path.exists() and path.suffix.lower() == ".nif":
+                            resolved.append(path)
+                    return resolved
+
+                def _scan_nifs(
+                    selected_nifs: list[Path] | None = None,
+                    *,
+                    preserve_log: bool = False,
+                ) -> None:
+                    nifs = selected_nifs or _resolve_nifs()
+                    if not preserve_log:
+                        _clear_log()
                     if not nifs:
                         _add_result_row("WARN", "—", "No NIF files found.")
                         return
                     if _is_running[0]:
                         status_var.set("Another operation is in progress. Please wait.")
                         return
+                    self.nif_retry_count_var.set(int(retry_count_var.get()))
+                    self._save_persisted_gui_state()
                     _is_running[0] = True
+                    _cancel_requested[0] = False
                     _set_ops_active(False)
-                    status_var.set(f"Scanning {len(nifs)} NIF file(s)…")
+                    status_var.set(f"Phase 1/4 (scan): scanning {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
 
                     def _worker() -> None:
+                        validations_for_summary: list[object] = []
+                        latest_validation_codes.clear()
+                        latest_conflict_files.clear()
+                        plugin_context = discover_plugin_conflict_context_from_manager(nifs, self.manager_context)
+                        retries_per_file = max(0, min(3, int(retry_count_var.get())))
                         for index, nif in enumerate(nifs, start=1):
+                            if _cancel_requested[0]:
+                                break
                             try:
-                                validation = validate_nif_for_parallax(nif)
+                                validation = None
+                                last_exc: Exception | None = None
+                                for attempt in range(retries_per_file + 1):
+                                    try:
+                                        validation = validate_nif_for_parallax(nif)
+                                        if attempt > 0:
+                                            _safe_add_row("WARN", nif.name, f"Scan succeeded after retry {attempt}/{retries_per_file}.")
+                                        break
+                                    except Exception as exc:
+                                        last_exc = exc
+                                        if attempt < retries_per_file:
+                                            continue
+                                if validation is None:
+                                    raise last_exc or RuntimeError("Scan failed")
+                                validations_for_summary.append(validation)
+                                latest_validation_codes[str(nif)] = [
+                                    getattr(group, "code", "")
+                                    for group in (getattr(validation, "conflict_report", None) or [])
+                                    if getattr(group, "code", "")
+                                ]
+                                if latest_validation_codes[str(nif)]:
+                                    latest_conflict_files.add(str(nif))
                                 combined_detail_lines: list[str] = []
+                                if validation.detected_game_profile:
+                                    combined_detail_lines.append(f"Detected profile: {validation.detected_game_profile}")
                                 if validation.has_havok:
                                     combined_detail_lines.append("⚠ Havok animation graph detected — parallax patching on this NIF can crash in-game.")
                                 if validation.skip_reasons:
@@ -10150,6 +11327,21 @@ if GUI_AVAILABLE:
                                 if validation.suggestions:
                                     combined_detail_lines.append("Suggestions:")
                                     combined_detail_lines.extend(f"- {text}" for text in validation.suggestions)
+                                if conflict_report_var.get() and getattr(validation, "conflict_report", None):
+                                    combined_detail_lines.append("Conflict-resolution report:")
+                                    for group in validation.conflict_report[:6]:
+                                        code = getattr(group, "code", "unknown")
+                                        count = getattr(group, "count", 0)
+                                        profile = getattr(group, "game_profile", "unknown")
+                                        layout = getattr(group, "shader_layout", "global")
+                                        combined_detail_lines.append(
+                                            f"- {code}: {count} (profile={profile}, layout={layout})"
+                                        )
+                                        if conflict_examples_var.get():
+                                            for example in tuple(getattr(group, "examples", ())[:2]):
+                                                combined_detail_lines.append(f"    example: {example}")
+                                        for action in tuple(getattr(group, "suggested_actions", ())[:2]):
+                                            combined_detail_lines.append(f"    auto-fix: {action}")
                                 if getattr(validation, "renderer_verdicts", None):
                                     combined_detail_lines.append("In-game renderer verdicts:")
                                     for renderer_key, renderer_label in (
@@ -10187,17 +11379,196 @@ if GUI_AVAILABLE:
                                     issue_text = "\n".join(combined_detail_lines) if combined_detail_lines else "Needs patching."
                                     row_args = ("WARN", nif.name, f"{validation.ready_count}/{validation.shader_count} ready{skip_info}.\n{issue_text}")
                             except Exception as exc:
+                                latest_conflict_files.add(str(nif))
                                 row_args = ("FAIL", nif.name, f"Scan failed: {exc}")
                             _safe_add_row(*row_args)
                             _safe_progress(float(index))
-                        _safe_status(f"Scan complete: {len(nifs)} file(s) reviewed.")
+                            if index % 25 == 0 or index == len(nifs):
+                                _safe_status(
+                                    f"Phase 1/4 (scan): {index}/{len(nifs)} file(s) processed; "
+                                    f"{len(latest_conflict_files)} with conflicts/issues."
+                                )
+                        if conflict_report_var.get() and validations_for_summary:
+                            grouped_conflicts = summarize_validation_conflicts(validations_for_summary)
+                            if grouped_conflicts:
+                                summary_lines = []
+                                for group in grouped_conflicts[:8]:
+                                    examples = ", ".join(tuple(group.example_files[:3]))
+                                    summary_lines.append(
+                                        f"{group.count}× {group.code} in {group.file_count} file(s)"
+                                        + (f" [{examples}]" if examples else "")
+                                    )
+                                _safe_add_row(
+                                    "WARN",
+                                    "Batch conflict summary",
+                                    "Top grouped conflicts across scanned NIFs:\n" + "\n".join(summary_lines),
+                                )
+                            if plugin_context:
+                                plugin_summary = summarize_plugin_aware_validation_conflicts(
+                                    validations_for_summary,
+                                    plugin_context=plugin_context,
+                                )
+                                if plugin_summary:
+                                    plugin_lines = []
+                                    for group in plugin_summary[:6]:
+                                        plugins = ", ".join(tuple(group.example_plugins[:2]))
+                                        plugin_lines.append(
+                                            f"{group.count}× {group.code} in {group.file_count} file(s), "
+                                            f"{group.plugin_count} plugin(s)"
+                                            + (f" [{plugins}]" if plugins else "")
+                                        )
+                                    _safe_add_row(
+                                        "WARN",
+                                        "Plugin conflict summary",
+                                        "Plugin-linked conflict hotspots:\n" + "\n".join(plugin_lines),
+                                    )
+                        if _cancel_requested[0]:
+                            _safe_status("Scan cancelled by user.")
+                        else:
+                            _safe_status(f"Phase 1/4 complete: scanned {len(nifs)} NIF file(s).")
                         win.after(0, _finish_op)
 
                     threading.Thread(target=_worker, daemon=True).start()
 
-                def _run_patch() -> None:
-                    nifs = _resolve_nifs()
-                    _clear_log()
+                def _rerun_conflict_scan() -> None:
+                    conflict_nifs = _resolve_conflict_nifs()
+                    if not conflict_nifs:
+                        _add_result_row("WARN", "—", "No conflict-affected NIF files are currently tracked.")
+                        return
+                    _scan_nifs(conflict_nifs, preserve_log=False)
+
+                def _rerun_conflict_auto_remediate() -> None:
+                    conflict_nifs = _resolve_conflict_nifs()
+                    if not conflict_nifs:
+                        _add_result_row("WARN", "—", "No conflict-affected NIF files are currently tracked.")
+                        return
+                    _run_auto_remediate_conflicts(conflict_nifs, preserve_log=False)
+
+                def _run_auto_remediate_conflicts(
+                    selected_nifs: list[Path] | None = None,
+                    *,
+                    preserve_log: bool = False,
+                ) -> None:
+                    nifs = selected_nifs or _resolve_nifs()
+                    if not preserve_log:
+                        _clear_log()
+                    if not nifs:
+                        _add_result_row("WARN", "—", "No NIF files found at the selected path.")
+                        return
+                    if _is_running[0]:
+                        status_var.set("Another operation is in progress. Please wait.")
+                        return
+                    self.nif_retry_count_var.set(int(retry_count_var.get()))
+                    self._save_persisted_gui_state()
+                    _is_running[0] = True
+                    _cancel_requested[0] = False
+                    _set_ops_active(False)
+                    status_var.set(f"Phase 2/4 (auto-remediation): processing {len(nifs)} NIF file(s)…")
+                    progress_bar.configure(maximum=max(1, len(nifs)))
+                    progress_var.set(0.0)
+
+                    def _auto_fix_worker(nif_list=nifs) -> None:
+                        ok = skip = fail = 0
+                        failure_groups: dict[str, int] = {}
+                        retries_per_file = max(0, min(3, int(retry_count_var.get())))
+                        for index, nif in enumerate(nif_list, start=1):
+                            if _cancel_requested[0]:
+                                break
+                            try:
+                                codes = latest_validation_codes.get(str(nif))
+                                if not codes:
+                                    validation = validate_nif_for_parallax(nif)
+                                    codes = [
+                                        getattr(group, "code", "")
+                                        for group in (getattr(validation, "conflict_report", None) or [])
+                                        if getattr(group, "code", "")
+                                    ]
+                                result = None
+                                steps: tuple[str, ...] = ()
+                                last_exc: Exception | None = None
+                                for attempt in range(retries_per_file + 1):
+                                    try:
+                                        result, steps = auto_remediate_nif_conflicts(
+                                            nif,
+                                            codes,
+                                            target_game=target_game_var.get(),
+                                            experimental_fallout_write=experimental_fallout_write_var.get(),
+                                            fallout_allow_parallax_scale=fallout_allow_parallax_scale_var.get(),
+                                            fallout_allow_fix_mesh_lighting=fallout_allow_fix_mesh_lighting_var.get(),
+                                            fallout_allow_spec_strength=fallout_allow_spec_strength_var.get(),
+                                            fallout_allow_spec_color=fallout_allow_spec_color_var.get(),
+                                            fallout_allow_env_map_scale=fallout_allow_env_map_scale_var.get(),
+                                            allow_destructive=False,
+                                            backup=backup_var.get(),
+                                            dry_run=dry_run_var.get(),
+                                            dry_run_diff=dry_run_diff_var.get(),
+                                        )
+                                        if attempt > 0:
+                                            _safe_add_row("WARN", nif.name, f"Auto-remediation succeeded after retry {attempt}/{retries_per_file}.")
+                                        break
+                                    except Exception as exc:
+                                        last_exc = exc
+                                        if attempt < retries_per_file:
+                                            continue
+                                        raise last_exc
+                                if result is None:
+                                    skip += 1
+                                    _safe_add_row("SKIP", nif.name, " | ".join(steps))
+                                elif result.success:
+                                    ok += 1
+                                    step_text = f" (steps: {', '.join(steps)})" if steps else ""
+                                    _safe_add_row("OK", nif.name, f"{result.message}{step_text}")
+                                else:
+                                    fail += 1
+                                    detail_lines = [result.message]
+                                    if steps:
+                                        detail_lines.append(f"steps: {', '.join(steps)}")
+                                    detail_lines.extend(result.errors[:4])
+                                    detail_text = "\n".join(line for line in detail_lines if line)
+                                    _safe_add_row("FAIL", nif.name, detail_text or "Auto-remediation failed.")
+                                    failure_key = _batch_failure_key(detail_text or "Auto-remediation failed.")
+                                    failure_groups[failure_key] = failure_groups.get(failure_key, 0) + 1
+                            except Exception as exc:
+                                fail += 1
+                                fail_text = f"Auto-remediation failed: {exc}"
+                                _safe_add_row("FAIL", nif.name, fail_text)
+                                failure_key = _batch_failure_key(fail_text)
+                                failure_groups[failure_key] = failure_groups.get(failure_key, 0) + 1
+                            _safe_progress(float(index))
+                            if index % 25 == 0 or index == len(nif_list):
+                                _safe_status(
+                                    f"Phase 2/4 (auto-remediation): {index}/{len(nif_list)} — "
+                                    f"{ok} patched, {skip} skipped, {fail} failed."
+                                )
+                        _emit_failure_summary_row(
+                            failure_groups,
+                            label=f"Top failure groups across {fail} failed auto-remediation operation(s):",
+                        )
+                        if _cancel_requested[0]:
+                            _safe_status(
+                                f"Auto-remediation cancelled — {ok} patched, {skip} skipped, {fail} failed before stop."
+                            )
+                        else:
+                            _safe_status(f"Phase 2/4 complete — {ok} patched, {skip} skipped, {fail} failed.")
+                        win.after(0, _finish_op)
+
+                    threading.Thread(target=_auto_fix_worker, daemon=True).start()
+
+                def _rerun_conflict_patch() -> None:
+                    conflict_nifs = _resolve_conflict_nifs()
+                    if not conflict_nifs:
+                        _add_result_row("WARN", "—", "No conflict-affected NIF files are currently tracked.")
+                        return
+                    _run_patch(conflict_nifs, preserve_log=False)
+
+                def _run_patch(
+                    selected_nifs: list[Path] | None = None,
+                    *,
+                    preserve_log: bool = False,
+                ) -> None:
+                    nifs = selected_nifs or _resolve_nifs()
+                    if not preserve_log:
+                        _clear_log()
                     if not nifs:
                         _add_result_row("WARN", "—", "No NIF files found at the selected path.")
                         return
@@ -10226,6 +11597,13 @@ if GUI_AVAILABLE:
                         clear_glow_texture_path=clear_glow_var.get(),
                         clear_diffuse_texture_path=clear_diffuse_var.get(),
                         clear_cubemap_texture_path=clear_cubemap_var.get(),
+                        target_game=target_game_var.get(),
+                        experimental_fallout_write=experimental_fallout_write_var.get(),
+                        fallout_allow_parallax_scale=fallout_allow_parallax_scale_var.get(),
+                        fallout_allow_fix_mesh_lighting=fallout_allow_fix_mesh_lighting_var.get(),
+                        fallout_allow_spec_strength=fallout_allow_spec_strength_var.get(),
+                        fallout_allow_spec_color=fallout_allow_spec_color_var.get(),
+                        fallout_allow_env_map_scale=fallout_allow_env_map_scale_var.get(),
                     )
                     if warnings_to_confirm:
                         proceed = messagebox.askyesno(
@@ -10241,6 +11619,8 @@ if GUI_AVAILABLE:
                     if _is_running[0]:
                         status_var.set("Another operation is in progress. Please wait.")
                         return
+                    self.nif_retry_count_var.set(int(retry_count_var.get()))
+                    self._save_persisted_gui_state()
                     recommended_profile = _recommended_nif_editor_profile()
                     resolved_defaults = resolve_nif_patch_defaults_for_render_profile(
                         renderer_profile_var.get(),
@@ -10263,6 +11643,7 @@ if GUI_AVAILABLE:
                         cubemap_texture_path=cubemap_tex_var.get(),
                         backup=backup_var.get(),
                         dry_run=dry_run_var.get(),
+                        dry_run_diff=dry_run_diff_var.get(),
                         disable_parallax=disable_parallax_var.get(),
                         disable_pom=disable_pom_var.get(),
                         disable_env_mapping=disable_env_var.get(),
@@ -10274,25 +11655,52 @@ if GUI_AVAILABLE:
                         clear_glow_texture_path=clear_glow_var.get(),
                         clear_diffuse_texture_path=clear_diffuse_var.get(),
                         clear_cubemap_texture_path=clear_cubemap_var.get(),
+                        target_game=target_game_var.get(),
+                        experimental_fallout_write=experimental_fallout_write_var.get(),
+                        fallout_allow_parallax_scale=fallout_allow_parallax_scale_var.get(),
+                        fallout_allow_fix_mesh_lighting=fallout_allow_fix_mesh_lighting_var.get(),
+                        fallout_allow_spec_strength=fallout_allow_spec_strength_var.get(),
+                        fallout_allow_spec_color=fallout_allow_spec_color_var.get(),
+                        fallout_allow_env_map_scale=fallout_allow_env_map_scale_var.get(),
                     )
                     _is_running[0] = True
+                    _cancel_requested[0] = False
                     _set_ops_active(False)
                     mode_label = "dry-run patching" if options.dry_run else "patching"
-                    status_var.set(f"Starting {mode_label} for {len(nifs)} NIF file(s)…")
+                    status_var.set(f"Phase 3/4 (patch): starting {mode_label} for {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
 
                     def _patch_worker(nif_list=nifs, opts=options) -> None:
                         ok = skip = fail = 0
+                        failure_groups: dict[str, int] = {}
+                        status_interval = 25
+                        retries_per_file = max(0, min(3, int(retry_count_var.get())))
                         for index, nif in enumerate(nif_list, start=1):
+                            if _cancel_requested[0]:
+                                break
                             try:
-                                resolved_options, autofill_notes = resolve_nif_editor_patch_options_for_target(
-                                    nif,
-                                    opts,
-                                    prefer_msn_normal=bool(resolved_defaults.get("prefer_msn_normal", False)),
-                                    preferred_env_mask_suffix=preferred_env_mask_suffix,
-                                )
-                                result = patch_nif(nif, resolved_options)
+                                result = None
+                                autofill_notes: tuple[str, ...] = ()
+                                last_exc: Exception | None = None
+                                for attempt in range(retries_per_file + 1):
+                                    try:
+                                        resolved_options, autofill_notes = resolve_nif_editor_patch_options_for_target(
+                                            nif,
+                                            opts,
+                                            prefer_msn_normal=bool(resolved_defaults.get("prefer_msn_normal", False)),
+                                            preferred_env_mask_suffix=preferred_env_mask_suffix,
+                                        )
+                                        result = patch_nif(nif, resolved_options)
+                                        if attempt > 0:
+                                            _safe_add_row("WARN", nif.name, f"Patching succeeded after retry {attempt}/{retries_per_file}.")
+                                        break
+                                    except Exception as exc:
+                                        last_exc = exc
+                                        if attempt < retries_per_file:
+                                            continue
+                                if result is None:
+                                    raise last_exc or RuntimeError("Patch failed")
                                 detail_lines = [*autofill_notes, result.message]
                                 if result.warnings:
                                     detail_lines.extend(f"Warning: {warning}" for warning in result.warnings[:3])
@@ -10305,14 +11713,39 @@ if GUI_AVAILABLE:
                                     _safe_add_row("OK", nif.name, detail_text or "Patched.")
                                 else:
                                     fail += 1
+                                    latest_conflict_files.add(str(nif))
                                     _safe_add_row("FAIL", nif.name, detail_text or "Patch failed.")
+                                    unique_failure_keys: set[str] = set()
+                                    if detail_text:
+                                        unique_failure_keys.add(_batch_failure_key(detail_text))
                                     for err in result.errors:
                                         _safe_add_row("FAIL", nif.name, err)
+                                        unique_failure_keys.add(_batch_failure_key(err))
+                                    if not unique_failure_keys:
+                                        unique_failure_keys.add(_batch_failure_key("Patch failed."))
+                                    for key in unique_failure_keys:
+                                        failure_groups[key] = failure_groups.get(key, 0) + 1
                             except Exception as exc:
                                 fail += 1
-                                _safe_add_row("FAIL", nif.name, f"Patch failed: {exc}")
+                                latest_conflict_files.add(str(nif))
+                                fail_text = f"Patch failed: {exc}"
+                                _safe_add_row("FAIL", nif.name, fail_text)
+                                failure_key = _batch_failure_key(fail_text)
+                                failure_groups[failure_key] = failure_groups.get(failure_key, 0) + 1
                             _safe_progress(float(index))
-                        _safe_status(f"Done — {ok} patched, {skip} skipped, {fail} failed.")
+                            if index % status_interval == 0 or index == len(nif_list):
+                                _safe_status(
+                                    f"Phase 3/4 (patch) {index}/{len(nif_list)} — "
+                                    f"{ok} patched, {skip} skipped, {fail} failed."
+                                )
+                        _emit_failure_summary_row(
+                            failure_groups,
+                            label=f"Top failure groups across {fail} failed patch operation(s):",
+                        )
+                        if _cancel_requested[0]:
+                            _safe_status(f"Patch cancelled — {ok} patched, {skip} skipped, {fail} failed before stop.")
+                        else:
+                            _safe_status(f"Phase 3/4 complete — {ok} patched, {skip} skipped, {fail} failed.")
                         win.after(0, _finish_op)
 
                     threading.Thread(target=_patch_worker, daemon=True).start()
@@ -10342,6 +11775,8 @@ if GUI_AVAILABLE:
                     if _is_running[0]:
                         status_var.set("Another operation is in progress. Please wait.")
                         return
+                    self.nif_retry_count_var.set(int(retry_count_var.get()))
+                    self._save_persisted_gui_state()
                     options = NifPatchOptions(
                         disable_parallax=disable_parallax_var.get(),
                         disable_pom=disable_pom_var.get(),
@@ -10356,19 +11791,45 @@ if GUI_AVAILABLE:
                         clear_cubemap_texture_path=clear_cubemap_var.get(),
                         backup=backup_var.get(),
                         dry_run=dry_run_var.get(),
+                        target_game=target_game_var.get(),
+                        experimental_fallout_write=experimental_fallout_write_var.get(),
+                        fallout_allow_parallax_scale=fallout_allow_parallax_scale_var.get(),
+                        fallout_allow_fix_mesh_lighting=fallout_allow_fix_mesh_lighting_var.get(),
+                        fallout_allow_spec_strength=fallout_allow_spec_strength_var.get(),
+                        fallout_allow_spec_color=fallout_allow_spec_color_var.get(),
+                        fallout_allow_env_map_scale=fallout_allow_env_map_scale_var.get(),
                     )
                     _is_running[0] = True
+                    _cancel_requested[0] = False
                     _set_ops_active(False)
                     mode_label = "dry-run unpatching" if options.dry_run else "unpatching"
-                    status_var.set(f"Starting {mode_label} for {len(nifs)} NIF file(s)…")
+                    status_var.set(f"Phase 4/4 (unpatch): starting {mode_label} for {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
 
                     def _unpatch_worker(nif_list=nifs, opts=options) -> None:
                         ok = skip = fail = 0
+                        failure_groups: dict[str, int] = {}
+                        status_interval = 25
+                        retries_per_file = max(0, min(3, int(retry_count_var.get())))
                         for index, nif in enumerate(nif_list, start=1):
+                            if _cancel_requested[0]:
+                                break
                             try:
-                                result = patch_nif(nif, opts)
+                                result = None
+                                last_exc: Exception | None = None
+                                for attempt in range(retries_per_file + 1):
+                                    try:
+                                        result = patch_nif(nif, opts)
+                                        if attempt > 0:
+                                            _safe_add_row("WARN", nif.name, f"Unpatch succeeded after retry {attempt}/{retries_per_file}.")
+                                        break
+                                    except Exception as exc:
+                                        last_exc = exc
+                                        if attempt < retries_per_file:
+                                            continue
+                                if result is None:
+                                    raise last_exc or RuntimeError("Unpatch failed")
                                 if result.already_up_to_date:
                                     skip += 1
                                     _safe_add_row("SKIP", nif.name, "Already up-to-date.")
@@ -10377,14 +11838,41 @@ if GUI_AVAILABLE:
                                     _safe_add_row("OK", nif.name, result.message)
                                 else:
                                     fail += 1
+                                    latest_conflict_files.add(str(nif))
                                     _safe_add_row("FAIL", nif.name, result.message)
+                                    unique_failure_keys: set[str] = set()
+                                    if result.message:
+                                        unique_failure_keys.add(_batch_failure_key(result.message))
                                     for err in result.errors:
                                         _safe_add_row("FAIL", nif.name, err)
+                                        unique_failure_keys.add(_batch_failure_key(err))
+                                    if not unique_failure_keys:
+                                        unique_failure_keys.add(_batch_failure_key("Unpatch failed."))
+                                    for key in unique_failure_keys:
+                                        failure_groups[key] = failure_groups.get(key, 0) + 1
                             except Exception as exc:
                                 fail += 1
-                                _safe_add_row("FAIL", nif.name, f"Unpatch failed: {exc}")
+                                latest_conflict_files.add(str(nif))
+                                fail_text = f"Unpatch failed: {exc}"
+                                _safe_add_row("FAIL", nif.name, fail_text)
+                                failure_key = _batch_failure_key(fail_text)
+                                failure_groups[failure_key] = failure_groups.get(failure_key, 0) + 1
                             _safe_progress(float(index))
-                        _safe_status(f"Done — {ok} unpatched, {skip} skipped, {fail} failed.")
+                            if index % status_interval == 0 or index == len(nif_list):
+                                _safe_status(
+                                    f"Phase 4/4 (unpatch) {index}/{len(nif_list)} — "
+                                    f"{ok} unpatched, {skip} skipped, {fail} failed."
+                                )
+                        _emit_failure_summary_row(
+                            failure_groups,
+                            label=f"Top failure groups across {fail} failed unpatch operation(s):",
+                        )
+                        if _cancel_requested[0]:
+                            _safe_status(
+                                f"Unpatch cancelled — {ok} unpatched, {skip} skipped, {fail} failed before stop."
+                            )
+                        else:
+                            _safe_status(f"Phase 4/4 complete — {ok} unpatched, {skip} skipped, {fail} failed.")
                         win.after(0, _finish_op)
 
                     threading.Thread(target=_unpatch_worker, daemon=True).start()
@@ -10408,14 +11896,17 @@ if GUI_AVAILABLE:
                         status_var.set("Another operation is in progress. Please wait.")
                         return
                     _is_running[0] = True
+                    _cancel_requested[0] = False
                     _set_ops_active(False)
-                    status_var.set(f"Restoring backups for {len(nifs)} NIF file(s)…")
+                    status_var.set(f"Restore phase: restoring backups for {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
 
                     def _restore_worker(nif_list=nifs) -> None:
                         ok = skip = fail = 0
                         for index, (row_status, file_name, details) in enumerate(restore_nif_backups(nif_list), start=1):
+                            if _cancel_requested[0]:
+                                break
                             _safe_add_row(row_status, file_name, details)
                             if row_status == "OK":
                                 ok += 1
@@ -10424,53 +11915,154 @@ if GUI_AVAILABLE:
                             else:
                                 fail += 1
                             _safe_progress(float(index))
-                        _safe_status(f"Restore complete — {ok} restored, {skip} skipped, {fail} failed.")
+                        if _cancel_requested[0]:
+                            _safe_status(f"Restore cancelled — {ok} restored, {skip} skipped, {fail} failed before stop.")
+                        else:
+                            _safe_status(f"Restore complete — {ok} restored, {skip} skipped, {fail} failed.")
                         win.after(0, _finish_op)
 
                     threading.Thread(target=_restore_worker, daemon=True).start()
 
                 scan_button = ttk.Button(btn_frame, text="Scan NIFs", command=_scan_nifs)
-                scan_button.pack(side="left", padx=(0, 6))
+                op_row1 = ttk.Frame(btn_frame)
+                op_row1.pack(fill="x", pady=(0, 4))
+                op_row2 = ttk.Frame(btn_frame)
+                op_row2.pack(fill="x")
+                scan_button.pack(in_=op_row1, side="left", padx=(0, 6))
+                rerun_conflicts_button = ttk.Button(
+                    btn_frame,
+                    text="Re-scan conflicts only",
+                    command=_rerun_conflict_scan,
+                )
+                rerun_conflicts_button.pack(in_=op_row1, side="left", padx=(0, 6))
+                rerun_patch_conflicts_button = ttk.Button(
+                    btn_frame,
+                    text="Patch conflicts only",
+                    command=_rerun_conflict_patch,
+                )
+                rerun_patch_conflicts_button.pack(in_=op_row1, side="left", padx=(0, 6))
                 patch_button = ttk.Button(btn_frame, text="Apply patch", command=_run_patch)
-                patch_button.pack(side="left", padx=(0, 6))
+                patch_button.pack(in_=op_row1, side="left", padx=(0, 6))
+                auto_fix_button = ttk.Button(
+                    btn_frame,
+                    text="Auto-remediate conflicts",
+                    command=_run_auto_remediate_conflicts,
+                )
+                auto_fix_button.pack(in_=op_row2, side="left", padx=(0, 6))
+                rerun_auto_fix_conflicts_button = ttk.Button(
+                    btn_frame,
+                    text="Auto-remediate conflict files only",
+                    command=_rerun_conflict_auto_remediate,
+                )
+                rerun_auto_fix_conflicts_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 unpatch_button = ttk.Button(btn_frame, text="Remove features (unpatch)", command=_run_unpatch)
-                unpatch_button.pack(side="left", padx=(0, 6))
+                unpatch_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 restore_button = ttk.Button(btn_frame, text="Restore from .bak", command=_run_restore_backups)
-                restore_button.pack(side="left", padx=(0, 6))
+                restore_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 clear_button = ttk.Button(btn_frame, text="Clear log", command=_clear_log)
-                clear_button.pack(side="left")
+                clear_button.pack(in_=op_row2, side="left", padx=(0, 6))
+                export_report_button = ttk.Button(btn_frame, text="Export report", command=_export_conflict_report)
+                export_report_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 copy_selected_button = ttk.Button(btn_frame, text="Copy selected", command=_copy_selected_result)
-                copy_selected_button.pack(side="left", padx=(6, 0))
+                copy_selected_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 copy_all_button = ttk.Button(btn_frame, text="Copy all", command=_copy_all_results)
-                copy_all_button.pack(side="left", padx=(6, 0))
+                copy_all_button.pack(in_=op_row2, side="left", padx=(0, 6))
+                cancel_ops_button = ttk.Button(btn_frame, text="Cancel operation", command=_request_cancel_nif_editor_ops, state=tk.DISABLED)
+                cancel_ops_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 close_button = ttk.Button(btn_frame, text="Close", command=win.destroy)
-                close_button.pack(side="right")
+                close_button.pack(in_=op_row2, side="right")
                 # Register action buttons so _set_ops_active can disable them during ops
-                _action_buttons_ref.extend([scan_button, patch_button, unpatch_button, restore_button])
-                self._add_tooltip(scan_button, "🔍 Read-only analysis pass. No file changes, just receipts.")
-                self._add_tooltip(patch_button, "🛠 Actually writes patch changes. This is the button with consequences.")
-                self._add_tooltip(unpatch_button, "↩ Removes selected flags/slots so you can undo or simplify prior NIF patching.")
-                self._add_tooltip(restore_button, "♻ Restores .nif files from sibling .nif.bak backups.")
-                self._add_tooltip(clear_button, "🧽 Clears rows so your brain can breathe again.")
-                self._add_tooltip(copy_selected_button, "📎 Copies only the selected row — ideal for Discord bragging or bug reports.")
-                self._add_tooltip(copy_all_button, "📦 Copies every row in one go for logs/changelists.")
-                self._add_tooltip(close_button, "🚪 Closes this window. Your NIFs will not feel abandoned.")
+                _action_buttons_ref.extend(
+                    [
+                        scan_button,
+                        rerun_conflicts_button,
+                        rerun_patch_conflicts_button,
+                        patch_button,
+                        auto_fix_button,
+                        rerun_auto_fix_conflicts_button,
+                        unpatch_button,
+                        restore_button,
+                    ]
+                )
+                self._add_tooltip(scan_button, "Read-only analysis pass. No file changes are written.")
+                self._add_tooltip(rerun_conflicts_button, "Incremental rerun: scan only files that previously reported conflicts or failures.")
+                self._add_tooltip(rerun_patch_conflicts_button, "Incremental rerun: patch only files that previously reported conflicts or failures.")
+                self._add_tooltip(patch_button, "Apply selected NIF patch options and write changes to disk.")
+                self._add_tooltip(auto_fix_button, "Run safe best-effort auto-remediation using detected conflict codes.")
+                self._add_tooltip(
+                    rerun_auto_fix_conflicts_button,
+                    "Incremental rerun: auto-remediate only files that previously reported conflicts or failures.",
+                )
+                self._add_tooltip(unpatch_button, "Remove selected flags/slots to undo or simplify prior NIF patching.")
+                self._add_tooltip(restore_button, "Restore .nif files from sibling .nif.bak backups.")
+                self._add_tooltip(clear_button, "Clear result rows from the log.")
+                self._add_tooltip(export_report_button, "Export the currently filtered result rows to a text report.")
+                self._add_tooltip(copy_selected_button, "Copy only the selected result row.")
+                self._add_tooltip(copy_all_button, "Copy all result rows for logs or bug reports.")
+                self._add_tooltip(cancel_ops_button, "Request cancellation for the running scan/patch operation after the current file.")
+                self._add_tooltip(close_button, "Close the NIF Editor window.")
 
-                def _apply_nif_editor_initial_pane_layout() -> None:
+                _NIF_EDITOR_LAYOUT_RETRY_MAX = 6
+                _NIF_EDITOR_LAYOUT_RETRY_DELAY_MS = 80
+                _NIF_EDITOR_MIN_CONTROLS_PANE_HEIGHT = 340
+                _NIF_EDITOR_MIN_RESULTS_PANE_HEIGHT = 180
+
+                def _enforce_nif_editor_sash_bounds() -> None:
+                    try:
+                        if not win.winfo_exists():
+                            return
+                        pane_height = content_pane.winfo_height()
+                        if pane_height <= 1:
+                            return
+                        pane_upper = max(1, pane_height - 1)
+                        if pane_height > _NIF_EDITOR_MIN_RESULTS_PANE_HEIGHT + 1:
+                            max_sash = min(pane_upper, pane_height - _NIF_EDITOR_MIN_RESULTS_PANE_HEIGHT)
+                            min_sash = min(_NIF_EDITOR_MIN_CONTROLS_PANE_HEIGHT, max_sash)
+                        else:
+                            max_sash = max(1, pane_height // 2)
+                            min_sash = max_sash
+                        current_sash = content_pane.sashpos(0)
+                        clamped_sash = max(min_sash, min(current_sash, max_sash))
+                        if clamped_sash != current_sash:
+                            content_pane.sashpos(0, clamped_sash)
+                    except Exception:
+                        pass
+
+                def _apply_nif_editor_initial_pane_layout(attempt: int = 0) -> None:
                     try:
                         if not win.winfo_exists():
                             return
                         win.update_idletasks()
+                        pane_height = content_pane.winfo_height()
+                        if pane_height <= 1 and attempt < _NIF_EDITOR_LAYOUT_RETRY_MAX:
+                            win.after(
+                                _NIF_EDITOR_LAYOUT_RETRY_DELAY_MS,
+                                lambda: _apply_nif_editor_initial_pane_layout(attempt + 1),
+                            )
+                            return
                         controls_height = _compute_nif_editor_controls_pane_height(
                             window_height=max(content_pane.winfo_height(), win.winfo_height()),
                             controls_requested_height=controls_wrapper.winfo_reqheight() + 24,
                             footer_height=footer_frame.winfo_reqheight(),
                         )
+                        pane_upper = max(1, pane_height - 1)
+                        if pane_height > _NIF_EDITOR_MIN_RESULTS_PANE_HEIGHT + 1:
+                            max_sash = min(pane_upper, pane_height - _NIF_EDITOR_MIN_RESULTS_PANE_HEIGHT)
+                            min_sash = min(_NIF_EDITOR_MIN_CONTROLS_PANE_HEIGHT, max_sash)
+                        else:
+                            max_sash = max(1, pane_height // 2)
+                            min_sash = max_sash
+                        controls_height = max(min_sash, min(controls_height, max_sash))
                         content_pane.sashpos(0, controls_height)
+                        _enforce_nif_editor_sash_bounds()
                     except Exception:
                         pass
 
+                def _on_nif_editor_resize(_event: object | None = None) -> None:
+                    _enforce_nif_editor_sash_bounds()
+
                 win.after_idle(_apply_nif_editor_initial_pane_layout)
+                content_pane.bind("<Configure>", _on_nif_editor_resize, add="+")
             except Exception as exc:
                 try:
                     win.destroy()
@@ -10577,8 +12169,12 @@ def main() -> int:
             roughness_strength=args.roughness_strength,
             include_complex=args.complex_material,
             render_profile=getattr(args, "render_profile", "auto"),
+            target_game=args.target_game,
             continue_on_error=True,
             batch_workers=args.batch_workers,
+            checkpoint_file=args.checkpoint_file,
+            resume_from_checkpoint=args.resume_checkpoint,
+            batch_telemetry_file=getattr(args, "batch_telemetry_file", None),
             error_callback=lambda _index, _total, current, exc: failures.append((current, str(exc))),
         )
         for input_file, outputs in batch_outputs.items():
@@ -10586,9 +12182,19 @@ def main() -> int:
             for output_type, path in outputs.items():
                 print(f"  {output_type.replace('_', ' ').title()} texture: {path}")
         if failures:
+            artifact_dir = args.output_dir if args.output_dir is not None else args.input_file
+            json_report, csv_report = write_batch_failure_artifacts(
+                artifact_dir=artifact_dir,
+                failures=failures,
+                batch_outputs=batch_outputs,
+            )
             print("\nSome files failed during batch processing:", file=sys.stderr)
             for file_path, error_message in failures:
                 print(f"- {file_path}: {error_message}", file=sys.stderr)
+            print(
+                f"\nFailure artifacts written: {json_report} and {csv_report}",
+                file=sys.stderr,
+            )
             return 1
         return 0
 
@@ -10630,6 +12236,7 @@ def main() -> int:
         roughness_strength=args.roughness_strength,
         include_complex=args.complex_material,
         render_profile=getattr(args, "render_profile", "auto"),
+        target_game=args.target_game,
     )
     for output_type, path in outputs.items():
         print(f"{output_type.replace('_', ' ').title()} texture: {path}")

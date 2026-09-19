@@ -1,6 +1,6 @@
 # skyrim-se-parllax-and-and-diffuse-generator-
 
-Current version: **0.5.5**
+Current version: **0.9**
 
 Texture generator that supports both GUI and command-line usage. It can generate:
 - a diffuse texture
@@ -83,11 +83,11 @@ Optional arguments:
 
 - positional input may also be a folder; folder mode scans subfolders, processes only original `.dds` source textures, and skips generated `_n`, `_p`, `_g`/legacy glow aliases, `_m`, packed `_rmaos`/`_orm` variants, `_s`, `_sk`, `_msn`, `_cm`, `_wt`, `_sm`, and common non-Skyrim authoring-suffix aliases such as `_ao`, `_roughness`, and `_metalness`
 
-- `--diffuse-name` (default: `<input_stem>`, e.g. `stonewall.dds`)
+- `--diffuse-name` (default: game-aware: Skyrim/Fallout 3/NV -> `<input_stem>`, Fallout 4/76 -> `<input_stem>_d`)
 - `--normal-name` (default: `<input_stem>_n`, e.g. `stonewall_n.dds`)
 - `--parallax-name` (default: `<input_stem>_p`, e.g. `stonewall_p.dds`)
 - `--glow-name` (default: `<input_stem>_g`, e.g. `stonewall_g.dds`)
-- `--environment-mask-name` (default: `<input_stem>_m`)
+- `--environment-mask-name` (default: game-aware: Skyrim/Fallout 3/NV -> `<input_stem>_m`, Fallout 4/76 -> `<input_stem>_s`)
 - `--rmaos-name` / `--ramos-name` (default: `<input_stem>_rmaos`)
 - `--complex-name` (default from format: `<input_stem>_msn` or `<input_stem>_cm`)
   - use `<input_stem>_c` here when a shader pack expects `_c.dds` naming
@@ -119,6 +119,8 @@ Optional arguments:
 - `--pbr-material` (shortcut for the app's Community Shaders Extended Materials packed output: enables complex material, forces `--complex-format cm`, and keeps compatible standard env/parallax modes; not an ENB workflow)
 - `--render-profile` (`auto`, `custom`, `vanilla`, `performance`, `vr`, `terrain`, `architecture`, `characters`, `community_shaders`, `truepbr`, `enb`)
   - locked profiles (and `auto` in single-file mode) now auto-correct conflicting `--complex-format`, `--environment-mask-mode`, and `--parallax-mode` values, then print the applied guardrail changes to stderr
+- `--target-game` (`skyrim`, `fallout3`, `falloutnv`, `fallout4`, `fallout76`; default: `skyrim`)
+  - controls generated filename conventions (for example, Fallout 4/76 diffuse defaults to `_d.dds` and env-mask defaults to `_s.dds`)
 - `--batch-workers` (parallel workers for folder mode; `0` = automatic)
 - `--gui` (force GUI mode)
 
@@ -286,6 +288,22 @@ When both Community Shaders and ENB markers are detected in mod-manager context,
 
 ### NIF Editor — Experimental Feature
 
-The **NIF Editor** (accessible from the toolbar button) lets you patch BSLightingShaderProperty flags and texture slots in Skyrim SE mesh files.
+The **NIF Editor** (accessible from the toolbar button) patches Skyrim-format BSLightingShaderProperty flags and texture slots for supported Skyrim LE/SE/AE/VR/CK variants. Fallout-era headers are now detected with an experimental profile path and should be treated as best-effort.
 **This is an experimental feature.** Always keep backups of your NIF files before patching.
 The **Auto-patch NIFs after generation** checkbox (off by default) triggers NIF patching automatically after each generation run.
+For safety, parallax auto-patching skips known-problem cases by default (Havok-attached meshes, skinned/alpha meshes, decal/anisotropic/soft-lighting variants, and single-pass shader blocks).
+For CLI runs, `nif_patcher.py --target-game auto|skyrim|fallout` now makes profile intent explicit. Fallout writes require `--experimental-fallout-write` and default to guarded flag/texture-slot patching.
+If you explicitly accept higher-risk Fallout writes, per-operation safety gates are available:
+`--fallout-allow-parallax-scale`, `--fallout-allow-fix-mesh-lighting`, `--fallout-allow-spec-strength`, `--fallout-allow-spec-color`, and `--fallout-allow-env-map-scale`.
+The NIF Editor now exposes matching controls (**NIF game profile** + **Enable experimental Fallout writes**) and per-operation Fallout safety gate checkboxes so GUI patch/remediation behavior aligns with CLI behavior.
+Validation can now emit a grouped conflict-resolution view with `--validate --conflict-report`, listing conflict categories plus suggested auto-fix actions per file.
+For larger mod-folder runs, add `--conflict-report-summary` to print a cross-file top-conflict summary, and use the NIF Editor scan view's batch summary row to quickly identify the highest-frequency conflict groups.
+You can also provide `--plugin-conflict-context <json>` (mesh path → plugin refs) to print plugin-aware conflict summaries, and `--auto-remediate` (optionally with `--auto-remediate-codes ...`) to apply safe best-effort fixes from detected conflict codes.
+The GUI now includes a language selector backed by `assets/translations/*.json` and a UI scale selector (0.75x–2.00x) for high-DPI display tuning.
+NIF scan runs also include retry/cancellation controls and a conflict-only incremental rerun action for faster follow-up passes after resolving issues.
+Plugin-aware conflict discovery now attempts lightweight plugin record parsing (record type + FormID + model-path subrecords) before raw mesh-string fallback so conflict summaries can carry real plugin-record metadata when available.
+NIF Editor conflict reruns now include conflict-only patch and conflict-only auto-remediation actions in addition to conflict-only scan reruns.
+Use `nif_patcher.py --compatibility-report` to print a current game/version support matrix (profiles, layouts, and guarded-operation policy).
+The regression suite also includes a locked fixture corpus baseline at `tests/fixtures/nif_fixture_corpus*.json` for cross-profile/layout conflict-matrix stability checks, including truncated-header and shifted texture-set layout edge signatures.
+CLI folder batch runs now emit `batch_failure_report.json` and `batch_failure_report.csv` when any source files fail, with per-file action/conflict/error fields for triage.
+For long-running folder batches, use `--checkpoint-file <path>` to persist successful-file progress and `--resume-checkpoint` to skip already completed files after interruption/restart.
