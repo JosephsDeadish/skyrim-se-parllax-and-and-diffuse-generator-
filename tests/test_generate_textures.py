@@ -3710,6 +3710,73 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(payload["resumed_completed_count"], 1)
             self.assertEqual(payload["completed_success_count"], 2)
 
+    def test_run_batch_with_options_writes_batch_telemetry_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            telemetry = temp_path / "reports" / "batch_telemetry.json"
+            input_dir.mkdir()
+            for name in ("a.dds", "b.dds"):
+                _sample_image().save(input_dir / name, format="DDS", pixel_format="DXT5")
+
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                batch_workers=1,
+                batch_telemetry_file=telemetry,
+            )
+
+            self.assertEqual(len(outputs), 2)
+            payload = json.loads(telemetry.read_text(encoding="utf-8"))
+            self.assertEqual(payload["tool"], "generate_textures")
+            self.assertEqual(payload["version"], APP_VERSION)
+            summary = payload["summary"]
+            self.assertEqual(summary["processed_files"], 2)
+            self.assertEqual(summary["successful_files"], 2)
+            self.assertEqual(summary["failed_files"], 0)
+            self.assertEqual(summary["workers"], 1)
+            self.assertGreaterEqual(summary["total_duration_seconds"], 0.0)
+            self.assertEqual(len(payload["per_file_duration_seconds"]), 2)
+
+    def test_run_batch_with_options_records_failed_files_in_telemetry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            telemetry = temp_path / "batch_telemetry.json"
+            input_dir.mkdir()
+            _sample_image().save(input_dir / "good.dds", format="DDS", pixel_format="DXT5")
+            (input_dir / "bad.dds").write_bytes(b"this is not a valid dds")
+
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                continue_on_error=True,
+                batch_workers=1,
+                batch_telemetry_file=telemetry,
+            )
+
+            self.assertEqual(sorted(path.name for path in outputs.keys()), ["good.dds"])
+            payload = json.loads(telemetry.read_text(encoding="utf-8"))
+            summary = payload["summary"]
+            self.assertEqual(summary["processed_files"], 2)
+            self.assertEqual(summary["successful_files"], 1)
+            self.assertEqual(summary["failed_files"], 1)
+            self.assertEqual(len(payload["per_file_duration_seconds"]), 2)
+
     def test_write_batch_failure_artifacts_writes_structured_json_and_csv(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

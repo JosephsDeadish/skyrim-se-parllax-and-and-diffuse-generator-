@@ -14,6 +14,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, replace
@@ -717,6 +718,32 @@ def _parse_enabled_modlist(modlist_path: Path) -> tuple[str, ...]:
     return tuple(enabled_mods)
 
 
+def _normalize_plugin_list_entry(raw_value: str) -> str:
+    cleaned = str(raw_value or "").strip().strip('"').strip("'")
+    if not cleaned:
+        return ""
+    # Typical load-order prefixes from various manager/export formats.
+    cleaned = re.sub(r"^\s*(?:\[[0-9a-fA-F]{2,3}\]|\([0-9a-fA-F]{2,3}\)|[0-9a-fA-F]{2,3}:)\s*", "", cleaned)
+    if cleaned.startswith("*"):
+        cleaned = cleaned[1:].strip()
+    lowered = cleaned.lower()
+    if lowered.startswith("ghosted:"):
+        cleaned = cleaned.split(":", 1)[1].strip()
+        lowered = cleaned.lower()
+    for marker in ("#", ";", "|"):
+        if marker in cleaned:
+            cleaned = cleaned.split(marker, 1)[0].strip()
+            lowered = cleaned.lower()
+    if lowered.startswith("-"):
+        return ""
+    if cleaned.lower().endswith(".ghost"):
+        cleaned = cleaned[:-6]
+    normalized = cleaned.strip()
+    if not normalized.lower().endswith((".esp", ".esm", ".esl")):
+        return ""
+    return normalized
+
+
 def _parse_enabled_plugins(plugins_path: Path) -> tuple[str, ...]:
     plugins: list[str] = []
     if not plugins_path.exists():
@@ -725,13 +752,14 @@ def _parse_enabled_plugins(plugins_path: Path) -> tuple[str, ...]:
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
-        if line[0] in {";", "-"}:
+        if line.startswith(";"):
             continue
-        if line[0] in {"+", "*"}:
+        if line[0] in {"+"}:
             line = line[1:].strip()
-        if line:
-            plugins.append(line)
-    return tuple(plugins)
+        normalized = _normalize_plugin_list_entry(line)
+        if normalized:
+            plugins.append(normalized)
+    return tuple(dict.fromkeys(plugins))
 
 
 def _parse_load_order(loadorder_path: Path) -> tuple[str, ...]:
@@ -742,11 +770,12 @@ def _parse_load_order(loadorder_path: Path) -> tuple[str, ...]:
         line = raw_line.strip()
         if not line or line.startswith("#") or line.startswith(";"):
             continue
-        if line[0] in {"+", "*", "-"}:
+        if line[0] in {"+", "*"}:
             line = line[1:].strip()
-        if line:
-            entries.append(line)
-    return tuple(entries)
+        normalized = _normalize_plugin_list_entry(line)
+        if normalized:
+            entries.append(normalized)
+    return tuple(dict.fromkeys(entries))
 
 
 _BODY_PROFILE_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -1150,30 +1179,21 @@ def discover_plugin_conflict_context_from_manager(
     nif_paths: list[Path],
     context: ModManagerContext,
 ) -> dict[str, list[object]]:
-    def _normalize_plugin_candidate(name: str) -> str:
-        cleaned = str(name or "").strip().strip('"').strip("'")
-        if not cleaned:
-            return ""
-        if cleaned.startswith("*"):
-            cleaned = cleaned[1:].strip()
-        for marker in ("#", ";"):
-            if marker in cleaned:
-                cleaned = cleaned.split(marker, 1)[0].strip()
-        if "|" in cleaned:
-            cleaned = cleaned.split("|", 1)[0].strip()
-        return cleaned
-
     def _resolve_plugin_path(plugin_name: str, search_roots: list[Path]) -> Path | None:
         lowered_name = plugin_name.lower()
         for root in search_roots:
             direct = root / plugin_name
             if direct.exists():
                 return direct
+            direct_ghost = root / f"{plugin_name}.ghost"
+            if direct_ghost.exists():
+                return direct_ghost
             try:
                 for candidate in root.rglob("*"):
                     if not candidate.is_file():
                         continue
-                    if candidate.name.lower() != lowered_name:
+                    candidate_name = candidate.name.lower()
+                    if candidate_name != lowered_name and candidate_name != f"{lowered_name}.ghost":
                         continue
                     return candidate
             except Exception:
@@ -1185,7 +1205,7 @@ def discover_plugin_conflict_context_from_manager(
             normalized_name
             for name in (*context.enabled_plugins, *context.load_order)
             if isinstance(name, str)
-            for normalized_name in (_normalize_plugin_candidate(name),)
+            for normalized_name in (_normalize_plugin_list_entry(name),)
             if normalized_name.lower().endswith((".esp", ".esm", ".esl"))
         )
     )
@@ -6840,10 +6860,14 @@ def run_batch_with_options(
     batch_workers: int | None = None,
     checkpoint_file: Path | None = None,
     resume_from_checkpoint: bool = False,
+    batch_telemetry_file: Path | None = None,
 ) -> dict[Path, dict[str, Path]]:
+    batch_start_time = time.perf_counter()
     input_files = collect_source_textures(input_path)
     completed_success_files: set[str] = set()
     resumed_completed_count = 0
+    per_file_durations: list[float] = []
+    failure_count = 0
 
     def _checkpoint_key(path: Path) -> str:
         return str(path.resolve())
@@ -6878,63 +6902,42 @@ def run_batch_with_options(
     total = len(input_files)
     workers = _resolve_batch_workers(batch_workers, total)
 
-    if workers == 1:
-        for index, input_file in enumerate(input_files, start=1):
-            if progress_callback is not None:
-                progress_callback(index, total, input_file)
-            try:
-                results[input_file] = run_with_options(
-                    input_file=input_file,
-                    output_dir=output_dir,
-                    diffuse_name=diffuse_name,
-                    normal_name=normal_name,
-                    parallax_name=parallax_name,
-                    glow_name=glow_name,
-                    environment_mask_name=environment_mask_name,
-                    rmaos_name=rmaos_name,
-                    complex_name=complex_name,
-                    normal_strength=normal_strength,
-                    parallax_strength=parallax_strength,
-                    glow_threshold=glow_threshold,
-                    environment_mask_strength=environment_mask_strength,
-                    rmaos_strength=rmaos_strength,
-                    complex_strength=complex_strength,
-                    specular_strength=specular_strength,
-                    complex_format=complex_format,
-                    env_mask_mode=env_mask_mode,
-                    emboss_mode=emboss_mode,
-                    relief_mode=relief_mode,
-                    parallax_mode=parallax_mode,
-                    include_diffuse=include_diffuse,
-                    include_normal=include_normal,
-                    include_parallax=include_parallax,
-                    include_glow=include_glow,
-                    include_environment_mask=include_environment_mask,
-                    include_rmaos=include_rmaos,
-                    include_complex=include_complex,
-                    render_profile=render_profile,
-                    target_game=target_game,
-                    include_wetness_mask=include_wetness_mask,
-                    wetness_mask_strength=wetness_mask_strength,
-                    wetness_name=wetness_name,
-                    include_snow_mask=include_snow_mask,
-                    snow_mask_strength=snow_mask_strength,
-                    snow_name=snow_name,
-                    include_ao=include_ao,
-                    ao_strength=ao_strength,
-                    ao_name=ao_name,
-                    include_roughness=include_roughness,
-                    roughness_strength=roughness_strength,
-                    roughness_name=roughness_name,
-                )
-                completed_success_files.add(_checkpoint_key(input_file))
-                _write_checkpoint_state()
-            except Exception as exc:
-                if error_callback is not None:
-                    error_callback(index, total, input_file, exc)
-                if not continue_on_error:
-                    raise
-        return results
+    def _write_batch_telemetry() -> None:
+        if batch_telemetry_file is None:
+            return
+        durations = sorted(value for value in per_file_durations if value >= 0.0)
+        duration_count = len(durations)
+        total_seconds = max(0.0, time.perf_counter() - batch_start_time)
+        if duration_count:
+            p95_index = min(duration_count - 1, max(0, math.ceil(duration_count * 0.95) - 1))
+            p95_seconds = durations[p95_index]
+            avg_seconds = sum(durations) / duration_count
+        else:
+            p95_seconds = 0.0
+            avg_seconds = 0.0
+        payload = {
+            "tool": "generate_textures",
+            "version": APP_VERSION,
+            "input_root": _checkpoint_key(input_path),
+            "summary": {
+                "workers": workers,
+                "total_files_considered": total + resumed_completed_count,
+                "resumed_completed_count": resumed_completed_count,
+                "processed_files": total,
+                "successful_files": len(results),
+                "failed_files": failure_count,
+                "total_duration_seconds": round(total_seconds, 6),
+                "avg_file_duration_seconds": round(avg_seconds, 6),
+                "p95_file_duration_seconds": round(p95_seconds, 6),
+                "max_file_duration_seconds": round(durations[-1], 6) if durations else 0.0,
+                "min_file_duration_seconds": round(durations[0], 6) if durations else 0.0,
+                "checkpoint_enabled": checkpoint_file is not None,
+                "resumed_from_checkpoint": bool(resume_from_checkpoint),
+            },
+            "per_file_duration_seconds": [round(value, 6) for value in durations],
+        }
+        batch_telemetry_file.parent.mkdir(parents=True, exist_ok=True)
+        batch_telemetry_file.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def _process_one(target_file: Path) -> dict[str, Path]:
         return run_with_options(
@@ -6981,26 +6984,54 @@ def run_batch_with_options(
             roughness_strength=roughness_strength,
             roughness_name=roughness_name,
         )
+    try:
+        if workers == 1:
+            for index, input_file in enumerate(input_files, start=1):
+                if progress_callback is not None:
+                    progress_callback(index, total, input_file)
+                started = time.perf_counter()
+                try:
+                    results[input_file] = _process_one(input_file)
+                    completed_success_files.add(_checkpoint_key(input_file))
+                    _write_checkpoint_state()
+                except Exception as exc:
+                    failure_count += 1
+                    if error_callback is not None:
+                        error_callback(index, total, input_file, exc)
+                    if not continue_on_error:
+                        raise
+                finally:
+                    per_file_durations.append(max(0.0, time.perf_counter() - started))
+            return results
 
-    completed = 0
-    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-        future_to_file = {executor.submit(_process_one, input_file): input_file for input_file in input_files}
-        for future in concurrent.futures.as_completed(future_to_file):
-            input_file = future_to_file[future]
-            completed += 1
-            if progress_callback is not None:
-                progress_callback(completed, total, input_file)
-            try:
-                results[input_file] = future.result()
-                completed_success_files.add(_checkpoint_key(input_file))
-                _write_checkpoint_state()
-            except Exception as exc:
-                if error_callback is not None:
-                    error_callback(completed, total, input_file, exc)
-                if not continue_on_error:
-                    raise
+        completed = 0
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_file = {executor.submit(_process_one, input_file): input_file for input_file in input_files}
+            start_times: dict[concurrent.futures.Future[dict[str, Path]], float] = {
+                future: time.perf_counter() for future in future_to_file
+            }
+            for future in concurrent.futures.as_completed(future_to_file):
+                input_file = future_to_file[future]
+                completed += 1
+                if progress_callback is not None:
+                    progress_callback(completed, total, input_file)
+                started = start_times.get(future, time.perf_counter())
+                try:
+                    results[input_file] = future.result()
+                    completed_success_files.add(_checkpoint_key(input_file))
+                    _write_checkpoint_state()
+                except Exception as exc:
+                    failure_count += 1
+                    if error_callback is not None:
+                        error_callback(completed, total, input_file, exc)
+                    if not continue_on_error:
+                        raise
+                finally:
+                    per_file_durations.append(max(0.0, time.perf_counter() - started))
 
-    return results
+        return results
+    finally:
+        _write_batch_telemetry()
 
 
 def parse_args() -> argparse.Namespace:
@@ -7198,6 +7229,12 @@ def parse_args() -> argparse.Namespace:
         "--resume-checkpoint",
         action="store_true",
         help="Resume a folder run by skipping files already marked as successful in --checkpoint-file.",
+    )
+    parser.add_argument(
+        "--batch-telemetry-file",
+        type=Path,
+        default=None,
+        help="Write batch performance telemetry JSON to this path for folder runs.",
     )
     parser.add_argument("--gui", action="store_true", help="Launch graphical interface.")
     parser.add_argument("--version", action="version", version=f"%(prog)s {APP_VERSION}")
@@ -12137,6 +12174,7 @@ def main() -> int:
             batch_workers=args.batch_workers,
             checkpoint_file=args.checkpoint_file,
             resume_from_checkpoint=args.resume_checkpoint,
+            batch_telemetry_file=getattr(args, "batch_telemetry_file", None),
             error_callback=lambda _index, _total, current, exc: failures.append((current, str(exc))),
         )
         for input_file, outputs in batch_outputs.items():
