@@ -26,6 +26,7 @@ from nif_patcher import (
     SHADER_TYPE_MULTILAYER,
     SHADER_TYPE_NAMES,
     TEXTURE_SLOT_DIFFUSE,
+    TEXTURE_SLOT_CUBEMAP,
     TEXTURE_SLOT_ENV_MASK,
     TEXTURE_SLOT_GLOW,
     TEXTURE_SLOT_NORMAL,
@@ -833,6 +834,7 @@ class TestValidateNifForParallax(unittest.TestCase):
         paths = [""] * 9
         paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_g.dds"
         paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_m.dds"
+        paths[TEXTURE_SLOT_CUBEMAP] = "textures\\arch\\stone_e.dds"
         paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone_p.dds"
         nif = _write_nif(
             self.tmp,
@@ -844,6 +846,7 @@ class TestValidateNifForParallax(unittest.TestCase):
         codes = {group.code for group in v.conflict_report}
         self.assertTrue(any(code.startswith("flag_glow_map.slot2_filled_without_flag.") for code in codes))
         self.assertTrue(any(code.startswith("flag_env_mapping.slot5_filled_without_flag.") for code in codes))
+        self.assertTrue(any(code.startswith("flag_env_mapping.slot4_filled_without_flag.") for code in codes))
         self.assertTrue(any(code.startswith("flag_pom.without_base_parallax.") for code in codes))
         self.assertTrue(any(code.startswith("flag_pom.non_heightmap_shader.") for code in codes))
 
@@ -905,6 +908,15 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertIn("slot 5", joined)
         self.assertIn("environment_mapping", joined)
 
+    def test_reports_cubemap_slot_without_env_mapping_flag(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_CUBEMAP] = "textures\\arch\\stone_e.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths, flags1=0)
+        v = validate_nif_for_parallax(nif)
+        joined = "\n".join(v.issues + v.suggestions).lower()
+        self.assertIn("slot 4", joined)
+        self.assertIn("environment_mapping", joined)
+
     def test_reports_pom_without_base_parallax_flag(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone_p.dds"
@@ -941,6 +953,20 @@ class TestValidateNifForParallax(unittest.TestCase):
         v = validate_nif_for_parallax(nif)
         self.assertTrue(
             any(group.code.startswith("shader_state.envmap_missing_slots4_5.") for group in v.conflict_report)
+        )
+
+    def test_conflict_report_flags_envmap_shader_with_missing_slot4(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_m.dds"
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            texture_paths=paths,
+        )
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(
+            any(group.code.startswith("shader_state.envmap_missing_slot4.") for group in v.conflict_report)
         )
 
     def test_reports_wrong_texture_type_in_normal_slot(self) -> None:
@@ -2922,6 +2948,30 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         assert opts is not None
         self.assertTrue(opts.disable_env_mapping)
         self.assertIn("disable_env_mapping_for_missing_slots4_5", steps)
+
+    def test_auto_remediation_build_options_enables_env_mapping_for_slot4_flag_conflict(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["flag_env_mapping.slot4_filled_without_flag.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(opts.enable_env_mapping)
+        self.assertIn("enable_env_mapping", steps)
+
+    def test_auto_remediation_build_options_disables_env_mapping_for_missing_envmap_slot4(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["shader_state.envmap_missing_slot4.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(opts.disable_env_mapping)
+        self.assertIn("disable_env_mapping_for_missing_slot4", steps)
 
 
 class TestCompatibilityReport(unittest.TestCase):

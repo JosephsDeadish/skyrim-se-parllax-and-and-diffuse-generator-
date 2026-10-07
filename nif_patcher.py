@@ -2999,6 +2999,12 @@ def _apply_patches(
                     and (not env_mask_path or env_mask_missing)
                 ):
                     restored_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
+                if (
+                    sp.shader_type == SHADER_TYPE_ENVMAP
+                    and (restored_flags1 & SLSF1_ENVIRONMENT_MAPPING)
+                    and (not cubemap_path or cubemap_missing)
+                ):
+                    restored_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
                 if (restored_flags2 & SLSF2_GLOW_MAP) and (
                     not glow_path or glow_missing
                 ):
@@ -3861,6 +3867,9 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "flag_env_mapping.slot5_filled_without_flag": (
         "Enable SLSF1_Environment_Mapping when slot 5 is populated, or clear slot 5.",
     ),
+    "flag_env_mapping.slot4_filled_without_flag": (
+        "Enable SLSF1_Environment_Mapping when slot 4 cubemap is populated, or clear slot 4.",
+    ),
     "flag_pom.without_base_parallax": (
         "Enable SLSF1_Parallax when POM is enabled, or disable POM for the block.",
     ),
@@ -3872,6 +3881,9 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     ),
     "shader_state.envmap_missing_slots4_5": (
         "Disable environment mapping when both slot 4 and slot 5 are unresolved, or restore valid EnvMap textures.",
+    ),
+    "shader_state.envmap_missing_slot4": (
+        "Restore a valid slot 4 cubemap texture for EnvMap shader blocks, or disable environment mapping for that block.",
     ),
     "fallback_or_unknown": (
         "Review the listed block diagnostics and apply targeted fixes before repatching.",
@@ -3960,6 +3972,8 @@ def _classify_conflict_code(message: str) -> str:
         return "flag_glow_map.flag_set_without_slot2"
     if "slot 5 is filled" in lowered and "slsf1_environment_mapping is not enabled" in lowered:
         return "flag_env_mapping.slot5_filled_without_flag"
+    if "slot 4 is filled" in lowered and "slsf1_environment_mapping is not enabled" in lowered:
+        return "flag_env_mapping.slot4_filled_without_flag"
     if "pom flag is set on shader type" in lowered:
         return "flag_pom.non_heightmap_shader"
     if "pom flag is enabled without the base slsf1_parallax flag" in lowered:
@@ -3968,6 +3982,8 @@ def _classify_conflict_code(message: str) -> str:
         return "shader_state.parallax_type_missing_slot3"
     if "shader type is envmap" in lowered and "both slot 4 cubemap and slot 5 env-mask are unresolved" in lowered:
         return "shader_state.envmap_missing_slots4_5"
+    if "shader type is envmap" in lowered and "slot 4 cubemap is unresolved" in lowered:
+        return "shader_state.envmap_missing_slot4"
     if "slot 0 " in lowered:
         return "path_slot_diffuse"
     if "slot 1 " in lowered:
@@ -4302,7 +4318,11 @@ def build_auto_remediation_patch_options(
     ):
         opts.enable_parallax = True
         applied_steps.append("enable_parallax_for_pom")
-    if any(code.startswith("flag_env_mapping.slot5_filled_without_flag") for code in base_codes):
+    if any(
+        code.startswith("flag_env_mapping.slot5_filled_without_flag")
+        or code.startswith("flag_env_mapping.slot4_filled_without_flag")
+        for code in base_codes
+    ):
         opts.enable_env_mapping = True
         applied_steps.append("enable_env_mapping")
     if any(code.startswith("flag_glow_map.slot2_filled_without_flag") for code in base_codes):
@@ -4346,6 +4366,9 @@ def build_auto_remediation_patch_options(
     if any(code.startswith("shader_state.envmap_missing_slots4_5") for code in base_codes):
         opts.disable_env_mapping = True
         applied_steps.append("disable_env_mapping_for_missing_slots4_5")
+    if any(code.startswith("shader_state.envmap_missing_slot4") for code in base_codes):
+        opts.disable_env_mapping = True
+        applied_steps.append("disable_env_mapping_for_missing_slot4")
 
     if not applied_steps:
         return None, (
@@ -4817,6 +4840,15 @@ def validate_nif_for_parallax(
                 result.suggestions,
                 "Enable environment mapping in BSLightingShaderProperty or clear slot 5 if this mesh should not be reflective."
             )
+        if cubemap_path and not info.has_env_mapping_flag:
+            _append_unique(
+                result.issues,
+                f"{bname}: slot 4 is filled ('{cubemap_path}') but SLSF1_Environment_Mapping is not enabled."
+            )
+            _append_unique(
+                result.suggestions,
+                "Enable environment mapping in BSLightingShaderProperty or clear slot 4 if this mesh should not be reflective."
+            )
         if info.has_env_mapping_flag and not env_mask_path:
             _append_unique(
                 result.suggestions,
@@ -4834,6 +4866,18 @@ def validate_nif_for_parallax(
             _append_unique(
                 result.suggestions,
                 "Restore valid slot 4/5 textures for EnvMap or disable environment mapping for this block."
+            )
+        elif (
+            info.shader_type == SHADER_TYPE_ENVMAP
+            and not cubemap_path
+        ):
+            _append_unique(
+                result.issues,
+                f"{bname}: shader type is EnvMap but slot 4 cubemap is unresolved."
+            )
+            _append_unique(
+                result.suggestions,
+                "Restore a valid slot 4 cubemap texture for EnvMap, or disable environment mapping for this block."
             )
         if info.parallax_scale is not None and info.parallax_scale < 0.35:
             _append_unique(

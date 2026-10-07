@@ -2769,6 +2769,64 @@ def build_render_profile_brief_message(recommended_profile: str) -> str:
     )
 
 
+def build_safe_preset_change_summary(
+    before: Mapping[str, object],
+    after: Mapping[str, object],
+    *,
+    max_items: int = 6,
+) -> str:
+    """Return compact summary of setting changes applied by a safe preset."""
+    labels = {
+        "render_profile": "Renderer",
+        "complex_format": "Complex format",
+        "env_mask_mode": "Env mode",
+        "parallax_mode": "Parallax mode",
+        "include_diffuse": "Diffuse",
+        "include_normal": "Normal",
+        "include_parallax": "Parallax",
+        "include_glow": "Glow",
+        "include_environment_mask": "Env mask",
+        "include_complex": "Complex material",
+        "include_rmaos": "RMAOS",
+        "include_wetness_mask": "Wetness",
+        "include_snow_mask": "Snow",
+        "include_ao": "AO",
+        "include_roughness": "Roughness",
+    }
+    ordered_keys = (
+        "render_profile",
+        "complex_format",
+        "env_mask_mode",
+        "parallax_mode",
+        "include_diffuse",
+        "include_normal",
+        "include_parallax",
+        "include_glow",
+        "include_environment_mask",
+        "include_complex",
+        "include_rmaos",
+        "include_wetness_mask",
+        "include_snow_mask",
+        "include_ao",
+        "include_roughness",
+    )
+    changes: list[str] = []
+    for key in ordered_keys:
+        if before.get(key) == after.get(key):
+            continue
+        label = labels.get(key, key)
+        after_value = after.get(key)
+        if isinstance(after_value, bool):
+            changes.append(f"{label}={'ON' if after_value else 'OFF'}")
+        else:
+            changes.append(f"{label}: {before.get(key)}→{after_value}")
+    if not changes:
+        return "No setting changes were required."
+    if len(changes) > max_items:
+        return "; ".join(changes[:max_items]) + f"; +{len(changes) - max_items} more"
+    return "; ".join(changes)
+
+
 def recommend_render_profile(
     input_path: Path | None,
     *,
@@ -7502,6 +7560,7 @@ if GUI_AVAILABLE:
             self.batch_perf_hint_var = tk.StringVar(value="")
             self.safe_preset_hint_var = tk.StringVar(value="Safe presets apply conservative workflow defaults in one click.")
             self.preview_force_full_once = False
+            self.preview_paused_var = tk.BooleanVar(value=False)
             self.normal_strength_var = tk.DoubleVar(value=2.0)
             self.parallax_strength_var = tk.DoubleVar(value=1.35)
             self.complex_strength_var = tk.DoubleVar(value=1.15)
@@ -8394,6 +8453,16 @@ if GUI_AVAILABLE:
                 self.render_all_preview_button,
                 "When lazy preview defers niche tiles for speed, click to render every enabled tile immediately.",
             )
+            self.preview_pause_button = ttk.Button(
+                source_controls,
+                text="Pause preview",
+                command=self._toggle_preview_pause,
+            )
+            self.preview_pause_button.pack(side=tk.LEFT, padx=(4, 4))
+            self._add_tooltip(
+                self.preview_pause_button,
+                "Pause heavy preview refresh work during long runs, then resume when needed.",
+            )
             _batch_prev_check = ttk.Checkbutton(
                 source_controls,
                 text="Show preview during batch",
@@ -9066,13 +9135,36 @@ if GUI_AVAILABLE:
             normalized = _normalize_render_profile(profile_key)
             if normalized not in {"vanilla", "enb", "community_shaders", "truepbr", "custom"}:
                 normalized = "custom"
+            before_state: dict[str, object] = {
+                "render_profile": _normalize_render_profile(self.render_profile_var.get()),
+                "complex_format": str(self.complex_format_var.get()),
+                "env_mask_mode": str(self.env_mask_mode_var.get()),
+                "parallax_mode": str(self.parallax_mode_var.get()),
+                "include_diffuse": bool(self.include_diffuse_var.get()),
+                "include_normal": bool(self.include_normal_var.get()),
+                "include_parallax": bool(self.include_parallax_var.get()),
+                "include_glow": bool(self.include_glow_var.get()),
+                "include_environment_mask": bool(self.include_environment_mask_var.get()),
+                "include_complex": bool(self.include_complex_var.get()),
+                "include_rmaos": bool(self.include_rmaos_var.get()),
+                "include_wetness_mask": bool(self.include_wetness_mask_var.get()),
+                "include_snow_mask": bool(self.include_snow_mask_var.get()),
+                "include_ao": bool(self.include_ao_var.get()),
+                "include_roughness": bool(self.include_roughness_var.get()),
+            }
             self.render_profile_var.set(normalized)
             recommended_profile = self._recommended_render_profile_for_preview(self._current_preview_path())
             if normalized == "custom":
                 self.safe_preset_hint_var.set(
-                    "Custom preset: manual controls enabled. Use when you need full fine-tuning."
+                    "Custom preset (safe-default baseline): manual controls enabled with no forced renderer lock."
                 )
                 self._update_render_profile_control_states()
+                after_state = dict(before_state)
+                after_state["render_profile"] = "custom"
+                self.status_var.set(
+                    "Applied Custom safe preset. Changed: "
+                    + build_safe_preset_change_summary(before_state, after_state)
+                )
                 self._request_preview_refresh()
                 return
             effective = self._apply_render_profile_modes(
@@ -9085,16 +9177,36 @@ if GUI_AVAILABLE:
                 recommended_profile=recommended_profile,
             )
             safe_descriptions = {
-                "vanilla": "Vanilla Safe: diffuse + normal + conservative slot-compatible defaults.",
-                "enb": "ENB Safe: ENB-oriented outputs with guarded mode defaults.",
-                "community_shaders": "Community Shaders Safe: _cm/_c workflow defaults without conflicting ENB paths.",
-                "truepbr": "TruePBR Safe: canonical _rmaos workflow defaults with safer naming guidance.",
+                "vanilla": "Vanilla Safe defaults: Diffuse+Normal ON, standard env-mask mode, no ENB/PBR-only extras.",
+                "enb": "ENB Safe defaults: ENB-oriented outputs/modes ON, conflicting CS/PBR outputs kept OFF.",
+                "community_shaders": "Community Shaders Safe defaults: _cm/_c workflow guidance ON, conflicting ENB complex paths avoided.",
+                "truepbr": "TruePBR Safe defaults: canonical _rmaos path guidance ON with non-TruePBR extras kept conservative.",
             }
             self.safe_preset_hint_var.set(
                 safe_descriptions.get(normalized, "Safe preset applied.")
             )
             effective_label = _RENDER_PROFILE_LABELS.get(effective, effective.replace("_", " ").title())
-            self.status_var.set(f"Applied {effective_label} safe preset.")
+            after_state: dict[str, object] = {
+                "render_profile": _normalize_render_profile(self.render_profile_var.get()),
+                "complex_format": str(self.complex_format_var.get()),
+                "env_mask_mode": str(self.env_mask_mode_var.get()),
+                "parallax_mode": str(self.parallax_mode_var.get()),
+                "include_diffuse": bool(self.include_diffuse_var.get()),
+                "include_normal": bool(self.include_normal_var.get()),
+                "include_parallax": bool(self.include_parallax_var.get()),
+                "include_glow": bool(self.include_glow_var.get()),
+                "include_environment_mask": bool(self.include_environment_mask_var.get()),
+                "include_complex": bool(self.include_complex_var.get()),
+                "include_rmaos": bool(self.include_rmaos_var.get()),
+                "include_wetness_mask": bool(self.include_wetness_mask_var.get()),
+                "include_snow_mask": bool(self.include_snow_mask_var.get()),
+                "include_ao": bool(self.include_ao_var.get()),
+                "include_roughness": bool(self.include_roughness_var.get()),
+            }
+            self.status_var.set(
+                f"Applied {effective_label} safe preset. Changed: "
+                + build_safe_preset_change_summary(before_state, after_state)
+            )
             self._update_render_profile_control_states()
             self._request_preview_refresh()
 
@@ -9638,8 +9750,25 @@ if GUI_AVAILABLE:
             self.reenable_batch_preview_button.configure(state=tk.DISABLED)
             self.status_var.set("Live batch preview re-enabled.")
 
+        def _toggle_preview_pause(self) -> None:
+            paused = not bool(self.preview_paused_var.get())
+            self.preview_paused_var.set(paused)
+            if paused:
+                self.preview_pause_button.configure(text="Resume preview")
+                self.preview_speed_state_var.set("Preview paused")
+                self.status_var.set("Preview paused to reduce UI overhead during long runs.")
+            else:
+                self.preview_pause_button.configure(text="Pause preview")
+                if "Preview paused" in str(self.preview_speed_state_var.get()):
+                    self.preview_speed_state_var.set("")
+                self.status_var.set("Preview resumed.")
+                self._refresh_preview()
+
         def _render_full_preview_now(self) -> None:
             self.preview_force_full_once = True
+            if self.preview_paused_var.get():
+                self.preview_paused_var.set(False)
+                self.preview_pause_button.configure(text="Pause preview")
             self.status_var.set("Rendering full preview tile set…")
             self._refresh_preview()
 
@@ -10182,6 +10311,11 @@ if GUI_AVAILABLE:
             self.preview_refresh_after_id = None
             if self.source_image is None:
                 return
+            if self.preview_paused_var.get():
+                for output_key, label in self.preview_output_labels.items():
+                    if output_key not in self.preview_output_images:
+                        label.configure(image="", text="Preview paused")
+                return
             try:
                 include_flags = {
                     "diffuse": bool(self.include_diffuse_var.get()),
@@ -10258,7 +10392,7 @@ if GUI_AVAILABLE:
                     if output_image is None:
                         self.preview_output_images.pop(output_key, None)
                         if output_key in deferred_output_keys and include_flags.get(output_key, False):
-                            label.configure(image="", text="Deferred (speed mode)")
+                            label.configure(image="", text="Deferred: speed mode (render all to load)")
                         else:
                             label.configure(image="", text="No preview")
                         continue
