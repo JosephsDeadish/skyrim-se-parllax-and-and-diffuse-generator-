@@ -2907,6 +2907,11 @@ class TestParitySampleMatrix(unittest.TestCase):
             self.assertIsInstance(expected_prefixes, list)
             expected_absent_prefixes = case.get("expected_absent_prefixes", [])
             self.assertIsInstance(expected_absent_prefixes, list)
+            expected_remediation_steps = case.get("expected_remediation_steps", [])
+            self.assertIsInstance(expected_remediation_steps, list)
+            expected_absent_remediation_steps = case.get("expected_absent_remediation_steps", [])
+            self.assertIsInstance(expected_absent_remediation_steps, list)
+            expected_no_auto_remediation = bool(case.get("expected_no_auto_remediation", False))
             codes = [group.code for group in validation.conflict_report]
             all_codes.extend(codes)
             for prefix in expected_prefixes:
@@ -2919,6 +2924,34 @@ class TestParitySampleMatrix(unittest.TestCase):
                     any(code.startswith(str(prefix)) for code in codes),
                     f"{case.get('id', 'case')} unexpectedly matched {prefix}; got {codes}",
                 )
+            if expected_remediation_steps or expected_absent_remediation_steps or expected_no_auto_remediation:
+                opts, rem_steps = build_auto_remediation_patch_options(
+                    validation.nif_path,
+                    codes,
+                    backup=False,
+                )
+                if expected_no_auto_remediation:
+                    self.assertIsNone(
+                        opts,
+                        f"{case.get('id', 'case')} expected no auto-remediation but got steps={rem_steps}",
+                    )
+                else:
+                    self.assertIsNotNone(
+                        opts,
+                        f"{case.get('id', 'case')} expected auto-remediation options but got none",
+                    )
+                for step in expected_remediation_steps:
+                    self.assertIn(
+                        str(step),
+                        rem_steps,
+                        f"{case.get('id', 'case')} missing remediation step {step!r}; got {rem_steps}",
+                    )
+                for step in expected_absent_remediation_steps:
+                    self.assertNotIn(
+                        str(step),
+                        rem_steps,
+                        f"{case.get('id', 'case')} unexpectedly included remediation step {step!r}; got {rem_steps}",
+                    )
 
         self.assertTrue(any(".skyrim." in code for code in all_codes))
         self.assertTrue(any(".fallout." in code for code in all_codes))

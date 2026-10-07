@@ -18,6 +18,14 @@
       "flags1": 128,
       "expected_prefixes": [
         "shader_state.envmap_missing_slots4_5.skyrim."
+      ],
+      "expected_remediation_steps": [
+        "set_slot4_cubemap_for_missing_envmap_slots4_5",
+        "set_slot5_env_mask_for_missing_envmap_slots4_5",
+        "enable_env_mapping_for_missing_envmap_slots4_5"
+      ],
+      "expected_absent_remediation_steps": [
+        "disable_env_mapping_for_missing_slots4_5"
       ]
     },
     {
@@ -40,6 +48,9 @@
       ],
       "expected_prefixes": [
         "shader_state.envmap_missing_slot5.skyrim."
+      ],
+      "expected_remediation_steps": [
+        "set_slot5_env_mask_for_missing_envmap_slot5"
       ]
     },
     {
@@ -72,6 +83,9 @@
       ],
       "expected_prefixes": [
         "path_slot_parallax.matches_diffuse.skyrim."
+      ],
+      "expected_remediation_steps": [
+        "set_slot3_parallax"
       ]
     },
     {
@@ -276,6 +290,57 @@
       "expected_prefixes": [
         "shader_state.envmap_missing_slot4.skyrim.real",
         "path_slot_parallax.matches_diffuse.skyrim.real"
+      ],
+      "expected_remediation_steps": [
+        "set_slot3_parallax",
+        "set_slot4_cubemap_for_missing_envmap_slot4",
+        "enable_env_mapping_for_missing_envmap_slot4"
+      ]
+    },
+    {
+      "id": "parity_skyrim_real_shifted_multiblock_envmap_slot5_and_glow_wrong_suffix",
+      "profile": "skyrim",
+      "shader_layout": "real",
+      "user_ver2": 130,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_set_layout_shift": 4,
+      "texture_paths": [
+        "textures\\architecture\\castle\\castlewall.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\castle_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\castle\\castlewall.dds",
+            "textures\\architecture\\castle\\castlewall_n.dds",
+            "textures\\architecture\\castle\\castlewall_n.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "expected_prefixes": [
+        "shader_state.envmap_missing_slot5.skyrim.real",
+        "path_slot_glow.wrong_suffix.skyrim.real"
+      ],
+      "expected_remediation_steps": [
+        "set_slot5_env_mask_for_missing_envmap_slot5",
+        "enable_env_mapping_for_missing_envmap_slot5",
+        "set_slot2_glow"
       ]
     },
     {
@@ -330,6 +395,9 @@
       ],
       "expected_prefixes": [
         "flag_env_mapping.slot5_filled_without_flag.fallout."
+      ],
+      "expected_remediation_steps": [
+        "enable_env_mapping"
       ]
     },
     {
@@ -353,6 +421,58 @@
       ],
       "expected_prefixes": [
         "shader_state.envmap_missing_slot5.fallout."
+      ],
+      "expected_remediation_steps": [
+        "set_slot5_env_mask_for_missing_envmap_slot5"
+      ]
+      ,
+      "expected_absent_remediation_steps": [
+        "disable_env_mapping_for_missing_slot5"
+      ]
+    },
+    {
+      "id": "parity_fallout_real_multiblock_envmap_slot4_and_parallax_diffuse",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\architecture\\factory\\factorywall.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\architecture\\factory\\factorywall_m.dds",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_paths": [
+            "textures\\architecture\\factory\\factorywall.dds",
+            "textures\\architecture\\factory\\factorywall_n.dds",
+            "",
+            "textures\\architecture\\factory\\factorywall.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "expected_prefixes": [
+        "shader_state.envmap_missing_slot4.fallout.real",
+        "path_slot_parallax.matches_diffuse.fallout.real"
+      ],
+      "expected_remediation_steps": [
+        "set_slot3_parallax",
+        "set_slot4_cubemap_for_missing_envmap_slot4",
+        "enable_env_mapping_for_missing_envmap_slot4"
       ]
     }
   ]

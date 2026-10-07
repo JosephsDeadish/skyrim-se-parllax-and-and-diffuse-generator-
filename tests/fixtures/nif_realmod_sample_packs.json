@@ -3,7 +3,7 @@
     {
       "id": "skyrim_realmod_family_pack",
       "expected_family_case_counts": {
-        "architecture": 3,
+        "architecture": 4,
         "clutter": 1,
         "armor": 1,
         "landscape": 1,
@@ -245,6 +245,48 @@
           "expected_prefixes": [
             "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim."
           ]
+        },
+        {
+          "id": "pack_skyrim_architecture_real_multiblock_env_slot5_and_glow_wrong",
+          "family": "architecture",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\castle\\castlewall.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\castle_e.dds",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\architecture\\castle\\castlewall.dds",
+                "textures\\architecture\\castle\\castlewall_n.dds",
+                "textures\\architecture\\castle\\castlewall_n.dds",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_missing_slot5.skyrim.real",
+            "path_slot_glow.wrong_suffix.skyrim.real"
+          ]
         }
       ]
     },
@@ -253,7 +295,7 @@
       "expected_family_case_counts": {
         "architecture": 1,
         "effects": 1,
-        "clutter": 1,
+        "clutter": 2,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -458,6 +500,47 @@
           "flags1": 2048,
           "expected_prefixes": [
             "shader_state.parallax_type_missing_slot3.fallout."
+          ]
+        },
+        {
+          "id": "pack_fallout_clutter_real_multiblock_env_slot4_and_parallax_diffuse",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_paths": [
+            "textures\\clutter\\factory\\console.dds",
+            "",
+            "",
+            "",
+            "",
+            "textures\\clutter\\factory\\console_m.dds",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "texture_paths": [
+                "textures\\clutter\\factory\\console.dds",
+                "textures\\clutter\\factory\\console_n.dds",
+                "",
+                "textures\\clutter\\factory\\console.dds",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_missing_slot4.fallout.real",
+            "path_slot_parallax.matches_diffuse.fallout.real"
           ]
         }
       ]
