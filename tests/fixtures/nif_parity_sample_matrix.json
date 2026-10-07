@@ -147,6 +147,58 @@
       ]
     },
     {
+      "id": "parity_skyrim_multiblock_conflicting_workflows",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\architecture\\bridge\\stonebridge.dds",
+        "textures\\architecture\\bridge\\stonebridge_n.dds",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_paths": [
+            "textures\\architecture\\bridge\\stonebridge.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\stonebridge_e.dds",
+            "",
+            "",
+            "",
+            ""
+          ]
+        },
+        {
+          "shader_type": 0,
+          "texture_paths": [
+            "textures\\architecture\\bridge\\stonebridge.dds",
+            "textures\\architecture\\bridge\\stonebridge_n.dds",
+            "",
+            "textures\\architecture\\bridge\\stonebridge_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "expected_prefixes": [
+        "shader_state.envmap_missing_slot5.skyrim.",
+        "path_slot_parallax.matches_normal.skyrim."
+      ]
+    },
+    {
       "id": "parity_fallout_missing_parallax_flag",
       "profile": "fallout",
       "shader_layout": "legacy",
@@ -198,6 +250,29 @@
       ],
       "expected_prefixes": [
         "flag_env_mapping.slot5_filled_without_flag.fallout."
+      ]
+    },
+    {
+      "id": "parity_fallout_envmap_slot5_missing",
+      "profile": "fallout",
+      "shader_layout": "legacy",
+      "user_version": 11,
+      "user_ver2": 130,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\stone_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "expected_prefixes": [
+        "shader_state.envmap_missing_slot5.fallout."
       ]
     }
   ]

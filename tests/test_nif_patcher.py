@@ -1549,6 +1549,56 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertFalse(infos[0].has_env_mapping_flag)
         self.assertTrue(any("auto-restored" in warning.lower() for warning in result.warnings))
 
+    def test_auto_restore_mixed_multiblock_conflicts_preserve_valid_block_flags(self) -> None:
+        cubemap_dir = self.tmp / "textures" / "cubemaps"
+        cubemap_dir.mkdir(parents=True, exist_ok=True)
+        (cubemap_dir / "env_e.dds").write_bytes(b"dds")
+        parallax_dir = self.tmp / "textures" / "architecture"
+        parallax_dir.mkdir(parents=True, exist_ok=True)
+        (parallax_dir / "stone_p.dds").write_bytes(b"dds")
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            texture_paths=[
+                "textures\\architecture\\stone.dds",
+                "",
+                "",
+                "",
+                "textures\\cubemaps\\env_e.dds",
+                "textures\\architecture\\missing_m.dds",
+                "",
+                "",
+                "",
+            ],
+            extra_shader_blocks=[
+                {
+                    "shader_type": SHADER_TYPE_HEIGHTMAP,
+                    "flags1": SLSF1_PARALLAX,
+                    "texture_paths": [
+                        "textures\\architecture\\stone.dds",
+                        "",
+                        "",
+                        "textures\\architecture\\stone_p.dds",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                    ],
+                }
+            ],
+        )
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, enable_env_mapping=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 2)
+        envmap_block = next(info for info in infos if info.shader_type == SHADER_TYPE_ENVMAP)
+        heightmap_block = next(info for info in infos if info.shader_type == SHADER_TYPE_HEIGHTMAP)
+        self.assertFalse(envmap_block.has_env_mapping_flag)
+        self.assertTrue(heightmap_block.has_parallax_flag)
+        self.assertTrue(any("auto-restored" in warning.lower() for warning in result.warnings), result.warnings)
+
     def test_patch_is_idempotent(self) -> None:
         # A fully patched parallax NIF must have both SLSF1_PARALLAX and
         # SLSF2_VERTEX_COLORS set.  Patching such a NIF again must be a no-op.

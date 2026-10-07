@@ -353,3 +353,29 @@ Before publishing a release, run at least one real mod-scale verification pass:
 - 8K-heavy runs may require lower worker counts and longer preview refresh intervals; this is expected to avoid memory spikes.
 - NIF Editor remains experimental, especially for Fallout-era profiles; keep backups and validate in game after patching.
 - TruePBR/Community Shaders/ENB outputs are workflow-specific; avoid mixing output families on the same mesh/material unless you explicitly know that pipeline is supported.
+
+### Consolidated compatibility matrix (game + workflow + profile)
+
+| Game/profile | Texture generation workflows | NIF patching mode | Recommended defaults |
+| --- | --- | --- | --- |
+| Skyrim LE/SE/AE/VR (auto/skyrim profile) | Vanilla (`_m`), ENB (`_msn` + optional POM), CS Extended Materials (`_cm/_c`), CS TruePBR (`_rmaos/_ramos` + JSON) | Supported | Start with a safe preset, keep lazy/staged preview on for large sets, use `resume` mode for 1000+ runs |
+| Fallout-era headers (fallout profile) | Texture generation outputs are available, but keep workflows separated per mesh/material | Guarded experimental patch mode only (`--experimental-fallout-write`) | Keep guarded mode, enable only required per-operation gates, validate in game after patching |
+| Unknown/unsupported headers | Texture generation unaffected | Validation-only guidance, patching may be blocked | Run `--validate --conflict-report` first and fix header/profile issues before patching |
+
+### Troubleshooting decision tree (common NIF patch failures)
+
+1. **Patch failed before write**
+   - Run `nif_patcher.py --validate --conflict-report <mesh_or_folder>`.
+   - If fallout-profile warnings appear, re-run with `--target-game fallout --experimental-fallout-write` and only necessary safety gates.
+2. **Parallax enabled but no in-game depth**
+   - Check slot 3 path and naming (`_p.dds`) and confirm it resolves on disk near the mesh.
+   - Review conflicts for `missing_parallax_slot3.*` or `shader_state.parallax_type_missing_slot3.*`.
+3. **EnvMap/reflective behavior missing or broken**
+   - Check slot 4 cubemap and slot 5 env-mask paths plus `SLSF1_Environment_Mapping`.
+   - Review `shader_state.envmap_missing_slot4.*`, `shader_state.envmap_missing_slot5.*`, and `flag_env_mapping.*` conflicts.
+4. **Glow/emissive not visible**
+   - Confirm slot 2 uses `_g.dds`-style emissive path and `SLSF2_Glow_Map` alignment.
+   - Review `flag_glow_map.*` and `path_slot_glow.*` conflicts.
+5. **Large batch run is too slow or reruns unexpectedly**
+   - Keep lazy/staged preview enabled, disable live batch preview, and use `resume` mode with checkpoint status checks.
+   - Use generated failure artifacts (`batch_failure_report.json/csv`) to isolate repeat offenders before rerun.

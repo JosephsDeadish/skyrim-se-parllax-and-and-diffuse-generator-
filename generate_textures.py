@@ -7705,7 +7705,9 @@ if GUI_AVAILABLE:
             self.preview_speed_state_var = tk.StringVar(value="")
             self.checkpoint_health_var = tk.StringVar(value="Checkpoint: pending")
             self.batch_perf_hint_var = tk.StringVar(value="")
-            self.safe_preset_hint_var = tk.StringVar(value="Safe-default presets apply conservative, conflict-averse workflow defaults in one click.")
+            self.safe_preset_hint_var = tk.StringVar(
+                value="Safe defaults are recommended for most users: pick one workflow preset first, then only tune sliders if needed."
+            )
             self.preview_force_full_once = False
             self.preview_paused_var = tk.BooleanVar(value=False)
             self.batch_preview_auto_paused = False
@@ -8071,6 +8073,15 @@ if GUI_AVAILABLE:
             ).pack(side=tk.LEFT, padx=2)
             _preset_hint = ttk.Label(_workflow_frame, textvariable=self.safe_preset_hint_var, foreground="gray")
             _preset_hint.grid(row=3, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
+            _preset_usage_hint = ttk.Label(
+                _workflow_frame,
+                text=(
+                    "When to use: Vanilla = stock Skyrim SE, ENB = ENB complex workflows, "
+                    "CS = Community Shaders Extended Materials, TruePBR = CS TruePBR JSON workflows."
+                ),
+                foreground="gray",
+            )
+            _preset_usage_hint.grid(row=4, column=0, columnspan=3, sticky=tk.W, pady=(0, 2))
 
             self._render_profile_managed_output_widgets = [
                 _diffuse_check,
@@ -8092,7 +8103,10 @@ if GUI_AVAILABLE:
                 command=self._toggle_auto_suggestions,
             )
             _auto_sugg_check.grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(6, 2))
-            self._add_tooltip(_auto_sugg_check, "🤖 Let the AI™ (actually just math) pick slider values.\nUncheck if you think YOU know better than the algorithm. Spoiler: maybe you do.")
+            self._add_tooltip(
+                _auto_sugg_check,
+                "Auto mode updates slider values from image analysis.\nDisable when you want fully manual control.",
+            )
             _show_advanced_generation_check = ttk.Checkbutton(
                 options_frame,
                 text="Show advanced generation controls",
@@ -8196,7 +8210,10 @@ if GUI_AVAILABLE:
 
             _normal_label = ttk.Label(options_frame, text="Normal strength")
             _normal_label.grid(row=4, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_normal_label, "💪 Controls normal-map intensity.\nHigher = sharper fake detail. Lower = smooth potato mode.")
+            self._add_tooltip(
+                _normal_label,
+                "Controls normal-map intensity.\nHigher = sharper detail, lower = smoother detail.",
+            )
             self.normal_scale = ttk.Scale(options_frame, from_=0.1, to=12.0, variable=self.normal_strength_var, command=lambda _: self._on_slider_changed())
             self.normal_scale.grid(row=4, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.normal_scale, "💪 Drag right for epic bumps, left for subtle detail.\nLive value is shown next to the slider so you can stop guessing.")
@@ -8204,7 +8221,10 @@ if GUI_AVAILABLE:
             self.normal_strength_display_label.grid(row=4, column=3, sticky=tk.W, padx=8)
             self.auto_normal_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_normal_suggestion_var, command=self._on_auto_slider_preference_changed)
             self.auto_normal_check.grid(row=4, column=4, sticky=tk.W)
-            self._add_tooltip(self.auto_normal_check, "🤖 Let the app analyse the image and choose this value.\nUncheck to manually control, as the control freak you truly are.")
+            self._add_tooltip(
+                self.auto_normal_check,
+                "Enable automatic normal-strength recommendation for this slider.",
+            )
 
             _parallax_label = ttk.Label(options_frame, text="Parallax strength")
             _parallax_label.grid(row=5, column=0, sticky=tk.W, pady=8)
@@ -8216,7 +8236,10 @@ if GUI_AVAILABLE:
             self.parallax_strength_display_label.grid(row=5, column=3, sticky=tk.W, padx=8)
             self.auto_parallax_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_parallax_suggestion_var, command=self._on_auto_slider_preference_changed)
             self.auto_parallax_check.grid(row=5, column=4, sticky=tk.W)
-            self._add_tooltip(self.auto_parallax_check, "🤖 Automatic parallax strength suggestion.\nBased on actual image analysis, not a horoscope.")
+            self._add_tooltip(
+                self.auto_parallax_check,
+                "Enable automatic parallax-strength recommendation for this slider.",
+            )
 
             _glow_label = ttk.Label(options_frame, text="Glow threshold")
             _glow_label.grid(row=6, column=0, sticky=tk.W, pady=8)
@@ -8228,7 +8251,10 @@ if GUI_AVAILABLE:
             self.glow_threshold_display_label.grid(row=6, column=3, sticky=tk.W, padx=8)
             self.auto_glow_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_glow_suggestion_var, command=self._on_auto_slider_preference_changed)
             self.auto_glow_check.grid(row=6, column=4, sticky=tk.W)
-            self._add_tooltip(self.auto_glow_check, "🤖 Auto-detect the ideal glow threshold.\nBased on luminance analysis. The computer is trying its best.")
+            self._add_tooltip(
+                self.auto_glow_check,
+                "Enable automatic glow-threshold recommendation for this slider.",
+            )
 
             _env_mask_label = ttk.Label(options_frame, text="Environment mask strength")
             _env_mask_label.grid(row=7, column=0, sticky=tk.W, pady=8)
