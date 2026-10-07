@@ -42,8 +42,6 @@ Usage (CLI)::
 """
 
 from __future__ import annotations
-
-import difflib
 import re
 import struct
 from dataclasses import dataclass, field, replace
@@ -138,6 +136,7 @@ def build_game_profile_support_matrix() -> tuple[tuple[str, str, str, str, str],
 
 
 def build_compatibility_report_text() -> str:
+    """Build a human-readable compatibility report for supported NIF game profiles."""
     fallout_versions = sorted({u for u, _ in _KNOWN_FALLOUT_USER_VERSION_SIGNATURES})
     fallout_user_ver2_values = sorted({u2 for _, u2 in _KNOWN_FALLOUT_USER_VERSION_SIGNATURES})
     if fallout_user_ver2_values:
@@ -2668,14 +2667,13 @@ def _apply_patches(
         new_flags1 = sp.flags1
         new_flags2 = sp.flags2
         # ---- Determine whether parallax is safe to enable on this block ----
-        requested_parallax_enable = _should_enable_parallax_on_shader(
+        enabling_parallax = _should_enable_parallax_on_shader(
             sp,
             effective_parallax=effective_parallax,
             opts=opts,
             shader_to_shape=shader_to_shape,
             has_havok=has_havok,
         )
-        enabling_parallax = requested_parallax_enable
         if enabling_parallax:
             if opts.clear_parallax_texture_path and not opts.parallax_texture_path:
                 enabling_parallax = False
@@ -3025,30 +3023,26 @@ def _summarize_binary_diff(
         if start is not None and len(changed_ranges) < max_ranges:
             changed_ranges.append((start, len(original_data) - 1))
         return changed_bytes, changed_ranges
-    if max(len(original_data), len(new_data)) > 2_000_000:
-        min_len = min(len(original_data), len(new_data))
-        first_diff = min_len
-        for idx in range(min_len):
-            if original_data[idx] != new_data[idx]:
-                first_diff = idx
-                break
-        if first_diff == min_len:
-            changed_bytes = abs(len(original_data) - len(new_data))
-        else:
-            changed_bytes = (min_len - first_diff) + abs(len(original_data) - len(new_data))
-            if len(changed_ranges) < max_ranges and len(new_data) > 0:
-                changed_ranges.append((first_diff, len(new_data) - 1))
-        return changed_bytes, changed_ranges
-    matcher = difflib.SequenceMatcher(a=original_data, b=new_data, autojunk=False)
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        if tag == "equal":
-            continue
-        changed_bytes += max(i2 - i1, j2 - j1)
-        if len(changed_ranges) < max_ranges:
-            start_idx = j1
-            end_idx = j2 - 1
-            if end_idx >= start_idx:
-                changed_ranges.append((start_idx, end_idx))
+    prefix = 0
+    min_len = min(len(original_data), len(new_data))
+    while prefix < min_len and original_data[prefix] == new_data[prefix]:
+        prefix += 1
+    suffix = 0
+    max_suffix = min_len - prefix
+    while (
+        suffix < max_suffix
+        and original_data[len(original_data) - 1 - suffix] == new_data[len(new_data) - 1 - suffix]
+    ):
+        suffix += 1
+    changed_old = len(original_data) - prefix - suffix
+    changed_new = len(new_data) - prefix - suffix
+    changed_bytes = max(changed_old, 0) + max(changed_new, 0)
+    if changed_new > 0 and len(changed_ranges) < max_ranges:
+        changed_ranges.append((prefix, prefix + changed_new - 1))
+    elif changed_old > 0 and len(changed_ranges) < max_ranges and len(new_data) > 0:
+        start = min(prefix, len(new_data) - 1)
+        end = min(len(new_data) - 1, start + max(changed_old - 1, 0))
+        changed_ranges.append((start, end))
     return changed_bytes, changed_ranges
 
 
