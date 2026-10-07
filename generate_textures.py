@@ -185,9 +185,12 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "dark_mode": False,
     "show_batch_preview": False,
     "auto_optimize_large_batches": True,
+    "lazy_preview_mode": True,
     "simplified_main_layout": True,
     "show_advanced_generation_controls": False,
     "show_advanced_workflow_outputs": False,
+    "batch_resume_mode": "start_fresh",
+    "batch_checkpoint_path": "",
     "auto_patch_nifs": False,
     "preview_size": "Medium",
     "complex_format": "msn",
@@ -435,6 +438,7 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         "dark_mode",
         "show_batch_preview",
         "auto_optimize_large_batches",
+        "lazy_preview_mode",
         "simplified_main_layout",
         "show_advanced_generation_controls",
         "show_advanced_workflow_outputs",
@@ -518,6 +522,11 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     else:
         state["render_profile"] = str(_GUI_STATE_DEFAULTS["render_profile"])
     state["target_game"] = _normalize_texture_target_game(str(raw.get("target_game", state["target_game"]) or state["target_game"]))
+    resume_mode = str(raw.get("batch_resume_mode", state.get("batch_resume_mode", "start_fresh")) or "start_fresh").strip().lower()
+    if resume_mode not in {"start_fresh", "resume"}:
+        resume_mode = "start_fresh"
+    state["batch_resume_mode"] = resume_mode
+    state["batch_checkpoint_path"] = str(raw.get("batch_checkpoint_path", state.get("batch_checkpoint_path", "")) or "")
     state["normal_strength"] = _coerce_float(raw.get("normal_strength"), float(state["normal_strength"]), 0.1, 12.0)
     state["parallax_strength"] = _coerce_float(raw.get("parallax_strength"), float(state["parallax_strength"]), 0.1, 10.0)
     state["glow_threshold"] = _coerce_int(raw.get("glow_threshold"), int(state["glow_threshold"]), 0, 255)
@@ -7466,9 +7475,12 @@ if GUI_AVAILABLE:
             self.preview_refresh_after_id: str | None = None
             self.show_batch_preview_var = tk.BooleanVar(value=False)
             self.auto_optimize_large_batches_var = tk.BooleanVar(value=True)
+            self.lazy_preview_mode_var = tk.BooleanVar(value=True)
             self.simplified_main_layout_var = tk.BooleanVar(value=True)
             self.show_advanced_generation_var = tk.BooleanVar(value=False)
             self.show_advanced_workflow_outputs_var = tk.BooleanVar(value=False)
+            self.batch_resume_mode_var = tk.StringVar(value="start_fresh")
+            self.batch_checkpoint_path_var = tk.StringVar(value="")
             self.auto_patch_nifs_var = tk.BooleanVar(value=False)
             self.dark_mode_var = tk.BooleanVar(value=False)
             self.ui_language_var = tk.StringVar(value="en")
@@ -7486,6 +7498,10 @@ if GUI_AVAILABLE:
             self.preview_source_name_var = tk.StringVar(value="No source loaded")
             self.preview_jump_var = tk.StringVar(value="")
             self.detected_context_var = tk.StringVar(value=self.manager_context.summary)
+            self.preview_speed_state_var = tk.StringVar(value="")
+            self.batch_perf_hint_var = tk.StringVar(value="")
+            self.safe_preset_hint_var = tk.StringVar(value="Safe presets apply conservative workflow defaults in one click.")
+            self.preview_force_full_once = False
             self.normal_strength_var = tk.DoubleVar(value=2.0)
             self.parallax_strength_var = tk.DoubleVar(value=1.35)
             self.complex_strength_var = tk.DoubleVar(value=1.15)
@@ -7812,6 +7828,36 @@ if GUI_AVAILABLE:
                 "Beginner mode keeps only core Vanilla/ENB outputs visible.\n"
                 "Enable this to show advanced Community Shaders/PBR workflow output groups.",
             )
+            _preset_row = ttk.Frame(_workflow_frame)
+            _preset_row.grid(row=2, column=0, columnspan=3, sticky=tk.EW, pady=(4, 0))
+            ttk.Label(_preset_row, text="Safe workflow presets").pack(side=tk.LEFT)
+            ttk.Button(
+                _preset_row,
+                text="Vanilla Safe",
+                command=lambda: self._apply_safe_workflow_preset("vanilla"),
+            ).pack(side=tk.LEFT, padx=(8, 2))
+            ttk.Button(
+                _preset_row,
+                text="ENB Safe",
+                command=lambda: self._apply_safe_workflow_preset("enb"),
+            ).pack(side=tk.LEFT, padx=2)
+            ttk.Button(
+                _preset_row,
+                text="CS Safe",
+                command=lambda: self._apply_safe_workflow_preset("community_shaders"),
+            ).pack(side=tk.LEFT, padx=2)
+            ttk.Button(
+                _preset_row,
+                text="TruePBR Safe",
+                command=lambda: self._apply_safe_workflow_preset("truepbr"),
+            ).pack(side=tk.LEFT, padx=2)
+            ttk.Button(
+                _preset_row,
+                text="Custom",
+                command=lambda: self._apply_safe_workflow_preset("custom"),
+            ).pack(side=tk.LEFT, padx=2)
+            _preset_hint = ttk.Label(_workflow_frame, textvariable=self.safe_preset_hint_var, foreground="gray")
+            _preset_hint.grid(row=3, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
 
             self._render_profile_managed_output_widgets = [
                 _diffuse_check,
@@ -7846,7 +7892,7 @@ if GUI_AVAILABLE:
                 "Leave disabled for a cleaner preset-focused workflow.",
             )
 
-            _render_profile_label = ttk.Label(options_frame, text="Target renderer")
+            _render_profile_label = ttk.Label(options_frame, text="Target renderer (advanced)")
             _render_profile_label.grid(row=2, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(
                 _render_profile_label,
@@ -8118,6 +8164,9 @@ if GUI_AVAILABLE:
             self._render_profile_mode_widgets = [self.complex_format_combo, self.env_mask_mode_combo, self.parallax_mode_combo]
 
             advanced_generation_widgets: list[tk.Widget] = [
+                _render_profile_label,
+                _render_profile_combo,
+                self.render_profile_hint_label,
                 _complex_fmt_label,
                 self.complex_format_combo,
                 _env_mode_row,
@@ -8220,10 +8269,25 @@ if GUI_AVAILABLE:
             )
             _status_label = ttk.Label(actions, textvariable=self.status_var, justify=tk.LEFT, anchor=tk.W)
             _status_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=14)
+            self.preview_speed_badge = ttk.Label(actions, textvariable=self.preview_speed_state_var, foreground="#d97706")
+            self.preview_speed_badge.pack(side=tk.LEFT, padx=(0, 8))
+            self.reenable_batch_preview_button = ttk.Button(
+                actions,
+                text="Re-enable preview now",
+                command=self._reenable_batch_preview,
+                state=tk.DISABLED,
+            )
+            self.reenable_batch_preview_button.pack(side=tk.LEFT, padx=(0, 8))
             self._add_tooltip(
                 _status_label,
                 "Live status updates for generation and patching tasks.",
             )
+            self._add_tooltip(
+                self.reenable_batch_preview_button,
+                "Turn live batch preview back on after an auto speed pause.",
+            )
+            _perf_hint_label = ttk.Label(actions, textvariable=self.batch_perf_hint_var, foreground="gray")
+            _perf_hint_label.pack(side=tk.LEFT, padx=(0, 4))
             self._bind_responsive_wrap(top_primary_row, top_bar_message, horizontal_padding=260, min_wrap=220)
             self._bind_responsive_wrap(file_frame, _detected_context_label, horizontal_padding=28, min_wrap=220)
             self._bind_responsive_wrap(actions, _status_label, horizontal_padding=360, min_wrap=200)
@@ -8308,6 +8372,28 @@ if GUI_AVAILABLE:
                 preview_size_combo,
                 "XS→XL changes preview size in this window only.\nGenerated output quality is unchanged.",
             )
+            _lazy_preview_check = ttk.Checkbutton(
+                source_controls,
+                text="Lazy preview for large sets",
+                variable=self.lazy_preview_mode_var,
+                command=self._request_preview_refresh,
+            )
+            _lazy_preview_check.pack(side=tk.LEFT, padx=(10, 4))
+            self._add_tooltip(
+                _lazy_preview_check,
+                "Render only core preview tiles first on heavy sets, and defer niche maps until requested.",
+            )
+            self.render_all_preview_button = ttk.Button(
+                source_controls,
+                text="Render all preview tiles now",
+                command=self._render_full_preview_now,
+            )
+            self.render_all_preview_button.pack(side=tk.LEFT, padx=(4, 4))
+            self.render_all_preview_button.configure(state=tk.DISABLED)
+            self._add_tooltip(
+                self.render_all_preview_button,
+                "When lazy preview defers niche tiles for speed, click to render every enabled tile immediately.",
+            )
             _batch_prev_check = ttk.Checkbutton(
                 source_controls,
                 text="Show preview during batch",
@@ -8329,6 +8415,29 @@ if GUI_AVAILABLE:
                 _large_batch_opt_check,
                 "Automatically reduce UI overhead for heavy batch runs.\n"
                 "When many high-resolution textures are detected, live preview is turned off before processing starts.",
+            )
+            ttk.Label(source_controls, text="Resume").pack(side=tk.LEFT, padx=(10, 4))
+            _resume_combo = ttk.Combobox(
+                source_controls,
+                textvariable=self.batch_resume_mode_var,
+                values=("start_fresh", "resume"),
+                state="readonly",
+                width=12,
+            )
+            _resume_combo.pack(side=tk.LEFT)
+            self._add_tooltip(
+                _resume_combo,
+                "start_fresh: ignore prior checkpoint entries.\nresume: skip files already completed in checkpoint.",
+            )
+            _clear_checkpoint_button = ttk.Button(
+                source_controls,
+                text="Clear checkpoint",
+                command=self._clear_batch_checkpoint,
+            )
+            _clear_checkpoint_button.pack(side=tk.LEFT, padx=(4, 4))
+            self._add_tooltip(
+                _clear_checkpoint_button,
+                "Delete the current batch checkpoint file so the next run starts from scratch.",
             )
             _auto_patch_nifs_check = ttk.Checkbutton(
                 source_controls,
@@ -8703,9 +8812,12 @@ if GUI_AVAILABLE:
             self.dark_mode_var.set(bool(state["dark_mode"]))
             self.show_batch_preview_var.set(bool(state["show_batch_preview"]))
             self.auto_optimize_large_batches_var.set(bool(state.get("auto_optimize_large_batches", True)))
+            self.lazy_preview_mode_var.set(bool(state.get("lazy_preview_mode", True)))
             self.simplified_main_layout_var.set(bool(state.get("simplified_main_layout", True)))
             self.show_advanced_generation_var.set(bool(state.get("show_advanced_generation_controls", False)))
             self.show_advanced_workflow_outputs_var.set(bool(state.get("show_advanced_workflow_outputs", False)))
+            self.batch_resume_mode_var.set(str(state.get("batch_resume_mode", "start_fresh")))
+            self.batch_checkpoint_path_var.set(str(state.get("batch_checkpoint_path", "")))
             self.auto_patch_nifs_var.set(bool(state["auto_patch_nifs"]))
             self.ui_language_var.set(str(state.get("ui_language", "en") or "en"))
             self.ui_scale_var.set(float(state.get("ui_scale", 1.0)))
@@ -8763,9 +8875,12 @@ if GUI_AVAILABLE:
                 "dark_mode": self.dark_mode_var.get(),
                 "show_batch_preview": self.show_batch_preview_var.get(),
                 "auto_optimize_large_batches": self.auto_optimize_large_batches_var.get(),
+                "lazy_preview_mode": self.lazy_preview_mode_var.get(),
                 "simplified_main_layout": self.simplified_main_layout_var.get(),
                 "show_advanced_generation_controls": self.show_advanced_generation_var.get(),
                 "show_advanced_workflow_outputs": self.show_advanced_workflow_outputs_var.get(),
+                "batch_resume_mode": self.batch_resume_mode_var.get(),
+                "batch_checkpoint_path": self.batch_checkpoint_path_var.get().strip(),
                 "auto_patch_nifs": self.auto_patch_nifs_var.get(),
                 "ui_language": self.ui_language_var.get(),
                 "ui_scale": self.ui_scale_var.get(),
@@ -8947,6 +9062,100 @@ if GUI_AVAILABLE:
                 self.status_var.set("Output will be written next to the input.")
             self._update_output_location_controls()
 
+        def _apply_safe_workflow_preset(self, profile_key: str) -> None:
+            normalized = _normalize_render_profile(profile_key)
+            if normalized not in {"vanilla", "enb", "community_shaders", "truepbr", "custom"}:
+                normalized = "custom"
+            self.render_profile_var.set(normalized)
+            recommended_profile = self._recommended_render_profile_for_preview(self._current_preview_path())
+            if normalized == "custom":
+                self.safe_preset_hint_var.set(
+                    "Custom preset: manual controls enabled. Use when you need full fine-tuning."
+                )
+                self._update_render_profile_control_states()
+                self._request_preview_refresh()
+                return
+            effective = self._apply_render_profile_modes(
+                normalized,
+                recommended_profile=recommended_profile,
+                apply_preset=True,
+            )
+            self._apply_render_profile_output_toggles(
+                normalized,
+                recommended_profile=recommended_profile,
+            )
+            safe_descriptions = {
+                "vanilla": "Vanilla Safe: diffuse + normal + conservative slot-compatible defaults.",
+                "enb": "ENB Safe: ENB-oriented outputs with guarded mode defaults.",
+                "community_shaders": "Community Shaders Safe: _cm/_c workflow defaults without conflicting ENB paths.",
+                "truepbr": "TruePBR Safe: canonical _rmaos workflow defaults with safer naming guidance.",
+            }
+            self.safe_preset_hint_var.set(
+                safe_descriptions.get(normalized, "Safe preset applied.")
+            )
+            effective_label = _RENDER_PROFILE_LABELS.get(effective, effective.replace("_", " ").title())
+            self.status_var.set(f"Applied {effective_label} safe preset.")
+            self._update_render_profile_control_states()
+            self._request_preview_refresh()
+
+        def _resolve_batch_checkpoint_path(self, *, input_path: Path, output_dir: Path | None) -> Path:
+            override = self.batch_checkpoint_path_var.get().strip()
+            if override:
+                return Path(override)
+            base_dir = output_dir or (input_path if input_path.is_dir() else input_path.parent)
+            return base_dir / ".skyrim_texture_generator_batch_checkpoint.json"
+
+        def _load_batch_checkpoint_completed_files(self, checkpoint_path: Path) -> set[str]:
+            if not checkpoint_path.exists():
+                return set()
+            try:
+                payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            except Exception:
+                return set()
+            if not isinstance(payload, dict):
+                return set()
+            raw = payload.get("completed_success_files", [])
+            if not isinstance(raw, list):
+                return set()
+            return {str(item) for item in raw if isinstance(item, str)}
+
+        def _write_batch_checkpoint_state(
+            self,
+            checkpoint_path: Path,
+            *,
+            input_root: Path,
+            completed_success_files: set[str],
+            resumed_completed_count: int,
+        ) -> None:
+            checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "tool": "generate_textures",
+                "version": APP_VERSION,
+                "input_root": str(input_root.resolve()),
+                "completed_success_count": len(completed_success_files),
+                "resumed_completed_count": int(resumed_completed_count),
+                "completed_success_files": sorted(completed_success_files),
+            }
+            checkpoint_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+        def _clear_batch_checkpoint(self) -> None:
+            value = self.batch_checkpoint_path_var.get().strip()
+            checkpoint_path = Path(value) if value else None
+            if checkpoint_path is None:
+                input_value = self.input_var.get().strip()
+                if input_value:
+                    input_path = Path(input_value)
+                    inferred_output = Path(self.output_var.get().strip()) if self.use_custom_output_var.get() and self.output_var.get().strip() else None
+                    checkpoint_path = self._resolve_batch_checkpoint_path(input_path=input_path, output_dir=inferred_output)
+            if checkpoint_path is None:
+                self.status_var.set("No checkpoint file path available to clear.")
+                return
+            try:
+                checkpoint_path.unlink(missing_ok=True)
+                self.status_var.set(f"Cleared checkpoint file: {checkpoint_path.name}")
+            except Exception as exc:
+                self.status_var.set(f"Could not clear checkpoint file: {exc}")
+
         def _summarize_selected_inputs_for_performance(self) -> dict[str, float | int]:
             return _summarize_batch_texture_dimensions(self.selected_inputs)
 
@@ -9016,6 +9225,8 @@ if GUI_AVAILABLE:
             self.detected_mod_button.configure(
                 state=(tk.DISABLED if processing or not self.manager_context.loaded_texture_dirs else tk.NORMAL)
             )
+            if not processing:
+                self.reenable_batch_preview_button.configure(state=tk.DISABLED)
             self._update_output_location_controls()
             self._update_preview_navigation_state()
 
@@ -9140,18 +9351,49 @@ if GUI_AVAILABLE:
                 if output_path not in self.last_generation_backups:
                     self.last_generation_created_files.add(output_path)
 
-        def _process_generation_batch(self, input_files: list[Path], generation_kwargs: dict[str, object]) -> None:
+        def _process_generation_batch(
+            self,
+            input_files: list[Path],
+            generation_kwargs: dict[str, object],
+            input_root: Path,
+            checkpoint_path: Path,
+            completed_checkpoint_files: set[str],
+            resumed_completed_count: int,
+        ) -> None:
             try:
                 total = len(input_files)
                 results: dict[Path, dict[str, Path]] = {}
+                started_at = time.perf_counter()
+                per_file_durations: list[float] = []
+                high_res_4k_count = 0
+                high_res_8k_count = 0
+                max_source_dim = 0
                 generation_call_kwargs = dict(generation_kwargs)
                 auto_patch_nifs = bool(generation_call_kwargs.pop("auto_patch_nifs", False))
                 manager_context = generation_call_kwargs.pop("manager_context", None)
+                batch_metrics = _summarize_batch_texture_dimensions(input_files)
+                high_res_4k_count = int(batch_metrics.get("high_res_4k_count", 0) or 0)
+                high_res_8k_count = int(batch_metrics.get("high_res_8k_count", 0) or 0)
+                max_source_dim = int(batch_metrics.get("max_dimension", 0) or 0)
                 for index, input_file in enumerate(input_files, start=1):
                     if self.cancel_requested:
-                        self.processing_queue.put(("cancelled", results))
+                        self.processing_queue.put(("cancelled", (results, {
+                            "elapsed_seconds": max(0.0, time.perf_counter() - started_at),
+                            "avg_file_seconds": (sum(per_file_durations) / len(per_file_durations)) if per_file_durations else 0.0,
+                            "max_file_seconds": max(per_file_durations) if per_file_durations else 0.0,
+                            "high_res_4k_count": high_res_4k_count,
+                            "high_res_8k_count": high_res_8k_count,
+                            "max_source_dimension": max_source_dim,
+                            "resumed_completed_count": resumed_completed_count,
+                        })))
                         return
-                    self.processing_queue.put(("progress", (index, total, input_file)))
+                    elapsed_seconds = max(0.0, time.perf_counter() - started_at)
+                    eta_seconds = 0.0
+                    if index > 1 and elapsed_seconds > 0.0:
+                        avg_so_far = elapsed_seconds / max(1, index - 1)
+                        eta_seconds = max(0.0, avg_so_far * (total - index + 1))
+                    self.processing_queue.put(("progress", (index, total, input_file, elapsed_seconds, eta_seconds)))
+                    file_started = time.perf_counter()
                     try:
                         outputs = run_with_options(
                             input_file=input_file,
@@ -9181,9 +9423,30 @@ if GUI_AVAILABLE:
                             self.processing_queue.put(("nif_patch", (input_file.name, patched, failed)))
                         results[input_file] = outputs
                         self._record_created_outputs(list(outputs.values()))
+                        completed_checkpoint_files.add(str(input_file.resolve()))
+                        self._write_batch_checkpoint_state(
+                            checkpoint_path,
+                            input_root=input_root,
+                            completed_success_files=completed_checkpoint_files,
+                            resumed_completed_count=resumed_completed_count,
+                        )
                     except Exception as exc:
                         self.processing_queue.put(("file_error", (index, total, input_file.name, str(exc))))
-                self.processing_queue.put(("done", results))
+                    finally:
+                        per_file_durations.append(max(0.0, time.perf_counter() - file_started))
+                elapsed_seconds = max(0.0, time.perf_counter() - started_at)
+                avg_seconds = (sum(per_file_durations) / len(per_file_durations)) if per_file_durations else 0.0
+                max_seconds = max(per_file_durations) if per_file_durations else 0.0
+                self.processing_queue.put(("done", (results, {
+                    "elapsed_seconds": elapsed_seconds,
+                    "avg_file_seconds": avg_seconds,
+                    "max_file_seconds": max_seconds,
+                    "high_res_4k_count": high_res_4k_count,
+                    "high_res_8k_count": high_res_8k_count,
+                    "max_source_dimension": max_source_dim,
+                    "resumed_completed_count": resumed_completed_count,
+                    "checkpoint_path": str(checkpoint_path),
+                })))
             except Exception as exc:
                 self.processing_queue.put(("error", str(exc)))
 
@@ -9201,8 +9464,18 @@ if GUI_AVAILABLE:
                 processed_events += 1
 
                 if event_type == "progress":
-                    index, total, current_path = payload
-                    self.status_var.set(f"Processing {index}/{total}: {current_path.name}")
+                    if isinstance(payload, tuple) and len(payload) >= 3:
+                        index, total, current_path = payload[0], payload[1], payload[2]
+                        elapsed_seconds = float(payload[3]) if len(payload) >= 4 else 0.0
+                        eta_seconds = float(payload[4]) if len(payload) >= 5 else 0.0
+                    else:
+                        index, total, current_path = 0, 0, Path("unknown")
+                        elapsed_seconds = 0.0
+                        eta_seconds = 0.0
+                    self.status_var.set(
+                        f"Processing {index}/{total}: {current_path.name} "
+                        f"(elapsed {elapsed_seconds:.1f}s, eta {eta_seconds:.1f}s)"
+                    )
                     if self.show_batch_preview_var.get():
                         self._set_preview_source_by_path(current_path)
                 elif event_type == "nif_patch":
@@ -9217,7 +9490,12 @@ if GUI_AVAILABLE:
                     self.batch_failures.append((filename, error_message))
                     self.status_var.set(f"Skipped failed file {index}/{total}: {filename}")
                 elif event_type == "done":
-                    results = payload
+                    telemetry: dict[str, object] = {}
+                    if isinstance(payload, tuple) and len(payload) == 2 and isinstance(payload[1], dict):
+                        results = payload[0]
+                        telemetry = payload[1]
+                    else:
+                        results = payload
                     self._set_processing_state(False)
                     total_sources = len(results)
                     total_failed = len(self.batch_failures)
@@ -9246,12 +9524,42 @@ if GUI_AVAILABLE:
                                 lines.append(f"- {filename}: {error_message}")
                             if total_failed > 5:
                                 lines.append(f"...and {total_failed - 5} more.")
+                    if telemetry:
+                        elapsed = float(telemetry.get("elapsed_seconds", 0.0) or 0.0)
+                        avg_file = float(telemetry.get("avg_file_seconds", 0.0) or 0.0)
+                        max_file = float(telemetry.get("max_file_seconds", 0.0) or 0.0)
+                        high_4k = int(telemetry.get("high_res_4k_count", 0) or 0)
+                        high_8k = int(telemetry.get("high_res_8k_count", 0) or 0)
+                        max_dim = int(telemetry.get("max_source_dimension", 0) or 0)
+                        resumed = int(telemetry.get("resumed_completed_count", 0) or 0)
+                        lines.append(
+                            f"Timing: total {elapsed:.1f}s, avg/file {avg_file:.2f}s, slowest file {max_file:.2f}s."
+                        )
+                        if resumed > 0:
+                            lines.append(f"Resume mode skipped {resumed} file(s) from checkpoint.")
+                        if high_4k > 0:
+                            lines.append(
+                                f"High-res load: {high_4k} file(s) at 4K+, {high_8k} at 8K+ (max {max_dim}px)."
+                            )
+                        perf_hints: list[str] = []
+                        if high_8k > 0 and avg_file > 1.5:
+                            perf_hints.append("8K-heavy run detected; keep lazy preview enabled and use resume checkpoints.")
+                        if high_4k > 50:
+                            perf_hints.append("Large high-res set detected; start with core outputs then add niche maps in a second pass.")
+                        if total_failed > 0:
+                            perf_hints.append("Check batch_failure_report.csv/json for repeated failure patterns before rerun.")
+                        self.batch_perf_hint_var.set(" | ".join(perf_hints[:2]))
                     messagebox.showinfo("Generation complete", "\n".join(lines), parent=self.root)
                     self._refresh_preview()
                     keep_polling = False
                     break
                 elif event_type == "cancelled":
-                    results = payload
+                    telemetry: dict[str, object] = {}
+                    if isinstance(payload, tuple) and len(payload) == 2 and isinstance(payload[1], dict):
+                        results = payload[0]
+                        telemetry = payload[1]
+                    else:
+                        results = payload
                     self._set_processing_state(False)
                     total_sources = len(results)
                     total_outputs = sum(len(output_set) for output_set in results.values())
@@ -9263,6 +9571,11 @@ if GUI_AVAILABLE:
                         "Processing was cancelled.\nUse Revert Process to undo files from this run if needed.",
                         parent=self.root,
                     )
+                    if telemetry:
+                        self.batch_perf_hint_var.set(
+                            f"Cancelled after {float(telemetry.get('elapsed_seconds', 0.0) or 0.0):.1f}s. "
+                            "Resume mode can continue from checkpoint."
+                        )
                     keep_polling = False
                     break
                 elif event_type == "error":
@@ -9315,6 +9628,20 @@ if GUI_AVAILABLE:
                 self.status_var.set("Batch live preview enabled. Heads-up: this can slow processing on large batches.")
             else:
                 self.status_var.set("Batch live preview disabled for faster processing.")
+            if self.show_batch_preview_var.get():
+                self.preview_speed_state_var.set("")
+                self.reenable_batch_preview_button.configure(state=tk.DISABLED)
+
+        def _reenable_batch_preview(self) -> None:
+            self.show_batch_preview_var.set(True)
+            self.preview_speed_state_var.set("")
+            self.reenable_batch_preview_button.configure(state=tk.DISABLED)
+            self.status_var.set("Live batch preview re-enabled.")
+
+        def _render_full_preview_now(self) -> None:
+            self.preview_force_full_once = True
+            self.status_var.set("Rendering full preview tile set…")
+            self._refresh_preview()
 
         def _on_auto_patch_nifs_toggle(self) -> None:
             if self.auto_patch_nifs_var.get():
@@ -9856,6 +10183,37 @@ if GUI_AVAILABLE:
             if self.source_image is None:
                 return
             try:
+                include_flags = {
+                    "diffuse": bool(self.include_diffuse_var.get()),
+                    "normal": bool(self.include_normal_var.get()),
+                    "parallax": bool(self.include_parallax_var.get()),
+                    "glow": bool(self.include_glow_var.get()),
+                    "environment_mask": bool(self.include_environment_mask_var.get()),
+                    "rmaos": bool(self.include_rmaos_var.get()),
+                    "wetness_mask": bool(self.include_wetness_mask_var.get()),
+                    "snow_mask": bool(self.include_snow_mask_var.get()),
+                    "ao": bool(self.include_ao_var.get()),
+                    "roughness": bool(self.include_roughness_var.get()),
+                    "complex_material": bool(self.include_complex_var.get()),
+                }
+                lazy_trigger = (
+                    bool(self.lazy_preview_mode_var.get())
+                    and not bool(self.preview_force_full_once)
+                    and (
+                        len(self.selected_inputs) >= 64
+                        or (self.source_image.width * self.source_image.height) >= (1024 * 1024)
+                    )
+                )
+                deferred_output_keys: set[str] = set()
+                if lazy_trigger:
+                    deferred_output_keys = {
+                        "rmaos",
+                        "wetness_mask",
+                        "snow_mask",
+                        "ao",
+                        "roughness",
+                        "complex_material",
+                    }
                 # Map the GUI parallax mode combo value to the internal key.
                 _pm_raw = self.parallax_mode_var.get()
                 _parallax_mode = "occlusion" if "occlusion" in _pm_raw else "standard"
@@ -9873,23 +10231,24 @@ if GUI_AVAILABLE:
                     emboss_mode=self.emboss_mode_var.get(),
                     relief_mode=self.relief_mode_var.get(),
                     parallax_mode=_parallax_mode,
-                    include_diffuse=self.include_diffuse_var.get(),
-                    include_normal=self.include_normal_var.get(),
-                    include_parallax=self.include_parallax_var.get(),
-                    include_glow=self.include_glow_var.get(),
-                    include_environment_mask=self.include_environment_mask_var.get(),
-                    include_rmaos=self.include_rmaos_var.get(),
-                    include_wetness_mask=self.include_wetness_mask_var.get(),
+                    include_diffuse=include_flags["diffuse"],
+                    include_normal=include_flags["normal"],
+                    include_parallax=include_flags["parallax"],
+                    include_glow=include_flags["glow"],
+                    include_environment_mask=include_flags["environment_mask"],
+                    include_rmaos=(include_flags["rmaos"] and "rmaos" not in deferred_output_keys),
+                    include_wetness_mask=(include_flags["wetness_mask"] and "wetness_mask" not in deferred_output_keys),
                     wetness_mask_strength=float(_GUI_STATE_DEFAULTS["wetness_mask_strength"]),
-                    include_snow_mask=self.include_snow_mask_var.get(),
+                    include_snow_mask=(include_flags["snow_mask"] and "snow_mask" not in deferred_output_keys),
                     snow_mask_strength=float(_GUI_STATE_DEFAULTS["snow_mask_strength"]),
-                    include_ao=self.include_ao_var.get(),
+                    include_ao=(include_flags["ao"] and "ao" not in deferred_output_keys),
                     ao_strength=float(self.ao_strength_var.get()),
-                    include_roughness=self.include_roughness_var.get(),
+                    include_roughness=(include_flags["roughness"] and "roughness" not in deferred_output_keys),
                     roughness_strength=float(self.roughness_strength_var.get()),
-                    include_complex=self.include_complex_var.get(),
+                    include_complex=(include_flags["complex_material"] and "complex_material" not in deferred_output_keys),
                     render_profile=self.render_profile_var.get(),
                 )
+                self.preview_force_full_once = False
 
                 before_max, output_max = get_preview_size_limits(self.preview_size_var.get())
                 self.preview_before = self._photo_image(self.source_image, max_size=before_max)
@@ -9898,7 +10257,10 @@ if GUI_AVAILABLE:
                     output_image = outputs.get(output_key)
                     if output_image is None:
                         self.preview_output_images.pop(output_key, None)
-                        label.configure(image="", text="No preview")
+                        if output_key in deferred_output_keys and include_flags.get(output_key, False):
+                            label.configure(image="", text="Deferred (speed mode)")
+                        else:
+                            label.configure(image="", text="No preview")
                         continue
                     display_image = output_image
                     if output_key == "complex_material":
@@ -9909,6 +10271,21 @@ if GUI_AVAILABLE:
                     photo = self._photo_image(display_image, max_size=output_max)
                     self.preview_output_images[output_key] = photo
                     label.configure(image=photo, text="")
+                if deferred_output_keys:
+                    deferred_enabled = sorted(
+                        key for key in deferred_output_keys if include_flags.get(key, False)
+                    )
+                    if deferred_enabled:
+                        self.render_all_preview_button.configure(state=tk.NORMAL)
+                        self.preview_speed_state_var.set(
+                            f"Lazy preview active ({len(deferred_enabled)} tile(s) deferred)"
+                        )
+                    else:
+                        self.render_all_preview_button.configure(state=tk.DISABLED)
+                else:
+                    self.render_all_preview_button.configure(state=tk.DISABLED)
+                    if not self.is_processing or self.show_batch_preview_var.get():
+                        self.preview_speed_state_var.set("")
             except Exception as exc:
                 self.status_var.set(f"Preview update failed: {exc}")
 
@@ -10092,6 +10469,34 @@ if GUI_AVAILABLE:
                         )
                         return
                     output_dir = Path(output_value)
+                checkpoint_path = self._resolve_batch_checkpoint_path(
+                    input_path=input_path,
+                    output_dir=output_dir,
+                )
+                self.batch_checkpoint_path_var.set(str(checkpoint_path))
+                resumed_completed_count = 0
+                completed_checkpoint_files: set[str] = set()
+                if self.batch_resume_mode_var.get() == "resume":
+                    completed_checkpoint_files = self._load_batch_checkpoint_completed_files(checkpoint_path)
+                    if completed_checkpoint_files:
+                        filtered_inputs = [
+                            candidate for candidate in self.selected_inputs
+                            if str(candidate.resolve()) not in completed_checkpoint_files
+                        ]
+                        resumed_completed_count = len(self.selected_inputs) - len(filtered_inputs)
+                        self.selected_inputs = filtered_inputs
+                        if not self.selected_inputs:
+                            self.status_var.set(
+                                f"All selected files are already completed in checkpoint ({checkpoint_path.name})."
+                            )
+                            messagebox.showinfo(
+                                "Nothing to process",
+                                "Checkpoint resume found no remaining files to process.",
+                                parent=self.root,
+                            )
+                            return
+                else:
+                    checkpoint_path.unlink(missing_ok=True)
 
                 _context_source = select_generation_context_source(Path(input_value), self.selected_inputs)
                 _material_type = classify_material_type(_context_source)
@@ -10225,6 +10630,13 @@ if GUI_AVAILABLE:
                     )
                 if preview_auto_disabled:
                     perf_note += " Live preview was turned off automatically for better throughput."
+                    self.preview_speed_state_var.set("Preview paused for speed")
+                    self.reenable_batch_preview_button.configure(state=tk.NORMAL)
+                else:
+                    self.preview_speed_state_var.set("")
+                    self.reenable_batch_preview_button.configure(state=tk.DISABLED)
+                if resumed_completed_count > 0:
+                    perf_note += f" Resume mode skipped {resumed_completed_count} file(s) from checkpoint."
                 if self.show_batch_preview_var.get():
                     self.status_var.set(
                         f"Queued {len(self.selected_inputs)} source texture(s). "
@@ -10236,7 +10648,14 @@ if GUI_AVAILABLE:
                     )
                 self.processing_thread = threading.Thread(
                     target=self._process_generation_batch,
-                    args=(self.selected_inputs.copy(), generation_kwargs),
+                    args=(
+                        self.selected_inputs.copy(),
+                        generation_kwargs,
+                        input_path,
+                        checkpoint_path,
+                        completed_checkpoint_files,
+                        resumed_completed_count,
+                    ),
                     daemon=True,
                 )
                 self.processing_thread.start()

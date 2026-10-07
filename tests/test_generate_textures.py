@@ -455,6 +455,8 @@ class GenerateTexturesTests(unittest.TestCase):
                 "parallax_mode": "occlusion",
                 "render_profile": "mystery",
                 "auto_optimize_large_batches": 0,
+                "lazy_preview_mode": 0,
+                "batch_resume_mode": "unsupported",
                 "simplified_main_layout": 0,
                 "show_advanced_generation_controls": 1,
                 "show_advanced_workflow_outputs": 1,
@@ -472,6 +474,8 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(normalized["parallax_mode"]), "occlusion (ENB/POM)")
         self.assertEqual(str(normalized["render_profile"]), "custom")
         self.assertFalse(bool(normalized["auto_optimize_large_batches"]))
+        self.assertFalse(bool(normalized["lazy_preview_mode"]))
+        self.assertEqual(str(normalized["batch_resume_mode"]), "start_fresh")
         self.assertFalse(bool(normalized["simplified_main_layout"]))
         self.assertTrue(bool(normalized["show_advanced_generation_controls"]))
         self.assertTrue(bool(normalized["show_advanced_workflow_outputs"]))

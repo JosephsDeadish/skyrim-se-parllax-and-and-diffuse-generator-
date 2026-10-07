@@ -917,6 +917,30 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertIn("pom flag", joined)
         self.assertIn("base slsf1_parallax", joined)
 
+    def test_conflict_report_flags_parallax_shader_type_with_missing_slot3(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_HEIGHTMAP,
+            flags1=SLSF1_PARALLAX,
+            texture_paths=["textures\\arch\\stone.dds"] + [""] * 8,
+        )
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(
+            any(group.code.startswith("shader_state.parallax_type_missing_slot3.") for group in v.conflict_report)
+        )
+
+    def test_conflict_report_flags_envmap_shader_with_missing_slots4_5(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            texture_paths=["textures\\arch\\stone.dds"] + [""] * 8,
+        )
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(
+            any(group.code.startswith("shader_state.envmap_missing_slots4_5.") for group in v.conflict_report)
+        )
+
     def test_reports_wrong_texture_type_in_normal_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_NORMAL] = "textures\\arch\\stone_p.dds"
@@ -1252,7 +1276,7 @@ class TestPatchNifFlags(unittest.TestCase):
         result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
         self.assertTrue(result.success, result.errors)
         infos = scan_nif(nif)
-        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
         self.assertFalse(infos[0].has_parallax_flag)
         self.assertFalse(infos[0].has_pom_flag)
         self.assertTrue(any("auto-restored" in warning.lower() for warning in result.warnings))
@@ -1311,7 +1335,7 @@ class TestPatchNifFlags(unittest.TestCase):
         result = patch_nif(nif, NifPatchOptions(enable_env_mapping=True, backup=False))
         self.assertTrue(result.success, result.errors)
         infos = scan_nif(nif)
-        self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
         self.assertFalse(infos[0].has_env_mapping_flag)
         self.assertTrue(any("auto-restored" in warning.lower() for warning in result.warnings))
 
@@ -2831,6 +2855,30 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         assert opts is not None
         self.assertTrue(str(opts.cubemap_texture_path).lower().endswith("_e.dds"))
         self.assertIn("set_slot4_cubemap", steps)
+
+    def test_auto_remediation_build_options_disables_parallax_for_missing_slot3_shader_state(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_HEIGHTMAP)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["shader_state.parallax_type_missing_slot3.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(opts.disable_parallax)
+        self.assertIn("disable_parallax_for_missing_slot3", steps)
+
+    def test_auto_remediation_build_options_disables_env_mapping_for_missing_envmap_slots(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["shader_state.envmap_missing_slots4_5.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(opts.disable_env_mapping)
+        self.assertIn("disable_env_mapping_for_missing_slots4_5", steps)
 
 
 class TestCompatibilityReport(unittest.TestCase):

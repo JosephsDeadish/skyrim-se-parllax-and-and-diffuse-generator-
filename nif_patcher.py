@@ -2965,18 +2965,33 @@ def _apply_patches(
                     nif_path, env_mask_path, texture_roots
                 )
                 restored_flags1 = sp.flags1
+                restored_shader_type = sp.shader_type
                 if (restored_flags1 & (SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION)) and (
                     not parallax_path or parallax_missing
                 ):
                     restored_flags1 &= ~SLSF1_PARALLAX
                     restored_flags1 &= ~SLSF1_PARALLAX_OCCLUSION
+                if (
+                    restored_shader_type in (SHADER_TYPE_HEIGHTMAP, SHADER_TYPE_PARALLAX_OCC)
+                    and (not parallax_path or parallax_missing)
+                ):
+                    restored_shader_type = SHADER_TYPE_DEFAULT
                 if (restored_flags1 & SLSF1_ENVIRONMENT_MAPPING) and (
                     (not cubemap_path or cubemap_missing)
                     and (not env_mask_path or env_mask_missing)
                 ):
                     restored_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
+                if (
+                    restored_shader_type == SHADER_TYPE_ENVMAP
+                    and (not cubemap_path or cubemap_missing)
+                    and (not env_mask_path or env_mask_missing)
+                ):
+                    restored_shader_type = SHADER_TYPE_DEFAULT
                 if restored_flags1 != sp.flags1:
                     buf_final.write_u32_at(sp.flags1_offset, restored_flags1)
+                    auto_restored_shader_states += 1
+                if restored_shader_type != sp.shader_type and sp.shader_type_offset is not None:
+                    buf_final.write_u32_at(sp.shader_type_offset, restored_shader_type)
                     auto_restored_shader_states += 1
             if auto_restored_shader_states:
                 data = buf_final.to_bytes()
@@ -3790,6 +3805,12 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "flag_pom.non_heightmap_shader": (
         "Prefer Heightmap shader type (3) when using POM for best compatibility.",
     ),
+    "shader_state.parallax_type_missing_slot3": (
+        "Disable parallax/POM for blocks with missing slot-3 _p.dds, or restore slot 3 before patching.",
+    ),
+    "shader_state.envmap_missing_slots4_5": (
+        "Disable environment mapping when both slot 4 and slot 5 are unresolved, or restore valid EnvMap textures.",
+    ),
     "fallback_or_unknown": (
         "Review the listed block diagnostics and apply targeted fixes before repatching.",
     ),
@@ -3879,6 +3900,10 @@ def _classify_conflict_code(message: str) -> str:
         return "flag_pom.non_heightmap_shader"
     if "pom flag is enabled without the base slsf1_parallax flag" in lowered:
         return "flag_pom.without_base_parallax"
+    if "shader type is parallax-focused" in lowered and "slot 3 is unresolved" in lowered:
+        return "shader_state.parallax_type_missing_slot3"
+    if "shader type is envmap" in lowered and "both slot 4 cubemap and slot 5 env-mask are unresolved" in lowered:
+        return "shader_state.envmap_missing_slots4_5"
     if "slot 0 " in lowered:
         return "path_slot_diffuse"
     if "slot 1 " in lowered:
@@ -4248,6 +4273,12 @@ def build_auto_remediation_patch_options(
     if has_non_heightmap_pom_conflict:
         opts.disable_pom = True
         applied_steps.append("disable_pom_for_non_heightmap_shader")
+    if any(code.startswith("shader_state.parallax_type_missing_slot3") for code in base_codes):
+        opts.disable_parallax = True
+        applied_steps.append("disable_parallax_for_missing_slot3")
+    if any(code.startswith("shader_state.envmap_missing_slots4_5") for code in base_codes):
+        opts.disable_env_mapping = True
+        applied_steps.append("disable_env_mapping_for_missing_slots4_5")
 
     if not applied_steps:
         return None, (
@@ -4513,6 +4544,15 @@ def validate_nif_for_parallax(
                         "(not Heightmap/3). Use force_shader_type_3=True to enable "
                         "the parallax_scale field for stronger in-game depth."
                     )
+                if info.shader_type in (SHADER_TYPE_HEIGHTMAP, SHADER_TYPE_PARALLAX_OCC) and not has_tex:
+                    _append_unique(
+                        result.issues,
+                        f"{bname}: shader type is parallax-focused ({info.shader_type_name}) but slot 3 is unresolved."
+                    )
+                    _append_unique(
+                        result.suggestions,
+                        "Disable parallax/POM for this block or restore a valid slot-3 _p.dds texture before patching."
+                    )
 
         diffuse_path = info.texture_paths.get(TEXTURE_SLOT_DIFFUSE, "").strip()
         normal_path = info.texture_paths.get(TEXTURE_SLOT_NORMAL, "").strip()
@@ -4644,6 +4684,7 @@ def validate_nif_for_parallax(
                 result.suggestions,
                 "Enable standard parallax alongside POM, or disable POM for this block."
             )
+        cubemap_path = info.texture_paths.get(TEXTURE_SLOT_CUBEMAP, "").strip()
         env_mask_path = info.texture_paths.get(TEXTURE_SLOT_ENV_MASK, "").strip()
         if env_mask_path:
             normalized_env_mask = _normalise_slot_path(env_mask_path)
@@ -4712,6 +4753,19 @@ def validate_nif_for_parallax(
             _append_unique(
                 result.suggestions,
                 f"{bname}: SLSF1_Environment_Mapping is enabled but slot 5 is empty; add an _m.dds mask or disable the flag."
+            )
+        if (
+            info.shader_type == SHADER_TYPE_ENVMAP
+            and not env_mask_path
+            and not cubemap_path
+        ):
+            _append_unique(
+                result.issues,
+                f"{bname}: shader type is EnvMap but both slot 4 cubemap and slot 5 env-mask are unresolved."
+            )
+            _append_unique(
+                result.suggestions,
+                "Restore valid slot 4/5 textures for EnvMap or disable environment mapping for this block."
             )
         if info.parallax_scale is not None and info.parallax_scale < 0.35:
             _append_unique(
