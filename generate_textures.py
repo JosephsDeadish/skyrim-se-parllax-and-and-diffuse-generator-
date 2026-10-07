@@ -10100,7 +10100,18 @@ if GUI_AVAILABLE:
                 intro_label.pack(fill="x")
                 self._bind_responsive_wrap(controls_wrapper, intro_label, horizontal_padding=60, min_wrap=280)
 
-                path_frame = ttk.LabelFrame(controls_wrapper, text="NIF Target", padding=6)
+                editor_tabs = ttk.Notebook(controls_wrapper)
+                editor_tabs.pack(fill="both", expand=True, pady=(4, 0))
+                basic_tab = ttk.Frame(editor_tabs, padding=6)
+                textures_tab = ttk.Frame(editor_tabs, padding=6)
+                disable_tab = ttk.Frame(editor_tabs, padding=6)
+                help_tab = ttk.Frame(editor_tabs, padding=6)
+                editor_tabs.add(basic_tab, text="Patch setup")
+                editor_tabs.add(textures_tab, text="Texture slots")
+                editor_tabs.add(disable_tab, text="Disable / clear")
+                editor_tabs.add(help_tab, text="Help")
+
+                path_frame = ttk.LabelFrame(basic_tab, text="NIF Target", padding=6)
                 path_frame.pack(fill="x", pady=(2, 4))
 
                 nif_path_var = tk.StringVar()
@@ -10142,7 +10153,7 @@ if GUI_AVAILABLE:
                 self._add_tooltip(nif_path_entry, "Paste or edit the full NIF file/folder path here.")
                 self._add_tooltip(browse_nif_button, "Open a file/folder picker for the NIF path.")
 
-                opt_frame = ttk.LabelFrame(controls_wrapper, text="Patch Options (what to enable)", padding=6)
+                opt_frame = ttk.LabelFrame(basic_tab, text="Patch Options (what to enable)", padding=6)
                 opt_frame.pack(fill="x", pady=4)
                 renderer_profile_var = tk.StringVar(value=_normalize_render_profile(self.render_profile_var.get()))
                 if renderer_profile_var.get() not in _RENDER_PROFILE_GUI_VALUES:
@@ -10207,7 +10218,6 @@ if GUI_AVAILABLE:
                 game_hint_label = ttk.Label(game_row, text="(Switch to fallout here)")
                 game_hint_label.pack(side="left")
                 fallout_mode_row = ttk.Frame(opt_frame)
-                fallout_mode_row.pack(fill="x", pady=(2, 0))
                 experimental_fallout_check = ttk.Checkbutton(
                     fallout_mode_row,
                     text="Enable experimental Fallout writes",
@@ -10215,7 +10225,6 @@ if GUI_AVAILABLE:
                 )
                 experimental_fallout_check.pack(side="left")
                 fallout_gate_frame = ttk.LabelFrame(opt_frame, text="Fallout safety gates", padding=6)
-                fallout_gate_frame.pack(fill="x", pady=(2, 0))
                 fallout_gate_label = ttk.Label(fallout_gate_frame, text="Opt in per operation (higher risk):")
                 fallout_gate_label.pack(anchor=tk.W, pady=(0, 4))
                 fallout_gate_row1 = ttk.Frame(fallout_gate_frame)
@@ -10337,7 +10346,7 @@ if GUI_AVAILABLE:
                 )
                 retry_count_combo.pack(side="left", padx=(6, 10))
                 guide_label = ttk.Label(
-                    opt_frame,
+                    help_tab,
                     text=(
                         "Slot guide — Skyrim SE texture naming (NOT Blender defaults):\n"
                         "  Slot 0: diffuse — vanilla Skyrim uses just <stem>.dds (no _d/_diffuse/_albedo suffix; those are Blender exports, not Skyrim).\n"
@@ -10354,7 +10363,7 @@ if GUI_AVAILABLE:
                     wraplength=860,
                 )
                 guide_label.pack(fill="x", pady=(4, 0))
-                self._bind_responsive_wrap(opt_frame, guide_label, horizontal_padding=40, min_wrap=260)
+                self._bind_responsive_wrap(help_tab, guide_label, horizontal_padding=40, min_wrap=260)
                 option_warning_label = ttk.Label(
                     opt_frame,
                     textvariable=option_warning_var,
@@ -10365,7 +10374,7 @@ if GUI_AVAILABLE:
                 option_warning_label.pack(fill="x", pady=(2, 0))
                 self._bind_responsive_wrap(opt_frame, option_warning_label, horizontal_padding=40, min_wrap=220)
 
-                unpatch_frame = ttk.LabelFrame(controls_wrapper, text="Remove Features (what to disable)", padding=6)
+                unpatch_frame = ttk.LabelFrame(disable_tab, text="Remove Features (what to disable)", padding=6)
                 unpatch_frame.pack(fill="x", pady=(2, 4))
                 unpatch_row = ttk.Frame(unpatch_frame)
                 unpatch_row.pack(fill="x")
@@ -10502,6 +10511,16 @@ if GUI_AVAILABLE:
                 def _sync_target_game_controls(*_: object) -> None:
                     selected_game = (target_game_var.get() or "auto").strip().lower()
                     allow_fallout_controls = selected_game != "skyrim"
+                    if allow_fallout_controls:
+                        if not fallout_mode_row.winfo_manager():
+                            fallout_mode_row.pack(fill="x", pady=(2, 0))
+                        if not fallout_gate_frame.winfo_manager():
+                            fallout_gate_frame.pack(fill="x", pady=(2, 0))
+                    else:
+                        if fallout_mode_row.winfo_manager():
+                            fallout_mode_row.pack_forget()
+                        if fallout_gate_frame.winfo_manager():
+                            fallout_gate_frame.pack_forget()
                     if not allow_fallout_controls:
                         experimental_fallout_write_var.set(False)
                     experimental_fallout_check.configure(state=(tk.NORMAL if allow_fallout_controls else tk.DISABLED))
@@ -10626,7 +10645,7 @@ if GUI_AVAILABLE:
                 self._add_tooltip(clear_cubemap_check, "🧹 Clears texture slot 4 path from BSShaderTextureSet.")
 
                 scale_frame = ttk.LabelFrame(
-                    controls_wrapper,
+                    basic_tab,
                     text="Parallax Scale (0.1 – 10.0 · higher = deeper / more extreme)",
                     padding=6,
                 )
@@ -10651,7 +10670,7 @@ if GUI_AVAILABLE:
                 )
 
                 tex_frame = ttk.LabelFrame(
-                    controls_wrapper,
+                    textures_tab,
                     text="Texture Paths (Skyrim-relative textures\\... ; blank keeps current NIF slot)",
                     padding=6,
                 )
