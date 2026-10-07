@@ -1225,12 +1225,8 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertTrue(result.success, result.errors)
         infos = scan_nif(nif)
         self.assertGreaterEqual(len(infos), 1)
-        auto_restored = any("auto-restored" in warning.lower() for warning in result.warnings)
-        if auto_restored:
-            self.assertFalse(infos[0].has_parallax_flag)
-            self.assertFalse(infos[0].has_pom_flag)
-        else:
-            self.assertTrue(infos[0].has_parallax_flag)
+        self.assertTrue(infos[0].has_parallax_flag)
+        self.assertFalse(any("auto-restored" in warning.lower() for warning in result.warnings), result.warnings)
 
     def test_enable_parallax_does_not_retype_envmap_block(self) -> None:
         nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP)
@@ -1282,7 +1278,7 @@ class TestPatchNifFlags(unittest.TestCase):
         result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
         self.assertTrue(result.success, result.errors)
         infos = scan_nif(nif)
-        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
         self.assertFalse(infos[0].has_parallax_flag)
         self.assertFalse(infos[0].has_pom_flag)
         self.assertTrue(any("auto-restored" in warning.lower() for warning in result.warnings))
@@ -1341,7 +1337,7 @@ class TestPatchNifFlags(unittest.TestCase):
         result = patch_nif(nif, NifPatchOptions(enable_env_mapping=True, backup=False))
         self.assertTrue(result.success, result.errors)
         infos = scan_nif(nif)
-        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
         self.assertFalse(infos[0].has_env_mapping_flag)
         self.assertTrue(any("auto-restored" in warning.lower() for warning in result.warnings))
 
@@ -3684,6 +3680,10 @@ class TestCliArgumentValidation(unittest.TestCase):
             with self.assertRaises(SystemExit) as ctx:
                 nif_patcher_main()
         self.assertEqual(ctx.exception.code, 2)
+
+    def test_compatibility_report_ignores_unrelated_unknown_shader_map_validation(self) -> None:
+        with mock.patch("sys.argv", ["nif_patcher.py", "--compatibility-report", "--unknown-shader-type-map", "bad"]):
+            nif_patcher_main()
 
 
 if __name__ == "__main__":

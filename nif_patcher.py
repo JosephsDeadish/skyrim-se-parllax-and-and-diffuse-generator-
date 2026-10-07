@@ -2677,10 +2677,6 @@ def _apply_patches(
         )
         enabling_parallax = requested_parallax_enable
         if enabling_parallax:
-            ts_for_shader = texture_sets.get(sp.texture_set_ref)
-            existing_parallax_path = ""
-            if ts_for_shader is not None and TEXTURE_SLOT_PARALLAX < len(ts_for_shader.slot_paths):
-                existing_parallax_path = ts_for_shader.slot_paths[TEXTURE_SLOT_PARALLAX].strip()
             if opts.clear_parallax_texture_path and not opts.parallax_texture_path:
                 enabling_parallax = False
                 restore_candidate_blocks.add(sp.block_index)
@@ -2765,7 +2761,7 @@ def _apply_patches(
             "Skipped enabling parallax on block(s) "
             + ", ".join(str(block_idx) for block_idx in unique_blocks[:12])
             + ("..." if len(unique_blocks) > 12 else "")
-            + " because slot 3 is empty/cleared and no replacement parallax texture path was provided."
+            + " because slot 3 was explicitly cleared and no replacement parallax texture path was provided."
         )
 
     # --- Phase 3: texture path patches (may change data length) -------------
@@ -2977,33 +2973,18 @@ def _apply_patches(
                     nif_path, env_mask_path, texture_roots
                 )
                 restored_flags1 = sp.flags1
-                restored_shader_type = sp.shader_type
                 if (restored_flags1 & (SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION)) and (
                     not parallax_path or parallax_missing
                 ):
                     restored_flags1 &= ~SLSF1_PARALLAX
                     restored_flags1 &= ~SLSF1_PARALLAX_OCCLUSION
-                if (
-                    restored_shader_type in (SHADER_TYPE_HEIGHTMAP, SHADER_TYPE_PARALLAX_OCC)
-                    and (not parallax_path or parallax_missing)
-                ):
-                    restored_shader_type = SHADER_TYPE_DEFAULT
                 if (restored_flags1 & SLSF1_ENVIRONMENT_MAPPING) and (
                     (not cubemap_path or cubemap_missing)
                     and (not env_mask_path or env_mask_missing)
                 ):
                     restored_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
-                if (
-                    restored_shader_type == SHADER_TYPE_ENVMAP
-                    and (not cubemap_path or cubemap_missing)
-                    and (not env_mask_path or env_mask_missing)
-                ):
-                    restored_shader_type = SHADER_TYPE_DEFAULT
                 if restored_flags1 != sp.flags1:
                     buf_final.write_u32_at(sp.flags1_offset, restored_flags1)
-                    auto_restored_shader_states += 1
-                if restored_shader_type != sp.shader_type and sp.shader_type_offset is not None:
-                    buf_final.write_u32_at(sp.shader_type_offset, restored_shader_type)
                     auto_restored_shader_states += 1
             if auto_restored_shader_states:
                 data = buf_final.to_bytes()
@@ -3032,14 +3013,28 @@ def _summarize_binary_diff(
         return 0, []
     changed_ranges: list[tuple[int, int]] = []
     changed_bytes = 0
+    if len(original_data) == len(new_data):
+        start: int | None = None
+        for idx, (left, right) in enumerate(zip(original_data, new_data)):
+            if left != right:
+                changed_bytes += 1
+                if start is None:
+                    start = idx
+            elif start is not None:
+                if len(changed_ranges) < max_ranges:
+                    changed_ranges.append((start, idx - 1))
+                start = None
+        if start is not None and len(changed_ranges) < max_ranges:
+            changed_ranges.append((start, len(original_data) - 1))
+        return changed_bytes, changed_ranges
     matcher = difflib.SequenceMatcher(a=original_data, b=new_data, autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
             continue
         changed_bytes += max(i2 - i1, j2 - j1)
         if len(changed_ranges) < max_ranges:
-            start_idx = min(i1, j1)
-            end_idx = max(i2, j2) - 1
+            start_idx = j1
+            end_idx = j2 - 1
             if end_idx >= start_idx:
                 changed_ranges.append((start_idx, end_idx))
     return changed_bytes, changed_ranges
@@ -5300,6 +5295,10 @@ def _main() -> None:  # pragma: no cover
 
     args = parser.parse_args()
 
+    if args.compatibility_report:
+        print(build_compatibility_report_text())
+        return
+
     if not args.compatibility_report and not args.nif:
         parser.error("the following arguments are required: nif")
 
@@ -5383,10 +5382,6 @@ def _main() -> None:  # pragma: no cover
             file=sys.stderr,
         )
         sys.exit(1)
-
-    if args.compatibility_report:
-        print(build_compatibility_report_text())
-        return
 
     nif_files: list[Path] = []
     for p in args.nif:
