@@ -10005,9 +10005,11 @@ if GUI_AVAILABLE:
                     total_sources = len(results)
                     total_failed = len(self.batch_failures)
                     total_outputs = sum(len(output_set) for output_set in results.values())
+                    resumed_total = int(telemetry.get("resumed_completed_count", 0) or 0)
+                    planned_total = max(0, total_sources + resumed_total)
                     self.status_var.set(
-                        f"Generated {total_outputs} file(s) from {total_sources} source texture(s). "
-                        f"Failed: {total_failed}."
+                        f"Run summary: processed {total_sources}/{planned_total}, generated {total_outputs}, "
+                        f"resumed-skip {resumed_total}, failed {total_failed}."
                     )
                     if total_sources == 1 and total_failed == 0:
                         only_outputs = next(iter(results.values()))
@@ -10067,6 +10069,13 @@ if GUI_AVAILABLE:
                                 checkpoint_path=Path(checkpoint_value),
                                 planned_total=max(0, total_sources + resumed),
                             )
+                            lines.append(
+                                f"Checkpoint health: {self.checkpoint_health_var.get() or 'unavailable'}"
+                            )
+                        else:
+                            lines.append("Checkpoint health: unavailable")
+                    else:
+                        lines.append("Checkpoint health: unavailable")
                     messagebox.showinfo("Generation complete", "\n".join(lines), parent=self.root)
                     self._refresh_preview()
                     keep_polling = False

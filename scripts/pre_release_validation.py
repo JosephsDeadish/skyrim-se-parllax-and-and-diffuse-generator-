@@ -129,6 +129,44 @@ def _conflict_base_code(conflict_code: str) -> str:
     return conflict_code
 
 
+def _derive_remediation_mode(remediation_steps: list[str]) -> str:
+    has_rebuild_steps = any(step.startswith("set_slot") for step in remediation_steps)
+    has_disable_steps = any(step.startswith("disable_") or step.startswith("clear_") for step in remediation_steps)
+    has_enable_steps = any(step.startswith("enable_") for step in remediation_steps)
+    if has_rebuild_steps and has_disable_steps:
+        return "mixed_rebuild_and_disable"
+    if has_rebuild_steps:
+        return "rebuild"
+    if has_disable_steps:
+        return "disable"
+    if has_enable_steps:
+        return "enable_or_flag_only"
+    return "manual_or_noop"
+
+
+def _classify_intended_difference_bucket(
+    *,
+    profile: str,
+    remediation_mode: str,
+    fallback_used: bool,
+    intentional_strategy_difference: bool,
+    local_strategy: str,
+    safety_difference_note: str,
+) -> str:
+    lowered_profile = profile.lower()
+    lowered_local = local_strategy.lower()
+    lowered_note = safety_difference_note.lower()
+    if "fallout" in lowered_profile or "guarded fallout" in lowered_local or "fallout" in lowered_note:
+        return "guarded_fallout"
+    if "destructive" in lowered_local or "destructive" in lowered_note:
+        return "destructive_disabled"
+    if fallback_used or remediation_mode in {"disable", "mixed_rebuild_and_disable"}:
+        return "safety_first"
+    if intentional_strategy_difference:
+        return "safety_first"
+    return "none"
+
+
 def _build_realmod_family_trend_snapshot() -> dict[str, object]:
     from nif_patcher import validate_nif_for_parallax
     from tests.test_nif_patcher import (
@@ -235,6 +273,102 @@ def _build_realmod_family_trend_snapshot() -> dict[str, object]:
     }
 
 
+def _build_realmod_side_by_side_delta_report() -> dict[str, object]:
+    from nif_patcher import (
+        build_auto_remediation_patch_options,
+        validate_nif_for_parallax,
+    )
+    from tests.test_nif_patcher import (
+        _FIXTURE_REALMOD_SAMPLE_PACKS,
+        _load_fixture_corpus_payload,
+        _materialize_fixture_corpus,
+    )
+
+    payload = _load_fixture_corpus_payload(_FIXTURE_REALMOD_SAMPLE_PACKS)
+    packs = payload.get("packs", [])
+    if not isinstance(packs, list):
+        packs = []
+    rows: list[dict[str, object]] = []
+
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        for pack in packs:
+            if not isinstance(pack, dict):
+                continue
+            pack_id = str(pack.get("id", "pack")).strip() or "pack"
+            cases = pack.get("cases", [])
+            if not isinstance(cases, list):
+                continue
+            pack_root = temp_root / pack_id
+            pack_root.mkdir(parents=True, exist_ok=True)
+            corpus = _materialize_fixture_corpus(pack_root, {"cases": cases})
+            validations = [validate_nif_for_parallax(path) for path in corpus]
+
+            case_map: dict[str, dict[str, object]] = {}
+            for case in cases:
+                if not isinstance(case, dict):
+                    continue
+                case_id = str(case.get("id", "")).strip()
+                if case_id:
+                    case_map[case_id] = case
+
+            for nif_path, validation in zip(corpus, validations):
+                case = case_map.get(nif_path.stem, {})
+                code_rows = [group.code for group in validation.conflict_report]
+                base_families = sorted({_conflict_base_code(code) for code in code_rows})
+                _, rem_steps_tuple = build_auto_remediation_patch_options(
+                    validation.nif_path,
+                    code_rows,
+                    backup=False,
+                )
+                rem_steps = [str(step) for step in rem_steps_tuple]
+                remediation_mode = _derive_remediation_mode(rem_steps)
+                fallback_used = remediation_mode in {"disable", "mixed_rebuild_and_disable"}
+                profile = str(case.get("profile", validation.detected_game_profile or ""))
+                local_strategy = str(case.get("local_strategy", "") or "")
+                intentional_strategy_difference = bool(case.get("intentional_strategy_difference", False))
+                safety_difference_note = str(case.get("safety_difference_note", "") or "")
+                difference_bucket = _classify_intended_difference_bucket(
+                    profile=profile,
+                    remediation_mode=remediation_mode,
+                    fallback_used=fallback_used,
+                    intentional_strategy_difference=intentional_strategy_difference,
+                    local_strategy=local_strategy,
+                    safety_difference_note=safety_difference_note,
+                )
+                rows.append(
+                    {
+                        "pack_id": pack_id,
+                        "case_id": str(case.get("id", nif_path.stem)),
+                        "family": str(case.get("family", "unknown") or "unknown"),
+                        "profile": profile,
+                        "shader_layout": str(case.get("shader_layout", "") or ""),
+                        "detected_conflict_families": base_families,
+                        "detected_conflict_codes": code_rows,
+                        "remediation_steps": rem_steps,
+                        "remediation_mode": remediation_mode,
+                        "fallback_used": fallback_used,
+                        "pgpatcher_strategy": str(case.get("pgpatcher_strategy", "") or ""),
+                        "local_strategy": local_strategy,
+                        "intentional_strategy_difference": intentional_strategy_difference,
+                        "safety_difference_note": safety_difference_note,
+                        "intended_difference_bucket": difference_bucket,
+                    }
+                )
+
+    bucket_counts: dict[str, int] = {}
+    for row in rows:
+        bucket = str(row.get("intended_difference_bucket", "none") or "none")
+        bucket_counts[bucket] = int(bucket_counts.get(bucket, 0)) + 1
+
+    return {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "case_count": len(rows),
+        "intended_difference_bucket_counts": dict(sorted(bucket_counts.items())),
+        "cases": rows,
+    }
+
+
 def _build_parity_matrix_feature_report() -> dict[str, object]:
     from nif_patcher import (
         build_auto_remediation_patch_options,
@@ -275,19 +409,19 @@ def _build_parity_matrix_feature_report() -> dict[str, object]:
             missing_expected_steps = [step for step in expected_steps if step not in rem_steps]
             unexpected_present_steps = [step for step in expected_absent_steps if step in rem_steps]
 
-            has_rebuild_steps = any(step.startswith("set_slot") for step in rem_steps)
-            has_disable_steps = any(step.startswith("disable_") or step.startswith("clear_") for step in rem_steps)
-            has_enable_steps = any(step.startswith("enable_") for step in rem_steps)
-            if has_rebuild_steps and has_disable_steps:
-                remediation_mode = "mixed_rebuild_and_disable"
-            elif has_rebuild_steps:
-                remediation_mode = "rebuild"
-            elif has_disable_steps:
-                remediation_mode = "disable"
-            elif has_enable_steps:
-                remediation_mode = "enable_or_flag_only"
-            else:
-                remediation_mode = "manual_or_noop"
+            remediation_mode = _derive_remediation_mode(rem_steps)
+            has_disable_steps = remediation_mode in {"disable", "mixed_rebuild_and_disable"}
+            local_strategy = str(case.get("local_strategy", "") or "")
+            intentional_strategy_difference = bool(case.get("intentional_strategy_difference", False))
+            safety_difference_note = str(case.get("safety_difference_note", "") or "")
+            difference_bucket = _classify_intended_difference_bucket(
+                profile=str(case.get("profile", "")),
+                remediation_mode=remediation_mode,
+                fallback_used=has_disable_steps,
+                intentional_strategy_difference=intentional_strategy_difference,
+                local_strategy=local_strategy,
+                safety_difference_note=safety_difference_note,
+            )
 
             case_rows.append(
                 {
@@ -304,9 +438,10 @@ def _build_parity_matrix_feature_report() -> dict[str, object]:
                     "missing_expected_remediation_steps": missing_expected_steps,
                     "unexpected_present_remediation_steps": unexpected_present_steps,
                     "pgpatcher_strategy": str(case.get("pgpatcher_strategy", "") or ""),
-                    "local_strategy": str(case.get("local_strategy", "") or ""),
-                    "intentional_strategy_difference": bool(case.get("intentional_strategy_difference", False)),
-                    "safety_difference_note": str(case.get("safety_difference_note", "") or ""),
+                    "local_strategy": local_strategy,
+                    "intentional_strategy_difference": intentional_strategy_difference,
+                    "safety_difference_note": safety_difference_note,
+                    "intended_difference_bucket": difference_bucket,
                 }
             )
 
@@ -336,8 +471,8 @@ def _render_parity_feature_report_markdown(report: dict[str, object]) -> str:
         f"- Cases: {report.get('case_count', 0)}",
         f"- Cases using disable/clear fallback: {report.get('fallback_case_count', 0)}",
         "",
-        "| Case | Profile/layout | Detected family count | Remediation mode | Fallback used | Intentional strategy diff |",
-        "| --- | --- | ---: | --- | --- | --- |",
+        "| Case | Profile/layout | Detected family count | Remediation mode | Fallback used | Intentional strategy diff | Difference bucket |",
+        "| --- | --- | ---: | --- | --- | --- | --- |",
     ]
     if isinstance(rows, list):
         for row in rows:
@@ -351,13 +486,51 @@ def _render_parity_feature_report_markdown(report: dict[str, object]) -> str:
             mode = str(row.get("remediation_mode", "manual_or_noop")).replace("|", "\\|")
             fallback = "yes" if bool(row.get("fallback_used", False)) else "no"
             strategy_diff = "yes" if bool(row.get("intentional_strategy_difference", False)) else "no"
+            difference_bucket = str(row.get("intended_difference_bucket", "none")).replace("|", "\\|")
             lines.append(
-                f"| `{case_id}` | `{profile_layout}` | {family_count} | `{mode}` | {fallback} | {strategy_diff} |"
+                f"| `{case_id}` | `{profile_layout}` | {family_count} | `{mode}` | {fallback} | {strategy_diff} | `{difference_bucket}` |"
             )
     lines.extend(
         [
             "",
             "Use the JSON artifact for full per-case details (detected families/codes, remediation steps, expected-step deltas, and safety-difference notes).",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _render_realmod_side_by_side_delta_markdown(report: dict[str, object]) -> str:
+    rows = report.get("cases", [])
+    lines = [
+        "# NIF real-sample side-by-side parity delta",
+        "",
+        f"- Generated: {report.get('generated_at_utc', '')}",
+        f"- Cases: {report.get('case_count', 0)}",
+        "",
+        "| Pack | Case | Family | Profile/layout | Conflict family count | Local remediation mode | Difference bucket |",
+        "| --- | --- | --- | --- | ---: | --- | --- |",
+    ]
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            pack_id = str(row.get("pack_id", "")).replace("|", "\\|")
+            case_id = str(row.get("case_id", "")).replace("|", "\\|")
+            family = str(row.get("family", "")).replace("|", "\\|")
+            profile_layout = f"{row.get('profile', '?')}/{row.get('shader_layout', '?')}".replace("|", "\\|")
+            family_count = len(row.get("detected_conflict_families", [])) if isinstance(
+                row.get("detected_conflict_families"), list
+            ) else 0
+            mode = str(row.get("remediation_mode", "manual_or_noop")).replace("|", "\\|")
+            bucket = str(row.get("intended_difference_bucket", "none")).replace("|", "\\|")
+            lines.append(
+                f"| `{pack_id}` | `{case_id}` | `{family}` | `{profile_layout}` | {family_count} | `{mode}` | `{bucket}` |"
+            )
+    lines.extend(
+        [
+            "",
+            "Bucket legend: `safety_first` = conservative disable/guard fallback, `guarded_fallout` = Fallout safety policy divergence, `destructive_disabled` = intentionally avoids destructive cleanup paths.",
             "",
         ]
     )
@@ -370,7 +543,8 @@ def _write_release_artifacts(
     step_status: list[tuple[str, str]],
     trend_snapshot: dict[str, object],
     parity_report: dict[str, object],
-) -> tuple[Path, Path, Path, Path]:
+    realmod_delta_report: dict[str, object],
+) -> tuple[Path, Path, Path, Path, Path, Path]:
     artifact_dir.mkdir(parents=True, exist_ok=True)
     trend_path = artifact_dir / "nif_family_trend_snapshot.json"
     trend_path.write_text(json.dumps(trend_snapshot, indent=2, sort_keys=True), encoding="utf-8")
@@ -378,6 +552,13 @@ def _write_release_artifacts(
     parity_json_path.write_text(json.dumps(parity_report, indent=2, sort_keys=True), encoding="utf-8")
     parity_md_path = artifact_dir / "nif_parity_feature_report.md"
     parity_md_path.write_text(_render_parity_feature_report_markdown(parity_report), encoding="utf-8")
+    realmod_delta_json_path = artifact_dir / "nif_realmod_parity_delta_report.json"
+    realmod_delta_json_path.write_text(json.dumps(realmod_delta_report, indent=2, sort_keys=True), encoding="utf-8")
+    realmod_delta_md_path = artifact_dir / "nif_realmod_parity_delta_report.md"
+    realmod_delta_md_path.write_text(
+        _render_realmod_side_by_side_delta_markdown(realmod_delta_report),
+        encoding="utf-8",
+    )
 
     checklist_path = artifact_dir / "release_checklist.md"
     lines = [
@@ -400,6 +581,11 @@ def _write_release_artifacts(
             "",
             f"- Parity JSON: `{parity_json_path.name}`",
             f"- Parity markdown: `{parity_md_path.name}`",
+            "",
+            "## NIF real-sample side-by-side parity delta snapshot",
+            "",
+            f"- Real-sample parity delta JSON: `{realmod_delta_json_path.name}`",
+            f"- Real-sample parity delta markdown: `{realmod_delta_md_path.name}`",
         ]
     )
     for pack in trend_snapshot.get("packs", []):
@@ -416,7 +602,14 @@ def _write_release_artifacts(
                 f"  - {family.get('family')}: pass {family.get('pass_count', 0)}/{family.get('case_count', 0)}, fail {family.get('fail_count', 0)}"
             )
     checklist_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return checklist_path, trend_path, parity_json_path, parity_md_path
+    return (
+        checklist_path,
+        trend_path,
+        parity_json_path,
+        parity_md_path,
+        realmod_delta_json_path,
+        realmod_delta_md_path,
+    )
 
 
 def _load_history_rows(history_file: Path) -> list[dict[str, object]]:
@@ -533,11 +726,20 @@ def main() -> int:
         step_status.append(("Packaging smoke build", "pass"))
     trend_snapshot = _build_realmod_family_trend_snapshot()
     parity_report = _build_parity_matrix_feature_report()
-    checklist_path, trend_path, parity_json_path, parity_md_path = _write_release_artifacts(
+    realmod_delta_report = _build_realmod_side_by_side_delta_report()
+    (
+        checklist_path,
+        trend_path,
+        parity_json_path,
+        parity_md_path,
+        realmod_delta_json_path,
+        realmod_delta_md_path,
+    ) = _write_release_artifacts(
         artifact_dir=args.artifact_dir,
         step_status=step_status,
         trend_snapshot=trend_snapshot,
         parity_report=parity_report,
+        realmod_delta_report=realmod_delta_report,
     )
     history_path = None
     if args.history_file is not None:
@@ -550,6 +752,8 @@ def main() -> int:
     print(f"NIF trend snapshot artifact: {trend_path}")
     print(f"NIF parity feature report JSON artifact: {parity_json_path}")
     print(f"NIF parity feature report markdown artifact: {parity_md_path}")
+    print(f"NIF real-sample parity delta JSON artifact: {realmod_delta_json_path}")
+    print(f"NIF real-sample parity delta markdown artifact: {realmod_delta_md_path}")
     if history_path is not None:
         print(f"NIF trend history artifact: {history_path}")
     print("\nPre-release validation passed.")
