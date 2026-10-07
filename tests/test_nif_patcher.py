@@ -1329,6 +1329,33 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertFalse(infos[0].has_env_mapping_flag)
         self.assertTrue(any("empty or unresolved" in warning.lower() for warning in result.warnings), result.warnings)
 
+    def test_auto_restores_glow_flag_when_slot2_file_is_missing_near_mesh(self) -> None:
+        (self.tmp / "textures").mkdir(exist_ok=True)
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_DEFAULT,
+            flags1=0,
+            flags2=SLSF2_GLOW_MAP,
+            texture_paths=["textures\\stone.dds", "", "textures\\architecture\\missing_g.dds"] + [""] * 7,
+        )
+        result = patch_nif(nif, NifPatchOptions(enable_glow_map=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertFalse(infos[0].has_glow_map_flag)
+        self.assertTrue(any("auto-restored" in warning.lower() for warning in result.warnings), result.warnings)
+
+    def test_validate_reports_glow_flag_set_with_unresolved_slot2(self) -> None:
+        (self.tmp / "textures").mkdir(exist_ok=True)
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_DEFAULT,
+            flags2=SLSF2_GLOW_MAP,
+            texture_paths=["textures\\stone.dds", "", "textures\\architecture\\missing_g.dds"] + [""] * 7,
+        )
+        validation = validate_nif_for_parallax(nif)
+        codes = {group.code for group in validation.conflict_report}
+        self.assertIn("flag_glow_map.flag_set_without_slot2.skyrim.legacy", codes)
+
     def test_auto_restores_envmap_shader_when_required_slots_are_empty(self) -> None:
         nif = _write_nif(
             self.tmp,
@@ -2829,6 +2856,18 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         assert opts is not None
         self.assertTrue(opts.disable_pom)
         self.assertIn("disable_pom_for_non_heightmap_shader", steps)
+
+    def test_auto_remediation_build_options_disables_glow_for_missing_slot2_conflict(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["flag_glow_map.flag_set_without_slot2.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(opts.disable_glow_map)
+        self.assertIn("disable_glow_map_for_missing_slot2", steps)
 
     def test_auto_remediation_skips_enable_parallax_when_disabling_non_heightmap_pom(self) -> None:
         nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT)

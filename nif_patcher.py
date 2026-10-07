@@ -2706,6 +2706,13 @@ def _apply_patches(
             new_flags2 &= ~SLSF2_GLOW_MAP
         if opts.disable_pbr:
             new_flags2 &= ~SLSF2_UNUSED01
+        if any((
+            opts.enable_glow_map,
+            opts.disable_glow_map,
+            opts.glow_texture_path is not None,
+            opts.clear_glow_texture_path,
+        )):
+            restore_candidate_blocks.add(sp.block_index)
 
         flags_changed = (new_flags1 != sp.flags1) or (new_flags2 != sp.flags2)
         if flags_changed:
@@ -2908,15 +2915,19 @@ def _apply_patches(
         opts.enable_parallax,
         opts.enable_pom,
         opts.enable_env_mapping,
+        opts.enable_glow_map,
         opts.disable_parallax,
         opts.disable_pom,
         opts.disable_env_mapping,
+        opts.disable_glow_map,
         opts.parallax_texture_path is not None,
         opts.env_mask_texture_path is not None,
         opts.cubemap_texture_path is not None,
+        opts.glow_texture_path is not None,
         opts.clear_parallax_texture_path,
         opts.clear_env_mask_texture_path,
         opts.clear_cubemap_texture_path,
+        opts.clear_glow_texture_path,
     ))
     if should_auto_restore_shader_states and restore_candidate_blocks:
         current_header = _reparse_header(data)
@@ -2959,6 +2970,11 @@ def _apply_patches(
                     if ts is not None and TEXTURE_SLOT_ENV_MASK < len(ts.slot_paths)
                     else ""
                 )
+                glow_path = (
+                    ts.slot_paths[TEXTURE_SLOT_GLOW].strip()
+                    if ts is not None and TEXTURE_SLOT_GLOW < len(ts.slot_paths)
+                    else ""
+                )
                 parallax_missing = _texture_slot_path_missing_near_nif(
                     nif_path, parallax_path, texture_roots
                 )
@@ -2968,7 +2984,11 @@ def _apply_patches(
                 env_mask_missing = _texture_slot_path_missing_near_nif(
                     nif_path, env_mask_path, texture_roots
                 )
+                glow_missing = _texture_slot_path_missing_near_nif(
+                    nif_path, glow_path, texture_roots
+                )
                 restored_flags1 = sp.flags1
+                restored_flags2 = sp.flags2
                 if (restored_flags1 & (SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION)) and (
                     not parallax_path or parallax_missing
                 ):
@@ -2979,8 +2999,13 @@ def _apply_patches(
                     and (not env_mask_path or env_mask_missing)
                 ):
                     restored_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
-                if restored_flags1 != sp.flags1:
+                if (restored_flags2 & SLSF2_GLOW_MAP) and (
+                    not glow_path or glow_missing
+                ):
+                    restored_flags2 &= ~SLSF2_GLOW_MAP
+                if (restored_flags1 != sp.flags1) or (restored_flags2 != sp.flags2):
                     buf_final.write_u32_at(sp.flags1_offset, restored_flags1)
+                    buf_final.write_u32_at(sp.flags2_offset, restored_flags2)
                     auto_restored_shader_states += 1
             if auto_restored_shader_states:
                 data = buf_final.to_bytes()
@@ -3830,6 +3855,9 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "flag_glow_map.slot2_filled_without_flag": (
         "Enable SLSF2_Glow_Map when slot 2 emissive is present, or clear slot 2.",
     ),
+    "flag_glow_map.flag_set_without_slot2": (
+        "Disable SLSF2_Glow_Map when slot 2 emissive is empty/unresolved, or restore a valid _g.dds path.",
+    ),
     "flag_env_mapping.slot5_filled_without_flag": (
         "Enable SLSF1_Environment_Mapping when slot 5 is populated, or clear slot 5.",
     ),
@@ -3928,6 +3956,8 @@ def _classify_conflict_code(message: str) -> str:
         return "path_slot_cubemap.wrong_suffix"
     if "slot 2 is filled" in lowered and "slsf2_glow_map is not set" in lowered:
         return "flag_glow_map.slot2_filled_without_flag"
+    if "slsf2_glow_map is set" in lowered and "slot 2 is unresolved" in lowered:
+        return "flag_glow_map.flag_set_without_slot2"
     if "slot 5 is filled" in lowered and "slsf1_environment_mapping is not enabled" in lowered:
         return "flag_env_mapping.slot5_filled_without_flag"
     if "pom flag is set on shader type" in lowered:
@@ -4278,6 +4308,9 @@ def build_auto_remediation_patch_options(
     if any(code.startswith("flag_glow_map.slot2_filled_without_flag") for code in base_codes):
         opts.enable_glow_map = True
         applied_steps.append("enable_glow_map")
+    if any(code.startswith("flag_glow_map.flag_set_without_slot2") for code in base_codes):
+        opts.disable_glow_map = True
+        applied_steps.append("disable_glow_map_for_missing_slot2")
     if any(code.startswith("path_slot_parallax") or code.startswith("missing_parallax_slot3") for code in base_codes):
         if guessed_parallax:
             opts.parallax_texture_path = guessed_parallax
@@ -4397,6 +4430,7 @@ def validate_nif_for_parallax(
         nif_path,
         mapping_table=unknown_shader_type_map,
     )
+    texture_roots = _candidate_texture_roots_for_nif(nif_path)
     guessed_parallax = guess_parallax_path_for_nif(nif_path)
 
     def _append_unique(items: list[str], message: str) -> None:
@@ -4846,10 +4880,19 @@ def validate_nif_for_parallax(
                 result.suggestions,
                 "Enable the glow map flag with enable_glow_map=True or clear slot 2 if this mesh should not glow."
             )
-        if info.has_glow_map_flag and not glow_path:
+        glow_path_missing = _texture_slot_path_missing_near_nif(
+            nif_path,
+            glow_path,
+            texture_roots,
+        )
+        if info.has_glow_map_flag and (not glow_path or glow_path_missing):
+            _append_unique(
+                result.issues,
+                f"{bname}: SLSF2_Glow_Map is set but slot 2 is unresolved."
+            )
             _append_unique(
                 result.suggestions,
-                f"{bname}: SLSF2_Glow_Map is set but slot 2 is empty; add a _g.dds emissive map or disable the flag."
+                f"{bname}: SLSF2_Glow_Map is set but slot 2 is empty or unresolved; add a valid _g.dds emissive map or disable the flag."
             )
         cubemap_path = info.texture_paths.get(TEXTURE_SLOT_CUBEMAP, "").strip()
         if cubemap_path:

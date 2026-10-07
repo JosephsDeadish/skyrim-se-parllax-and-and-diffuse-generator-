@@ -9609,19 +9609,19 @@ if GUI_AVAILABLE:
             def _fmt(value: str, auto_var: tk.BooleanVar) -> str:
                 return f"{value}  ◉ AUTO" if (auto_all and auto_var.get()) else value
 
-            self.normal_strength_display_var.set(_fmt(f"{float(self.normal_strength_var.get()):.2f} (0.1–8.0)", self.auto_normal_suggestion_var))
+            self.normal_strength_display_var.set(_fmt(f"{float(self.normal_strength_var.get()):.2f} (0.1–12.0)", self.auto_normal_suggestion_var))
             self.parallax_strength_display_var.set(_fmt(f"{float(self.parallax_strength_var.get()):.2f} (0.1–10.0)", self.auto_parallax_suggestion_var))
             self.glow_threshold_display_var.set(_fmt(f"{int(round(self.glow_threshold_var.get()))} (0–255)", self.auto_glow_suggestion_var))
             self.environment_mask_strength_display_var.set(
-                _fmt(f"{float(self.environment_mask_strength_var.get()):.2f} (0.1–8.0)", self.auto_environment_mask_suggestion_var)
+                _fmt(f"{float(self.environment_mask_strength_var.get()):.2f} (0.1–12.0)", self.auto_environment_mask_suggestion_var)
             )
             self.rmaos_strength_display_var.set(
-                _fmt(f"{float(self.rmaos_strength_var.get()):.2f} (0.1–8.0)", self.auto_rmaos_suggestion_var)
+                _fmt(f"{float(self.rmaos_strength_var.get()):.2f} (0.1–12.0)", self.auto_rmaos_suggestion_var)
             )
-            self.complex_strength_display_var.set(_fmt(f"{float(self.complex_strength_var.get()):.2f} (0.1–8.0)", self.auto_complex_suggestion_var))
-            self.specular_strength_display_var.set(_fmt(f"{float(self.specular_strength_var.get()):.2f} (0.1–8.0)", self.auto_specular_suggestion_var))
-            self.ao_strength_display_var.set(_fmt(f"{float(self.ao_strength_var.get()):.2f} (0.1–8.0)", self.auto_ao_suggestion_var))
-            self.roughness_strength_display_var.set(_fmt(f"{float(self.roughness_strength_var.get()):.2f} (0.1–8.0)", self.auto_roughness_suggestion_var))
+            self.complex_strength_display_var.set(_fmt(f"{float(self.complex_strength_var.get()):.2f} (0.1–12.0)", self.auto_complex_suggestion_var))
+            self.specular_strength_display_var.set(_fmt(f"{float(self.specular_strength_var.get()):.2f} (0.1–12.0)", self.auto_specular_suggestion_var))
+            self.ao_strength_display_var.set(_fmt(f"{float(self.ao_strength_var.get()):.2f} (0.1–12.0)", self.auto_ao_suggestion_var))
+            self.roughness_strength_display_var.set(_fmt(f"{float(self.roughness_strength_var.get()):.2f} (0.1–12.0)", self.auto_roughness_suggestion_var))
 
         def _on_batch_preview_toggle(self) -> None:
             if self.show_batch_preview_var.get():
