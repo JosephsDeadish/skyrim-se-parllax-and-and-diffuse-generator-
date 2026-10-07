@@ -1009,6 +1009,21 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertTrue(any(code.startswith("path_slot_env_mask.generic_alias_suffix.") for code in codes))
         self.assertTrue(any(code.startswith("path_slot_glow.wrong_suffix.") for code in codes))
 
+    def test_conflict_report_flags_envmap_pom_with_unresolved_env_textures(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone_p.dds"
+        paths[TEXTURE_SLOT_CUBEMAP] = "textures\\cubemaps\\missing_env_e.dds"
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=SLSF1_ENVIRONMENT_MAPPING | SLSF1_PARALLAX_OCCLUSION,
+            texture_paths=paths,
+        )
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(
+            any(group.code.startswith("shader_state.envmap_pom_missing_env_slots.") for group in v.conflict_report)
+        )
+
     def test_reports_wrong_texture_type_in_normal_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_NORMAL] = "textures\\arch\\stone_p.dds"
@@ -3058,6 +3073,20 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         assert opts is not None
         self.assertTrue(str(opts.env_mask_texture_path).lower().endswith("_m.dds"))
         self.assertIn("set_slot5_env_mask_for_missing_envmap_slot5", steps)
+
+    def test_auto_remediation_build_options_disables_env_mapping_and_pom_for_mixed_envmap_pom_conflict(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["shader_state.envmap_pom_missing_env_slots.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(opts.disable_env_mapping)
+        self.assertTrue(opts.disable_pom)
+        self.assertIn("disable_env_mapping_for_envmap_pom_mixed_unresolved", steps)
+        self.assertIn("disable_pom_for_envmap_pom_mixed_unresolved", steps)
 
 
 class TestCompatibilityReport(unittest.TestCase):

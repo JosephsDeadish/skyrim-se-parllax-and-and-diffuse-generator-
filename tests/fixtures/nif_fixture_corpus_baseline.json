@@ -1,7 +1,7 @@
 {
-  "expected_total_cases": 26,
+  "expected_total_cases": 28,
   "expected_profile_counts": {
-    "skyrim": 17,
+    "skyrim": 19,
     "fallout": 7,
     "unknown": 2
   },
@@ -18,6 +18,7 @@
     "shader_state.envmap_missing_slots4_5.skyrim.",
     "shader_state.envmap_missing_slot4.skyrim.",
     "shader_state.envmap_missing_slot5.skyrim.",
+    "shader_state.envmap_pom_missing_env_slots.skyrim.",
     "unsupported_header."
   ]
 }

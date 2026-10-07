@@ -458,6 +458,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 "render_profile": "mystery",
                 "auto_optimize_large_batches": 0,
                 "lazy_preview_mode": 0,
+                "staged_preview_mode": 0,
                 "batch_resume_mode": "unsupported",
                 "simplified_main_layout": 0,
                 "show_advanced_generation_controls": 1,
@@ -477,6 +478,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(normalized["render_profile"]), "custom")
         self.assertFalse(bool(normalized["auto_optimize_large_batches"]))
         self.assertFalse(bool(normalized["lazy_preview_mode"]))
+        self.assertFalse(bool(normalized["staged_preview_mode"]))
         self.assertEqual(str(normalized["batch_resume_mode"]), "start_fresh")
         self.assertFalse(bool(normalized["simplified_main_layout"]))
         self.assertTrue(bool(normalized["show_advanced_generation_controls"]))
@@ -1909,12 +1911,15 @@ class GenerateTexturesTests(unittest.TestCase):
             max_file_seconds=8.0,
             high_res_4k_count=120,
             high_res_8k_count=4,
+            max_source_dimension=8192,
+            max_source_megapixels=67.1,
             resumed_completed_count=0,
             total_failed=2,
             total_sources=1500,
         )
         self.assertTrue(any("Resume mode" in hint for hint in hints))
         self.assertTrue(any("8K-heavy" in hint for hint in hints))
+        self.assertTrue(any("Very large source textures" in hint for hint in hints))
 
     def test_get_generation_warnings_glow_on_stone_triggers_warning(self) -> None:
         warnings = get_generation_warnings(

@@ -3900,6 +3900,9 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "shader_state.envmap_missing_slot5": (
         "Restore a valid slot 5 env-mask texture for EnvMap shader blocks, or disable environment mapping for that block.",
     ),
+    "shader_state.envmap_pom_missing_env_slots": (
+        "EnvMap + POM is active while required EnvMap textures are unresolved; restore slot 4/5 textures or disable both env mapping and POM for the block.",
+    ),
     "fallback_or_unknown": (
         "Review the listed block diagnostics and apply targeted fixes before repatching.",
     ),
@@ -4001,6 +4004,8 @@ def _classify_conflict_code(message: str) -> str:
         return "shader_state.envmap_missing_slot4"
     if "shader type is envmap" in lowered and "slot 5 env-mask is unresolved" in lowered:
         return "shader_state.envmap_missing_slot5"
+    if "envmap and pom are enabled" in lowered and "required envmap textures are unresolved" in lowered:
+        return "shader_state.envmap_pom_missing_env_slots"
     if "slot 0 " in lowered:
         return "path_slot_diffuse"
     if "slot 1 " in lowered:
@@ -4393,6 +4398,11 @@ def build_auto_remediation_patch_options(
         else:
             opts.disable_env_mapping = True
             applied_steps.append("disable_env_mapping_for_missing_slot5")
+    if any(code.startswith("shader_state.envmap_pom_missing_env_slots") for code in base_codes):
+        opts.disable_env_mapping = True
+        opts.disable_pom = True
+        applied_steps.append("disable_env_mapping_for_envmap_pom_mixed_unresolved")
+        applied_steps.append("disable_pom_for_envmap_pom_mixed_unresolved")
 
     if not applied_steps:
         return None, (
@@ -4924,6 +4934,22 @@ def validate_nif_for_parallax(
             _append_unique(
                 result.suggestions,
                 "Restore a valid slot 5 env-mask texture for EnvMap, or disable environment mapping for this block."
+            )
+        if (
+            info.shader_type == SHADER_TYPE_ENVMAP
+            and info.has_pom_flag
+            and (
+                (not env_mask_path or env_mask_missing)
+                or (not cubemap_path or cubemap_missing)
+            )
+        ):
+            _append_unique(
+                result.issues,
+                f"{bname}: EnvMap and POM are enabled together, but required EnvMap textures are unresolved."
+            )
+            _append_unique(
+                result.suggestions,
+                "Restore valid slot 4/5 EnvMap textures, or disable both environment mapping and POM for this mixed block."
             )
         if info.parallax_scale is not None and info.parallax_scale < 0.35:
             _append_unique(

@@ -186,6 +186,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "show_batch_preview": False,
     "auto_optimize_large_batches": True,
     "lazy_preview_mode": True,
+    "staged_preview_mode": True,
     "simplified_main_layout": True,
     "show_advanced_generation_controls": False,
     "show_advanced_workflow_outputs": False,
@@ -450,6 +451,8 @@ def build_batch_bottleneck_hints(
     max_file_seconds: float,
     high_res_4k_count: int,
     high_res_8k_count: int,
+    max_source_dimension: int,
+    max_source_megapixels: float,
     resumed_completed_count: int,
     total_failed: int,
     total_sources: int,
@@ -457,10 +460,12 @@ def build_batch_bottleneck_hints(
     hints: list[str] = []
     if high_res_8k_count > 0 and avg_file_seconds > 1.5:
         hints.append("8K-heavy run detected; keep lazy preview enabled and use resume checkpoints.")
-    if high_res_4k_count >= 50:
-        hints.append("Large high-res set detected; split core and niche outputs into separate passes.")
     if total_sources >= 1000 and resumed_completed_count == 0:
         hints.append("Large 1000+ run: use Resume mode to protect progress from interruptions.")
+    if max_source_dimension >= 8192 or max_source_megapixels >= 48.0:
+        hints.append("Very large source textures detected; reduce worker count and keep staged/lazy preview enabled.")
+    if high_res_4k_count >= 50:
+        hints.append("Large high-res set detected; split core and niche outputs into separate passes.")
     if max_file_seconds >= max(5.0, avg_file_seconds * 2.5):
         hints.append("A few outlier files were much slower; inspect unusually large or noisy source textures first.")
     if total_failed > 0:
@@ -504,6 +509,7 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         "show_batch_preview",
         "auto_optimize_large_batches",
         "lazy_preview_mode",
+        "staged_preview_mode",
         "simplified_main_layout",
         "show_advanced_generation_controls",
         "show_advanced_workflow_outputs",
@@ -7599,6 +7605,7 @@ if GUI_AVAILABLE:
             self.show_batch_preview_var = tk.BooleanVar(value=False)
             self.auto_optimize_large_batches_var = tk.BooleanVar(value=True)
             self.lazy_preview_mode_var = tk.BooleanVar(value=True)
+            self.staged_preview_mode_var = tk.BooleanVar(value=True)
             self.simplified_main_layout_var = tk.BooleanVar(value=True)
             self.show_advanced_generation_var = tk.BooleanVar(value=False)
             self.show_advanced_workflow_outputs_var = tk.BooleanVar(value=False)
@@ -7622,11 +7629,14 @@ if GUI_AVAILABLE:
             self.preview_jump_var = tk.StringVar(value="")
             self.detected_context_var = tk.StringVar(value=self.manager_context.summary)
             self.preview_speed_state_var = tk.StringVar(value="")
+            self.checkpoint_health_var = tk.StringVar(value="Checkpoint: pending")
             self.batch_perf_hint_var = tk.StringVar(value="")
             self.safe_preset_hint_var = tk.StringVar(value="Safe-default presets apply conservative, conflict-averse workflow defaults in one click.")
             self.preview_force_full_once = False
             self.preview_paused_var = tk.BooleanVar(value=False)
             self.batch_preview_auto_paused = False
+            self.preview_deferred_render_after_id: str | None = None
+            self.preview_deferred_queue: list[str] = []
             self.normal_strength_var = tk.DoubleVar(value=2.0)
             self.parallax_strength_var = tk.DoubleVar(value=1.35)
             self.complex_strength_var = tk.DoubleVar(value=1.15)
@@ -8394,7 +8404,7 @@ if GUI_AVAILABLE:
             )
             _status_label = ttk.Label(actions, textvariable=self.status_var, justify=tk.LEFT, anchor=tk.W)
             _status_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=14)
-            self.preview_speed_badge = ttk.Label(actions, textvariable=self.preview_speed_state_var, foreground="#d97706")
+            self.preview_speed_badge = ttk.Label(actions, textvariable=self.preview_speed_state_var, foreground="#6b7280")
             self.preview_speed_badge.pack(side=tk.LEFT, padx=(0, 8))
             self.reenable_batch_preview_button = ttk.Button(
                 actions,
@@ -8506,7 +8516,18 @@ if GUI_AVAILABLE:
             _lazy_preview_check.pack(side=tk.LEFT, padx=(10, 4))
             self._add_tooltip(
                 _lazy_preview_check,
-                "Render only core preview tiles first on heavy sets, and defer niche maps until requested.",
+                "Render only core preview tiles first on large sets, and defer niche maps until requested.",
+            )
+            _staged_preview_check = ttk.Checkbutton(
+                source_controls,
+                text="Stage deferred preview tiles in background",
+                variable=self.staged_preview_mode_var,
+                command=self._request_preview_refresh,
+            )
+            _staged_preview_check.pack(side=tk.LEFT, padx=(6, 4))
+            self._add_tooltip(
+                _staged_preview_check,
+                "Gradually render deferred preview tiles after core tiles load, instead of one heavy full-refresh step.",
             )
             self.render_all_preview_button = ttk.Button(
                 source_controls,
@@ -8527,7 +8548,7 @@ if GUI_AVAILABLE:
             self.preview_pause_button.pack(side=tk.LEFT, padx=(4, 4))
             self._add_tooltip(
                 self.preview_pause_button,
-                "Pause heavy preview refresh work during long runs, then resume when needed.",
+                "Pause preview rendering manually during long runs, then resume when needed.",
             )
             _batch_prev_check = ttk.Checkbutton(
                 source_controls,
@@ -8538,7 +8559,7 @@ if GUI_AVAILABLE:
             _batch_prev_check.pack(side=tk.LEFT, padx=(14, 4))
             self._add_tooltip(
                 _batch_prev_check,
-                "Show live preview while batch-processing.\nThis can slow large batches, so it is disabled by default.",
+                "Show live preview while batch processing.\nThis can slow large batches, so it is off by default.",
             )
             _large_batch_opt_check = ttk.Checkbutton(
                 source_controls,
@@ -8548,7 +8569,7 @@ if GUI_AVAILABLE:
             _large_batch_opt_check.pack(side=tk.LEFT, padx=(10, 4))
             self._add_tooltip(
                 _large_batch_opt_check,
-                "Automatically reduce UI overhead for heavy batch runs.\n"
+                "Automatically reduce preview/UI overhead for heavy batch runs.\n"
                 "When many high-resolution textures are detected, live preview is turned off before processing starts.",
             )
             _resume_label = ttk.Label(source_controls, text="Resume")
@@ -8563,7 +8584,7 @@ if GUI_AVAILABLE:
             _resume_combo.pack(side=tk.LEFT)
             self._add_tooltip(
                 _resume_combo,
-                "start_fresh: ignore prior checkpoint entries.\nresume: skip files already completed in checkpoint.\nFor large 1000+ runs, resume is strongly recommended.",
+                "start_fresh: ignore prior checkpoint entries.\nresume: skip files already completed in checkpoint.\nFor 1000+ runs, Resume is strongly recommended.",
             )
             _clear_checkpoint_button = ttk.Button(
                 source_controls,
@@ -8573,7 +8594,13 @@ if GUI_AVAILABLE:
             _clear_checkpoint_button.pack(side=tk.LEFT, padx=(4, 4))
             self._add_tooltip(
                 _clear_checkpoint_button,
-                "Delete the current batch checkpoint file so the next run starts from scratch.\nUse carefully on very large runs because resume progress is lost.",
+                "Delete the current batch checkpoint file so the next run starts from scratch.\nUse carefully on large runs because resume protection is lost.",
+            )
+            _checkpoint_health_label = ttk.Label(source_controls, textvariable=self.checkpoint_health_var, foreground="gray")
+            _checkpoint_health_label.pack(side=tk.LEFT, padx=(10, 4))
+            self._add_tooltip(
+                _checkpoint_health_label,
+                "Checkpoint status summary for the next run: file path, freshness, and resumable completed count.",
             )
             _auto_patch_nifs_check = ttk.Checkbutton(
                 source_controls,
@@ -8590,9 +8617,16 @@ if GUI_AVAILABLE:
                 "Off by default — always keep NIF backups before enabling.",
             )
             advanced_batch_widgets: list[tk.Widget] = [
+                _lazy_preview_check,
+                _staged_preview_check,
+                self.render_all_preview_button,
+                self.preview_pause_button,
+                _batch_prev_check,
+                _large_batch_opt_check,
                 _resume_label,
                 _resume_combo,
                 _clear_checkpoint_button,
+                _checkpoint_health_label,
                 _auto_patch_nifs_check,
             ]
             _advanced_batch_pack_layout: dict[tk.Widget, dict[str, object]] = {}
@@ -8969,6 +9003,7 @@ if GUI_AVAILABLE:
             self.show_batch_preview_var.set(bool(state["show_batch_preview"]))
             self.auto_optimize_large_batches_var.set(bool(state.get("auto_optimize_large_batches", True)))
             self.lazy_preview_mode_var.set(bool(state.get("lazy_preview_mode", True)))
+            self.staged_preview_mode_var.set(bool(state.get("staged_preview_mode", True)))
             self.simplified_main_layout_var.set(bool(state.get("simplified_main_layout", True)))
             self.show_advanced_generation_var.set(bool(state.get("show_advanced_generation_controls", False)))
             self.show_advanced_workflow_outputs_var.set(bool(state.get("show_advanced_workflow_outputs", False)))
@@ -9032,6 +9067,7 @@ if GUI_AVAILABLE:
                 "show_batch_preview": self.show_batch_preview_var.get(),
                 "auto_optimize_large_batches": self.auto_optimize_large_batches_var.get(),
                 "lazy_preview_mode": self.lazy_preview_mode_var.get(),
+                "staged_preview_mode": self.staged_preview_mode_var.get(),
                 "simplified_main_layout": self.simplified_main_layout_var.get(),
                 "show_advanced_generation_controls": self.show_advanced_generation_var.get(),
                 "show_advanced_workflow_outputs": self.show_advanced_workflow_outputs_var.get(),
@@ -9318,6 +9354,37 @@ if GUI_AVAILABLE:
                 return set()
             return {str(item) for item in raw if isinstance(item, str)}
 
+        def _refresh_checkpoint_health_status(
+            self,
+            *,
+            checkpoint_path: Path | None,
+            planned_total: int = 0,
+        ) -> None:
+            if checkpoint_path is None:
+                self.checkpoint_health_var.set("Checkpoint: unavailable")
+                return
+            if not checkpoint_path.exists():
+                self.checkpoint_health_var.set(f"Checkpoint: new ({checkpoint_path.name})")
+                return
+            age_seconds = max(0.0, time.time() - checkpoint_path.stat().st_mtime)
+            if age_seconds < 120:
+                age_label = "just now"
+            elif age_seconds < 3600:
+                age_label = f"{int(age_seconds // 60)}m ago"
+            elif age_seconds < 86400:
+                age_label = f"{int(age_seconds // 3600)}h ago"
+            else:
+                age_label = f"{int(age_seconds // 86400)}d ago"
+            completed = len(self._load_batch_checkpoint_completed_files(checkpoint_path))
+            if planned_total > 0:
+                self.checkpoint_health_var.set(
+                    f"Checkpoint: {checkpoint_path.name} ({completed}/{planned_total} complete, updated {age_label})"
+                )
+            else:
+                self.checkpoint_health_var.set(
+                    f"Checkpoint: {checkpoint_path.name} ({completed} complete, updated {age_label})"
+                )
+
         def _write_batch_checkpoint_state(
             self,
             checkpoint_path: Path,
@@ -9352,6 +9419,7 @@ if GUI_AVAILABLE:
             try:
                 checkpoint_path.unlink(missing_ok=True)
                 self.status_var.set(f"Cleared checkpoint file: {checkpoint_path.name}")
+                self._refresh_checkpoint_health_status(checkpoint_path=checkpoint_path)
             except Exception as exc:
                 self.status_var.set(f"Could not clear checkpoint file: {exc}")
 
@@ -9371,6 +9439,20 @@ if GUI_AVAILABLE:
                     self._apply_render_profile_modes(self.render_profile_var.get(), apply_preset=False)
                 if not self.use_custom_output_var.get():
                     self.output_var.set(str(self._default_output_dir_for_path(path)))
+                inferred_output = (
+                    Path(self.output_var.get().strip())
+                    if self.use_custom_output_var.get() and self.output_var.get().strip()
+                    else None
+                )
+                checkpoint_probe = self._resolve_batch_checkpoint_path(
+                    input_path=path,
+                    output_dir=inferred_output,
+                )
+                self.batch_checkpoint_path_var.set(str(checkpoint_probe))
+                self._refresh_checkpoint_health_status(
+                    checkpoint_path=checkpoint_probe,
+                    planned_total=len(self.selected_inputs),
+                )
                 preview_path = self.selected_inputs[self.current_preview_index]
                 if path.is_dir():
                     metrics = self._summarize_selected_inputs_for_performance()
@@ -9427,8 +9509,9 @@ if GUI_AVAILABLE:
             if not processing:
                 self.reenable_batch_preview_button.configure(state=tk.DISABLED)
                 self.batch_preview_auto_paused = False
+                self._cancel_deferred_preview_staging(clear_queue=False)
                 if not self.preview_paused_var.get():
-                    self.preview_speed_state_var.set("")
+                    self._set_preview_speed_badge("none")
             self._update_output_location_controls()
             self._update_preview_navigation_state()
 
@@ -9570,6 +9653,7 @@ if GUI_AVAILABLE:
                 high_res_4k_count = 0
                 high_res_8k_count = 0
                 max_source_dim = 0
+                max_source_megapixels = 0.0
                 generation_call_kwargs = dict(generation_kwargs)
                 auto_patch_nifs = bool(generation_call_kwargs.pop("auto_patch_nifs", False))
                 manager_context = generation_call_kwargs.pop("manager_context", None)
@@ -9577,6 +9661,7 @@ if GUI_AVAILABLE:
                 high_res_4k_count = int(batch_metrics.get("high_res_4k_count", 0) or 0)
                 high_res_8k_count = int(batch_metrics.get("high_res_8k_count", 0) or 0)
                 max_source_dim = int(batch_metrics.get("max_dimension", 0) or 0)
+                max_source_megapixels = float(batch_metrics.get("max_megapixels", 0.0) or 0.0)
                 for index, input_file in enumerate(input_files, start=1):
                     if self.cancel_requested:
                         self.processing_queue.put(("cancelled", (results, {
@@ -9586,7 +9671,9 @@ if GUI_AVAILABLE:
                             "high_res_4k_count": high_res_4k_count,
                             "high_res_8k_count": high_res_8k_count,
                             "max_source_dimension": max_source_dim,
+                            "max_source_megapixels": max_source_megapixels,
                             "resumed_completed_count": resumed_completed_count,
+                            "checkpoint_path": str(checkpoint_path),
                         })))
                         return
                     elapsed_seconds = max(0.0, time.perf_counter() - started_at)
@@ -9646,6 +9733,7 @@ if GUI_AVAILABLE:
                     "high_res_4k_count": high_res_4k_count,
                     "high_res_8k_count": high_res_8k_count,
                     "max_source_dimension": max_source_dim,
+                    "max_source_megapixels": max_source_megapixels,
                     "resumed_completed_count": resumed_completed_count,
                     "checkpoint_path": str(checkpoint_path),
                 })))
@@ -9733,6 +9821,7 @@ if GUI_AVAILABLE:
                         high_4k = int(telemetry.get("high_res_4k_count", 0) or 0)
                         high_8k = int(telemetry.get("high_res_8k_count", 0) or 0)
                         max_dim = int(telemetry.get("max_source_dimension", 0) or 0)
+                        max_megapixels = float(telemetry.get("max_source_megapixels", 0.0) or 0.0)
                         resumed = int(telemetry.get("resumed_completed_count", 0) or 0)
                         lines.append(
                             f"Timing: total {elapsed:.1f}s, avg/file {avg_file:.2f}s, slowest file {max_file:.2f}s."
@@ -9743,16 +9832,26 @@ if GUI_AVAILABLE:
                             lines.append(
                                 f"High-res load: {high_4k} file(s) at 4K+, {high_8k} at 8K+ (max {max_dim}px)."
                             )
+                        if max_megapixels > 0:
+                            lines.append(f"Largest sampled source: {max_megapixels:.1f} MP.")
                         perf_hints = build_batch_bottleneck_hints(
                             avg_file_seconds=avg_file,
                             max_file_seconds=max_file,
                             high_res_4k_count=high_4k,
                             high_res_8k_count=high_8k,
+                            max_source_dimension=max_dim,
+                            max_source_megapixels=max_megapixels,
                             resumed_completed_count=resumed,
                             total_failed=total_failed,
                             total_sources=total_sources,
                         )
-                        self.batch_perf_hint_var.set(" | ".join(perf_hints[:2]))
+                        self.batch_perf_hint_var.set(" | ".join(perf_hints[:3]))
+                        checkpoint_value = str(telemetry.get("checkpoint_path", "") or "").strip()
+                        if checkpoint_value:
+                            self._refresh_checkpoint_health_status(
+                                checkpoint_path=Path(checkpoint_value),
+                                planned_total=max(0, total_sources + resumed),
+                            )
                     messagebox.showinfo("Generation complete", "\n".join(lines), parent=self.root)
                     self._refresh_preview()
                     keep_polling = False
@@ -9780,6 +9879,13 @@ if GUI_AVAILABLE:
                             f"Cancelled after {float(telemetry.get('elapsed_seconds', 0.0) or 0.0):.1f}s. "
                             "Resume mode can continue from checkpoint."
                         )
+                        checkpoint_value = str(telemetry.get("checkpoint_path", "") or "").strip()
+                        if checkpoint_value:
+                            resumed = int(telemetry.get("resumed_completed_count", 0) or 0)
+                            self._refresh_checkpoint_health_status(
+                                checkpoint_path=Path(checkpoint_value),
+                                planned_total=max(0, total_sources + resumed),
+                            )
                     keep_polling = False
                     break
                 elif event_type == "error":
@@ -9834,14 +9940,14 @@ if GUI_AVAILABLE:
                 self.status_var.set("Batch live preview disabled for faster processing.")
             if self.show_batch_preview_var.get():
                 self.batch_preview_auto_paused = False
-                self.preview_speed_state_var.set("")
+                self._set_preview_speed_badge("none")
                 self.reenable_batch_preview_button.configure(state=tk.DISABLED)
             elif self.is_processing:
-                self.preview_speed_state_var.set("Preview off for speed")
+                self._set_preview_speed_badge("auto_speed_off")
 
         def _reenable_batch_preview(self) -> None:
             self.show_batch_preview_var.set(True)
-            self.preview_speed_state_var.set("")
+            self._set_preview_speed_badge("none")
             self.reenable_batch_preview_button.configure(state=tk.DISABLED)
             self.batch_preview_auto_paused = False
             self.status_var.set("Live batch preview re-enabled.")
@@ -9850,15 +9956,16 @@ if GUI_AVAILABLE:
             paused = not bool(self.preview_paused_var.get())
             self.preview_paused_var.set(paused)
             if paused:
+                self._cancel_deferred_preview_staging(clear_queue=False)
                 self.preview_pause_button.configure(text="Resume preview")
-                self.preview_speed_state_var.set("Preview paused (manual)")
+                self._set_preview_speed_badge("manual_pause")
                 self.status_var.set("Preview paused to reduce UI overhead during long runs.")
             else:
                 self.preview_pause_button.configure(text="Pause preview")
                 if self.batch_preview_auto_paused and not self.show_batch_preview_var.get():
-                    self.preview_speed_state_var.set("Preview off for speed")
+                    self._set_preview_speed_badge("auto_speed_off")
                 else:
-                    self.preview_speed_state_var.set("")
+                    self._set_preview_speed_badge("none")
                 self.status_var.set("Preview resumed.")
                 self._refresh_preview()
 
@@ -9868,9 +9975,134 @@ if GUI_AVAILABLE:
                 self.preview_paused_var.set(False)
                 self.preview_pause_button.configure(text="Pause preview")
             if self.batch_preview_auto_paused and not self.show_batch_preview_var.get():
-                self.preview_speed_state_var.set("Preview off for speed")
+                self._set_preview_speed_badge("auto_speed_off")
             self.status_var.set("Rendering full preview tile set…")
             self._refresh_preview()
+
+        def _set_preview_speed_badge(self, mode: str, *, deferred_count: int = 0) -> None:
+            if mode == "manual_pause":
+                self.preview_speed_state_var.set("⏸ Preview paused (manual)")
+                self.preview_speed_badge.configure(foreground="#dc2626")
+                return
+            if mode == "auto_speed_off":
+                self.preview_speed_state_var.set("⚡ Preview off for speed")
+                self.preview_speed_badge.configure(foreground="#d97706")
+                return
+            if mode == "staged" and deferred_count > 0:
+                self.preview_speed_state_var.set(f"🧩 Staged preview loading ({deferred_count} tile(s) queued)")
+                self.preview_speed_badge.configure(foreground="#2563eb")
+                return
+            if mode == "lazy" and deferred_count > 0:
+                self.preview_speed_state_var.set(f"🪶 Lazy preview active ({deferred_count} tile(s) deferred)")
+                self.preview_speed_badge.configure(foreground="#2563eb")
+                return
+            self.preview_speed_state_var.set("")
+            self.preview_speed_badge.configure(foreground="#6b7280")
+
+        def _cancel_deferred_preview_staging(self, *, clear_queue: bool = True) -> None:
+            if self.preview_deferred_render_after_id is not None:
+                try:
+                    self.root.after_cancel(self.preview_deferred_render_after_id)
+                except Exception:
+                    pass
+                self.preview_deferred_render_after_id = None
+            if clear_queue:
+                self.preview_deferred_queue = []
+
+        def _start_deferred_preview_staging(self, deferred_output_keys: set[str]) -> None:
+            self._cancel_deferred_preview_staging(clear_queue=True)
+            if not deferred_output_keys:
+                return
+            self.preview_deferred_queue = sorted(deferred_output_keys)
+            self._set_preview_speed_badge("staged", deferred_count=len(self.preview_deferred_queue))
+            self.preview_deferred_render_after_id = self.root.after(40, self._render_next_deferred_preview_tile)
+
+        def _render_next_deferred_preview_tile(self) -> None:
+            self.preview_deferred_render_after_id = None
+            if (
+                self.source_image is None
+                or self.preview_paused_var.get()
+                or (self.batch_preview_auto_paused and not self.show_batch_preview_var.get())
+            ):
+                return
+            if not self.preview_deferred_queue:
+                if self.batch_preview_auto_paused and not self.show_batch_preview_var.get():
+                    self._set_preview_speed_badge("auto_speed_off")
+                else:
+                    self._set_preview_speed_badge("none")
+                return
+            output_key = self.preview_deferred_queue.pop(0)
+            include_flags = {
+                "diffuse": False,
+                "normal": False,
+                "parallax": output_key == "parallax",
+                "glow": output_key == "glow",
+                "environment_mask": output_key == "environment_mask",
+                "rmaos": output_key == "rmaos",
+                "wetness_mask": output_key == "wetness_mask",
+                "snow_mask": output_key == "snow_mask",
+                "ao": output_key == "ao",
+                "roughness": output_key == "roughness",
+                "complex_material": output_key == "complex_material",
+            }
+            _pm_raw = self.parallax_mode_var.get()
+            _parallax_mode = "occlusion" if "occlusion" in _pm_raw else "standard"
+            try:
+                outputs = generate_preview_outputs(
+                    self.source_image,
+                    normal_strength=float(self.normal_strength_var.get()),
+                    parallax_strength=float(self.parallax_strength_var.get()),
+                    glow_threshold=int(round(self.glow_threshold_var.get())),
+                    environment_mask_strength=float(self.environment_mask_strength_var.get()),
+                    rmaos_strength=float(self.rmaos_strength_var.get()),
+                    complex_strength=float(self.complex_strength_var.get()),
+                    specular_strength=float(self.specular_strength_var.get()),
+                    complex_format=self.complex_format_var.get(),
+                    env_mask_mode=self.env_mask_mode_var.get(),
+                    emboss_mode=self.emboss_mode_var.get(),
+                    relief_mode=self.relief_mode_var.get(),
+                    parallax_mode=_parallax_mode,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=include_flags["parallax"],
+                    include_glow=include_flags["glow"],
+                    include_environment_mask=include_flags["environment_mask"],
+                    include_rmaos=include_flags["rmaos"],
+                    include_wetness_mask=include_flags["wetness_mask"],
+                    wetness_mask_strength=float(_GUI_STATE_DEFAULTS["wetness_mask_strength"]),
+                    include_snow_mask=include_flags["snow_mask"],
+                    snow_mask_strength=float(_GUI_STATE_DEFAULTS["snow_mask_strength"]),
+                    include_ao=include_flags["ao"],
+                    ao_strength=float(self.ao_strength_var.get()),
+                    include_roughness=include_flags["roughness"],
+                    roughness_strength=float(self.roughness_strength_var.get()),
+                    include_complex=include_flags["complex_material"],
+                    render_profile=self.render_profile_var.get(),
+                )
+                output_image = outputs.get(output_key)
+                label = self.preview_output_labels.get(output_key)
+                if output_image is not None and label is not None:
+                    _, output_max = get_preview_size_limits(self.preview_size_var.get())
+                    display_image = output_image
+                    if output_key == "complex_material":
+                        display_image = build_complex_preview_image(
+                            output_image,
+                            complex_format=self.complex_format_var.get(),
+                        )
+                    photo = self._photo_image(display_image, max_size=output_max)
+                    self.preview_output_images[output_key] = photo
+                    label.configure(image=photo, text="")
+            except Exception:
+                self.preview_deferred_queue = []
+                return
+            remaining = len(self.preview_deferred_queue)
+            if remaining > 0:
+                self._set_preview_speed_badge("staged", deferred_count=remaining)
+                self.preview_deferred_render_after_id = self.root.after(60, self._render_next_deferred_preview_tile)
+            elif self.batch_preview_auto_paused and not self.show_batch_preview_var.get():
+                self._set_preview_speed_badge("auto_speed_off")
+            else:
+                self._set_preview_speed_badge("none")
 
         def _on_auto_patch_nifs_toggle(self) -> None:
             if self.auto_patch_nifs_var.get():
@@ -10411,8 +10643,9 @@ if GUI_AVAILABLE:
             self.preview_refresh_after_id = None
             if self.source_image is None:
                 return
+            self._cancel_deferred_preview_staging(clear_queue=True)
             if self.preview_paused_var.get():
-                self.preview_speed_state_var.set("Preview paused (manual)")
+                self._set_preview_speed_badge("manual_pause")
                 for output_key, label in self.preview_output_labels.items():
                     if output_key not in self.preview_output_images:
                         label.configure(image="", text="Preview paused")
@@ -10498,17 +10731,18 @@ if GUI_AVAILABLE:
                 if deferred_output_keys:
                     self.render_all_preview_button.configure(state=tk.NORMAL)
                     if not self.preview_paused_var.get():
-                        self.preview_speed_state_var.set(
-                            f"Lazy preview active ({len(deferred_output_keys)} tile(s) deferred)"
-                        )
+                        if self.staged_preview_mode_var.get():
+                            self._start_deferred_preview_staging(deferred_output_keys)
+                        else:
+                            self._set_preview_speed_badge("lazy", deferred_count=len(deferred_output_keys))
                 else:
                     self.render_all_preview_button.configure(state=tk.DISABLED)
                     if self.preview_paused_var.get():
-                        self.preview_speed_state_var.set("Preview paused (manual)")
+                        self._set_preview_speed_badge("manual_pause")
                     elif self.batch_preview_auto_paused and not self.show_batch_preview_var.get():
-                        self.preview_speed_state_var.set("Preview off for speed")
+                        self._set_preview_speed_badge("auto_speed_off")
                     elif not self.is_processing or self.show_batch_preview_var.get():
-                        self.preview_speed_state_var.set("")
+                        self._set_preview_speed_badge("none")
             except Exception as exc:
                 self.status_var.set(f"Preview update failed: {exc}")
 
@@ -10698,6 +10932,10 @@ if GUI_AVAILABLE:
                     output_dir=output_dir,
                 )
                 self.batch_checkpoint_path_var.set(str(checkpoint_path))
+                self._refresh_checkpoint_health_status(
+                    checkpoint_path=checkpoint_path,
+                    planned_total=len(self.selected_inputs),
+                )
                 if (
                     is_huge_batch
                     and self.batch_resume_mode_var.get() != "resume"
@@ -10749,6 +10987,10 @@ if GUI_AVAILABLE:
                             self.status_var.set("Large-batch start canceled. Switch Resume mode to continue safely.")
                             return
                     checkpoint_path.unlink(missing_ok=True)
+                self._refresh_checkpoint_health_status(
+                    checkpoint_path=checkpoint_path,
+                    planned_total=len(self.selected_inputs),
+                )
 
                 _context_source = select_generation_context_source(Path(input_value), self.selected_inputs)
                 _material_type = classify_material_type(_context_source)
@@ -10883,14 +11125,16 @@ if GUI_AVAILABLE:
                 if preview_auto_disabled:
                     perf_note += " Live preview was turned off automatically for better throughput."
                     self.batch_preview_auto_paused = True
-                    self.preview_speed_state_var.set("Preview off for speed")
+                    self._set_preview_speed_badge("auto_speed_off")
                     self.reenable_batch_preview_button.configure(state=tk.NORMAL)
                 else:
                     self.batch_preview_auto_paused = False
-                    self.preview_speed_state_var.set("")
+                    self._set_preview_speed_badge("none")
                     self.reenable_batch_preview_button.configure(state=tk.DISABLED)
                 if resumed_completed_count > 0:
                     perf_note += f" Resume mode skipped {resumed_completed_count} file(s) from checkpoint."
+                if checkpoint_path.exists():
+                    perf_note += f" Checkpoint file: {checkpoint_path.name}."
                 if self.show_batch_preview_var.get():
                     self.status_var.set(
                         f"Queued {len(self.selected_inputs)} source texture(s). "

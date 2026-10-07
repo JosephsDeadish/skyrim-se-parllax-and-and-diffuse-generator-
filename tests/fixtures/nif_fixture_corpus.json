@@ -229,6 +229,42 @@
       ]
     },
     {
+      "id": "skyrim_mixed_envmap_pom_unresolved",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 268435584,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "textures\\arch\\stone_p.dds",
+        "textures\\cubemaps\\missing_env_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_multiconflict_env_flag_mismatch_with_aliases",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "textures\\arch\\stone_n.dds",
+        "",
+        "textures\\arch\\stone_n.dds",
+        "textures\\arch\\stone_n.dds",
+        "textures\\arch\\stone_orm.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
       "id": "fallout_legacy_11_130",
       "profile": "fallout",
       "shader_layout": "legacy",
