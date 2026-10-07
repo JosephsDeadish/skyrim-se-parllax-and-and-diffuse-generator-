@@ -7506,71 +7506,75 @@ if GUI_AVAILABLE:
 
             top_bar = ttk.Frame(wrapper, padding=(4, 0, 4, 6))
             top_bar.pack(fill=tk.X)
+            top_primary_row = ttk.Frame(top_bar)
+            top_primary_row.pack(fill=tk.X)
+            top_controls_row = ttk.Frame(top_bar)
+            top_controls_row.pack(fill=tk.X, pady=(4, 0))
             top_bar_message = ttk.Label(
-                top_bar,
+                top_primary_row,
                 text="Generate Skyrim/Fallout-ready texture maps from one source image (single file or full folder batch).",
                 justify=tk.LEFT,
                 anchor=tk.W,
             )
             top_bar_message.pack(side=tk.LEFT, fill=tk.X, expand=True)
             _patreon_button = ttk.Button(
-                top_bar,
+                top_primary_row,
                 text="❤ Support on Patreon",
                 command=lambda: webbrowser.open(PATREON_URL),
             )
             _patreon_button.pack(side=tk.RIGHT, padx=4)
             _wiki_button = ttk.Button(
-                top_bar,
+                top_primary_row,
                 text="Skyrim Wiki",
                 command=lambda: webbrowser.open(MODDING_WIKI_SKYRIM_URL),
             )
             _wiki_button.pack(side=tk.RIGHT, padx=4)
             _help_button = ttk.Button(
-                top_bar,
+                top_primary_row,
                 text="Help",
                 command=self._open_render_profile_help,
             )
             _help_button.pack(side=tk.RIGHT, padx=4)
             _theme_top_check = ttk.Checkbutton(
-                top_bar,
+                top_controls_row,
                 textvariable=self.theme_mode_label_var,
                 variable=self.dark_mode_var,
                 command=self._toggle_theme,
             )
-            _theme_top_check.pack(side=tk.RIGHT, padx=(0, 8))
-            _language_label = ttk.Label(top_bar, text="Language")
-            _language_label.pack(side=tk.RIGHT, padx=(12, 4))
-            self.language_combo = ttk.Combobox(
-                top_bar,
-                textvariable=self.ui_language_var,
-                values=self._available_ui_languages,
-                state="readonly",
-                width=8,
-            )
-            self.language_combo.pack(side=tk.RIGHT, padx=(0, 6))
-            self.language_combo.bind("<<ComboboxSelected>>", self._on_ui_language_changed)
-            _ui_scale_label = ttk.Label(top_bar, text="UI scale")
-            _ui_scale_label.pack(side=tk.RIGHT, padx=(12, 4))
-            self.ui_scale_combo = ttk.Combobox(
-                top_bar,
-                values=("0.9", "1.0", "1.15", "1.3", "1.5"),
-                state="readonly",
-                width=6,
-            )
-            self.ui_scale_combo.set(f"{self.ui_scale_var.get():.2f}".rstrip("0").rstrip("."))
-            self.ui_scale_combo.pack(side=tk.RIGHT, padx=(0, 8))
-            self.ui_scale_combo.bind("<<ComboboxSelected>>", self._on_ui_scale_changed)
-            _target_game_label = ttk.Label(top_bar, text="Game")
-            _target_game_label.pack(side=tk.RIGHT, padx=(12, 4))
+            _theme_top_check.pack(side=tk.LEFT, padx=(0, 14))
+            _target_game_label = ttk.Label(top_controls_row, text="Game")
+            _target_game_label.pack(side=tk.LEFT, padx=(0, 4))
             self.target_game_combo = ttk.Combobox(
-                top_bar,
+                top_controls_row,
                 textvariable=self.target_game_var,
                 values=_TEXTURE_TARGET_GAME_VALUES,
                 state="readonly",
                 width=10,
             )
-            self.target_game_combo.pack(side=tk.RIGHT, padx=(0, 6))
+            self.target_game_combo.pack(side=tk.LEFT, padx=(0, 14))
             self.target_game_combo.bind("<<ComboboxSelected>>", lambda _event: self._save_persisted_gui_state())
+            _language_label = ttk.Label(top_controls_row, text="Language")
+            _language_label.pack(side=tk.LEFT, padx=(0, 4))
+            self.language_combo = ttk.Combobox(
+                top_controls_row,
+                textvariable=self.ui_language_var,
+                values=self._available_ui_languages,
+                state="readonly",
+                width=8,
+            )
+            self.language_combo.pack(side=tk.LEFT, padx=(0, 14))
+            self.language_combo.bind("<<ComboboxSelected>>", self._on_ui_language_changed)
+            _ui_scale_label = ttk.Label(top_controls_row, text="UI scale")
+            _ui_scale_label.pack(side=tk.LEFT, padx=(0, 4))
+            self.ui_scale_combo = ttk.Combobox(
+                top_controls_row,
+                values=("0.9", "1.0", "1.15", "1.3", "1.5"),
+                state="readonly",
+                width=6,
+            )
+            self.ui_scale_combo.set(f"{self.ui_scale_var.get():.2f}".rstrip("0").rstrip("."))
+            self.ui_scale_combo.pack(side=tk.LEFT, padx=(0, 8))
+            self.ui_scale_combo.bind("<<ComboboxSelected>>", self._on_ui_scale_changed)
             self._add_tooltip(_theme_top_check, "🌙 Toggle dark/light mode.\nEasy on the eyes during those 3am modding sessions.")
             self._add_tooltip(_language_label, "Choose the interface language from available translation files.")
             self._add_tooltip(self.language_combo, "Switch language for labels, buttons, and tooltips.")
@@ -8038,7 +8042,7 @@ if GUI_AVAILABLE:
                 _status_label,
                 "Live status updates for generation and patching tasks.",
             )
-            self._bind_responsive_wrap(top_bar, top_bar_message, horizontal_padding=260, min_wrap=220)
+            self._bind_responsive_wrap(top_primary_row, top_bar_message, horizontal_padding=260, min_wrap=220)
             self._bind_responsive_wrap(file_frame, _detected_context_label, horizontal_padding=28, min_wrap=220)
             self._bind_responsive_wrap(actions, _status_label, horizontal_padding=360, min_wrap=200)
             self._bind_responsive_wrap(options_frame, self.render_profile_hint_label, horizontal_padding=350, min_wrap=220)

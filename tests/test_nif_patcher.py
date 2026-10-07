@@ -599,6 +599,23 @@ class TestScanNif(unittest.TestCase):
         _infos, diagnostics = scan_nif_diagnostics(nif)
         self.assertFalse(any("u32 read out of range" in d.lower() for d in diagnostics))
 
+    def test_patch_recovers_from_invalid_num_extra_with_tolerant_fallback(self) -> None:
+        nif = _write_nif(self.tmp)
+        raw = bytearray(nif.read_bytes())
+        shader_header = struct.pack("<IIiI", 0, 0, -1, SHADER_TYPE_DEFAULT)
+        shader_start = raw.find(shader_header)
+        self.assertNotEqual(shader_start, -1)
+        struct.pack_into("<I", raw, shader_start + 4, 0xFFFFFFFF)
+        nif.write_bytes(raw)
+
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        self.assertTrue(
+            any("tolerant niobjectnet fallback" in warning.lower() for warning in result.warnings),
+            result.warnings,
+        )
+        self.assertGreater(result.shader_properties_patched, 0)
+
     def test_scan_parses_legacy_block_with_null_shader_type(self) -> None:
         """Legacy BSLightingShaderProperty blocks where shader_type=0xFFFFFFFF
         (Bethesda null/unset sentinel) must be parsed successfully, not rejected

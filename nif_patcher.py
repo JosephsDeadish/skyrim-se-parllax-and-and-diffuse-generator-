@@ -2907,7 +2907,7 @@ def _validate_patched_bytes_before_write(
         errors.append("Pre-write header validation failed: unsupported NIF header/profile values.")
         return errors
     try:
-        _shader_props, _texture_sets, parse_errors = _build_block_map(
+        shader_props, _texture_sets, parse_errors = _build_block_map(
             new_data,
             header,
             unknown_shader_type_map,
@@ -2916,6 +2916,19 @@ def _validate_patched_bytes_before_write(
     except Exception as exc:  # noqa: BLE001
         errors.append(f"Pre-write block-map validation failed: {exc}")
         return errors
+    if not shader_props and parse_errors:
+        try:
+            fallback_shader_props, _fallback_texture_sets, fallback_parse_errors = _build_block_map(
+                new_data,
+                header,
+                unknown_shader_type_map,
+                allow_num_extra_fallback=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"Pre-write tolerant block-map validation failed: {exc}")
+            return errors
+        if fallback_shader_props and not fallback_parse_errors:
+            parse_errors = []
     if parse_errors:
         errors.extend(f"Pre-write block-map warning/error: {item}" for item in parse_errors)
     return errors
@@ -3091,6 +3104,26 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         opts.unknown_shader_type_map,
         allow_num_extra_fallback=False,
     )
+    if not shader_props and parse_errors:
+        fallback_shader_props, fallback_texture_sets, fallback_parse_errors = _build_block_map(
+            original_data,
+            header,
+            opts.unknown_shader_type_map,
+            allow_num_extra_fallback=True,
+        )
+        if fallback_shader_props:
+            shader_props = fallback_shader_props
+            texture_sets = fallback_texture_sets
+            if parse_errors:
+                for item in parse_errors[:4]:
+                    result.warnings.append(f"Strict parse warning: {item}")
+            if fallback_parse_errors:
+                parse_errors = fallback_parse_errors
+            else:
+                parse_errors = []
+            result.warnings.append(
+                "Recovered shader parsing with tolerant NiObjectNET fallback; verify patched meshes in-game."
+            )
     result.errors.extend(parse_errors)
     result.warnings.extend(_shader_resolution_notes(shader_props))
     strict_unknowns = _strict_unknown_shader_notes(shader_props)
