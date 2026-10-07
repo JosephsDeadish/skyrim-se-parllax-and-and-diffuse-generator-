@@ -43,6 +43,7 @@ Usage (CLI)::
 
 from __future__ import annotations
 
+import difflib
 import re
 import struct
 from dataclasses import dataclass, field, replace
@@ -2566,8 +2567,8 @@ def _apply_patches(
     shader_props: list[_ShaderPropBlock],
     texture_sets: dict[int, _TextureSetBlock],
     opts: NifPatchOptions,
-) -> tuple[bytes, int, int, int, int]:
-    """Return (new_data, props_patched, sets_patched, blocks_upgraded, auto_restored_shader_states)."""
+) -> tuple[bytes, int, int, int, int, list[str]]:
+    """Return (new_data, props_patched, sets_patched, blocks_upgraded, auto_restored_shader_states, warnings)."""
     source_profile = _detect_game_profile(header.user_version, header.user_version_2)
     target_game = (opts.target_game or "auto").strip().lower()
     reparse_profiles = (
@@ -2653,6 +2654,8 @@ def _apply_patches(
     # --- Phase 2: in-place flag + parallax scale + field patches --------------
     buf = _Buf(data)
     props_patched = 0
+    skipped_parallax_enable_blocks: list[int] = []
+    patch_warnings: list[str] = []
 
     # NIFs with Havok-animated skeletons must not receive parallax — doing so
     # causes an EXCEPTION_ACCESS_VIOLATION crash at runtime.
@@ -2678,9 +2681,10 @@ def _apply_patches(
             existing_parallax_path = ""
             if ts_for_shader is not None and TEXTURE_SLOT_PARALLAX < len(ts_for_shader.slot_paths):
                 existing_parallax_path = ts_for_shader.slot_paths[TEXTURE_SLOT_PARALLAX].strip()
-            if (opts.clear_parallax_texture_path or not existing_parallax_path) and not opts.parallax_texture_path:
+            if opts.clear_parallax_texture_path and not opts.parallax_texture_path:
                 enabling_parallax = False
                 restore_candidate_blocks.add(sp.block_index)
+                skipped_parallax_enable_blocks.append(sp.block_index)
 
         # ---- Apply flag changes ----
         if enabling_parallax:
@@ -2755,6 +2759,14 @@ def _apply_patches(
                     props_patched += 1
 
     data = buf.to_bytes()
+    if skipped_parallax_enable_blocks:
+        unique_blocks = sorted(set(skipped_parallax_enable_blocks))
+        patch_warnings.append(
+            "Skipped enabling parallax on block(s) "
+            + ", ".join(str(block_idx) for block_idx in unique_blocks[:12])
+            + ("..." if len(unique_blocks) > 12 else "")
+            + " because slot 3 is empty/cleared and no replacement parallax texture path was provided."
+        )
 
     # --- Phase 3: texture path patches (may change data length) -------------
     sets_patched = 0
@@ -2996,7 +3008,7 @@ def _apply_patches(
             if auto_restored_shader_states:
                 data = buf_final.to_bytes()
 
-    return data, props_patched, sets_patched, upgraded, auto_restored_shader_states
+    return data, props_patched, sets_patched, upgraded, auto_restored_shader_states, patch_warnings
 
 
 def _is_retryable_force_type3_error(exc: Exception) -> bool:
@@ -3016,31 +3028,20 @@ def _summarize_binary_diff(
     *,
     max_ranges: int = 8,
 ) -> tuple[int, list[tuple[int, int]]]:
+    if original_data == new_data:
+        return 0, []
     changed_ranges: list[tuple[int, int]] = []
     changed_bytes = 0
-    if original_data == new_data:
-        return 0, changed_ranges
-    limit = min(len(original_data), len(new_data))
-    start: int | None = None
-    end = -1
-    for idx in range(limit):
-        if original_data[idx] != new_data[idx]:
-            changed_bytes += 1
-            if start is None:
-                start = idx
-            end = idx
-        elif start is not None:
-            if len(changed_ranges) < max_ranges:
-                changed_ranges.append((start, end))
-            start = None
-    if start is not None and len(changed_ranges) < max_ranges:
-        changed_ranges.append((start, end))
-    if len(original_data) != len(new_data):
-        changed_bytes += abs(len(original_data) - len(new_data))
+    matcher = difflib.SequenceMatcher(a=original_data, b=new_data, autojunk=False)
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        changed_bytes += max(i2 - i1, j2 - j1)
         if len(changed_ranges) < max_ranges:
-            start_idx = limit
-            end_idx = max(len(original_data), len(new_data)) - 1
-            changed_ranges.append((start_idx, end_idx))
+            start_idx = min(i1, j1)
+            end_idx = max(i2, j2) - 1
+            if end_idx >= start_idx:
+                changed_ranges.append((start_idx, end_idx))
     return changed_bytes, changed_ranges
 
 
@@ -3295,7 +3296,9 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
                 for item in parse_errors[:4]:
                     result.warnings.append(f"Strict parse warning: {item}")
             if fallback_parse_errors:
-                parse_errors = fallback_parse_errors
+                for item in fallback_parse_errors[:4]:
+                    result.warnings.append(f"Tolerant parse warning: {item}")
+                parse_errors = []
             else:
                 parse_errors = []
             result.warnings.append(
@@ -3308,17 +3311,22 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         result.errors.extend(strict_unknowns)
         result.message = "Strict unknown-shader check failed."
         return result
-    if detected_profile == _GAME_PROFILE_FALLOUT:
+    if capability.allowed_layouts:
         unsupported_layout_blocks = [
             sp.block_index for sp in shader_props if sp.layout_name not in capability.allowed_layouts
         ]
         if unsupported_layout_blocks:
             shader_props = [sp for sp in shader_props if sp.layout_name in capability.allowed_layouts]
             result.warnings.append(
-                "Skipped unsupported-layout shader blocks in experimental Fallout mode: "
+                f"Skipped unsupported-layout shader blocks for {policy_profile} policy: "
                 + ", ".join(str(idx) for idx in unsupported_layout_blocks[:12])
                 + ("..." if len(unsupported_layout_blocks) > 12 else "")
             )
+    elif shader_props:
+        result.warnings.append(
+            f"No supported shader layouts are available for profile '{policy_profile}'; skipping all shader blocks."
+        )
+        shader_props = []
     if fallout_parallax_scale_gate_enabled and not any(
         sp.shader_type in (SHADER_TYPE_HEIGHTMAP, SHADER_TYPE_PARALLAX_OCC)
         for sp in shader_props
@@ -3346,17 +3354,28 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         return result
 
     auto_restored_shader_states = 0
+    patch_warnings: list[str] = []
     try:
-        new_data, props_patched, sets_patched, upgraded, auto_restored_shader_states = _apply_patches(
-            nif_path, original_data, header, shader_props, texture_sets, opts
-        )
+        (
+            new_data,
+            props_patched,
+            sets_patched,
+            upgraded,
+            auto_restored_shader_states,
+            patch_warnings,
+        ) = _apply_patches(nif_path, original_data, header, shader_props, texture_sets, opts)
     except Exception as exc:  # noqa: BLE001
         if opts.force_shader_type_3 and effective_parallax and _is_retryable_force_type3_error(exc):
             try:
                 fallback_opts = replace(opts, force_shader_type_3=False)
-                new_data, props_patched, sets_patched, upgraded, auto_restored_shader_states = _apply_patches(
-                    nif_path, original_data, header, shader_props, texture_sets, fallback_opts
-                )
+                (
+                    new_data,
+                    props_patched,
+                    sets_patched,
+                    upgraded,
+                    auto_restored_shader_states,
+                    patch_warnings,
+                ) = _apply_patches(nif_path, original_data, header, shader_props, texture_sets, fallback_opts)
                 result.warnings.append(
                     "Skipped shader type-3 block expansion due to layout mismatch; "
                     "continued with compatible flag/texture patching."
@@ -3374,6 +3393,8 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         result.warnings.append(
             f"Auto-restored {auto_restored_shader_states} invalid shader state(s) where required texture slots were empty or unresolved."
         )
+    if patch_warnings:
+        result.warnings.extend(patch_warnings)
 
     result.shader_properties_patched = props_patched
     result.texture_sets_patched = sets_patched
@@ -5279,6 +5300,9 @@ def _main() -> None:  # pragma: no cover
 
     args = parser.parse_args()
 
+    if not args.compatibility_report and not args.nif:
+        parser.error("the following arguments are required: nif")
+
     # Parse --spec-color
     parsed_spec_color: tuple[float, float, float] | None = None
     if args.spec_color:
@@ -5293,9 +5317,6 @@ def _main() -> None:  # pragma: no cover
                 file=sys.stderr,
             )
             sys.exit(1)
-
-    if not args.compatibility_report and not args.nif:
-        parser.error("the following arguments are required: nif")
 
     # Parse --unknown-shader-type-map
     parsed_shader_map: dict[int, int] | None = None

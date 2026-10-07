@@ -1225,6 +1225,12 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertTrue(result.success, result.errors)
         infos = scan_nif(nif)
         self.assertGreaterEqual(len(infos), 1)
+        auto_restored = any("auto-restored" in warning.lower() for warning in result.warnings)
+        if auto_restored:
+            self.assertFalse(infos[0].has_parallax_flag)
+            self.assertFalse(infos[0].has_pom_flag)
+        else:
+            self.assertTrue(infos[0].has_parallax_flag)
 
     def test_enable_parallax_does_not_retype_envmap_block(self) -> None:
         nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP)
@@ -3672,6 +3678,12 @@ class TestCliArgumentValidation(unittest.TestCase):
             with self.assertRaises(SystemExit) as ctx:
                 nif_patcher_main()
         self.assertEqual(ctx.exception.code, 1)
+
+    def test_missing_nif_paths_errors_before_unknown_shader_map_validation(self) -> None:
+        with mock.patch("sys.argv", ["nif_patcher.py", "--unknown-shader-type-map", "bad"]):
+            with self.assertRaises(SystemExit) as ctx:
+                nif_patcher_main()
+        self.assertEqual(ctx.exception.code, 2)
 
 
 if __name__ == "__main__":
