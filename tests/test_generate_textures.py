@@ -379,6 +379,7 @@ class GenerateTexturesTests(unittest.TestCase):
                     "use_custom_output": True,
                     "dark_mode": True,
                     "show_batch_preview": True,
+                    "show_advanced_workflow_outputs": True,
                     "preview_size": "XL",
                     "complex_format": "cm",
                     "env_mask_mode": "complex",
@@ -413,6 +414,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(loaded["use_custom_output"]))
         self.assertTrue(bool(loaded["dark_mode"]))
         self.assertTrue(bool(loaded["show_batch_preview"]))
+        self.assertTrue(bool(loaded["show_advanced_workflow_outputs"]))
         self.assertEqual(str(loaded["preview_size"]), "XL")
         self.assertEqual(str(loaded["complex_format"]), "cm")
         self.assertEqual(str(loaded["env_mask_mode"]), "complex")
@@ -448,6 +450,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 "parallax_mode": "occlusion",
                 "render_profile": "mystery",
                 "auto_optimize_large_batches": 0,
+                "show_advanced_workflow_outputs": 1,
                 "normal_strength": 500,
                 "parallax_strength": -10,
                 "glow_threshold": 999,
@@ -462,6 +465,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(normalized["parallax_mode"]), "occlusion (ENB/POM)")
         self.assertEqual(str(normalized["render_profile"]), "custom")
         self.assertFalse(bool(normalized["auto_optimize_large_batches"]))
+        self.assertTrue(bool(normalized["show_advanced_workflow_outputs"]))
         self.assertAlmostEqual(float(normalized["normal_strength"]), 12.0)
         self.assertAlmostEqual(float(normalized["parallax_strength"]), 0.1)
         self.assertEqual(int(normalized["glow_threshold"]), 255)

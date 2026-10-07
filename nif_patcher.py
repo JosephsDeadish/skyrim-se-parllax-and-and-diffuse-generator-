@@ -2520,8 +2520,8 @@ def _apply_patches(
     shader_props: list[_ShaderPropBlock],
     texture_sets: dict[int, _TextureSetBlock],
     opts: NifPatchOptions,
-) -> tuple[bytes, int, int, int]:
-    """Return (new_data, props_patched, sets_patched, blocks_upgraded)."""
+) -> tuple[bytes, int, int, int, int]:
+    """Return (new_data, props_patched, sets_patched, blocks_upgraded, auto_restored_shader_states)."""
     source_profile = _detect_game_profile(header.user_version, header.user_version_2)
     target_game = (opts.target_game or "auto").strip().lower()
     reparse_profiles = (
@@ -2536,6 +2536,7 @@ def _apply_patches(
         return _read_header_for_profiles(_Buf(data_bytes), allowed_profiles=reparse_profiles)
 
     upgraded = 0
+    restore_candidate_blocks: set[int] = set()
     effective_parallax = opts.enable_parallax or opts.enable_pom
     want_scale = opts.parallax_scale is not None and opts.parallax_scale > 0
     shader_to_shape: dict[int, _ShapeBlock] = {}
@@ -2618,13 +2619,22 @@ def _apply_patches(
         new_flags1 = sp.flags1
         new_flags2 = sp.flags2
         # ---- Determine whether parallax is safe to enable on this block ----
-        enabling_parallax = _should_enable_parallax_on_shader(
+        requested_parallax_enable = _should_enable_parallax_on_shader(
             sp,
             effective_parallax=effective_parallax,
             opts=opts,
             shader_to_shape=shader_to_shape,
             has_havok=has_havok,
         )
+        enabling_parallax = requested_parallax_enable
+        if enabling_parallax:
+            ts_for_shader = texture_sets.get(sp.texture_set_ref)
+            existing_parallax_path = ""
+            if ts_for_shader is not None and TEXTURE_SLOT_PARALLAX < len(ts_for_shader.slot_paths):
+                existing_parallax_path = ts_for_shader.slot_paths[TEXTURE_SLOT_PARALLAX].strip()
+            if (opts.clear_parallax_texture_path or not existing_parallax_path) and not opts.parallax_texture_path:
+                enabling_parallax = False
+                restore_candidate_blocks.add(sp.block_index)
 
         # ---- Apply flag changes ----
         if enabling_parallax:
@@ -2658,6 +2668,7 @@ def _apply_patches(
             buf.write_u32_at(sp.flags1_offset, new_flags1)
             buf.write_u32_at(sp.flags2_offset, new_flags2)
             props_patched += 1
+            restore_candidate_blocks.add(sp.block_index)
 
         # Parallax scale — only when block is (now) type 3
         if want_scale and sp.shader_type in (SHADER_TYPE_HEIGHTMAP, SHADER_TYPE_PARALLAX_OCC):
@@ -2801,6 +2812,7 @@ def _apply_patches(
 
         if not slot_changes:
             continue
+        restore_candidate_blocks.add(sp.block_index)
 
         # Sort high-offset-first so earlier offsets remain valid during replacement.
         indexed: list[tuple[int, int, str, str]] = []  # (file_offset, slot, old, new)
@@ -2837,7 +2849,78 @@ def _apply_patches(
             header = new_header
         sets_patched += 1
 
-    return data, props_patched, sets_patched, upgraded
+    # --- Phase 4: auto-restore invalid shader states when required slots are missing ----
+    auto_restored_shader_states = 0
+    should_auto_restore_shader_states = any((
+        opts.enable_parallax,
+        opts.enable_pom,
+        opts.enable_env_mapping,
+        opts.disable_parallax,
+        opts.disable_pom,
+        opts.disable_env_mapping,
+        opts.parallax_texture_path is not None,
+        opts.env_mask_texture_path is not None,
+        opts.cubemap_texture_path is not None,
+        opts.clear_parallax_texture_path,
+        opts.clear_env_mask_texture_path,
+        opts.clear_cubemap_texture_path,
+    ))
+    if should_auto_restore_shader_states and restore_candidate_blocks:
+        current_header = _reparse_header(data)
+        if current_header is None:
+            current_header = header
+        final_shader_props, final_texture_sets, _ = _build_block_map(
+            data,
+            current_header,
+            opts.unknown_shader_type_map,
+            allow_num_extra_fallback=False,
+        )
+        if not final_shader_props:
+            fallback_shader_props, fallback_texture_sets, _fallback_errors = _build_block_map(
+                data,
+                current_header,
+                opts.unknown_shader_type_map,
+                allow_num_extra_fallback=True,
+            )
+            if fallback_shader_props:
+                final_shader_props = fallback_shader_props
+                final_texture_sets = fallback_texture_sets
+        if final_shader_props:
+            buf_final = _Buf(data)
+            for sp in final_shader_props:
+                if sp.block_index not in restore_candidate_blocks:
+                    continue
+                ts = final_texture_sets.get(sp.texture_set_ref)
+                if ts is None:
+                    continue
+                parallax_path = (
+                    ts.slot_paths[TEXTURE_SLOT_PARALLAX].strip()
+                    if TEXTURE_SLOT_PARALLAX < len(ts.slot_paths)
+                    else ""
+                )
+                cubemap_path = (
+                    ts.slot_paths[TEXTURE_SLOT_CUBEMAP].strip()
+                    if TEXTURE_SLOT_CUBEMAP < len(ts.slot_paths)
+                    else ""
+                )
+                env_mask_path = (
+                    ts.slot_paths[TEXTURE_SLOT_ENV_MASK].strip()
+                    if TEXTURE_SLOT_ENV_MASK < len(ts.slot_paths)
+                    else ""
+                )
+                restored_flags1 = sp.flags1
+                if (restored_flags1 & (SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION)) and not parallax_path:
+                    restored_flags1 &= ~SLSF1_PARALLAX
+                    restored_flags1 &= ~SLSF1_PARALLAX_OCCLUSION
+                if (restored_flags1 & SLSF1_ENVIRONMENT_MAPPING) and not cubemap_path and not env_mask_path:
+                    restored_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
+                if restored_flags1 != sp.flags1:
+                    buf_final.write_u32_at(sp.flags1_offset, restored_flags1)
+                    auto_restored_shader_states += 1
+            if auto_restored_shader_states:
+                data = buf_final.to_bytes()
+
+    return data, props_patched, sets_patched, upgraded, auto_restored_shader_states
 
 
 def _is_retryable_force_type3_error(exc: Exception) -> bool:
@@ -2859,6 +2942,8 @@ def _summarize_binary_diff(
 ) -> tuple[int, list[tuple[int, int]]]:
     changed_ranges: list[tuple[int, int]] = []
     changed_bytes = 0
+    if original_data == new_data:
+        return 0, changed_ranges
     limit = min(len(original_data), len(new_data))
     start: int | None = None
     end = -1
@@ -3035,6 +3120,22 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
             f"target_game='{target_game}' differs from detected profile '{detected_profile}'; "
             f"applying {policy_profile} safety policy."
         )
+    if (
+        policy_profile == _GAME_PROFILE_FALLOUT
+        and detected_profile != _GAME_PROFILE_FALLOUT
+        and any(
+            (
+                opts.fallout_allow_parallax_scale,
+                opts.fallout_allow_fix_mesh_lighting,
+                opts.fallout_allow_spec_strength,
+                opts.fallout_allow_spec_color,
+                opts.fallout_allow_env_map_scale,
+            )
+        )
+    ):
+        result.warnings.append(
+            "Fallout safety gates are enabled while the detected header is non-Fallout; verify this cross-profile patch intent before writing."
+        )
     if capability.requires_experimental_opt_in and not opts.experimental_fallout_write:
         result.errors.append(
             "Fallout profile detected/selected, but experimental_fallout_write is disabled."
@@ -3168,15 +3269,16 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
             result.message = f"{result.message} {extra_hints[0]}"
         return result
 
+    auto_restored_shader_states = 0
     try:
-        new_data, props_patched, sets_patched, upgraded = _apply_patches(
+        new_data, props_patched, sets_patched, upgraded, auto_restored_shader_states = _apply_patches(
             original_data, header, shader_props, texture_sets, opts
         )
     except Exception as exc:  # noqa: BLE001
         if opts.force_shader_type_3 and effective_parallax and _is_retryable_force_type3_error(exc):
             try:
                 fallback_opts = replace(opts, force_shader_type_3=False)
-                new_data, props_patched, sets_patched, upgraded = _apply_patches(
+                new_data, props_patched, sets_patched, upgraded, auto_restored_shader_states = _apply_patches(
                     original_data, header, shader_props, texture_sets, fallback_opts
                 )
                 result.warnings.append(
@@ -3191,6 +3293,11 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
             result.errors.append(f"Patch error: {exc}")
             result.message = str(exc)
             return result
+
+    if auto_restored_shader_states:
+        result.warnings.append(
+            f"Auto-restored {auto_restored_shader_states} invalid shader state(s) where required texture slots were empty."
+        )
 
     result.shader_properties_patched = props_patched
     result.texture_sets_patched = sets_patched
@@ -3884,10 +3991,18 @@ def summarize_plugin_aware_validation_conflicts(
     def _normalize_nif_path_key(path: Path | str) -> str:
         return str(Path(path).resolve()).lower()
 
+    normalized_plugin_context: dict[str, list[NifPluginConflictRef]] = {}
+    for key, refs in plugin_context.items():
+        normalized_plugin_context.setdefault(str(key).lower(), []).extend(refs)
+        normalized_plugin_context.setdefault(_normalize_nif_path_key(key), []).extend(refs)
+
     grouped: dict[str, dict[str, object]] = {}
     for validation in validations:
         file_key = _normalize_nif_path_key(validation.nif_path)
-        refs = plugin_context.get(file_key, [])
+        refs = normalized_plugin_context.get(file_key) or normalized_plugin_context.get(
+            str(validation.nif_path).lower(),
+            [],
+        )
         report = getattr(validation, "conflict_report", None) or []
         seen_codes_for_file: set[str] = set()
         seen_plugin_for_code: dict[str, set[str]] = {}
@@ -4175,7 +4290,7 @@ def validate_nif_for_parallax(
         )
     if not infos:
         if not diagnostics:
-            result.issues.append("No BSLightingShaderProperty blocks found or not a Skyrim SE NIF.")
+            result.issues.append("No BSLightingShaderProperty blocks found or not a supported Skyrim/Fallout NIF.")
         for diagnostic in diagnostics:
             lowered = diagnostic.lower()
             if "resolution:" in lowered or "convert" in lowered or "re-save" in lowered or "re-export" in lowered:
@@ -4847,7 +4962,7 @@ def _main() -> None:  # pragma: no cover
     import sys
 
     parser = argparse.ArgumentParser(
-        description="Patch Skyrim SE NIF files to enable parallax / env mapping.",
+        description="Patch Skyrim/Fallout-era NIF files to enable or disable parallax/env mapping states.",
     )
     parser.add_argument("nif", nargs="*", type=Path,
                         help="NIF file(s) or folder(s) to patch.")
@@ -5103,7 +5218,7 @@ def _main() -> None:  # pragma: no cover
             validate_only_flags.append("--plugin-conflict-context")
         if args.auto_remediate:
             validate_only_flags.append("--auto-remediate")
-        if args.auto_remediate_codes:
+        if args.auto_remediate_codes is not None:
             validate_only_flags.append("--auto-remediate-codes")
         if args.allow_destructive_remediation:
             validate_only_flags.append("--allow-destructive-remediation")
@@ -5114,9 +5229,21 @@ def _main() -> None:  # pragma: no cover
                 file=sys.stderr,
             )
             sys.exit(1)
-    elif args.plugin_conflict_context is not None and not args.conflict_report_summary:
+    if args.validate and args.plugin_conflict_context is not None and not args.conflict_report_summary:
         print(
             "Error: --plugin-conflict-context requires --conflict-report-summary when used with --validate.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if args.validate and args.auto_remediate_codes is not None and len(args.auto_remediate_codes) == 0:
+        print(
+            "Error: --auto-remediate-codes requires at least one conflict-code prefix.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if args.validate and args.auto_remediate_codes is not None and not args.auto_remediate:
+        print(
+            "Error: --auto-remediate-codes requires --auto-remediate.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -5191,7 +5318,7 @@ def _main() -> None:  # pragma: no cover
             if args.auto_remediate:
                 selected_codes: list[str]
                 report_codes = [group.code for group in v.conflict_report]
-                if args.auto_remediate_codes:
+                if args.auto_remediate_codes is not None:
                     selected_codes = [
                         code for code in report_codes
                         if any(code.startswith(prefix) for prefix in args.auto_remediate_codes)

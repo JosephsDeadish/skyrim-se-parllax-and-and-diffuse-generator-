@@ -185,6 +185,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "dark_mode": False,
     "show_batch_preview": False,
     "auto_optimize_large_batches": True,
+    "show_advanced_workflow_outputs": False,
     "auto_patch_nifs": False,
     "preview_size": "Medium",
     "complex_format": "msn",
@@ -432,6 +433,7 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         "dark_mode",
         "show_batch_preview",
         "auto_optimize_large_batches",
+        "show_advanced_workflow_outputs",
         "emboss_mode",
         "relief_mode",
         "include_diffuse",
@@ -7460,6 +7462,7 @@ if GUI_AVAILABLE:
             self.preview_refresh_after_id: str | None = None
             self.show_batch_preview_var = tk.BooleanVar(value=False)
             self.auto_optimize_large_batches_var = tk.BooleanVar(value=True)
+            self.show_advanced_workflow_outputs_var = tk.BooleanVar(value=False)
             self.auto_patch_nifs_var = tk.BooleanVar(value=False)
             self.dark_mode_var = tk.BooleanVar(value=False)
             self.ui_language_var = tk.StringVar(value="en")
@@ -7782,6 +7785,17 @@ if GUI_AVAILABLE:
             _snow_mask_check = ttk.Checkbutton(_custom_section, text="Snow Mask / _sm (Community Shaders)", variable=self.include_snow_mask_var, command=self._refresh_preview)
             _snow_mask_check.grid(row=1, column=0, sticky=tk.W)
             self._add_tooltip(_snow_mask_check, "❄ Generate a Community Shaders Dynamic Snow mask (_sm.dds).\nMarks where snow accumulates in supported shader/mod setups; this is workflow-specific, not a universal vanilla slot.")
+            _advanced_workflow_toggle = ttk.Checkbutton(
+                _workflow_frame,
+                text="Show advanced workflow outputs (RMAOS/Wetness/Snow/AO/Roughness)",
+                variable=self.show_advanced_workflow_outputs_var,
+            )
+            _advanced_workflow_toggle.grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
+            self._add_tooltip(
+                _advanced_workflow_toggle,
+                "Beginner mode keeps only core Vanilla/ENB outputs visible.\n"
+                "Enable this to show advanced Community Shaders/PBR workflow output groups.",
+            )
 
             self._render_profile_managed_output_widgets = [
                 _diffuse_check,
@@ -8127,6 +8141,14 @@ if GUI_AVAILABLE:
             for widget in advanced_generation_widgets:
                 _advanced_generation_layout[widget] = widget.grid_info()
 
+            advanced_workflow_widgets: list[tk.Widget] = [
+                _pbr_section,
+                _custom_section,
+            ]
+            _advanced_workflow_layout: dict[tk.Widget, dict[str, object]] = {}
+            for widget in advanced_workflow_widgets:
+                _advanced_workflow_layout[widget] = widget.grid_info()
+
             def _sync_advanced_generation_controls(*_: object) -> None:
                 show_advanced = bool(show_advanced_generation_var.get())
                 for widget in advanced_generation_widgets:
@@ -8135,8 +8157,18 @@ if GUI_AVAILABLE:
                     else:
                         widget.grid_remove()
 
+            def _sync_advanced_workflow_controls(*_: object) -> None:
+                show_advanced_workflow = bool(self.show_advanced_workflow_outputs_var.get())
+                for widget in advanced_workflow_widgets:
+                    if show_advanced_workflow:
+                        widget.grid(**_advanced_workflow_layout[widget])
+                    else:
+                        widget.grid_remove()
+
             show_advanced_generation_var.trace_add("write", _sync_advanced_generation_controls)
+            self.show_advanced_workflow_outputs_var.trace_add("write", _sync_advanced_workflow_controls)
             _sync_advanced_generation_controls()
+            _sync_advanced_workflow_controls()
 
             options_frame.columnconfigure(2, weight=1)
             options_frame.columnconfigure(3, weight=1)
@@ -8628,6 +8660,7 @@ if GUI_AVAILABLE:
             self.dark_mode_var.set(bool(state["dark_mode"]))
             self.show_batch_preview_var.set(bool(state["show_batch_preview"]))
             self.auto_optimize_large_batches_var.set(bool(state.get("auto_optimize_large_batches", True)))
+            self.show_advanced_workflow_outputs_var.set(bool(state.get("show_advanced_workflow_outputs", False)))
             self.auto_patch_nifs_var.set(bool(state["auto_patch_nifs"]))
             self.ui_language_var.set(str(state.get("ui_language", "en") or "en"))
             self.ui_scale_var.set(float(state.get("ui_scale", 1.0)))
@@ -8685,6 +8718,7 @@ if GUI_AVAILABLE:
                 "dark_mode": self.dark_mode_var.get(),
                 "show_batch_preview": self.show_batch_preview_var.get(),
                 "auto_optimize_large_batches": self.auto_optimize_large_batches_var.get(),
+                "show_advanced_workflow_outputs": self.show_advanced_workflow_outputs_var.get(),
                 "auto_patch_nifs": self.auto_patch_nifs_var.get(),
                 "ui_language": self.ui_language_var.get(),
                 "ui_scale": self.ui_scale_var.get(),

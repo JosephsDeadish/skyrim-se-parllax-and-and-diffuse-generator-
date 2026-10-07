@@ -383,10 +383,6 @@ class TestScanNif(unittest.TestCase):
 
     def test_scan_reports_fallout_header_as_experimental(self) -> None:
         nif = _write_nif(self.tmp, user_ver2=130)
-        raw = nif.read_bytes()
-        header = _read_header(_Buf(raw))
-        self.assertIsNotNone(header)
-        assert header is not None
         _rewrite_user_version(nif, 11)
         infos, diagnostics = scan_nif_diagnostics(nif)
         self.assertEqual(len(infos), 1)
@@ -615,6 +611,31 @@ class TestScanNif(unittest.TestCase):
             result.warnings,
         )
         self.assertGreater(result.shader_properties_patched, 0)
+
+    def test_tolerant_fallback_auto_restores_invalid_parallax_flags_when_slot_missing(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_HEIGHTMAP,
+            flags1=SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION,
+            texture_paths=["textures\\stone.dds"] + [""] * 8,
+        )
+        raw = bytearray(nif.read_bytes())
+        shader_header = struct.pack("<IIiI", 0, 0, -1, SHADER_TYPE_HEIGHTMAP)
+        shader_start = raw.find(shader_header)
+        self.assertNotEqual(shader_start, -1)
+        struct.pack_into("<I", raw, shader_start + 4, 0xFFFFFFFF)
+        nif.write_bytes(raw)
+
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertFalse(infos[0].has_parallax_flag)
+        self.assertFalse(infos[0].has_pom_flag)
+        self.assertTrue(
+            any("tolerant niobjectnet fallback" in warning.lower() for warning in result.warnings),
+            result.warnings,
+        )
+        self.assertTrue(any("auto-restored" in warning.lower() for warning in result.warnings), result.warnings)
 
     def test_scan_parses_legacy_block_with_null_shader_type(self) -> None:
         """Legacy BSLightingShaderProperty blocks where shader_type=0xFFFFFFFF
@@ -1160,6 +1181,27 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
         self.assertTrue(infos[0].has_parallax_flag)
 
+    def test_real_layout_auto_restore_respects_strict_pre_write_validation(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            shader_type=SHADER_TYPE_HEIGHTMAP,
+            flags1=SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION,
+            texture_paths=["textures\\stone.dds"] + [""] * 8,
+        )
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                clear_parallax_texture_path=True,
+                backup=False,
+                strict_pre_write_validation=True,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertGreaterEqual(len(infos), 1)
+
     def test_enable_parallax_does_not_retype_envmap_block(self) -> None:
         nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP)
         result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
@@ -1200,6 +1242,49 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertTrue(result.success, result.errors)
         infos = scan_nif(nif)
         self.assertTrue(infos[0].has_env_mapping_flag)
+
+    def test_auto_restores_heightmap_shader_when_parallax_slot_is_empty(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_HEIGHTMAP,
+            flags1=SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION,
+        )
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+        self.assertFalse(infos[0].has_parallax_flag)
+        self.assertFalse(infos[0].has_pom_flag)
+        self.assertTrue(any("auto-restored" in warning.lower() for warning in result.warnings))
+
+    def test_auto_restores_parallax_flags_on_default_shader_when_slot_is_empty(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_DEFAULT,
+            flags1=SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION,
+            texture_paths=["textures\\stone.dds"] + [""] * 8,
+        )
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_DEFAULT)
+        self.assertFalse(infos[0].has_parallax_flag)
+        self.assertFalse(infos[0].has_pom_flag)
+        self.assertTrue(any("auto-restored" in warning.lower() for warning in result.warnings))
+
+    def test_auto_restores_envmap_shader_when_required_slots_are_empty(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=0,
+            texture_paths=["textures\\stone.dds"] + [""] * 8,
+        )
+        result = patch_nif(nif, NifPatchOptions(enable_env_mapping=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
+        self.assertFalse(infos[0].has_env_mapping_flag)
+        self.assertTrue(any("auto-restored" in warning.lower() for warning in result.warnings))
 
     def test_patch_is_idempotent(self) -> None:
         # A fully patched parallax NIF must have both SLSF1_PARALLAX and
@@ -3489,6 +3574,24 @@ class TestCliArgumentValidation(unittest.TestCase):
 
     def test_auto_remediate_requires_validate_mode(self) -> None:
         with mock.patch("sys.argv", ["nif_patcher.py", "dummy.nif", "--auto-remediate"]):
+            with self.assertRaises(SystemExit) as ctx:
+                nif_patcher_main()
+        self.assertEqual(ctx.exception.code, 1)
+
+    def test_auto_remediate_codes_requires_at_least_one_prefix(self) -> None:
+        with mock.patch(
+            "sys.argv",
+            ["nif_patcher.py", "dummy.nif", "--validate", "--auto-remediate-codes"],
+        ):
+            with self.assertRaises(SystemExit) as ctx:
+                nif_patcher_main()
+        self.assertEqual(ctx.exception.code, 1)
+
+    def test_auto_remediate_codes_requires_auto_remediate_flag(self) -> None:
+        with mock.patch(
+            "sys.argv",
+            ["nif_patcher.py", "dummy.nif", "--validate", "--auto-remediate-codes", "missing_parallax_flag"],
+        ):
             with self.assertRaises(SystemExit) as ctx:
                 nif_patcher_main()
         self.assertEqual(ctx.exception.code, 1)
