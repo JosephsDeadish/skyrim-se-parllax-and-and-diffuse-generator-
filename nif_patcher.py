@@ -3846,6 +3846,12 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "path_slot_parallax": (
         "Use slot 3 for _p.dds height maps only.",
     ),
+    "path_slot_parallax.matches_diffuse": (
+        "Do not reuse diffuse/albedo in slot 3; provide a dedicated _p.dds height map path.",
+    ),
+    "path_slot_parallax.matches_normal": (
+        "Do not point slot 3 at slot-1 normal maps; provide a dedicated _p.dds height map path.",
+    ),
     "path_slot_glow": (
         "Use slot 2 for _g.dds emissive maps and align the glow flag with slot usage.",
     ),

@@ -54,6 +54,7 @@ from nif_patcher import (
     _main as nif_patcher_main,
     _Buf,
     _build_block_map,
+    _actions_for_conflict_code,
     _classify_shader_type_resolution,
     _is_retryable_force_type3_error,
     _renderer_compatibility,
@@ -2281,6 +2282,12 @@ class TestHelpers(unittest.TestCase):
         guessed = guess_normal_path_for_nif(nif, msn=True)
         self.assertIsNotNone(guessed)
         self.assertTrue((guessed or "").endswith("_msn.dds"))
+
+    def test_actions_for_parallax_slot_match_subcodes_have_specific_guidance(self) -> None:
+        diffuse_actions = _actions_for_conflict_code("path_slot_parallax.matches_diffuse")
+        normal_actions = _actions_for_conflict_code("path_slot_parallax.matches_normal")
+        self.assertTrue(any("diffuse/albedo" in action.lower() for action in diffuse_actions))
+        self.assertTrue(any("slot-1 normal" in action.lower() for action in normal_actions))
 
     def test_find_nif_files_recursive(self) -> None:
         sub = self.tmp / "sub"
