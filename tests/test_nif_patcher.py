@@ -1272,6 +1272,35 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertFalse(infos[0].has_pom_flag)
         self.assertTrue(any("auto-restored" in warning.lower() for warning in result.warnings))
 
+    def test_auto_restores_parallax_flags_when_slot_path_file_is_missing_near_mesh(self) -> None:
+        (self.tmp / "textures").mkdir(exist_ok=True)
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_HEIGHTMAP,
+            flags1=SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION,
+            texture_paths=["textures\\stone.dds", "", "", "textures\\architecture\\missing_p.dds"] + [""] * 5,
+        )
+        result = patch_nif(nif, NifPatchOptions(disable_pom=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertFalse(infos[0].has_parallax_flag)
+        self.assertFalse(infos[0].has_pom_flag)
+        self.assertTrue(any("empty or unresolved" in warning.lower() for warning in result.warnings), result.warnings)
+
+    def test_auto_restores_envmap_flag_when_slot5_file_is_missing_near_mesh(self) -> None:
+        (self.tmp / "textures").mkdir(exist_ok=True)
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=0,
+            texture_paths=["textures\\stone.dds", "", "", "", "", "textures\\architecture\\missing_m.dds"] + [""] * 3,
+        )
+        result = patch_nif(nif, NifPatchOptions(enable_env_mapping=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        infos = scan_nif(nif)
+        self.assertFalse(infos[0].has_env_mapping_flag)
+        self.assertTrue(any("empty or unresolved" in warning.lower() for warning in result.warnings), result.warnings)
+
     def test_auto_restores_envmap_shader_when_required_slots_are_empty(self) -> None:
         nif = _write_nif(
             self.tmp,

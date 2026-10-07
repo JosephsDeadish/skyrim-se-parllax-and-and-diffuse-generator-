@@ -2031,6 +2031,51 @@ def _path_has_dds_extension(path: str) -> bool:
     return normalized.endswith(".dds")
 
 
+def _candidate_texture_roots_for_nif(nif_path: Path) -> list[Path]:
+    roots: list[Path] = []
+    seen: set[str] = set()
+    for parent in nif_path.resolve().parents:
+        lowered = parent.name.lower()
+        if lowered == "meshes":
+            candidate = parent.parent / "textures"
+            key = str(candidate).lower()
+            if key not in seen and candidate.exists():
+                seen.add(key)
+                roots.append(candidate)
+        candidate = parent / "textures"
+        key = str(candidate).lower()
+        if key not in seen and candidate.exists():
+            seen.add(key)
+            roots.append(candidate)
+    return roots
+
+
+def _texture_slot_path_missing_near_nif(
+    nif_path: Path | None,
+    texture_path: str,
+    texture_roots: list[Path] | None = None,
+) -> bool:
+    if nif_path is None:
+        return False
+    normalized = _normalise_slot_path(texture_path)
+    if not normalized or not normalized.startswith("textures\\"):
+        return False
+    if texture_roots is None:
+        texture_roots = _candidate_texture_roots_for_nif(nif_path)
+    if not texture_roots:
+        return False
+    rel_parts = [part for part in normalized.split("\\")[1:] if part]
+    if not rel_parts:
+        return False
+    for root in texture_roots:
+        candidate = root
+        for part in rel_parts:
+            candidate = candidate / part
+        if candidate.exists():
+            return False
+    return True
+
+
 def _path_uses_known_authoring_extension(path: str) -> bool:
     normalized = _normalise_slot_path(path)
     return normalized.endswith(_GENERIC_SOURCE_TEXTURE_EXTENSIONS)
@@ -2515,6 +2560,7 @@ def _should_enable_parallax_on_shader(
 
 
 def _apply_patches(
+    nif_path: Path | None,
     data: bytes,
     header: _NifHeader,
     shader_props: list[_ShaderPropBlock],
@@ -2851,6 +2897,7 @@ def _apply_patches(
 
     # --- Phase 4: auto-restore invalid shader states when required slots are missing ----
     auto_restored_shader_states = 0
+    texture_roots = _candidate_texture_roots_for_nif(nif_path) if nif_path is not None else []
     should_auto_restore_shader_states = any((
         opts.enable_parallax,
         opts.enable_pom,
@@ -2908,11 +2955,25 @@ def _apply_patches(
                     if TEXTURE_SLOT_ENV_MASK < len(ts.slot_paths)
                     else ""
                 )
+                parallax_missing = _texture_slot_path_missing_near_nif(
+                    nif_path, parallax_path, texture_roots
+                )
+                cubemap_missing = _texture_slot_path_missing_near_nif(
+                    nif_path, cubemap_path, texture_roots
+                )
+                env_mask_missing = _texture_slot_path_missing_near_nif(
+                    nif_path, env_mask_path, texture_roots
+                )
                 restored_flags1 = sp.flags1
-                if (restored_flags1 & (SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION)) and not parallax_path:
+                if (restored_flags1 & (SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION)) and (
+                    not parallax_path or parallax_missing
+                ):
                     restored_flags1 &= ~SLSF1_PARALLAX
                     restored_flags1 &= ~SLSF1_PARALLAX_OCCLUSION
-                if (restored_flags1 & SLSF1_ENVIRONMENT_MAPPING) and not cubemap_path and not env_mask_path:
+                if (restored_flags1 & SLSF1_ENVIRONMENT_MAPPING) and (
+                    (not cubemap_path or cubemap_missing)
+                    and (not env_mask_path or env_mask_missing)
+                ):
                     restored_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
                 if restored_flags1 != sp.flags1:
                     buf_final.write_u32_at(sp.flags1_offset, restored_flags1)
@@ -3272,14 +3333,14 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
     auto_restored_shader_states = 0
     try:
         new_data, props_patched, sets_patched, upgraded, auto_restored_shader_states = _apply_patches(
-            original_data, header, shader_props, texture_sets, opts
+            nif_path, original_data, header, shader_props, texture_sets, opts
         )
     except Exception as exc:  # noqa: BLE001
         if opts.force_shader_type_3 and effective_parallax and _is_retryable_force_type3_error(exc):
             try:
                 fallback_opts = replace(opts, force_shader_type_3=False)
                 new_data, props_patched, sets_patched, upgraded, auto_restored_shader_states = _apply_patches(
-                    original_data, header, shader_props, texture_sets, fallback_opts
+                    nif_path, original_data, header, shader_props, texture_sets, fallback_opts
                 )
                 result.warnings.append(
                     "Skipped shader type-3 block expansion due to layout mismatch; "
@@ -3296,7 +3357,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
 
     if auto_restored_shader_states:
         result.warnings.append(
-            f"Auto-restored {auto_restored_shader_states} invalid shader state(s) where required texture slots were empty."
+            f"Auto-restored {auto_restored_shader_states} invalid shader state(s) where required texture slots were empty or unresolved."
         )
 
     result.shader_properties_patched = props_patched

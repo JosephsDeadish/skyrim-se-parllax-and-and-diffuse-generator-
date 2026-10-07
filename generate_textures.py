@@ -185,6 +185,8 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "dark_mode": False,
     "show_batch_preview": False,
     "auto_optimize_large_batches": True,
+    "simplified_main_layout": True,
+    "show_advanced_generation_controls": False,
     "show_advanced_workflow_outputs": False,
     "auto_patch_nifs": False,
     "preview_size": "Medium",
@@ -433,6 +435,8 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         "dark_mode",
         "show_batch_preview",
         "auto_optimize_large_batches",
+        "simplified_main_layout",
+        "show_advanced_generation_controls",
         "show_advanced_workflow_outputs",
         "emboss_mode",
         "relief_mode",
@@ -7462,6 +7466,8 @@ if GUI_AVAILABLE:
             self.preview_refresh_after_id: str | None = None
             self.show_batch_preview_var = tk.BooleanVar(value=False)
             self.auto_optimize_large_batches_var = tk.BooleanVar(value=True)
+            self.simplified_main_layout_var = tk.BooleanVar(value=True)
+            self.show_advanced_generation_var = tk.BooleanVar(value=False)
             self.show_advanced_workflow_outputs_var = tk.BooleanVar(value=False)
             self.auto_patch_nifs_var = tk.BooleanVar(value=False)
             self.dark_mode_var = tk.BooleanVar(value=False)
@@ -7642,11 +7648,21 @@ if GUI_AVAILABLE:
             self.ui_scale_combo.set(f"{self.ui_scale_var.get():.2f}".rstrip("0").rstrip("."))
             self.ui_scale_combo.pack(side=tk.LEFT, padx=(0, 8))
             self.ui_scale_combo.bind("<<ComboboxSelected>>", self._on_ui_scale_changed)
+            _simplified_layout_check = ttk.Checkbutton(
+                top_controls_row,
+                text="Simplified layout",
+                variable=self.simplified_main_layout_var,
+            )
+            _simplified_layout_check.pack(side=tk.LEFT, padx=(8, 8))
             self._add_tooltip(_theme_top_check, "🌙 Toggle dark/light mode.\nEasy on the eyes during those 3am modding sessions.")
             self._add_tooltip(_language_label, "Choose the interface language from available translation files.")
             self._add_tooltip(self.language_combo, "Switch language for labels, buttons, and tooltips.")
             self._add_tooltip(_ui_scale_label, "Manual UI scale multiplier for high-DPI displays.")
             self._add_tooltip(self.ui_scale_combo, "Increase this on 4K/high-DPI displays if controls look too small.")
+            self._add_tooltip(
+                _simplified_layout_check,
+                "Keeps the main window cleaner by hiding advanced workflow/generation controls and generated-output preview grid.",
+            )
             self._add_tooltip(_target_game_label, "Select Skyrim or Fallout naming mode for generated texture filenames.")
             self._add_tooltip(
                 self.target_game_combo,
@@ -7818,11 +7834,10 @@ if GUI_AVAILABLE:
             )
             _auto_sugg_check.grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(6, 2))
             self._add_tooltip(_auto_sugg_check, "🤖 Let the AI™ (actually just math) pick slider values.\nUncheck if you think YOU know better than the algorithm. Spoiler: maybe you do.")
-            show_advanced_generation_var = tk.BooleanVar(value=False)
             _show_advanced_generation_check = ttk.Checkbutton(
                 options_frame,
                 text="Show advanced generation controls",
-                variable=show_advanced_generation_var,
+                variable=self.show_advanced_generation_var,
             )
             _show_advanced_generation_check.grid(row=1, column=3, columnspan=2, sticky=tk.E, pady=(6, 2))
             self._add_tooltip(
@@ -8150,7 +8165,10 @@ if GUI_AVAILABLE:
                 _advanced_workflow_layout[widget] = widget.grid_info()
 
             def _sync_advanced_generation_controls(*_: object) -> None:
-                show_advanced = bool(show_advanced_generation_var.get())
+                show_advanced = (
+                    bool(self.show_advanced_generation_var.get())
+                    and not bool(self.simplified_main_layout_var.get())
+                )
                 for widget in advanced_generation_widgets:
                     if show_advanced:
                         widget.grid(**_advanced_generation_layout[widget])
@@ -8158,15 +8176,20 @@ if GUI_AVAILABLE:
                         widget.grid_remove()
 
             def _sync_advanced_workflow_controls(*_: object) -> None:
-                show_advanced_workflow = bool(self.show_advanced_workflow_outputs_var.get())
+                show_advanced_workflow = (
+                    bool(self.show_advanced_workflow_outputs_var.get())
+                    and not bool(self.simplified_main_layout_var.get())
+                )
                 for widget in advanced_workflow_widgets:
                     if show_advanced_workflow:
                         widget.grid(**_advanced_workflow_layout[widget])
                     else:
                         widget.grid_remove()
 
-            show_advanced_generation_var.trace_add("write", _sync_advanced_generation_controls)
+            self.show_advanced_generation_var.trace_add("write", _sync_advanced_generation_controls)
             self.show_advanced_workflow_outputs_var.trace_add("write", _sync_advanced_workflow_controls)
+            self.simplified_main_layout_var.trace_add("write", _sync_advanced_generation_controls)
+            self.simplified_main_layout_var.trace_add("write", _sync_advanced_workflow_controls)
             _sync_advanced_generation_controls()
             _sync_advanced_workflow_controls()
 
@@ -8326,6 +8349,7 @@ if GUI_AVAILABLE:
             _generated_title.grid(
                 row=3, column=0, columnspan=2, padx=6, pady=(2, 2), sticky=""
             )
+            _generated_title_layout = _generated_title.grid_info()
             self._add_tooltip(
                 _generated_title,
                 "Preview of generated outputs that will be written to disk.",
@@ -8333,6 +8357,7 @@ if GUI_AVAILABLE:
             self.preview_output_labels: dict[str, ttk.Label] = {}
             output_grid = ttk.Frame(preview_frame)
             output_grid.grid(row=4, column=0, columnspan=2, sticky="")
+            _output_grid_layout = output_grid.grid_info()
             output_specs = (
                 ("diffuse", "Diffuse"),
                 ("normal", "Normal"),
@@ -8374,6 +8399,24 @@ if GUI_AVAILABLE:
             preview_frame.columnconfigure(1, weight=1)
             output_grid.columnconfigure(0, weight=0)
             output_grid.columnconfigure(1, weight=0)
+
+            def _sync_simplified_layout_preview(*_: object) -> None:
+                simplified = bool(self.simplified_main_layout_var.get())
+                _show_advanced_generation_check.configure(
+                    state=(tk.DISABLED if simplified else tk.NORMAL)
+                )
+                _advanced_workflow_toggle.configure(
+                    state=(tk.DISABLED if simplified else tk.NORMAL)
+                )
+                if simplified:
+                    _generated_title.grid_remove()
+                    output_grid.grid_remove()
+                else:
+                    _generated_title.grid(**_generated_title_layout)
+                    output_grid.grid(**_output_grid_layout)
+
+            self.simplified_main_layout_var.trace_add("write", _sync_simplified_layout_preview)
+            _sync_simplified_layout_preview()
             self._update_preview_navigation_state()
 
             self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
@@ -8660,6 +8703,8 @@ if GUI_AVAILABLE:
             self.dark_mode_var.set(bool(state["dark_mode"]))
             self.show_batch_preview_var.set(bool(state["show_batch_preview"]))
             self.auto_optimize_large_batches_var.set(bool(state.get("auto_optimize_large_batches", True)))
+            self.simplified_main_layout_var.set(bool(state.get("simplified_main_layout", True)))
+            self.show_advanced_generation_var.set(bool(state.get("show_advanced_generation_controls", False)))
             self.show_advanced_workflow_outputs_var.set(bool(state.get("show_advanced_workflow_outputs", False)))
             self.auto_patch_nifs_var.set(bool(state["auto_patch_nifs"]))
             self.ui_language_var.set(str(state.get("ui_language", "en") or "en"))
@@ -8718,6 +8763,8 @@ if GUI_AVAILABLE:
                 "dark_mode": self.dark_mode_var.get(),
                 "show_batch_preview": self.show_batch_preview_var.get(),
                 "auto_optimize_large_batches": self.auto_optimize_large_batches_var.get(),
+                "simplified_main_layout": self.simplified_main_layout_var.get(),
+                "show_advanced_generation_controls": self.show_advanced_generation_var.get(),
                 "show_advanced_workflow_outputs": self.show_advanced_workflow_outputs_var.get(),
                 "auto_patch_nifs": self.auto_patch_nifs_var.get(),
                 "ui_language": self.ui_language_var.get(),
