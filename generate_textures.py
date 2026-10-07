@@ -3742,7 +3742,11 @@ def _map_parallax_strength_to_nif_scale(parallax_strength: float | None) -> floa
     if strength <= 1.0:
         mapped = 0.2 + (strength * 1.4)
     else:
-        mapped = 1.6 + ((strength - 1.0) * (8.4 / 9.0))
+        # Use a mild ease-out curve above 1.0 so common strengths around 1.2–2.0
+        # translate to stronger in-game depth while preserving the same endpoints.
+        normalized = _clamp((strength - 1.0) / 9.0, 0.0, 1.0)
+        eased = 1.0 - ((1.0 - normalized) ** 1.5)
+        mapped = 1.6 + (8.4 * eased)
     return _clamp(mapped, 0.1, 10.0)
 
 
@@ -7611,6 +7615,7 @@ if GUI_AVAILABLE:
             self.show_advanced_workflow_outputs_var = tk.BooleanVar(value=False)
             self.batch_resume_mode_var = tk.StringVar(value="start_fresh")
             self.batch_checkpoint_path_var = tk.StringVar(value="")
+            self.batch_resume_hint_var = tk.StringVar(value="Mode: start fresh — checkpoint entries are ignored.")
             self.auto_patch_nifs_var = tk.BooleanVar(value=False)
             self.dark_mode_var = tk.BooleanVar(value=False)
             self.ui_language_var = tk.StringVar(value="en")
@@ -8588,6 +8593,14 @@ if GUI_AVAILABLE:
                 _resume_combo,
                 "start_fresh: ignore prior checkpoint entries.\nresume: skip files already completed in checkpoint.\nFor 1000+ runs, Resume is strongly recommended.",
             )
+            _resume_hint_label = ttk.Label(source_controls, textvariable=self.batch_resume_hint_var, foreground="gray")
+            _resume_hint_label.pack(side=tk.LEFT, padx=(6, 4))
+            self._add_tooltip(
+                _resume_hint_label,
+                "Clear wording for the active checkpoint mode to reduce accidental reruns.",
+            )
+            self.batch_resume_mode_var.trace_add("write", self._update_batch_resume_hint)
+            self._update_batch_resume_hint()
             _clear_checkpoint_button = ttk.Button(
                 source_controls,
                 text="Clear checkpoint",
@@ -8627,6 +8640,7 @@ if GUI_AVAILABLE:
                 _large_batch_opt_check,
                 _resume_label,
                 _resume_combo,
+                _resume_hint_label,
                 _clear_checkpoint_button,
                 _checkpoint_health_label,
                 _auto_patch_nifs_check,
@@ -9356,6 +9370,13 @@ if GUI_AVAILABLE:
                 return Path(override)
             base_dir = output_dir or (input_path if input_path.is_dir() else input_path.parent)
             return base_dir / ".skyrim_texture_generator_batch_checkpoint.json"
+
+        def _update_batch_resume_hint(self, *_args: object) -> None:
+            mode = str(self.batch_resume_mode_var.get() or "start_fresh").strip().lower()
+            if mode == "resume":
+                self.batch_resume_hint_var.set("Mode: resume — skip files already completed in checkpoint.")
+            else:
+                self.batch_resume_hint_var.set("Mode: start fresh — checkpoint entries are ignored.")
 
         def _load_batch_checkpoint_completed_files(self, checkpoint_path: Path) -> set[str]:
             if not checkpoint_path.exists():

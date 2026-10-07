@@ -3960,6 +3960,12 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "shader_state.envmap_pom_missing_env_slots": (
         "EnvMap + POM is active while required EnvMap textures are unresolved; restore slot 4/5 textures or disable both env mapping and POM for the block.",
     ),
+    "shader_state.envmap_glow_missing_slots2_4_5": (
+        "EnvMap + glow are active while slot 2 and EnvMap textures are unresolved; restore slot 2/4/5 textures or disable both env mapping and glow for the block.",
+    ),
+    "shader_state.parallax_envmap_missing_slots3_4_5": (
+        "Parallax/POM + env mapping are active while slot 3 and EnvMap textures are unresolved; restore slot 3/4/5 textures or disable both parallax/POM and env mapping for the block.",
+    ),
     "fallback_or_unknown": (
         "Review the listed block diagnostics and apply targeted fixes before repatching.",
     ),
@@ -4063,6 +4069,10 @@ def _classify_conflict_code(message: str) -> str:
         return "shader_state.envmap_missing_slot5"
     if "envmap and pom are enabled" in lowered and "required envmap textures are unresolved" in lowered:
         return "shader_state.envmap_pom_missing_env_slots"
+    if "envmap and glow are enabled" in lowered and "required slot 2 and envmap textures are unresolved" in lowered:
+        return "shader_state.envmap_glow_missing_slots2_4_5"
+    if "parallax/pom and env mapping are enabled" in lowered and "required slot 3 and envmap textures are unresolved" in lowered:
+        return "shader_state.parallax_envmap_missing_slots3_4_5"
     if "slot 0 " in lowered:
         return "path_slot_diffuse"
     if "slot 1 " in lowered:
@@ -4460,6 +4470,18 @@ def build_auto_remediation_patch_options(
         opts.disable_pom = True
         applied_steps.append("disable_env_mapping_for_envmap_pom_mixed_unresolved")
         applied_steps.append("disable_pom_for_envmap_pom_mixed_unresolved")
+    if any(code.startswith("shader_state.envmap_glow_missing_slots2_4_5") for code in base_codes):
+        opts.disable_env_mapping = True
+        opts.disable_glow_map = True
+        applied_steps.append("disable_env_mapping_for_envmap_glow_mixed_unresolved")
+        applied_steps.append("disable_glow_map_for_envmap_glow_mixed_unresolved")
+    if any(code.startswith("shader_state.parallax_envmap_missing_slots3_4_5") for code in base_codes):
+        opts.disable_env_mapping = True
+        opts.disable_parallax = True
+        opts.disable_pom = True
+        applied_steps.append("disable_env_mapping_for_parallax_envmap_mixed_unresolved")
+        applied_steps.append("disable_parallax_for_parallax_envmap_mixed_unresolved")
+        applied_steps.append("disable_pom_for_parallax_envmap_mixed_unresolved")
 
     if not applied_steps:
         return None, (
@@ -5058,6 +5080,11 @@ def validate_nif_for_parallax(
             glow_path,
             texture_roots,
         )
+        parallax_missing = _texture_slot_path_missing_near_nif(
+            nif_path,
+            parallax_path,
+            texture_roots,
+        )
         if info.has_glow_map_flag and (not glow_path or glow_path_missing):
             _append_unique(
                 result.issues,
@@ -5066,6 +5093,41 @@ def validate_nif_for_parallax(
             _append_unique(
                 result.suggestions,
                 f"{bname}: SLSF2_Glow_Map is set but slot 2 is empty or unresolved; add a valid _g.dds emissive map or disable the flag."
+            )
+        if (
+            info.shader_type == SHADER_TYPE_ENVMAP
+            and info.has_env_mapping_flag
+            and info.has_glow_map_flag
+            and (not glow_path or glow_path_missing)
+            and (
+                (not cubemap_path or cubemap_missing)
+                or (not env_mask_path or env_mask_missing)
+            )
+        ):
+            _append_unique(
+                result.issues,
+                f"{bname}: EnvMap and glow are enabled together, but required slot 2 and EnvMap textures are unresolved."
+            )
+            _append_unique(
+                result.suggestions,
+                "Restore valid slot 2/4/5 textures, or disable both glow and environment mapping for this mixed block."
+            )
+        if (
+            info.has_env_mapping_flag
+            and info.has_parallax_flag
+            and (not parallax_path or parallax_missing)
+            and (
+                (not cubemap_path or cubemap_missing)
+                or (not env_mask_path or env_mask_missing)
+            )
+        ):
+            _append_unique(
+                result.issues,
+                f"{bname}: Parallax/POM and env mapping are enabled together, but required slot 3 and EnvMap textures are unresolved."
+            )
+            _append_unique(
+                result.suggestions,
+                "Restore valid slot 3/4/5 textures, or disable both parallax/POM and environment mapping for this mixed block."
             )
         cubemap_path = info.texture_paths.get(TEXTURE_SLOT_CUBEMAP, "").strip()
         if cubemap_path:

@@ -265,6 +265,23 @@
       ]
     },
     {
+      "id": "skyrim_envmap_glow_mixed_unresolved",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64
+    },
+    {
+      "id": "skyrim_parallax_envmap_mixed_unresolved",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 2176
+    },
+    {
       "id": "fallout_legacy_11_130",
       "profile": "fallout",
       "shader_layout": "legacy",
