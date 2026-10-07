@@ -319,6 +319,7 @@ Plugin-aware conflict discovery now attempts lightweight plugin record parsing (
 NIF Editor conflict reruns now include conflict-only patch and conflict-only auto-remediation actions in addition to conflict-only scan reruns.
 Use `nif_patcher.py --compatibility-report` to print a current game/version support matrix (profiles, layouts, and guarded-operation policy).
 Use `nif_patcher.py --validate --conflict-report-summary --parity-delta-report <nif_or_folder>` to emit a markdown parity-gap table (conflict family, count, auto-remediation support level, suggested next action) for structured comparisons against external patchers such as PGPatcher.
+For repeatable parity-regression checks in CI/local runs, see `tests/fixtures/nif_parity_sample_matrix.json` and its corresponding `tests/test_nif_patcher.py` matrix assertions.
 The regression suite also includes a locked fixture corpus baseline at `tests/fixtures/nif_fixture_corpus*.json` for cross-profile/layout conflict-matrix stability checks, including truncated-header and shifted texture-set layout edge signatures.
 CLI folder batch runs now emit `batch_failure_report.json` and `batch_failure_report.csv` when any source files fail, with per-file action/conflict/error fields for triage.
 For long-running folder batches, use `--checkpoint-file <path>` to persist successful-file progress and `--resume-checkpoint` to skip already completed files after interruption/restart.

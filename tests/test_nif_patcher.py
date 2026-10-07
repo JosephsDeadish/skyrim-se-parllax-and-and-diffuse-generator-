@@ -68,6 +68,7 @@ from nif_patcher import (
 _FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 _FIXTURE_CORPUS_MANIFEST = _FIXTURE_DIR / "nif_fixture_corpus.json"
 _FIXTURE_CORPUS_BASELINE = _FIXTURE_DIR / "nif_fixture_corpus_baseline.json"
+_FIXTURE_PARITY_SAMPLE_MATRIX = _FIXTURE_DIR / "nif_parity_sample_matrix.json"
 
 
 # ---------------------------------------------------------------------------
@@ -1052,6 +1053,22 @@ class TestValidateNifForParallax(unittest.TestCase):
         v = validate_nif_for_parallax(nif)
         self.assertTrue(
             any(group.code.startswith("shader_state.parallax_envmap_missing_slots3_4_5.") for group in v.conflict_report)
+        )
+
+    def test_conflict_report_flags_parallax_envmap_glow_with_unresolved_slots(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=SLSF1_ENVIRONMENT_MAPPING | SLSF1_PARALLAX,
+            flags2=SLSF2_GLOW_MAP,
+            texture_paths=["textures\\arch\\stone.dds"] + [""] * 8,
+        )
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(
+            any(
+                group.code.startswith("shader_state.parallax_envmap_glow_missing_slots2_3_4_5.")
+                for group in v.conflict_report
+            )
         )
 
     def test_reports_wrong_texture_type_in_normal_slot(self) -> None:
@@ -2792,6 +2809,42 @@ class TestMixedModValidationBatches(unittest.TestCase):
         self.assertTrue(any(".fallout." in code for code in all_codes))
 
 
+class TestParitySampleMatrix(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_structured_parity_matrix_cases_cover_expected_conflict_prefixes(self) -> None:
+        payload = _load_fixture_corpus_payload(_FIXTURE_PARITY_SAMPLE_MATRIX)
+        cases = payload.get("cases", [])
+        self.assertIsInstance(cases, list)
+        corpus = _materialize_fixture_corpus(self.tmp, payload)
+        self.assertEqual(len(corpus), len(cases))
+        validations = [validate_nif_for_parallax(path) for path in corpus]
+
+        all_codes: list[str] = []
+        for case, validation in zip(cases, validations):
+            self.assertIsInstance(case, dict)
+            expected_prefixes = case.get("expected_prefixes", [])
+            self.assertIsInstance(expected_prefixes, list)
+            codes = [group.code for group in validation.conflict_report]
+            all_codes.extend(codes)
+            for prefix in expected_prefixes:
+                self.assertTrue(
+                    any(code.startswith(str(prefix)) for code in codes),
+                    f"{case.get('id', 'case')} missing {prefix}; got {codes}",
+                )
+
+        self.assertTrue(any(".skyrim." in code for code in all_codes))
+        self.assertTrue(any(".fallout." in code for code in all_codes))
+        report = build_parity_delta_report_text(summarize_validation_conflicts(validations), max_rows=12)
+        self.assertIn("NIF parity delta report", report)
+        self.assertIn("| Conflict code | Count | Files | Auto-remediation | Suggested action |", report)
+
+
 class TestBatchConflictSummaries(unittest.TestCase):
     def setUp(self) -> None:
         self._td = tempfile.TemporaryDirectory()
@@ -3178,6 +3231,47 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertIn("disable_env_mapping_for_parallax_envmap_mixed_unresolved", steps)
         self.assertIn("disable_parallax_for_parallax_envmap_mixed_unresolved", steps)
         self.assertIn("disable_pom_for_parallax_envmap_mixed_unresolved", steps)
+
+    def test_auto_remediation_build_options_restores_paths_for_mixed_parallax_envmap_glow_conflict(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP, texture_paths=paths)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(str(opts.parallax_texture_path).lower().endswith("_p.dds"))
+        self.assertTrue(str(opts.glow_texture_path).lower().endswith("_g.dds"))
+        self.assertTrue(str(opts.cubemap_texture_path).lower().endswith("_e.dds"))
+        self.assertTrue(str(opts.env_mask_texture_path).lower().endswith("_m.dds"))
+        self.assertIn("set_slot3_parallax_for_parallax_envmap_glow_mixed_unresolved", steps)
+        self.assertIn("set_slot2_glow_for_parallax_envmap_glow_mixed_unresolved", steps)
+        self.assertIn("set_slot4_cubemap_for_parallax_envmap_glow_mixed_unresolved", steps)
+        self.assertIn("set_slot5_env_mask_for_parallax_envmap_glow_mixed_unresolved", steps)
+
+    def test_auto_remediation_build_options_disables_flags_for_mixed_parallax_envmap_glow_without_guesses(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_ENVMAP,
+            texture_paths=[""] * 9,
+        )
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(opts.disable_env_mapping)
+        self.assertTrue(opts.disable_parallax)
+        self.assertTrue(opts.disable_pom)
+        self.assertTrue(opts.disable_glow_map)
+        self.assertIn("disable_env_mapping_for_parallax_envmap_glow_mixed_unresolved", steps)
+        self.assertIn("disable_parallax_for_parallax_envmap_glow_mixed_unresolved", steps)
+        self.assertIn("disable_pom_for_parallax_envmap_glow_mixed_unresolved", steps)
+        self.assertIn("disable_glow_map_for_parallax_envmap_glow_mixed_unresolved", steps)
 
 
 class TestCompatibilityReport(unittest.TestCase):

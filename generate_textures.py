@@ -8043,7 +8043,7 @@ if GUI_AVAILABLE:
             )
             _preset_row = ttk.Frame(_workflow_frame)
             _preset_row.grid(row=2, column=0, columnspan=3, sticky=tk.EW, pady=(4, 0))
-            ttk.Label(_preset_row, text="One-click safe-default workflow presets").pack(side=tk.LEFT)
+            ttk.Label(_preset_row, text="One-click Safe Defaults (recommended)").pack(side=tk.LEFT)
             ttk.Button(
                 _preset_row,
                 text="Vanilla (Safe default)",
@@ -8377,6 +8377,7 @@ if GUI_AVAILABLE:
             self._render_profile_mode_widgets = [self.complex_format_combo, self.env_mask_mode_combo, self.parallax_mode_combo]
 
             advanced_generation_widgets: list[tk.Widget] = [
+                _auto_sugg_check,
                 _render_profile_label,
                 _render_profile_combo,
                 self.render_profile_hint_label,
@@ -8384,6 +8385,9 @@ if GUI_AVAILABLE:
                 self.complex_format_combo,
                 _env_mode_row,
                 _env_mode_hint_label,
+                self.auto_normal_check,
+                self.auto_parallax_check,
+                self.auto_glow_check,
                 _env_mask_label,
                 self.environment_mask_scale,
                 self.environment_mask_strength_display_label,
@@ -8697,10 +8701,10 @@ if GUI_AVAILABLE:
                 _clear_checkpoint_button,
                 "Delete the current batch checkpoint file so the next run starts from scratch.\nUse only when you intentionally want a full rerun.",
             )
-            _checkpoint_health_label = ttk.Label(source_controls, textvariable=self.checkpoint_health_var, foreground="gray")
-            _checkpoint_health_label.pack(side=tk.LEFT, padx=(10, 4))
+            self.checkpoint_health_label = ttk.Label(source_controls, textvariable=self.checkpoint_health_var, foreground="gray")
+            self.checkpoint_health_label.pack(side=tk.LEFT, padx=(10, 4))
             self._add_tooltip(
-                _checkpoint_health_label,
+                self.checkpoint_health_label,
                 "Checkpoint status summary for the next run: file path, freshness, and resumable completed count.",
             )
             _auto_patch_nifs_check = ttk.Checkbutton(
@@ -8728,7 +8732,7 @@ if GUI_AVAILABLE:
                 _resume_combo,
                 _resume_hint_label,
                 _clear_checkpoint_button,
-                _checkpoint_health_label,
+                self.checkpoint_health_label,
                 _auto_patch_nifs_check,
             ]
             simplified_optional_preview_widgets: list[tk.Widget] = [
@@ -9460,9 +9464,9 @@ if GUI_AVAILABLE:
         def _update_batch_resume_hint(self, *_args: object) -> None:
             mode = str(self.batch_resume_mode_var.get() or "start_fresh").strip().lower()
             if mode == "resume":
-                self.batch_resume_hint_var.set("Mode: resume — continue safely by skipping files already completed.")
+                self.batch_resume_hint_var.set("Checkpoint mode: Resume — skip files already completed in checkpoint.")
             else:
-                self.batch_resume_hint_var.set("Mode: start fresh — rerun all selected files and ignore checkpoint entries.")
+                self.batch_resume_hint_var.set("Checkpoint mode: Start fresh — rerun all selected files and ignore checkpoint entries.")
 
         def _load_batch_checkpoint_completed_files(self, checkpoint_path: Path) -> set[str]:
             if not checkpoint_path.exists():
@@ -9486,9 +9490,13 @@ if GUI_AVAILABLE:
         ) -> None:
             if checkpoint_path is None:
                 self.checkpoint_health_var.set("Checkpoint: unavailable")
+                if hasattr(self, "checkpoint_health_label"):
+                    self.checkpoint_health_label.configure(foreground="#6b7280")
                 return
             if not checkpoint_path.exists():
                 self.checkpoint_health_var.set(f"Checkpoint: new ({checkpoint_path.name})")
+                if hasattr(self, "checkpoint_health_label"):
+                    self.checkpoint_health_label.configure(foreground="#2563eb")
                 return
             age_seconds = max(0.0, time.time() - checkpoint_path.stat().st_mtime)
             if age_seconds < 120:
@@ -9546,6 +9554,13 @@ if GUI_AVAILABLE:
                 self.checkpoint_health_var.set(
                     f"Checkpoint: {checkpoint_path.name} ({completed} complete, updated {age_label}){status_suffix}"
                 )
+            if hasattr(self, "checkpoint_health_label"):
+                if mismatch_flags:
+                    self.checkpoint_health_label.configure(foreground="#dc2626")
+                elif stale_flag:
+                    self.checkpoint_health_label.configure(foreground="#d97706")
+                else:
+                    self.checkpoint_health_label.configure(foreground="#16a34a")
 
         def _write_batch_checkpoint_state(
             self,

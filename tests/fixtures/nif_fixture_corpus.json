@@ -299,6 +299,15 @@
       "flags1": 2176
     },
     {
+      "id": "skyrim_parallax_envmap_glow_mixed_unresolved",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 2176,
+      "flags2": 64
+    },
+    {
       "id": "skyrim_real_shifted_multiconflict_envmap",
       "profile": "skyrim",
       "shader_layout": "real",
@@ -368,6 +377,43 @@
       "shader_layout": "legacy",
       "user_version": 12,
       "user_ver2": 133
+    },
+    {
+      "id": "fallout_envmap_missing_slots4_5",
+      "profile": "fallout",
+      "shader_layout": "legacy",
+      "user_version": 11,
+      "user_ver2": 130,
+      "shader_type": 1,
+      "flags1": 128
+    },
+    {
+      "id": "fallout_env_slot5_without_flag",
+      "profile": "fallout",
+      "shader_layout": "legacy",
+      "user_version": 11,
+      "user_ver2": 130,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\arch\\stone_m.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_parallax_envmap_glow_mixed_unresolved",
+      "profile": "fallout",
+      "shader_layout": "legacy",
+      "user_version": 11,
+      "user_ver2": 130,
+      "shader_type": 1,
+      "flags1": 2176,
+      "flags2": 64
     },
     {
       "id": "unknown_header_signature",

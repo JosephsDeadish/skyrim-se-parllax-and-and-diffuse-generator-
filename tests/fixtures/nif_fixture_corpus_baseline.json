@@ -1,8 +1,8 @@
 {
-  "expected_total_cases": 32,
+  "expected_total_cases": 36,
   "expected_profile_counts": {
-    "skyrim": 23,
-    "fallout": 7,
+    "skyrim": 24,
+    "fallout": 10,
     "unknown": 2
   },
   "required_summary_code_prefixes": [
@@ -22,6 +22,10 @@
     "shader_state.envmap_pom_missing_env_slots.skyrim.",
     "shader_state.envmap_glow_missing_slots2_4_5.skyrim.",
     "shader_state.parallax_envmap_missing_slots3_4_5.skyrim.",
+    "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim.",
+    "shader_state.envmap_missing_slots4_5.fallout.",
+    "flag_env_mapping.slot5_filled_without_flag.fallout.",
+    "skip_single_pass.fallout.",
     "unsupported_header."
   ]
 }
