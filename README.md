@@ -118,6 +118,20 @@ Optional arguments:
 - `--snow-mask-strength` (snow mask strength, 0.1–3.0; default: 1.0)
 - `--pbr-material` (shortcut for the app's Community Shaders Extended Materials packed output: enables complex material, forces `--complex-format cm`, and keeps compatible standard env/parallax modes; not an ENB workflow)
 - `--render-profile` (`auto`, `custom`, `vanilla`, `performance`, `vr`, `terrain`, `architecture`, `characters`, `community_shaders`, `truepbr`, `enb`)
+
+## Pre-release validation
+
+Run the full release gate locally before packaging or publishing:
+
+```bash
+python scripts/pre_release_validation.py
+```
+
+This gate runs:
+- full unittest suite (`tests/test_generate_textures.py` + `tests/test_nif_patcher.py` and related modules),
+- targeted NIF fixture/conflict stress checks,
+- Python compile checks,
+- a lightweight tracked-file secret scan.
   - locked profiles (and `auto` in single-file mode) now auto-correct conflicting `--complex-format`, `--environment-mask-mode`, and `--parallax-mode` values, then print the applied guardrail changes to stderr
 - `--target-game` (`skyrim`, `fallout3`, `falloutnv`, `fallout4`, `fallout76`; default: `skyrim`)
   - controls generated filename conventions (for example, Fallout 4/76 diffuse defaults to `_d.dds` and env-mask defaults to `_s.dds`)

@@ -146,6 +146,23 @@
       ]
     },
     {
+      "id": "skyrim_env_slot5_without_flag",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\arch\\stone_m.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
       "id": "skyrim_envmap_missing_slots4_5",
       "profile": "skyrim",
       "shader_layout": "legacy",
