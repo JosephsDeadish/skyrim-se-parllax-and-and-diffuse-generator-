@@ -321,3 +321,29 @@ Use `nif_patcher.py --compatibility-report` to print a current game/version supp
 The regression suite also includes a locked fixture corpus baseline at `tests/fixtures/nif_fixture_corpus*.json` for cross-profile/layout conflict-matrix stability checks, including truncated-header and shifted texture-set layout edge signatures.
 CLI folder batch runs now emit `batch_failure_report.json` and `batch_failure_report.csv` when any source files fail, with per-file action/conflict/error fields for triage.
 For long-running folder batches, use `--checkpoint-file <path>` to persist successful-file progress and `--resume-checkpoint` to skip already completed files after interruption/restart.
+
+### Large real-sample batch verification checklist (release readiness)
+
+Before publishing a release, run at least one real mod-scale verification pass:
+
+1. Prepare a representative sample set (minimum recommended: **500+ textures**, include some **4K/8K** sources).
+2. Run one pass in **start_fresh** mode and one pass in **resume** mode.
+3. Confirm checkpoint behavior:
+   - checkpoint file is created,
+   - resume skips completed entries,
+   - start_fresh clear/reset prompts are shown as expected.
+4. Confirm preview guardrails:
+   - lazy/staged preview remains responsive,
+   - manual pause and auto speed-off badges are clear,
+   - re-enable live preview works mid-run.
+5. Confirm output integrity:
+   - generated file count matches enabled outputs,
+   - `batch_failure_report.json/csv` is created if failures occur,
+   - NIF auto-patching (if enabled) reports accurate success/fail counts.
+
+### Known limits and operating guidance
+
+- Very large batches (1000+ sources) can become UI-heavy if live preview is forced on continuously; use Resume mode and keep lazy/staged preview enabled.
+- 8K-heavy runs may require lower worker counts and longer preview refresh intervals; this is expected to avoid memory spikes.
+- NIF Editor remains experimental, especially for Fallout-era profiles; keep backups and validate in game after patching.
+- TruePBR/Community Shaders/ENB outputs are workflow-specific; avoid mixing output families on the same mesh/material unless you explicitly know that pipeline is supported.

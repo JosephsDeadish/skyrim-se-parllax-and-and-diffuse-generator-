@@ -473,6 +473,75 @@ def build_batch_bottleneck_hints(
     return hints[:3]
 
 
+def compute_preview_refresh_delay_ms(
+    *,
+    is_processing: bool,
+    show_batch_preview: bool,
+    total_sources: int,
+    source_pixels: int,
+    lazy_preview_enabled: bool,
+    staged_preview_enabled: bool,
+) -> int:
+    if not is_processing:
+        return 75
+    delay = 120
+    if not show_batch_preview:
+        delay = max(delay, 160)
+    if total_sources >= 1000:
+        delay = max(delay, 320)
+    elif total_sources >= 400:
+        delay = max(delay, 220)
+    elif total_sources >= 150:
+        delay = max(delay, 160)
+    if source_pixels >= (8192 * 8192):
+        delay += 80
+    elif source_pixels >= (4096 * 4096):
+        delay += 40
+    if lazy_preview_enabled:
+        delay += 20
+    if staged_preview_enabled:
+        delay += 20
+    return min(delay, 500)
+
+
+def compute_deferred_preview_tile_interval_ms(
+    *,
+    total_sources: int,
+    source_pixels: int,
+) -> int:
+    interval = 40
+    if total_sources >= 1000:
+        interval = 140
+    elif total_sources >= 400:
+        interval = 100
+    elif total_sources >= 150:
+        interval = 70
+    if source_pixels >= (8192 * 8192):
+        interval = max(interval, 160)
+    elif source_pixels >= (4096 * 4096):
+        interval = max(interval, 110)
+    return min(interval, 220)
+
+
+def should_update_live_batch_preview(
+    *,
+    total_sources: int,
+    current_index: int,
+    last_index: int,
+    seconds_since_last_update: float,
+) -> bool:
+    if total_sources < 300:
+        return True
+    min_interval = 0.45 if total_sources >= 1000 else 0.30
+    min_index_step = 3 if total_sources >= 1000 else 2
+    if seconds_since_last_update >= min_interval:
+        return True
+    return (
+        (current_index - last_index) >= min_index_step
+        and seconds_since_last_update >= (min_interval * 0.6)
+    )
+
+
 def _compute_tooltip_position(
     *,
     pointer_x: int,
@@ -7644,6 +7713,8 @@ if GUI_AVAILABLE:
             self.preview_deferred_revision = 0
             self.preview_deferred_render_after_id: str | None = None
             self.preview_deferred_queue: list[str] = []
+            self._last_live_batch_preview_update_at = 0.0
+            self._last_live_batch_preview_index = 0
             self.normal_strength_var = tk.DoubleVar(value=2.0)
             self.parallax_strength_var = tk.DoubleVar(value=1.35)
             self.complex_strength_var = tk.DoubleVar(value=1.15)
@@ -7847,19 +7918,19 @@ if GUI_AVAILABLE:
 
             _input_label = ttk.Label(file_frame, text="Input DDS or folder")
             _input_label.grid(row=0, column=0, sticky=tk.W, pady=4)
-            self._add_tooltip(_input_label, "📂 Paste a .dds file path here, or use the buttons below.\nAKA: 'Where did I put that rock texture again?'")
+            self._add_tooltip(_input_label, "📂 Enter a .dds file path or use the file/folder buttons below.")
             _input_entry = ttk.Entry(file_frame, textvariable=self.input_var, width=80)
             _input_entry.grid(row=0, column=1, padx=6, pady=4, sticky=tk.EW)
-            self._add_tooltip(_input_entry, "📂 The sacred path to your source texture.\nTip: Drag & drop doesn't work here, use the buttons. Yes, I know. Sorry.")
+            self._add_tooltip(_input_entry, "📂 Source texture path.\nTip: use File/Folder buttons if drag-and-drop is unavailable.")
             self.input_file_button = ttk.Button(file_frame, text="File", command=self._pick_input)
             self.input_file_button.grid(row=0, column=2, padx=4, pady=4)
-            self._add_tooltip(self.input_file_button, "🗂 Open a single DDS/PNG/JPG texture.\nFor when you only have ONE texture and you're very proud of it.")
+            self._add_tooltip(self.input_file_button, "🗂 Open one DDS/PNG/JPG texture file.")
             self.input_folder_button = ttk.Button(file_frame, text="Folder", command=self._pick_input_folder)
             self.input_folder_button.grid(row=0, column=3, padx=4, pady=4)
-            self._add_tooltip(self.input_folder_button, "📁 Select a whole folder of textures for MAXIMUM CHAOS.\nBatch mode: because doing things one at a time is for cowards.")
+            self._add_tooltip(self.input_folder_button, "📁 Select a folder of textures for batch processing.")
             self.detected_mod_button = ttk.Button(file_frame, text="Loaded Mod", command=self._pick_detected_mod_folder)
             self.detected_mod_button.grid(row=0, column=4, padx=4, pady=4)
-            self._add_tooltip(self.detected_mod_button, "🧙 Auto-detected MO2/Vortex mod folder.\nIf this button is greyed out, your mod manager is playing hide and seek.")
+            self._add_tooltip(self.detected_mod_button, "🧙 Use the detected MO2/Vortex mod texture folder when available.")
 
             _output_label = ttk.Label(file_frame, text="Output folder")
             _output_label.grid(row=1, column=0, sticky=tk.W, pady=4)
@@ -7877,7 +7948,7 @@ if GUI_AVAILABLE:
                 command=self._toggle_custom_output_location,
             )
             _custom_out_check.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(2, 0))
-            self._add_tooltip(_custom_out_check, "📦 Check this if you want your outputs somewhere other than the input folder.\nUseful when you have strong opinions about folder organisation.")
+            self._add_tooltip(_custom_out_check, "📦 Write generated outputs to a different folder instead of next to input files.")
             _detected_context_label = ttk.Label(
                 file_frame,
                 textvariable=self.detected_context_var,
@@ -8350,6 +8421,7 @@ if GUI_AVAILABLE:
             advanced_workflow_widgets: list[tk.Widget] = [
                 _pbr_section,
                 _custom_section,
+                _complex_check,
             ]
             _advanced_workflow_layout: dict[tk.Widget, dict[str, object]] = {}
             for widget in advanced_workflow_widgets:
@@ -8376,6 +8448,17 @@ if GUI_AVAILABLE:
                         widget.grid(**_advanced_workflow_layout[widget])
                     else:
                         widget.grid_remove()
+                if not show_advanced_workflow:
+                    for advanced_var in (
+                        self.include_rmaos_var,
+                        self.include_wetness_mask_var,
+                        self.include_snow_mask_var,
+                        self.include_ao_var,
+                        self.include_roughness_var,
+                        self.include_complex_var,
+                    ):
+                        if bool(advanced_var.get()):
+                            advanced_var.set(False)
 
             self.show_advanced_generation_var.trace_add("write", _sync_advanced_generation_controls)
             self.show_advanced_workflow_outputs_var.trace_add("write", _sync_advanced_workflow_controls)
@@ -9846,7 +9929,19 @@ if GUI_AVAILABLE:
                         f"(elapsed {elapsed_seconds:.1f}s, eta {eta_seconds:.1f}s)"
                     )
                     if self.show_batch_preview_var.get():
-                        self._set_preview_source_by_path(current_path)
+                        now = time.monotonic()
+                        last_at = float(getattr(self, "_last_live_batch_preview_update_at", 0.0) or 0.0)
+                        last_index = int(getattr(self, "_last_live_batch_preview_index", 0) or 0)
+                        should_update = should_update_live_batch_preview(
+                            total_sources=max(0, int(total)),
+                            current_index=max(0, int(index)),
+                            last_index=last_index,
+                            seconds_since_last_update=max(0.0, now - last_at),
+                        )
+                        if should_update:
+                            self._set_preview_source_by_path(current_path)
+                            self._last_live_batch_preview_update_at = now
+                            self._last_live_batch_preview_index = max(0, int(index))
                 elif event_type == "nif_patch":
                     filename, patched, failed = payload
                     self.batch_nif_patch_results.append((filename, patched, failed))
@@ -10095,8 +10190,13 @@ if GUI_AVAILABLE:
             self.preview_deferred_revision = revision
             self.preview_deferred_queue = sorted(deferred_output_keys)
             self._set_preview_speed_badge("staged", deferred_count=len(self.preview_deferred_queue))
+            source_pixels = int(self.source_image.width * self.source_image.height) if self.source_image is not None else 0
+            stage_interval = compute_deferred_preview_tile_interval_ms(
+                total_sources=len(self.selected_inputs),
+                source_pixels=source_pixels,
+            )
             self.preview_deferred_render_after_id = self.root.after(
-                40,
+                stage_interval,
                 lambda rev=revision: self._render_next_deferred_preview_tile(rev),
             )
 
@@ -10623,8 +10723,20 @@ if GUI_AVAILABLE:
             self._cancel_deferred_preview_staging(clear_queue=True)
             if self.preview_refresh_after_id is not None:
                 self.root.after_cancel(self.preview_refresh_after_id)
+            source_pixels = int(self.source_image.width * self.source_image.height) if self.source_image is not None else 0
+            refresh_delay = compute_preview_refresh_delay_ms(
+                is_processing=bool(self.is_processing),
+                show_batch_preview=bool(self.show_batch_preview_var.get()),
+                total_sources=len(self.selected_inputs),
+                source_pixels=source_pixels,
+                lazy_preview_enabled=bool(self.lazy_preview_mode_var.get()),
+                staged_preview_enabled=bool(self.staged_preview_mode_var.get()),
+            )
             current_revision = self.preview_render_revision
-            self.preview_refresh_after_id = self.root.after(75, lambda rev=current_revision: self._refresh_preview(rev))
+            self.preview_refresh_after_id = self.root.after(
+                refresh_delay,
+                lambda rev=current_revision: self._refresh_preview(rev),
+            )
 
         def _on_preview_size_changed(self) -> None:
             self.status_var.set(f"Preview size set to {self.preview_size_var.get()}.")
@@ -10963,6 +11075,18 @@ if GUI_AVAILABLE:
                     )
                     return
 
+                if not bool(self.show_advanced_workflow_outputs_var.get()):
+                    for advanced_var in (
+                        self.include_rmaos_var,
+                        self.include_wetness_mask_var,
+                        self.include_snow_mask_var,
+                        self.include_ao_var,
+                        self.include_roughness_var,
+                        self.include_complex_var,
+                    ):
+                        if bool(advanced_var.get()):
+                            advanced_var.set(False)
+
                 include_diffuse = self.include_diffuse_var.get()
                 include_normal = self.include_normal_var.get()
                 include_parallax = self.include_parallax_var.get()
@@ -11050,6 +11174,19 @@ if GUI_AVAILABLE:
                 resumed_completed_count = 0
                 completed_checkpoint_files: set[str] = set()
                 if self.batch_resume_mode_var.get() == "resume":
+                    if is_huge_batch and not checkpoint_path.exists():
+                        proceed_resume_without_history = messagebox.askyesno(
+                            "Resume mode: starting new checkpoint",
+                            (
+                                "Resume mode is enabled, but no checkpoint file exists yet for this run.\n\n"
+                                "A new checkpoint will be created as files finish.\n"
+                                "Continue?"
+                            ),
+                            parent=self.root,
+                        )
+                        if not proceed_resume_without_history:
+                            self.status_var.set("Batch start canceled before creating a new checkpoint.")
+                            return
                     completed_checkpoint_files = self._load_batch_checkpoint_completed_files(checkpoint_path)
                     if completed_checkpoint_files:
                         filtered_inputs = [
@@ -11064,7 +11201,10 @@ if GUI_AVAILABLE:
                             )
                             messagebox.showinfo(
                                 "Nothing to process",
-                                "Checkpoint resume found no remaining files to process.",
+                                (
+                                    "Checkpoint resume found no remaining files to process.\n"
+                                    "Switch to start-fresh mode if you want to rerun everything."
+                                ),
                                 parent=self.root,
                             )
                             return
