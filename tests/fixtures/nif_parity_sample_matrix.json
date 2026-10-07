@@ -199,6 +199,86 @@
       ]
     },
     {
+      "id": "parity_skyrim_real_shifted_multiblock_env_flag_and_parallax_reuse",
+      "profile": "skyrim",
+      "shader_layout": "real",
+      "user_ver2": 130,
+      "texture_set_layout_shift": 4,
+      "texture_paths": [
+        "textures\\architecture\\castle\\castlewall.dds",
+        "textures\\architecture\\castle\\castlewall_n.dds",
+        "",
+        "",
+        "textures\\cubemaps\\castle_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\castle\\castlewall.dds",
+            "textures\\architecture\\castle\\castlewall_n.dds",
+            "",
+            "textures\\architecture\\castle\\castlewall_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "expected_prefixes": [
+        "flag_env_mapping.slot4_filled_without_flag.skyrim.real",
+        "path_slot_parallax.matches_normal.skyrim.real"
+      ]
+    },
+    {
+      "id": "parity_skyrim_real_shifted_multiblock_envmap_slot4_and_parallax_diffuse",
+      "profile": "skyrim",
+      "shader_layout": "real",
+      "user_ver2": 130,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_set_layout_shift": 4,
+      "texture_paths": [
+        "textures\\architecture\\dwemer\\metal.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\architecture\\dwemer\\metal_m.dds",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\dwemer\\metal.dds",
+            "",
+            "",
+            "textures\\architecture\\dwemer\\metal.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "expected_prefixes": [
+        "shader_state.envmap_missing_slot4.skyrim.real",
+        "path_slot_parallax.matches_diffuse.skyrim.real"
+      ]
+    },
+    {
       "id": "parity_fallout_missing_parallax_flag",
       "profile": "fallout",
       "shader_layout": "legacy",

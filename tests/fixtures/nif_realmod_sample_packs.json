@@ -255,14 +255,21 @@
         "effects": 1,
         "clutter": 1,
         "armor": 1,
-        "landscape": 1
+        "landscape": 1,
+        "spec_gate": 1,
+        "spec_color_gate": 1,
+        "env_scale_gate": 1,
+        "fix_lighting_gate": 1,
+        "parallax_scale_gate": 1
       },
       "required_summary_code_prefixes": [
         "shader_state.envmap_missing_slots4_5.fallout.",
         "flag_env_mapping.slot5_filled_without_flag.fallout.",
         "skip_single_pass.fallout.",
         "shader_state.envmap_missing_slot4.fallout.",
-        "shader_state.envmap_missing_slot5.fallout."
+        "shader_state.envmap_missing_slot5.fallout.",
+        "missing_parallax_flag.flag1_not_set.fallout.",
+        "shader_state.parallax_type_missing_slot3.fallout."
       ],
       "cases": [
         {
@@ -358,6 +365,99 @@
           ],
           "expected_prefixes": [
             "shader_state.envmap_missing_slot5.fallout."
+          ]
+        },
+        {
+          "id": "pack_fallout_spec_strength_gate_profile",
+          "family": "spec_gate",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "texture_paths": [
+            "textures\\architecture\\factory\\factorywall.dds",
+            "textures\\architecture\\factory\\factorywall_n.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "missing_parallax_flag.flag1_not_set.fallout."
+          ]
+        },
+        {
+          "id": "pack_fallout_spec_color_gate_profile",
+          "family": "spec_color_gate",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 132,
+          "texture_paths": [
+            "textures\\armor\\combat\\combathelmet.dds",
+            "",
+            "",
+            "",
+            "",
+            "textures\\armor\\combat\\combathelmet_m.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "flag_env_mapping.slot5_filled_without_flag.fallout."
+          ]
+        },
+        {
+          "id": "pack_fallout_env_scale_gate_profile",
+          "family": "env_scale_gate",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 133,
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_paths": [
+            "textures\\landscape\\city\\road.dds",
+            "",
+            "",
+            "",
+            "",
+            "textures\\landscape\\city\\road_m.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_missing_slot4.fallout."
+          ]
+        },
+        {
+          "id": "pack_fallout_fix_lighting_gate_profile",
+          "family": "fix_lighting_gate",
+          "profile": "fallout",
+          "shader_layout": "legacy",
+          "user_version": 11,
+          "user_ver2": 139,
+          "flags1": 32,
+          "expected_prefixes": [
+            "skip_single_pass.fallout."
+          ]
+        },
+        {
+          "id": "pack_fallout_parallax_scale_gate_profile",
+          "family": "parallax_scale_gate",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "shader_type": 3,
+          "flags1": 2048,
+          "expected_prefixes": [
+            "shader_state.parallax_type_missing_slot3.fallout."
           ]
         }
       ]

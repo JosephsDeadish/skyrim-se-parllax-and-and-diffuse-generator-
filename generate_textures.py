@@ -11250,18 +11250,25 @@ if GUI_AVAILABLE:
                             )
                             return
                 else:
-                    if is_huge_batch and checkpoint_path.exists():
+                    if checkpoint_path.exists():
+                        completed_in_checkpoint = len(self._load_batch_checkpoint_completed_files(checkpoint_path))
+                        caution_detail = (
+                            "For 1000+ runs this removes resume protection.\n"
+                            if is_huge_batch
+                            else "This can cause accidental duplicate output work if the run was already partially completed.\n"
+                        )
                         proceed_reset = messagebox.askyesno(
                             "Confirm checkpoint reset",
                             (
                                 f"A checkpoint already exists at:\n{checkpoint_path}\n\n"
-                                "Start-fresh mode will clear it. For 1000+ runs this removes resume protection.\n"
+                                f"It currently tracks {completed_in_checkpoint} completed file(s).\n"
+                                f"Start-fresh mode will clear it. {caution_detail}"
                                 "Continue with start-fresh and clear checkpoint?"
                             ),
                             parent=self.root,
                         )
                         if not proceed_reset:
-                            self.status_var.set("Large-batch start canceled. Switch Resume mode to continue safely.")
+                            self.status_var.set("Start-fresh canceled. Switch Resume mode to continue safely from checkpoint.")
                             return
                     checkpoint_path.unlink(missing_ok=True)
                 self._refresh_checkpoint_health_status(

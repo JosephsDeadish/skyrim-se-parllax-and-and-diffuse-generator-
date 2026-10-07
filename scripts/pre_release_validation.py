@@ -280,21 +280,52 @@ def _write_release_artifacts(
     return checklist_path, trend_path
 
 
-def _append_trend_history(snapshot: dict[str, object], history_file: Path) -> Path:
+def _load_history_rows(history_file: Path) -> list[dict[str, object]]:
+    if not history_file.exists():
+        return []
+    try:
+        loaded = json.loads(history_file.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    if not isinstance(loaded, dict):
+        return []
+    rows = loaded.get("history", [])
+    if not isinstance(rows, list):
+        return []
+    normalized: list[dict[str, object]] = []
+    for row in rows:
+        if isinstance(row, dict):
+            normalized.append(row)
+    return normalized
+
+
+def _merge_history_rows(*history_groups: list[dict[str, object]]) -> list[dict[str, object]]:
+    merged: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for group in history_groups:
+        for row in group:
+            key = json.dumps(row, sort_keys=True)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(row)
+    return merged
+
+
+def _append_trend_history(
+    snapshot: dict[str, object],
+    history_file: Path,
+    *,
+    seed_history_files: list[Path] | None = None,
+) -> Path:
     history_file.parent.mkdir(parents=True, exist_ok=True)
-    history_payload: dict[str, object] = {"history": []}
-    if history_file.exists():
-        try:
-            loaded = json.loads(history_file.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                history_payload = loaded
-        except Exception:
-            history_payload = {"history": []}
-    history_rows = history_payload.get("history", [])
-    if not isinstance(history_rows, list):
-        history_rows = []
+    seed_rows: list[dict[str, object]] = []
+    for seed in seed_history_files or []:
+        seed_rows.extend(_load_history_rows(seed))
+    existing_rows = _load_history_rows(history_file)
+    history_rows = _merge_history_rows(seed_rows, existing_rows)
     history_rows.append(snapshot)
-    history_payload["history"] = history_rows[-120:]
+    history_payload: dict[str, object] = {"history": history_rows[-240:]}
     history_file.write_text(json.dumps(history_payload, indent=2, sort_keys=True), encoding="utf-8")
     return history_file
 
@@ -312,6 +343,16 @@ def main() -> int:
         type=Path,
         default=None,
         help="Optional JSON file to append family trend snapshots over time.",
+    )
+    parser.add_argument(
+        "--seed-history-file",
+        action="append",
+        type=Path,
+        default=[],
+        help=(
+            "Optional prior history file(s) used to seed/roll-forward trend timelines across CI runs. "
+            "Can be passed multiple times."
+        ),
     )
     parser.add_argument(
         "--skip-packaging-smoke",
@@ -359,7 +400,11 @@ def main() -> int:
     )
     history_path = None
     if args.history_file is not None:
-        history_path = _append_trend_history(trend_snapshot, args.history_file)
+        history_path = _append_trend_history(
+            trend_snapshot,
+            args.history_file,
+            seed_history_files=[path for path in args.seed_history_file if path is not None],
+        )
     print(f"\nRelease checklist artifact: {checklist_path}")
     print(f"NIF trend snapshot artifact: {trend_path}")
     if history_path is not None:
