@@ -19,7 +19,7 @@ import uuid
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Callable, Mapping
+from typing import Callable, Mapping, Sequence
 
 import webbrowser
 
@@ -184,6 +184,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "use_custom_output": False,
     "dark_mode": False,
     "show_batch_preview": False,
+    "auto_optimize_large_batches": True,
     "auto_patch_nifs": False,
     "preview_size": "Medium",
     "complex_format": "msn",
@@ -430,6 +431,7 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         "use_custom_output",
         "dark_mode",
         "show_batch_preview",
+        "auto_optimize_large_batches",
         "emboss_mode",
         "relief_mode",
         "include_diffuse",
@@ -3335,15 +3337,66 @@ def recommend_output_resolution(
     return (max_dim, reason)
 
 
-def _resolve_batch_workers(batch_workers: int | None, total: int) -> int:
+def _resolve_batch_workers(batch_workers: int | None, total: int, *, max_megapixels: float = 0.0) -> int:
     if total <= 1:
         return 1
+    high_res_limit = 16.0
+    ultra_res_limit = 60.0
     if batch_workers is not None and batch_workers > 0:
-        return int(_clamp(float(batch_workers), 1.0, 16.0))
+        requested = int(_clamp(float(batch_workers), 1.0, 16.0))
+        if max_megapixels >= ultra_res_limit:
+            return min(requested, 1)
+        if max_megapixels >= high_res_limit:
+            return min(requested, 2)
+        return requested
     if total < 4:
         return 1
     cpu_count = os.cpu_count() or 2
-    return max(1, min(4, cpu_count // 2))
+    workers = max(1, min(4, cpu_count // 2))
+    if max_megapixels >= ultra_res_limit:
+        return 1
+    if max_megapixels >= high_res_limit:
+        return min(workers, 2)
+    return workers
+
+
+def _probe_image_dimensions(path: Path) -> tuple[int, int] | None:
+    try:
+        with Image.open(path) as image:
+            width, height = image.size
+            if width <= 0 or height <= 0:
+                return None
+            return int(width), int(height)
+    except Exception:
+        return None
+
+
+def _summarize_batch_texture_dimensions(paths: Sequence[Path]) -> dict[str, float | int]:
+    max_dimension = 0
+    max_megapixels = 0.0
+    high_res_4k_count = 0
+    high_res_8k_count = 0
+    sampled = 0
+    for path in paths:
+        dims = _probe_image_dimensions(path)
+        if dims is None:
+            continue
+        sampled += 1
+        width, height = dims
+        max_dimension = max(max_dimension, width, height)
+        megapixels = (width * height) / 1_000_000.0
+        max_megapixels = max(max_megapixels, megapixels)
+        if max(width, height) >= 4096:
+            high_res_4k_count += 1
+        if max(width, height) >= 8192:
+            high_res_8k_count += 1
+    return {
+        "sampled_files": sampled,
+        "max_dimension": max_dimension,
+        "max_megapixels": round(max_megapixels, 3),
+        "high_res_4k_count": high_res_4k_count,
+        "high_res_8k_count": high_res_8k_count,
+    }
 
 
 def _prepare_height_map(source: Image.Image) -> Image.Image:
@@ -6900,7 +6953,12 @@ def run_batch_with_options(
 
     results: dict[Path, dict[str, Path]] = {}
     total = len(input_files)
-    workers = _resolve_batch_workers(batch_workers, total)
+    batch_metrics = _summarize_batch_texture_dimensions(input_files)
+    workers = _resolve_batch_workers(
+        batch_workers,
+        total,
+        max_megapixels=float(batch_metrics.get("max_megapixels", 0.0) or 0.0),
+    )
 
     def _write_batch_telemetry() -> None:
         if batch_telemetry_file is None:
@@ -6933,6 +6991,11 @@ def run_batch_with_options(
                 "min_file_duration_seconds": round(durations[0], 6) if durations else 0.0,
                 "checkpoint_enabled": checkpoint_file is not None,
                 "resumed_from_checkpoint": bool(resume_from_checkpoint),
+                "sampled_resolution_files": int(batch_metrics.get("sampled_files", 0) or 0),
+                "max_source_dimension": int(batch_metrics.get("max_dimension", 0) or 0),
+                "max_source_megapixels": float(batch_metrics.get("max_megapixels", 0.0) or 0.0),
+                "source_files_4k_or_above": int(batch_metrics.get("high_res_4k_count", 0) or 0),
+                "source_files_8k_or_above": int(batch_metrics.get("high_res_8k_count", 0) or 0),
             },
             "per_file_duration_seconds": [round(value, 6) for value in durations],
         }
@@ -7396,6 +7459,7 @@ if GUI_AVAILABLE:
             self.preview_size_var = tk.StringVar(value="Medium")
             self.preview_refresh_after_id: str | None = None
             self.show_batch_preview_var = tk.BooleanVar(value=False)
+            self.auto_optimize_large_batches_var = tk.BooleanVar(value=True)
             self.auto_patch_nifs_var = tk.BooleanVar(value=False)
             self.dark_mode_var = tk.BooleanVar(value=False)
             self.ui_language_var = tk.StringVar(value="en")
@@ -8200,6 +8264,17 @@ if GUI_AVAILABLE:
                 _batch_prev_check,
                 "Show live preview while batch-processing.\nThis can slow large batches, so it is disabled by default.",
             )
+            _large_batch_opt_check = ttk.Checkbutton(
+                source_controls,
+                text="Auto-optimize large 4K/8K batches",
+                variable=self.auto_optimize_large_batches_var,
+            )
+            _large_batch_opt_check.pack(side=tk.LEFT, padx=(10, 4))
+            self._add_tooltip(
+                _large_batch_opt_check,
+                "Automatically reduce UI overhead for heavy batch runs.\n"
+                "When many high-resolution textures are detected, live preview is turned off before processing starts.",
+            )
             _auto_patch_nifs_check = ttk.Checkbutton(
                 source_controls,
                 text="Auto-patch NIFs after generation [Experimental]",
@@ -8552,6 +8627,7 @@ if GUI_AVAILABLE:
             self.use_custom_output_var.set(bool(state["use_custom_output"]))
             self.dark_mode_var.set(bool(state["dark_mode"]))
             self.show_batch_preview_var.set(bool(state["show_batch_preview"]))
+            self.auto_optimize_large_batches_var.set(bool(state.get("auto_optimize_large_batches", True)))
             self.auto_patch_nifs_var.set(bool(state["auto_patch_nifs"]))
             self.ui_language_var.set(str(state.get("ui_language", "en") or "en"))
             self.ui_scale_var.set(float(state.get("ui_scale", 1.0)))
@@ -8608,6 +8684,7 @@ if GUI_AVAILABLE:
                 "use_custom_output": self.use_custom_output_var.get(),
                 "dark_mode": self.dark_mode_var.get(),
                 "show_batch_preview": self.show_batch_preview_var.get(),
+                "auto_optimize_large_batches": self.auto_optimize_large_batches_var.get(),
                 "auto_patch_nifs": self.auto_patch_nifs_var.get(),
                 "ui_language": self.ui_language_var.get(),
                 "ui_scale": self.ui_scale_var.get(),
@@ -8789,6 +8866,9 @@ if GUI_AVAILABLE:
                 self.status_var.set("Output will be written next to the input.")
             self._update_output_location_controls()
 
+        def _summarize_selected_inputs_for_performance(self) -> dict[str, float | int]:
+            return _summarize_batch_texture_dimensions(self.selected_inputs)
+
         def _load_input_selection(self, path: Path, *, show_error: bool = True) -> None:
             try:
                 input_files = collect_source_textures(path)
@@ -8804,8 +8884,21 @@ if GUI_AVAILABLE:
                     self.output_var.set(str(self._default_output_dir_for_path(path)))
                 preview_path = self.selected_inputs[self.current_preview_index]
                 if path.is_dir():
+                    metrics = self._summarize_selected_inputs_for_performance()
+                    high_4k = int(metrics.get("high_res_4k_count", 0) or 0)
+                    high_8k = int(metrics.get("high_res_8k_count", 0) or 0)
+                    max_dim = int(metrics.get("max_dimension", 0) or 0)
+                    if high_4k > 0:
+                        suffix = (
+                            f"Detected {high_4k} texture(s) at 4K+"
+                            + (f", including {high_8k} at 8K+" if high_8k else "")
+                            + f" (max {max_dim}px)."
+                        )
+                    else:
+                        suffix = f"Max source dimension {max_dim}px." if max_dim else "Resolution scan unavailable."
                     self.status_var.set(
-                        f"Loaded {len(input_files)} source DDS file(s) from {path.name}. Previewing {preview_path.name}."
+                        f"Loaded {len(input_files)} source DDS file(s) from {path.name}. "
+                        f"Previewing {preview_path.name}. {suffix}"
                     )
                 elif self.auto_suggestions_var.get():
                     self.status_var.set(f"Loaded: {path.name} (automatic suggestions applied)")
@@ -9892,6 +9985,19 @@ if GUI_AVAILABLE:
                     self.status_var.set("No source textures found to process.")
                     messagebox.showwarning("No source textures found", "No valid source textures were found for the selected input.", parent=self.root)
                     return
+                batch_metrics = _summarize_batch_texture_dimensions(self.selected_inputs)
+                high_4k_count = int(batch_metrics.get("high_res_4k_count", 0) or 0)
+                high_8k_count = int(batch_metrics.get("high_res_8k_count", 0) or 0)
+                max_dim = int(batch_metrics.get("max_dimension", 0) or 0)
+                preview_auto_disabled = False
+                if (
+                    self.auto_optimize_large_batches_var.get()
+                    and len(self.selected_inputs) > 1
+                    and self.show_batch_preview_var.get()
+                    and high_4k_count > 0
+                ):
+                    self.show_batch_preview_var.set(False)
+                    preview_auto_disabled = True
 
                 output_dir: Path | None = None
                 state = load_gui_state()
@@ -10030,12 +10136,23 @@ if GUI_AVAILABLE:
                 self.cancel_requested = False
                 self._prepare_generation_snapshot(self.selected_inputs, generation_kwargs)
                 self._set_processing_state(True)
+                perf_note = ""
+                if high_4k_count > 0:
+                    perf_note = (
+                        f" High-res batch detected ({high_4k_count} at 4K+, "
+                        f"{high_8k_count} at 8K+, max {max_dim}px)."
+                    )
+                if preview_auto_disabled:
+                    perf_note += " Live preview was turned off automatically for better throughput."
                 if self.show_batch_preview_var.get():
                     self.status_var.set(
-                        f"Queued {len(self.selected_inputs)} source texture(s). Live batch preview is ON and may slow processing."
+                        f"Queued {len(self.selected_inputs)} source texture(s). "
+                        f"Live batch preview is ON and may slow processing.{perf_note}"
                     )
                 else:
-                    self.status_var.set(f"Queued {len(self.selected_inputs)} source texture(s) for processing...")
+                    self.status_var.set(
+                        f"Queued {len(self.selected_inputs)} source texture(s) for processing...{perf_note}"
+                    )
                 self.processing_thread = threading.Thread(
                     target=self._process_generation_batch,
                     args=(self.selected_inputs.copy(), generation_kwargs),

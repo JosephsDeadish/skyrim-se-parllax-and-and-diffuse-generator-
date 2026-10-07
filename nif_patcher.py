@@ -3092,6 +3092,11 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
                 + ", ".join(sorted(set(enabled_fallout_gates)))
                 + "."
             )
+    fallout_parallax_scale_gate_enabled = (
+        policy_profile == _GAME_PROFILE_FALLOUT
+        and opts.parallax_scale is not None
+        and opts.fallout_allow_parallax_scale
+    )
 
     shader_props, texture_sets, parse_errors = _build_block_map(
         original_data,
@@ -3137,6 +3142,14 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
                 + ", ".join(str(idx) for idx in unsupported_layout_blocks[:12])
                 + ("..." if len(unsupported_layout_blocks) > 12 else "")
             )
+    if fallout_parallax_scale_gate_enabled and not any(
+        sp.shader_type in (SHADER_TYPE_HEIGHTMAP, SHADER_TYPE_PARALLAX_OCC)
+        for sp in shader_props
+    ):
+        result.warnings.append(
+            "fallout_allow_parallax_scale is enabled, but no existing type-3 parallax-capable shader blocks were found; "
+            "parallax_scale can only be applied to blocks already using shader type 2/3 in Fallout guarded mode."
+        )
     result.shader_properties_found = len(shader_props)
 
     if not shader_props:

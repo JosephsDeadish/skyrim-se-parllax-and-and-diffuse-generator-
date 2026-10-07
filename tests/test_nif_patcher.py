@@ -1347,7 +1347,7 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertIn("parallax_scale", result.message)
 
     def test_target_game_fallout_allows_parallax_scale_with_safety_gate(self) -> None:
-        nif = _write_nif(self.tmp, user_ver2=130)
+        nif = _write_nif(self.tmp, user_ver2=130, shader_type=SHADER_TYPE_DEFAULT)
         _rewrite_user_version(nif, 11)
         result = patch_nif(
             nif,
@@ -1362,6 +1362,7 @@ class TestPatchNifFlags(unittest.TestCase):
         )
         self.assertTrue(result.success, result.errors)
         self.assertTrue(any("per-operation safety gates enabled" in warning.lower() for warning in result.warnings))
+        self.assertTrue(any("no existing type-3 parallax-capable shader blocks" in warning.lower() for warning in result.warnings))
 
     def test_target_game_fallout_rejects_force_type3(self) -> None:
         nif = _write_nif(self.tmp, user_ver2=130)

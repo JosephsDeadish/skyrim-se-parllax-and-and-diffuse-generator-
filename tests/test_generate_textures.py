@@ -33,6 +33,8 @@ from generate_textures import (
     _RENDER_PROFILE_GUI_VALUES,
     _run_cli,
     _normalize_gui_state,
+    _resolve_batch_workers,
+    _summarize_batch_texture_dimensions,
     _save_with_dds_fallback,
     _to_dds_compatible_image,
     TextureGeneratorGUI,
@@ -445,6 +447,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 "env_mask_mode": "invalid",
                 "parallax_mode": "occlusion",
                 "render_profile": "mystery",
+                "auto_optimize_large_batches": 0,
                 "normal_strength": 500,
                 "parallax_strength": -10,
                 "glow_threshold": 999,
@@ -458,6 +461,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(normalized["env_mask_mode"]), "standard")
         self.assertEqual(str(normalized["parallax_mode"]), "occlusion (ENB/POM)")
         self.assertEqual(str(normalized["render_profile"]), "custom")
+        self.assertFalse(bool(normalized["auto_optimize_large_batches"]))
         self.assertAlmostEqual(float(normalized["normal_strength"]), 12.0)
         self.assertAlmostEqual(float(normalized["parallax_strength"]), 0.1)
         self.assertEqual(int(normalized["glow_threshold"]), 255)
@@ -3742,6 +3746,9 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(summary["successful_files"], 2)
             self.assertEqual(summary["failed_files"], 0)
             self.assertEqual(summary["workers"], 1)
+            self.assertEqual(summary["sampled_resolution_files"], 2)
+            self.assertGreaterEqual(summary["max_source_dimension"], 8)
+            self.assertGreaterEqual(summary["max_source_megapixels"], 0.0)
             self.assertGreaterEqual(summary["total_duration_seconds"], 0.0)
             self.assertEqual(len(payload["per_file_duration_seconds"]), 2)
 
@@ -3776,6 +3783,24 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(summary["successful_files"], 1)
             self.assertEqual(summary["failed_files"], 1)
             self.assertEqual(len(payload["per_file_duration_seconds"]), 2)
+
+    def test_resolve_batch_workers_throttles_for_8k_textures(self) -> None:
+        self.assertEqual(_resolve_batch_workers(None, 10, max_megapixels=64.0), 1)
+        self.assertEqual(_resolve_batch_workers(8, 10, max_megapixels=64.0), 1)
+        self.assertEqual(_resolve_batch_workers(None, 10, max_megapixels=20.0), 2)
+
+    def test_summarize_batch_texture_dimensions_counts_4k_and_8k(self) -> None:
+        paths = [Path("/tmp/a.dds"), Path("/tmp/b.dds")]
+        with mock.patch(
+            "generate_textures._probe_image_dimensions",
+            side_effect=[(4096, 2048), (8192, 4096)],
+        ):
+            summary = _summarize_batch_texture_dimensions(paths)
+        self.assertEqual(int(summary["sampled_files"]), 2)
+        self.assertEqual(int(summary["high_res_4k_count"]), 2)
+        self.assertEqual(int(summary["high_res_8k_count"]), 1)
+        self.assertEqual(int(summary["max_dimension"]), 8192)
+        self.assertGreater(float(summary["max_megapixels"]), 30.0)
 
     def test_write_batch_failure_artifacts_writes_structured_json_and_csv(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
