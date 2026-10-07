@@ -72,13 +72,12 @@ def _run_secret_scan() -> None:
             continue
         relative = file_path.relative_to(REPO_ROOT)
         for name, pattern in SECRET_PATTERNS:
-            for match in pattern.finditer(content):
-                findings.append(f"{relative}:{name}:{match.group(0)[:80]}")
+            if pattern.search(content):
+                findings.append(f"{relative}:{name}")
                 break
     if findings:
-        print("Potential secrets detected:")
-        for finding in findings:
-            print(" -", finding)
+        print(f"Potential secrets detected in {len(findings)} tracked file(s).")
+        print("Resolve secret-scan findings before release.")
         raise SystemExit(1)
     print("No obvious secrets detected.")
 
