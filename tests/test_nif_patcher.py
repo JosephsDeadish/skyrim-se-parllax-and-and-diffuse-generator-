@@ -3077,8 +3077,22 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertTrue(opts.enable_env_mapping)
         self.assertIn("enable_env_mapping", steps)
 
-    def test_auto_remediation_build_options_disables_env_mapping_for_missing_envmap_slot4(self) -> None:
-        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP)
+    def test_auto_remediation_build_options_sets_cubemap_for_missing_envmap_slot4_when_guessable(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP, texture_paths=paths)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["shader_state.envmap_missing_slot4.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(str(opts.cubemap_texture_path).lower().endswith("_e.dds"))
+        self.assertIn("set_slot4_cubemap_for_missing_envmap_slot4", steps)
+
+    def test_auto_remediation_build_options_disables_env_mapping_for_missing_envmap_slot4_without_guess(self) -> None:
+        paths = [""] * 9
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP, texture_paths=paths)
         opts, steps = build_auto_remediation_patch_options(
             nif,
             ["shader_state.envmap_missing_slot4.skyrim.legacy"],

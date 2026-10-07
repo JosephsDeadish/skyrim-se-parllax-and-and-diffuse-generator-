@@ -4456,8 +4456,12 @@ def build_auto_remediation_patch_options(
         opts.disable_env_mapping = True
         applied_steps.append("disable_env_mapping_for_missing_slots4_5")
     if any(code.startswith("shader_state.envmap_missing_slot4") for code in base_codes):
-        opts.disable_env_mapping = True
-        applied_steps.append("disable_env_mapping_for_missing_slot4")
+        if guessed_cubemap:
+            opts.cubemap_texture_path = guessed_cubemap
+            applied_steps.append("set_slot4_cubemap_for_missing_envmap_slot4")
+        else:
+            opts.disable_env_mapping = True
+            applied_steps.append("disable_env_mapping_for_missing_slot4")
     if any(code.startswith("shader_state.envmap_missing_slot5") for code in base_codes):
         if guessed_env:
             opts.env_mask_texture_path = guessed_env

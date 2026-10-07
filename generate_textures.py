@@ -8415,7 +8415,7 @@ if GUI_AVAILABLE:
             self.preview_speed_badge.pack(side=tk.LEFT, padx=(0, 8))
             self.reenable_batch_preview_button = ttk.Button(
                 actions,
-                text="Re-enable preview now",
+                text="Resume live preview",
                 command=self._reenable_batch_preview,
                 state=tk.DISABLED,
             )
@@ -8426,7 +8426,7 @@ if GUI_AVAILABLE:
             )
             self._add_tooltip(
                 self.reenable_batch_preview_button,
-                "Turn live batch preview back on after an auto speed pause.",
+                "Turn live batch preview back on after an auto speed pause.\nUse this when you need visual checks mid-run.",
             )
             _perf_hint_label = ttk.Label(actions, textvariable=self.batch_perf_hint_var, foreground="gray")
             _perf_hint_label.pack(side=tk.LEFT, padx=(0, 4))
@@ -8523,7 +8523,7 @@ if GUI_AVAILABLE:
             _lazy_preview_check.pack(side=tk.LEFT, padx=(10, 4))
             self._add_tooltip(
                 _lazy_preview_check,
-                "Render only core preview tiles first on large sets, and defer niche maps until requested.",
+                "Render core maps first on large sets, and defer niche maps until requested.\nThis keeps the UI responsive while preserving output quality.",
             )
             _staged_preview_check = ttk.Checkbutton(
                 source_controls,
@@ -8534,7 +8534,7 @@ if GUI_AVAILABLE:
             _staged_preview_check.pack(side=tk.LEFT, padx=(6, 4))
             self._add_tooltip(
                 _staged_preview_check,
-                "Gradually render deferred preview tiles after core tiles load, instead of one heavy full-refresh step.",
+                "After core tiles load, render deferred tiles gradually in the background\ninstead of one heavy all-at-once refresh.",
             )
             self.render_all_preview_button = ttk.Button(
                 source_controls,
@@ -8545,7 +8545,7 @@ if GUI_AVAILABLE:
             self.render_all_preview_button.configure(state=tk.DISABLED)
             self._add_tooltip(
                 self.render_all_preview_button,
-                "When lazy preview defers niche tiles for speed, click to render every enabled tile immediately.",
+                "When lazy preview defers niche tiles for speed, click to render every enabled tile immediately.\nUse this before final visual signoff.",
             )
             self.preview_pause_button = ttk.Button(
                 source_controls,
@@ -8555,7 +8555,7 @@ if GUI_AVAILABLE:
             self.preview_pause_button.pack(side=tk.LEFT, padx=(4, 4))
             self._add_tooltip(
                 self.preview_pause_button,
-                "Pause preview rendering manually during long runs, then resume when needed.",
+                "Pause preview rendering manually during long runs, then resume when needed.\nGeneration output continues while preview is paused.",
             )
             _batch_prev_check = ttk.Checkbutton(
                 source_controls,
@@ -8566,7 +8566,7 @@ if GUI_AVAILABLE:
             _batch_prev_check.pack(side=tk.LEFT, padx=(14, 4))
             self._add_tooltip(
                 _batch_prev_check,
-                "Show live preview while batch processing.\nThis can slow large batches, so it is off by default.",
+                "Show live preview while batch processing.\nThis can slow large batches, so it is off by default for safer throughput.",
             )
             _large_batch_opt_check = ttk.Checkbutton(
                 source_controls,
@@ -8577,9 +8577,10 @@ if GUI_AVAILABLE:
             self._add_tooltip(
                 _large_batch_opt_check,
                 "Automatically reduce preview/UI overhead for heavy batch runs.\n"
-                "When many high-resolution textures are detected, live preview is turned off before processing starts.",
+                "When many high-resolution textures are detected, live preview is paused before processing starts.\n"
+                "Best paired with Resume mode for 1000+ runs.",
             )
-            _resume_label = ttk.Label(source_controls, text="Resume")
+            _resume_label = ttk.Label(source_controls, text="Checkpoint mode")
             _resume_label.pack(side=tk.LEFT, padx=(10, 4))
             _resume_combo = ttk.Combobox(
                 source_controls,
@@ -8591,7 +8592,9 @@ if GUI_AVAILABLE:
             _resume_combo.pack(side=tk.LEFT)
             self._add_tooltip(
                 _resume_combo,
-                "start_fresh: ignore prior checkpoint entries.\nresume: skip files already completed in checkpoint.\nFor 1000+ runs, Resume is strongly recommended.",
+                "start_fresh: process every selected file and ignore prior checkpoint entries.\n"
+                "resume: skip files already completed in checkpoint.\n"
+                "For 1000+ runs, Resume is strongly recommended.",
             )
             _resume_hint_label = ttk.Label(source_controls, textvariable=self.batch_resume_hint_var, foreground="gray")
             _resume_hint_label.pack(side=tk.LEFT, padx=(6, 4))
@@ -8609,7 +8612,7 @@ if GUI_AVAILABLE:
             _clear_checkpoint_button.pack(side=tk.LEFT, padx=(4, 4))
             self._add_tooltip(
                 _clear_checkpoint_button,
-                "Delete the current batch checkpoint file so the next run starts from scratch.\nUse carefully on large runs because resume protection is lost.",
+                "Delete the current batch checkpoint file so the next run starts from scratch.\nUse only when you intentionally want a full rerun.",
             )
             _checkpoint_health_label = ttk.Label(source_controls, textvariable=self.checkpoint_health_var, foreground="gray")
             _checkpoint_health_label.pack(side=tk.LEFT, padx=(10, 4))
@@ -9374,9 +9377,9 @@ if GUI_AVAILABLE:
         def _update_batch_resume_hint(self, *_args: object) -> None:
             mode = str(self.batch_resume_mode_var.get() or "start_fresh").strip().lower()
             if mode == "resume":
-                self.batch_resume_hint_var.set("Mode: resume — skip files already completed in checkpoint.")
+                self.batch_resume_hint_var.set("Mode: resume — continue safely by skipping files already completed.")
             else:
-                self.batch_resume_hint_var.set("Mode: start fresh — checkpoint entries are ignored.")
+                self.batch_resume_hint_var.set("Mode: start fresh — rerun all selected files and ignore checkpoint entries.")
 
         def _load_batch_checkpoint_completed_files(self, checkpoint_path: Path) -> set[str]:
             if not checkpoint_path.exists():
