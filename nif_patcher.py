@@ -1191,7 +1191,7 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
                 "Could not parse user version fields from header; the file may be truncated or malformed."
             )
             diagnostics.append(
-                "Resolution: open the mesh in NifSkope or the Creation Kit and re-save/export it as a clean Skyrim SE NIF, then run the patch again."
+                "Resolution: open the mesh in NifSkope or the Creation Kit and re-save/export it as a clean Skyrim or Fallout NIF, then run the patch again."
             )
             return diagnostics
         user_version = header.user_version
@@ -3010,16 +3010,27 @@ def _summarize_binary_diff(
     changed_ranges: list[tuple[int, int]] = []
     changed_bytes = 0
     if len(original_data) == len(new_data):
+        chunk_size = 8192
         start: int | None = None
-        for idx, (left, right) in enumerate(zip(original_data, new_data)):
-            if left != right:
-                changed_bytes += 1
-                if start is None:
-                    start = idx
-            elif start is not None:
-                if len(changed_ranges) < max_ranges:
-                    changed_ranges.append((start, idx - 1))
-                start = None
+        for chunk_start in range(0, len(original_data), chunk_size):
+            left_chunk = original_data[chunk_start:chunk_start + chunk_size]
+            right_chunk = new_data[chunk_start:chunk_start + chunk_size]
+            if left_chunk == right_chunk:
+                if start is not None:
+                    if len(changed_ranges) < max_ranges:
+                        changed_ranges.append((start, chunk_start - 1))
+                    start = None
+                continue
+            for offset, (left, right) in enumerate(zip(left_chunk, right_chunk)):
+                idx = chunk_start + offset
+                if left != right:
+                    changed_bytes += 1
+                    if start is None:
+                        start = idx
+                elif start is not None:
+                    if len(changed_ranges) < max_ranges:
+                        changed_ranges.append((start, idx - 1))
+                    start = None
         if start is not None and len(changed_ranges) < max_ranges:
             changed_ranges.append((start, len(original_data) - 1))
         return changed_bytes, changed_ranges
@@ -3343,7 +3354,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         if parse_errors:
             result.message = f"No patchable BSLightingShaderProperty blocks found ({parse_errors[0]})."
         else:
-            if detected_profile == _GAME_PROFILE_FALLOUT:
+            if policy_profile == _GAME_PROFILE_FALLOUT:
                 result.message = (
                     "No Fallout-compatible BSLightingShaderProperty blocks found for experimental patch mode."
                 )

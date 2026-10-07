@@ -1,11 +1,13 @@
 """Tests for nif_patcher.py."""
 from __future__ import annotations
 
+import io
 import json
 import shutil
 import struct
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -3682,8 +3684,11 @@ class TestCliArgumentValidation(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 2)
 
     def test_compatibility_report_ignores_unrelated_unknown_shader_map_validation(self) -> None:
+        out = io.StringIO()
         with mock.patch("sys.argv", ["nif_patcher.py", "--compatibility-report", "--unknown-shader-type-map", "bad"]):
-            nif_patcher_main()
+            with redirect_stdout(out):
+                nif_patcher_main()
+        self.assertIn("NIF patch compatibility report", out.getvalue())
 
 
 if __name__ == "__main__":
