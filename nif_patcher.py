@@ -2946,21 +2946,19 @@ def _apply_patches(
                 if sp.block_index not in restore_candidate_blocks:
                     continue
                 ts = final_texture_sets.get(sp.texture_set_ref)
-                if ts is None:
-                    continue
                 parallax_path = (
                     ts.slot_paths[TEXTURE_SLOT_PARALLAX].strip()
-                    if TEXTURE_SLOT_PARALLAX < len(ts.slot_paths)
+                    if ts is not None and TEXTURE_SLOT_PARALLAX < len(ts.slot_paths)
                     else ""
                 )
                 cubemap_path = (
                     ts.slot_paths[TEXTURE_SLOT_CUBEMAP].strip()
-                    if TEXTURE_SLOT_CUBEMAP < len(ts.slot_paths)
+                    if ts is not None and TEXTURE_SLOT_CUBEMAP < len(ts.slot_paths)
                     else ""
                 )
                 env_mask_path = (
                     ts.slot_paths[TEXTURE_SLOT_ENV_MASK].strip()
-                    if TEXTURE_SLOT_ENV_MASK < len(ts.slot_paths)
+                    if ts is not None and TEXTURE_SLOT_ENV_MASK < len(ts.slot_paths)
                     else ""
                 )
                 parallax_missing = _texture_slot_path_missing_near_nif(
@@ -3026,6 +3024,20 @@ def _summarize_binary_diff(
                 start = None
         if start is not None and len(changed_ranges) < max_ranges:
             changed_ranges.append((start, len(original_data) - 1))
+        return changed_bytes, changed_ranges
+    if max(len(original_data), len(new_data)) > 2_000_000:
+        min_len = min(len(original_data), len(new_data))
+        first_diff = min_len
+        for idx in range(min_len):
+            if original_data[idx] != new_data[idx]:
+                first_diff = idx
+                break
+        if first_diff == min_len:
+            changed_bytes = abs(len(original_data) - len(new_data))
+        else:
+            changed_bytes = (min_len - first_diff) + abs(len(original_data) - len(new_data))
+            if len(changed_ranges) < max_ranges and len(new_data) > 0:
+                changed_ranges.append((first_diff, len(new_data) - 1))
         return changed_bytes, changed_ranges
     matcher = difflib.SequenceMatcher(a=original_data, b=new_data, autojunk=False)
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
@@ -3250,6 +3262,10 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
                 + ", ".join(unsupported_ops)
                 + "."
             )
+            if "force_shader_type_3" in unsupported_ops:
+                result.errors.append(
+                    "force_shader_type_3 has no Fallout safety-gate override and remains unsupported in guarded mode."
+                )
             result.errors.append(
                 "Enable the matching --fallout-allow-* safety gates only when you explicitly accept risk, "
                 "or use flag/texture-slot patch options only."
@@ -3287,15 +3303,12 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         if fallback_shader_props:
             shader_props = fallback_shader_props
             texture_sets = fallback_texture_sets
-            if parse_errors:
-                for item in parse_errors[:4]:
-                    result.warnings.append(f"Strict parse warning: {item}")
+            for item in parse_errors[:4]:
+                result.warnings.append(f"Strict parse warning: {item}")
             if fallback_parse_errors:
                 for item in fallback_parse_errors[:4]:
                     result.warnings.append(f"Tolerant parse warning: {item}")
-                parse_errors = []
-            else:
-                parse_errors = []
+            parse_errors = []
             result.warnings.append(
                 "Recovered shader parsing with tolerant NiObjectNET fallback; verify patched meshes in-game."
             )
@@ -3862,7 +3875,7 @@ def _classify_conflict_code(message: str) -> str:
         return "skip_alpha_decal_lighting.subsurface_flags"
     if "slsf2_anisotropic_lighting is set" in lowered:
         return "skip_alpha_decal_lighting.anisotropic_flag"
-    if "single_pass" in lowered:
+    if "slsf1_single_pass is set" in lowered:
         return "skip_single_pass"
     if "havok" in lowered or "skinned/animated mesh" in lowered or "skinned mesh" in lowered:
         return "skip_skinned_or_havok"
@@ -5299,7 +5312,7 @@ def _main() -> None:  # pragma: no cover
         print(build_compatibility_report_text())
         return
 
-    if not args.compatibility_report and not args.nif:
+    if not args.nif:
         parser.error("the following arguments are required: nif")
 
     # Parse --spec-color
