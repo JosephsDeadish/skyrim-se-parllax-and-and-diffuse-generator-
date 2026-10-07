@@ -3283,7 +3283,9 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertTrue(str(opts.env_mask_texture_path).lower().endswith("_m.dds"))
         self.assertIn("set_slot4_cubemap_for_missing_envmap_slots4_5", steps)
         self.assertIn("set_slot5_env_mask_for_missing_envmap_slots4_5", steps)
+        self.assertIn("enable_env_mapping_for_missing_envmap_slots4_5", steps)
         self.assertNotIn("disable_env_mapping_for_missing_slots4_5", steps)
+        self.assertTrue(opts.enable_env_mapping)
         self.assertFalse(opts.disable_env_mapping)
 
     def test_auto_remediation_build_options_disables_env_mapping_for_missing_envmap_slots_without_guesses(self) -> None:
@@ -3323,6 +3325,8 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         assert opts is not None
         self.assertTrue(str(opts.cubemap_texture_path).lower().endswith("_e.dds"))
         self.assertIn("set_slot4_cubemap_for_missing_envmap_slot4", steps)
+        self.assertIn("enable_env_mapping_for_missing_envmap_slot4", steps)
+        self.assertTrue(opts.enable_env_mapping)
         self.assertNotIn("disable_env_mapping_for_missing_slot4", steps)
 
     def test_auto_remediation_build_options_disables_env_mapping_for_missing_envmap_slot4_without_guess(self) -> None:
@@ -3351,6 +3355,8 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         assert opts is not None
         self.assertTrue(str(opts.env_mask_texture_path).lower().endswith("_m.dds"))
         self.assertIn("set_slot5_env_mask_for_missing_envmap_slot5", steps)
+        self.assertIn("enable_env_mapping_for_missing_envmap_slot5", steps)
+        self.assertTrue(opts.enable_env_mapping)
         self.assertNotIn("disable_env_mapping_for_missing_slot5", steps)
 
     def test_auto_remediation_build_options_disables_env_mapping_and_pom_for_mixed_envmap_pom_conflict(self) -> None:
@@ -3411,10 +3417,12 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertTrue(str(opts.glow_texture_path).lower().endswith("_g.dds"))
         self.assertTrue(str(opts.cubemap_texture_path).lower().endswith("_e.dds"))
         self.assertTrue(str(opts.env_mask_texture_path).lower().endswith("_m.dds"))
+        self.assertTrue(opts.enable_env_mapping)
         self.assertIn("set_slot3_parallax_for_parallax_envmap_glow_mixed_unresolved", steps)
         self.assertIn("set_slot2_glow_for_parallax_envmap_glow_mixed_unresolved", steps)
         self.assertIn("set_slot4_cubemap_for_parallax_envmap_glow_mixed_unresolved", steps)
         self.assertIn("set_slot5_env_mask_for_parallax_envmap_glow_mixed_unresolved", steps)
+        self.assertIn("enable_env_mapping_for_parallax_envmap_glow_mixed_unresolved", steps)
 
     def test_auto_remediation_build_options_disables_flags_for_mixed_parallax_envmap_glow_without_guesses(self) -> None:
         nif = _write_nif(

@@ -4532,13 +4532,18 @@ def build_auto_remediation_patch_options(
             opts.env_mask_texture_path = guessed_env
             applied_steps.append("set_slot5_env_mask_for_missing_envmap_slots4_5")
             restored_any_env_slot = True
-        if not restored_any_env_slot:
+        if restored_any_env_slot:
+            opts.enable_env_mapping = True
+            applied_steps.append("enable_env_mapping_for_missing_envmap_slots4_5")
+        else:
             opts.disable_env_mapping = True
             applied_steps.append("disable_env_mapping_for_missing_slots4_5")
     if any(code.startswith("shader_state.envmap_missing_slot4") for code in base_codes):
         if guessed_cubemap:
             opts.cubemap_texture_path = guessed_cubemap
             applied_steps.append("set_slot4_cubemap_for_missing_envmap_slot4")
+            opts.enable_env_mapping = True
+            applied_steps.append("enable_env_mapping_for_missing_envmap_slot4")
         else:
             opts.disable_env_mapping = True
             applied_steps.append("disable_env_mapping_for_missing_slot4")
@@ -4546,6 +4551,8 @@ def build_auto_remediation_patch_options(
         if guessed_env:
             opts.env_mask_texture_path = guessed_env
             applied_steps.append("set_slot5_env_mask_for_missing_envmap_slot5")
+            opts.enable_env_mapping = True
+            applied_steps.append("enable_env_mapping_for_missing_envmap_slot5")
         else:
             opts.disable_env_mapping = True
             applied_steps.append("disable_env_mapping_for_missing_slot5")
@@ -4585,6 +4592,9 @@ def build_auto_remediation_patch_options(
             opts.env_mask_texture_path = guessed_env
             applied_steps.append("set_slot5_env_mask_for_parallax_envmap_glow_mixed_unresolved")
             restored_any_env_slot = True
+        if restored_any_env_slot:
+            opts.enable_env_mapping = True
+            applied_steps.append("enable_env_mapping_for_parallax_envmap_glow_mixed_unresolved")
         if not restored_any_texture:
             opts.disable_parallax = True
             opts.disable_pom = True
