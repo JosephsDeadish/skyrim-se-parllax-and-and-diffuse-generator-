@@ -2583,6 +2583,9 @@ def _apply_patches(
 
     upgraded = 0
     restore_candidate_blocks: set[int] = set()
+    original_flags_by_block: dict[int, tuple[int, int]] = {
+        sp.block_index: (sp.flags1, sp.flags2) for sp in shader_props
+    }
     effective_parallax = opts.enable_parallax or opts.enable_pom
     want_scale = opts.parallax_scale is not None and opts.parallax_scale > 0
     shader_to_shape: dict[int, _ShapeBlock] = {}
@@ -2929,6 +2932,29 @@ def _apply_patches(
         opts.clear_cubemap_texture_path,
         opts.clear_glow_texture_path,
     ))
+    restore_parallax_family = any((
+        opts.enable_parallax,
+        opts.enable_pom,
+        opts.disable_parallax,
+        opts.disable_pom,
+        opts.parallax_texture_path is not None,
+        opts.clear_parallax_texture_path,
+        opts.force_shader_type_3,
+    ))
+    restore_env_mapping_family = any((
+        opts.enable_env_mapping,
+        opts.disable_env_mapping,
+        opts.env_mask_texture_path is not None,
+        opts.cubemap_texture_path is not None,
+        opts.clear_env_mask_texture_path,
+        opts.clear_cubemap_texture_path,
+    ))
+    restore_glow_family = any((
+        opts.enable_glow_map,
+        opts.disable_glow_map,
+        opts.glow_texture_path is not None,
+        opts.clear_glow_texture_path,
+    ))
     if should_auto_restore_shader_states and restore_candidate_blocks:
         current_header = _reparse_header(data)
         if current_header is None:
@@ -2989,30 +3015,61 @@ def _apply_patches(
                 )
                 restored_flags1 = sp.flags1
                 restored_flags2 = sp.flags2
-                if (restored_flags1 & (SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION)) and (
+                original_flags1, original_flags2 = original_flags_by_block.get(sp.block_index, (0, 0))
+                had_original_parallax_flags = bool(
+                    original_flags1 & (SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION)
+                )
+                had_original_env_mapping_flag = bool(original_flags1 & SLSF1_ENVIRONMENT_MAPPING)
+                had_original_glow_flag = bool(original_flags2 & SLSF2_GLOW_MAP)
+
+                if (
+                    restore_parallax_family
+                    and
+                    (restored_flags1 & (SLSF1_PARALLAX | SLSF1_PARALLAX_OCCLUSION))
+                    and (
+                        had_original_parallax_flags
+                    )
+                    and (
                     not parallax_path or parallax_missing
+                    )
                 ):
                     restored_flags1 &= ~SLSF1_PARALLAX
                     restored_flags1 &= ~SLSF1_PARALLAX_OCCLUSION
-                if (restored_flags1 & SLSF1_ENVIRONMENT_MAPPING) and (
+                if (
+                    restore_env_mapping_family
+                    and
+                    (restored_flags1 & SLSF1_ENVIRONMENT_MAPPING)
+                    and had_original_env_mapping_flag
+                    and (
                     (not cubemap_path or cubemap_missing)
                     and (not env_mask_path or env_mask_missing)
+                    )
                 ):
                     restored_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
                 if (
+                    restore_env_mapping_family
+                    and
                     sp.shader_type == SHADER_TYPE_ENVMAP
                     and (restored_flags1 & SLSF1_ENVIRONMENT_MAPPING)
                     and (not cubemap_path or cubemap_missing)
                 ):
                     restored_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
                 if (
+                    restore_env_mapping_family
+                    and
                     sp.shader_type == SHADER_TYPE_ENVMAP
                     and (restored_flags1 & SLSF1_ENVIRONMENT_MAPPING)
                     and (not env_mask_path or env_mask_missing)
                 ):
                     restored_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
-                if (restored_flags2 & SLSF2_GLOW_MAP) and (
+                if (
+                    restore_glow_family
+                    and
+                    (restored_flags2 & SLSF2_GLOW_MAP)
+                    and had_original_glow_flag
+                    and (
                     not glow_path or glow_missing
+                    )
                 ):
                     restored_flags2 &= ~SLSF2_GLOW_MAP
                 if (restored_flags1 != sp.flags1) or (restored_flags2 != sp.flags2):

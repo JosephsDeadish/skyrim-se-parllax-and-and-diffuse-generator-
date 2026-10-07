@@ -7635,6 +7635,8 @@ if GUI_AVAILABLE:
             self.preview_force_full_once = False
             self.preview_paused_var = tk.BooleanVar(value=False)
             self.batch_preview_auto_paused = False
+            self.preview_render_revision = 0
+            self.preview_deferred_revision = 0
             self.preview_deferred_render_after_id: str | None = None
             self.preview_deferred_queue: list[str] = []
             self.normal_strength_var = tk.DoubleVar(value=2.0)
@@ -8629,9 +8631,19 @@ if GUI_AVAILABLE:
                 _checkpoint_health_label,
                 _auto_patch_nifs_check,
             ]
+            simplified_optional_preview_widgets: list[tk.Widget] = [
+                _jump_label,
+                self.preview_jump_entry,
+                self.preview_jump_button,
+                _preview_size_label,
+                preview_size_combo,
+            ]
             _advanced_batch_pack_layout: dict[tk.Widget, dict[str, object]] = {}
             for widget in advanced_batch_widgets:
                 _advanced_batch_pack_layout[widget] = widget.pack_info()
+            _simplified_optional_preview_pack_layout: dict[tk.Widget, dict[str, object]] = {}
+            for widget in simplified_optional_preview_widgets:
+                _simplified_optional_preview_pack_layout[widget] = widget.pack_info()
 
             _generated_title = ttk.Label(preview_frame, text="Generated outputs (after processing)")
             _generated_title.grid(
@@ -8706,6 +8718,11 @@ if GUI_AVAILABLE:
                             widget.pack(**_advanced_batch_pack_layout[widget])
                     else:
                         widget.pack_forget()
+                for widget in simplified_optional_preview_widgets:
+                    if simplified:
+                        widget.pack_forget()
+                    elif not widget.winfo_manager():
+                        widget.pack(**_simplified_optional_preview_pack_layout[widget])
                 if simplified:
                     _generated_title.grid_remove()
                     output_grid.grid_remove()
@@ -9376,13 +9393,51 @@ if GUI_AVAILABLE:
             else:
                 age_label = f"{int(age_seconds // 86400)}d ago"
             completed = len(self._load_batch_checkpoint_completed_files(checkpoint_path))
+            payload: dict[str, object] = {}
+            try:
+                payload_raw = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+                if isinstance(payload_raw, dict):
+                    payload = payload_raw
+            except Exception:
+                payload = {}
+
+            mismatch_flags: list[str] = []
+            current_input = self.input_var.get().strip()
+            if current_input:
+                try:
+                    current_input_root = str(Path(current_input).resolve())
+                    checkpoint_input_root = str(payload.get("input_root", "") or "").strip()
+                    if checkpoint_input_root and checkpoint_input_root != current_input_root:
+                        mismatch_flags.append("input mismatch")
+                except Exception:
+                    pass
+            checkpoint_output_root = str(payload.get("output_root", "") or "").strip()
+            current_output_raw = self.output_var.get().strip()
+            if checkpoint_output_root and current_output_raw:
+                try:
+                    current_output_root = str(Path(current_output_raw).resolve())
+                    if checkpoint_output_root != current_output_root:
+                        mismatch_flags.append("output mismatch")
+                except Exception:
+                    pass
+            if planned_total > 0:
+                checkpoint_total = int(payload.get("total_files_considered", 0) or 0)
+                if checkpoint_total > 0 and checkpoint_total != planned_total:
+                    mismatch_flags.append("selection size changed")
+
+            stale_flag = age_seconds >= 86400
+            status_suffix = ""
+            if mismatch_flags:
+                status_suffix = " ⚠ " + ", ".join(mismatch_flags[:2])
+            elif stale_flag:
+                status_suffix = " ⚠ stale"
             if planned_total > 0:
                 self.checkpoint_health_var.set(
-                    f"Checkpoint: {checkpoint_path.name} ({completed}/{planned_total} complete, updated {age_label})"
+                    f"Checkpoint: {checkpoint_path.name} ({completed}/{planned_total} complete, updated {age_label}){status_suffix}"
                 )
             else:
                 self.checkpoint_health_var.set(
-                    f"Checkpoint: {checkpoint_path.name} ({completed} complete, updated {age_label})"
+                    f"Checkpoint: {checkpoint_path.name} ({completed} complete, updated {age_label}){status_suffix}"
                 )
 
         def _write_batch_checkpoint_state(
@@ -10009,16 +10064,23 @@ if GUI_AVAILABLE:
             if clear_queue:
                 self.preview_deferred_queue = []
 
-        def _start_deferred_preview_staging(self, deferred_output_keys: set[str]) -> None:
+        def _start_deferred_preview_staging(self, deferred_output_keys: set[str], *, revision: int) -> None:
             self._cancel_deferred_preview_staging(clear_queue=True)
             if not deferred_output_keys:
                 return
+            self.preview_deferred_revision = revision
             self.preview_deferred_queue = sorted(deferred_output_keys)
             self._set_preview_speed_badge("staged", deferred_count=len(self.preview_deferred_queue))
-            self.preview_deferred_render_after_id = self.root.after(40, self._render_next_deferred_preview_tile)
+            self.preview_deferred_render_after_id = self.root.after(
+                40,
+                lambda rev=revision: self._render_next_deferred_preview_tile(rev),
+            )
 
-        def _render_next_deferred_preview_tile(self) -> None:
+        def _render_next_deferred_preview_tile(self, revision: int | None = None) -> None:
             self.preview_deferred_render_after_id = None
+            if revision is not None and revision != self.preview_render_revision:
+                self.preview_deferred_queue = []
+                return
             if (
                 self.source_image is None
                 or self.preview_paused_var.get()
@@ -10098,7 +10160,11 @@ if GUI_AVAILABLE:
             remaining = len(self.preview_deferred_queue)
             if remaining > 0:
                 self._set_preview_speed_badge("staged", deferred_count=remaining)
-                self.preview_deferred_render_after_id = self.root.after(60, self._render_next_deferred_preview_tile)
+                next_revision = revision if revision is not None else self.preview_render_revision
+                self.preview_deferred_render_after_id = self.root.after(
+                    60,
+                    lambda rev=next_revision: self._render_next_deferred_preview_tile(rev),
+                )
             elif self.batch_preview_auto_paused and not self.show_batch_preview_var.get():
                 self._set_preview_speed_badge("auto_speed_off")
             else:
@@ -10529,9 +10595,12 @@ if GUI_AVAILABLE:
             return ImageTk.PhotoImage(preview)
 
         def _request_preview_refresh(self) -> None:
+            self.preview_render_revision += 1
+            self._cancel_deferred_preview_staging(clear_queue=True)
             if self.preview_refresh_after_id is not None:
                 self.root.after_cancel(self.preview_refresh_after_id)
-            self.preview_refresh_after_id = self.root.after(75, self._refresh_preview)
+            current_revision = self.preview_render_revision
+            self.preview_refresh_after_id = self.root.after(75, lambda rev=current_revision: self._refresh_preview(rev))
 
         def _on_preview_size_changed(self) -> None:
             self.status_var.set(f"Preview size set to {self.preview_size_var.get()}.")
@@ -10639,10 +10708,13 @@ if GUI_AVAILABLE:
             self.preview_jump_entry.configure(state=jump_state)
             self.preview_jump_button.configure(state=jump_state)
 
-        def _refresh_preview(self) -> None:
+        def _refresh_preview(self, revision: int | None = None) -> None:
             self.preview_refresh_after_id = None
+            if revision is not None and revision != self.preview_render_revision:
+                return
             if self.source_image is None:
                 return
+            active_revision = self.preview_render_revision
             self._cancel_deferred_preview_staging(clear_queue=True)
             if self.preview_paused_var.get():
                 self._set_preview_speed_badge("manual_pause")
@@ -10732,7 +10804,7 @@ if GUI_AVAILABLE:
                     self.render_all_preview_button.configure(state=tk.NORMAL)
                     if not self.preview_paused_var.get():
                         if self.staged_preview_mode_var.get():
-                            self._start_deferred_preview_staging(deferred_output_keys)
+                            self._start_deferred_preview_staging(deferred_output_keys, revision=active_revision)
                         else:
                             self._set_preview_speed_badge("lazy", deferred_count=len(deferred_output_keys))
                 else:
