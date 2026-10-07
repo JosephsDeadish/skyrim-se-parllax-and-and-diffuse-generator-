@@ -970,6 +970,45 @@ class TestValidateNifForParallax(unittest.TestCase):
             any(group.code.startswith("shader_state.envmap_missing_slot4.") for group in v.conflict_report)
         )
 
+    def test_conflict_report_flags_envmap_shader_with_missing_slot5(self) -> None:
+        textures_root = self.tmp / "textures" / "cubemaps"
+        textures_root.mkdir(parents=True, exist_ok=True)
+        (textures_root / "stone_e.dds").write_bytes(b"dds")
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_CUBEMAP] = "textures\\cubemaps\\stone_e.dds"
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\missing_mask_m.dds"
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            texture_paths=paths,
+        )
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(
+            any(group.code.startswith("shader_state.envmap_missing_slot5.") for group in v.conflict_report)
+        )
+
+    def test_conflict_report_can_emit_multi_conflict_mixed_states(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_NORMAL] = "textures\\arch\\stone_n.dds"
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_n.dds"
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone.dds"
+        paths[TEXTURE_SLOT_CUBEMAP] = "textures\\arch\\stone_n.dds"
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_orm.dds"
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=SLSF1_PARALLAX_OCCLUSION | SLSF1_ENVIRONMENT_MAPPING,
+            flags2=SLSF2_GLOW_MAP,
+            texture_paths=paths,
+        )
+        v = validate_nif_for_parallax(nif)
+        codes = {group.code for group in v.conflict_report}
+        self.assertTrue(any(code.startswith("path_slot_parallax.matches_diffuse.") for code in codes))
+        self.assertTrue(any(code.startswith("path_slot_cubemap.wrong_suffix.") for code in codes))
+        self.assertTrue(any(code.startswith("path_slot_env_mask.generic_alias_suffix.") for code in codes))
+        self.assertTrue(any(code.startswith("path_slot_glow.wrong_suffix.") for code in codes))
+
     def test_reports_wrong_texture_type_in_normal_slot(self) -> None:
         paths = [""] * 9
         paths[TEXTURE_SLOT_NORMAL] = "textures\\arch\\stone_p.dds"
@@ -2979,6 +3018,20 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         assert opts is not None
         self.assertTrue(opts.disable_env_mapping)
         self.assertIn("disable_env_mapping_for_missing_slot4", steps)
+
+    def test_auto_remediation_build_options_sets_env_mask_for_missing_envmap_slot5_when_guessable(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_CUBEMAP] = "textures\\cubemaps\\stone_e.dds"
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP, texture_paths=paths)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["shader_state.envmap_missing_slot5.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(str(opts.env_mask_texture_path).lower().endswith("_m.dds"))
+        self.assertIn("set_slot5_env_mask_for_missing_envmap_slot5", steps)
 
 
 class TestCompatibilityReport(unittest.TestCase):

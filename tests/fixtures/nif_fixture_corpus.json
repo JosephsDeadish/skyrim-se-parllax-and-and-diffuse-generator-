@@ -171,6 +171,44 @@
       ]
     },
     {
+      "id": "skyrim_envmap_missing_slot5_only",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\stone_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_mixed_multiconflict_envmap_parallax_glow",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 268435584,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "textures\\arch\\stone_n.dds",
+        "textures\\arch\\stone_n.dds",
+        "textures\\arch\\stone.dds",
+        "textures\\arch\\stone_n.dds",
+        "textures\\arch\\stone_orm.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
       "id": "fallout_legacy_11_130",
       "profile": "fallout",
       "shader_layout": "legacy",

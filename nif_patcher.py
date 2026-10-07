@@ -3891,6 +3891,9 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "shader_state.envmap_missing_slot4": (
         "Restore a valid slot 4 cubemap texture for EnvMap shader blocks, or disable environment mapping for that block.",
     ),
+    "shader_state.envmap_missing_slot5": (
+        "Restore a valid slot 5 env-mask texture for EnvMap shader blocks, or disable environment mapping for that block.",
+    ),
     "fallback_or_unknown": (
         "Review the listed block diagnostics and apply targeted fixes before repatching.",
     ),
@@ -3990,6 +3993,8 @@ def _classify_conflict_code(message: str) -> str:
         return "shader_state.envmap_missing_slots4_5"
     if "shader type is envmap" in lowered and "slot 4 cubemap is unresolved" in lowered:
         return "shader_state.envmap_missing_slot4"
+    if "shader type is envmap" in lowered and "slot 5 env-mask is unresolved" in lowered:
+        return "shader_state.envmap_missing_slot5"
     if "slot 0 " in lowered:
         return "path_slot_diffuse"
     if "slot 1 " in lowered:
@@ -4375,6 +4380,13 @@ def build_auto_remediation_patch_options(
     if any(code.startswith("shader_state.envmap_missing_slot4") for code in base_codes):
         opts.disable_env_mapping = True
         applied_steps.append("disable_env_mapping_for_missing_slot4")
+    if any(code.startswith("shader_state.envmap_missing_slot5") for code in base_codes):
+        if guessed_env:
+            opts.env_mask_texture_path = guessed_env
+            applied_steps.append("set_slot5_env_mask_for_missing_envmap_slot5")
+        else:
+            opts.disable_env_mapping = True
+            applied_steps.append("disable_env_mapping_for_missing_slot5")
 
     if not applied_steps:
         return None, (
@@ -4860,10 +4872,20 @@ def validate_nif_for_parallax(
                 result.suggestions,
                 f"{bname}: SLSF1_Environment_Mapping is enabled but slot 5 is empty; add an _m.dds mask or disable the flag."
             )
+        env_mask_missing = _texture_slot_path_missing_near_nif(
+            nif_path,
+            env_mask_path,
+            texture_roots,
+        )
+        cubemap_missing = _texture_slot_path_missing_near_nif(
+            nif_path,
+            cubemap_path,
+            texture_roots,
+        )
         if (
             info.shader_type == SHADER_TYPE_ENVMAP
-            and not env_mask_path
-            and not cubemap_path
+            and (not env_mask_path or env_mask_missing)
+            and (not cubemap_path or cubemap_missing)
         ):
             _append_unique(
                 result.issues,
@@ -4875,7 +4897,7 @@ def validate_nif_for_parallax(
             )
         elif (
             info.shader_type == SHADER_TYPE_ENVMAP
-            and not cubemap_path
+            and (not cubemap_path or cubemap_missing)
         ):
             _append_unique(
                 result.issues,
@@ -4884,6 +4906,18 @@ def validate_nif_for_parallax(
             _append_unique(
                 result.suggestions,
                 "Restore a valid slot 4 cubemap texture for EnvMap, or disable environment mapping for this block."
+            )
+        elif (
+            info.shader_type == SHADER_TYPE_ENVMAP
+            and (not env_mask_path or env_mask_missing)
+        ):
+            _append_unique(
+                result.issues,
+                f"{bname}: shader type is EnvMap but slot 5 env-mask is unresolved."
+            )
+            _append_unique(
+                result.suggestions,
+                "Restore a valid slot 5 env-mask texture for EnvMap, or disable environment mapping for this block."
             )
         if info.parallax_scale is not None and info.parallax_scale < 0.35:
             _append_unique(
