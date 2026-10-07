@@ -318,6 +318,7 @@ NIF scan runs also include retry/cancellation controls and a conflict-only incre
 Plugin-aware conflict discovery now attempts lightweight plugin record parsing (record type + FormID + model-path subrecords) before raw mesh-string fallback so conflict summaries can carry real plugin-record metadata when available.
 NIF Editor conflict reruns now include conflict-only patch and conflict-only auto-remediation actions in addition to conflict-only scan reruns.
 Use `nif_patcher.py --compatibility-report` to print a current game/version support matrix (profiles, layouts, and guarded-operation policy).
+Use `nif_patcher.py --validate --conflict-report-summary --parity-delta-report <nif_or_folder>` to emit a markdown parity-gap table (conflict family, count, auto-remediation support level, suggested next action) for structured comparisons against external patchers such as PGPatcher.
 The regression suite also includes a locked fixture corpus baseline at `tests/fixtures/nif_fixture_corpus*.json` for cross-profile/layout conflict-matrix stability checks, including truncated-header and shifted texture-set layout edge signatures.
 CLI folder batch runs now emit `batch_failure_report.json` and `batch_failure_report.csv` when any source files fail, with per-file action/conflict/error fields for triage.
 For long-running folder batches, use `--checkpoint-file <path>` to persist successful-file progress and `--resume-checkpoint` to skip already completed files after interruption/restart.
@@ -340,6 +341,9 @@ Before publishing a release, run at least one real mod-scale verification pass:
    - generated file count matches enabled outputs,
    - `batch_failure_report.json/csv` is created if failures occur,
    - NIF auto-patching (if enabled) reports accurate success/fail counts.
+6. Run pre-release validation gate:
+   - `python scripts/pre_release_validation.py`
+   - This runs the full test suite, conflict-stress checks, compile checks, and a tracked-file secret scan.
 
 ### Known limits and operating guidance
 

@@ -4233,6 +4233,67 @@ def summarize_validation_conflicts(
     return summaries
 
 
+_AUTO_REMEDIATION_CONFLICT_PREFIXES: tuple[str, ...] = (
+    "missing_parallax_flag",
+    "missing_parallax_slot3",
+    "flag_env_mapping.slot4_filled_without_flag",
+    "flag_env_mapping.slot5_filled_without_flag",
+    "flag_glow_map.slot2_filled_without_flag",
+    "flag_glow_map.flag_set_without_slot2",
+    "flag_pom.without_base_parallax",
+    "flag_pom.non_heightmap_shader",
+    "path_slot_diffuse",
+    "path_slot_normal",
+    "path_slot_parallax",
+    "path_slot_glow",
+    "path_slot_cubemap",
+    "path_slot_env_mask",
+    "shader_state.parallax_type_missing_slot3",
+    "shader_state.envmap_missing_slots4_5",
+    "shader_state.envmap_missing_slot4",
+    "shader_state.envmap_missing_slot5",
+    "shader_state.envmap_pom_missing_env_slots",
+    "shader_state.envmap_glow_missing_slots2_4_5",
+    "shader_state.parallax_envmap_missing_slots3_4_5",
+)
+
+
+def _auto_remediation_support_level(conflict_code: str) -> str:
+    base_code = _conflict_base_code(conflict_code)
+    if any(base_code.startswith(prefix) for prefix in _AUTO_REMEDIATION_CONFLICT_PREFIXES):
+        return "supported"
+    return "manual"
+
+
+def build_parity_delta_report_text(
+    summaries: list[NifBatchConflictSummary],
+    *,
+    title: str = "NIF parity delta report (vs PGPatcher sample set)",
+    max_rows: int = 20,
+) -> str:
+    """Build a markdown parity-gap report from grouped conflict summaries."""
+    if not summaries:
+        return f"{title}\n\nNo conflicts detected in the current sample set."
+    lines: list[str] = [
+        title,
+        "",
+        "| Conflict code | Count | Files | Auto-remediation | Suggested action |",
+        "| --- | ---: | ---: | --- | --- |",
+    ]
+    for group in summaries[: max(1, max_rows)]:
+        support = _auto_remediation_support_level(group.code)
+        action = group.suggested_actions[0] if group.suggested_actions else "Manual investigation required."
+        action = action.replace("|", "\\|")
+        lines.append(
+            f"| `{group.code}` | {group.count} | {group.file_count} | {support} | {action} |"
+        )
+    lines.append("")
+    lines.append(
+        "Interpretation: prioritize high-count `manual` rows first when closing parity gaps against external patchers."
+    )
+    return "\n".join(lines)
+
+
 def summarize_plugin_aware_validation_conflicts(
     validations: list[NifValidationResult],
     *,
@@ -4453,8 +4514,18 @@ def build_auto_remediation_patch_options(
         opts.disable_parallax = True
         applied_steps.append("disable_parallax_for_missing_slot3")
     if any(code.startswith("shader_state.envmap_missing_slots4_5") for code in base_codes):
-        opts.disable_env_mapping = True
-        applied_steps.append("disable_env_mapping_for_missing_slots4_5")
+        restored_any_env_slot = False
+        if guessed_cubemap:
+            opts.cubemap_texture_path = guessed_cubemap
+            applied_steps.append("set_slot4_cubemap_for_missing_envmap_slots4_5")
+            restored_any_env_slot = True
+        if guessed_env:
+            opts.env_mask_texture_path = guessed_env
+            applied_steps.append("set_slot5_env_mask_for_missing_envmap_slots4_5")
+            restored_any_env_slot = True
+        if not restored_any_env_slot:
+            opts.disable_env_mapping = True
+            applied_steps.append("disable_env_mapping_for_missing_slots4_5")
     if any(code.startswith("shader_state.envmap_missing_slot4") for code in base_codes):
         if guessed_cubemap:
             opts.cubemap_texture_path = guessed_cubemap
@@ -5480,6 +5551,11 @@ def _main() -> None:  # pragma: no cover
         help="Print the current game/version support matrix and guarded-operation policy, then exit.",
     )
     parser.add_argument(
+        "--parity-delta-report",
+        action="store_true",
+        help="With --validate, print a markdown parity-gap table from grouped conflict families.",
+    )
+    parser.add_argument(
         "--auto-remediate",
         action="store_true",
         help="With --validate, apply safe best-effort fixes inferred from detected conflict codes.",
@@ -5657,6 +5733,8 @@ def _main() -> None:  # pragma: no cover
             validate_only_flags.append("--auto-remediate-codes")
         if args.allow_destructive_remediation:
             validate_only_flags.append("--allow-destructive-remediation")
+        if args.parity_delta_report:
+            validate_only_flags.append("--parity-delta-report")
         if validate_only_flags:
             print(
                 "Error: the following options require --validate: "
@@ -5787,8 +5865,10 @@ def _main() -> None:  # pragma: no cover
                             nif,
                             unknown_shader_type_map=parsed_shader_map,
                         )
-        if args.conflict_report_summary:
+        summary: list[NifBatchConflictSummary] = []
+        if args.conflict_report_summary or args.parity_delta_report:
             summary = summarize_validation_conflicts(validation_results)
+        if args.conflict_report_summary:
             if summary:
                 print("\nBatch conflict summary:")
                 for group in summary[:12]:
@@ -5799,6 +5879,9 @@ def _main() -> None:  # pragma: no cover
                     )
                     for action in group.suggested_actions[:2]:
                         print(f"      auto-fix: {action}")
+        if args.parity_delta_report:
+            print()
+            print(build_parity_delta_report_text(summary))
         if args.conflict_report_summary and plugin_context:
             plugin_summary = summarize_plugin_aware_validation_conflicts(
                 validation_results,

@@ -46,6 +46,7 @@ from nif_patcher import (
     summarize_validation_conflicts,
     build_auto_remediation_patch_options,
     build_compatibility_report_text,
+    build_parity_delta_report_text,
     build_game_profile_support_matrix,
     auto_remediate_nif_conflicts,
     scan_nif_diagnostics,
@@ -3053,8 +3054,25 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertTrue(opts.disable_parallax)
         self.assertIn("disable_parallax_for_missing_slot3", steps)
 
-    def test_auto_remediation_build_options_disables_env_mapping_for_missing_envmap_slots(self) -> None:
-        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP)
+    def test_auto_remediation_build_options_sets_slots_for_missing_envmap_slots_when_guessable(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP, texture_paths=paths)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["shader_state.envmap_missing_slots4_5.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(str(opts.cubemap_texture_path).lower().endswith("_e.dds"))
+        self.assertTrue(str(opts.env_mask_texture_path).lower().endswith("_m.dds"))
+        self.assertIn("set_slot4_cubemap_for_missing_envmap_slots4_5", steps)
+        self.assertIn("set_slot5_env_mask_for_missing_envmap_slots4_5", steps)
+        self.assertFalse(opts.disable_env_mapping)
+
+    def test_auto_remediation_build_options_disables_env_mapping_for_missing_envmap_slots_without_guesses(self) -> None:
+        paths = [""] * 9
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP, texture_paths=paths)
         opts, steps = build_auto_remediation_patch_options(
             nif,
             ["shader_state.envmap_missing_slots4_5.skyrim.legacy"],
@@ -3177,6 +3195,23 @@ class TestCompatibilityReport(unittest.TestCase):
         self.assertIn("Fallout signature range", report)
         self.assertIn("--fallout-allow-parallax-scale", report)
         self.assertIn("--fallout-allow-env-map-scale", report)
+
+    def test_parity_delta_report_formats_markdown_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            validations = [
+                validate_nif_for_parallax(_write_nif(tmp)),
+                validate_nif_for_parallax(_write_nif(tmp, shader_type=SHADER_TYPE_ENVMAP)),
+            ]
+        summary = summarize_validation_conflicts(validations)
+        report = build_parity_delta_report_text(summary, max_rows=5)
+        self.assertIn("NIF parity delta report", report)
+        self.assertIn("| Conflict code | Count | Files | Auto-remediation | Suggested action |", report)
+        self.assertIn("`missing_parallax_flag.flag1_not_set.", report)
+
+    def test_parity_delta_report_handles_empty_summary(self) -> None:
+        report = build_parity_delta_report_text([])
+        self.assertIn("No conflicts detected", report)
 
 
 class TestFixtureCorpusCompatibilityMatrix(unittest.TestCase):

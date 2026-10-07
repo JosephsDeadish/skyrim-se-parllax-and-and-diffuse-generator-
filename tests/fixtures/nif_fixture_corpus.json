@@ -299,6 +299,27 @@
       "flags1": 2176
     },
     {
+      "id": "skyrim_real_shifted_multiconflict_envmap",
+      "profile": "skyrim",
+      "shader_layout": "real",
+      "user_ver2": 130,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "texture_set_layout_shift": 4,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "textures\\arch\\stone_n.dds",
+        "textures\\arch\\stone_n.dds",
+        "textures\\arch\\stone.dds",
+        "textures\\cubemaps\\missing_e.dds",
+        "textures\\arch\\stone_orm.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
       "id": "fallout_legacy_11_130",
       "profile": "fallout",
       "shader_layout": "legacy",
