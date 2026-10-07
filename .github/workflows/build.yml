@@ -81,7 +81,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Download prior release-readiness artifacts (history seed)
-        uses: dawidd6/action-download-artifact@v3
+        uses: dawidd6/action-download-artifact@v6
         continue-on-error: true
         with:
           workflow: build.yml
