@@ -35,6 +35,7 @@ from generate_textures import (
     _normalize_gui_state,
     _resolve_batch_workers,
     _summarize_batch_texture_dimensions,
+    build_batch_bottleneck_hints,
     _save_with_dds_fallback,
     _to_dds_compatible_image,
     TextureGeneratorGUI,
@@ -97,6 +98,7 @@ from generate_textures import (
     parse_args,
     run_batch_with_options,
     run_with_options,
+    resolve_lazy_preview_deferred_outputs,
     save_gui_state,
     should_apply_preview_recommendations,
     select_generation_context_source,
@@ -1850,6 +1852,69 @@ class GenerateTexturesTests(unittest.TestCase):
             auto_suggestions_enabled=False,
             is_processing=False,
         ))
+
+    def test_resolve_lazy_preview_deferred_outputs_defers_niche_outputs_for_large_sets(self) -> None:
+        include_flags = {
+            "diffuse": True,
+            "normal": True,
+            "rmaos": True,
+            "wetness_mask": True,
+            "snow_mask": True,
+            "ao": True,
+            "roughness": True,
+            "complex_material": True,
+        }
+        deferred = resolve_lazy_preview_deferred_outputs(
+            lazy_enabled=True,
+            force_full_once=False,
+            total_sources=100,
+            source_pixels=1024 * 1024,
+            include_flags=include_flags,
+        )
+        self.assertIn("rmaos", deferred)
+        self.assertIn("complex_material", deferred)
+        self.assertNotIn("diffuse", deferred)
+        self.assertNotIn("normal", deferred)
+
+    def test_resolve_lazy_preview_deferred_outputs_defers_more_outputs_for_very_large_sets(self) -> None:
+        include_flags = {
+            "diffuse": True,
+            "normal": True,
+            "parallax": True,
+            "glow": True,
+            "environment_mask": True,
+            "rmaos": True,
+            "wetness_mask": True,
+            "snow_mask": True,
+            "ao": True,
+            "roughness": True,
+            "complex_material": True,
+        }
+        deferred = resolve_lazy_preview_deferred_outputs(
+            lazy_enabled=True,
+            force_full_once=False,
+            total_sources=300,
+            source_pixels=4096 * 4096,
+            include_flags=include_flags,
+        )
+        self.assertIn("parallax", deferred)
+        self.assertIn("glow", deferred)
+        self.assertIn("environment_mask", deferred)
+        self.assertNotIn("diffuse", deferred)
+        self.assertNotIn("normal", deferred)
+
+    def test_build_batch_bottleneck_hints_includes_large_run_resume_guidance(self) -> None:
+        hints = build_batch_bottleneck_hints(
+            avg_file_seconds=2.0,
+            max_file_seconds=8.0,
+            high_res_4k_count=120,
+            high_res_8k_count=4,
+            resumed_completed_count=0,
+            total_failed=2,
+            total_sources=1500,
+        )
+        self.assertTrue(any("Resume mode" in hint for hint in hints))
+        self.assertTrue(any("8K-heavy" in hint for hint in hints))
 
     def test_get_generation_warnings_glow_on_stone_triggers_warning(self) -> None:
         warnings = get_generation_warnings(

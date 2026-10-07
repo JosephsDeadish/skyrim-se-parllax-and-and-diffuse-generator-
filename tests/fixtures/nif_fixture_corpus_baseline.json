@@ -1,7 +1,7 @@
 {
-  "expected_total_cases": 25,
+  "expected_total_cases": 26,
   "expected_profile_counts": {
-    "skyrim": 16,
+    "skyrim": 17,
     "fallout": 7,
     "unknown": 2
   },

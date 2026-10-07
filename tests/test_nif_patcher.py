@@ -1395,6 +1395,32 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertFalse(infos[0].has_env_mapping_flag)
         self.assertTrue(any("empty or unresolved" in warning.lower() for warning in result.warnings), result.warnings)
 
+    def test_auto_restores_envmap_flag_when_envmap_shader_slot5_file_is_missing_even_with_slot4_set(self) -> None:
+        cubemap_dir = self.tmp / "textures" / "cubemaps"
+        cubemap_dir.mkdir(parents=True, exist_ok=True)
+        (cubemap_dir / "stone_e.dds").write_bytes(b"dds")
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=0,
+            texture_paths=[
+                "textures\\stone.dds",
+                "",
+                "",
+                "",
+                "textures\\cubemaps\\stone_e.dds",
+                "textures\\architecture\\missing_m.dds",
+                "",
+                "",
+                "",
+            ],
+        )
+        result = patch_nif(nif, NifPatchOptions(enable_env_mapping=True, backup=False))
+        self.assertTrue(result.success, result.errors)
+        info = scan_nif(nif)[0]
+        self.assertFalse(info.has_env_mapping_flag)
+        self.assertTrue(any("empty or unresolved" in warning.lower() for warning in result.warnings), result.warnings)
+
     def test_auto_restores_glow_flag_when_slot2_file_is_missing_near_mesh(self) -> None:
         (self.tmp / "textures").mkdir(exist_ok=True)
         nif = _write_nif(

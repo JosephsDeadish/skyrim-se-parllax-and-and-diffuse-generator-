@@ -209,6 +209,26 @@
       ]
     },
     {
+      "id": "skyrim_mixed_multiconflict_envmap_slot5_missing_glow_flag",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "textures\\arch\\stone_n.dds",
+        "",
+        "textures\\arch\\stone_n.dds",
+        "textures\\cubemaps\\stone_e.dds",
+        "textures\\arch\\missing_m.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
       "id": "fallout_legacy_11_130",
       "profile": "fallout",
       "shader_layout": "legacy",

@@ -403,6 +403,71 @@ def should_apply_preview_recommendations(*, auto_suggestions_enabled: bool, is_p
     return auto_suggestions_enabled and not is_processing
 
 
+def resolve_lazy_preview_deferred_outputs(
+    *,
+    lazy_enabled: bool,
+    force_full_once: bool,
+    total_sources: int,
+    source_pixels: int,
+    include_flags: Mapping[str, bool],
+) -> set[str]:
+    """Return preview outputs to defer for responsive large-batch UX."""
+    if not lazy_enabled or force_full_once:
+        return set()
+    if total_sources <= 0 and source_pixels <= 0:
+        return set()
+    very_large = total_sources >= 256 or source_pixels >= (4096 * 4096)
+    large = total_sources >= 64 or source_pixels >= (1024 * 1024)
+    if not large:
+        return set()
+    if very_large:
+        candidates = {
+            "parallax",
+            "glow",
+            "environment_mask",
+            "rmaos",
+            "wetness_mask",
+            "snow_mask",
+            "ao",
+            "roughness",
+            "complex_material",
+        }
+    else:
+        candidates = {
+            "rmaos",
+            "wetness_mask",
+            "snow_mask",
+            "ao",
+            "roughness",
+            "complex_material",
+        }
+    return {key for key in candidates if include_flags.get(key, False)}
+
+
+def build_batch_bottleneck_hints(
+    *,
+    avg_file_seconds: float,
+    max_file_seconds: float,
+    high_res_4k_count: int,
+    high_res_8k_count: int,
+    resumed_completed_count: int,
+    total_failed: int,
+    total_sources: int,
+) -> list[str]:
+    hints: list[str] = []
+    if high_res_8k_count > 0 and avg_file_seconds > 1.5:
+        hints.append("8K-heavy run detected; keep lazy preview enabled and use resume checkpoints.")
+    if high_res_4k_count >= 50:
+        hints.append("Large high-res set detected; split core and niche outputs into separate passes.")
+    if total_sources >= 1000 and resumed_completed_count == 0:
+        hints.append("Large 1000+ run: use Resume mode to protect progress from interruptions.")
+    if max_file_seconds >= max(5.0, avg_file_seconds * 2.5):
+        hints.append("A few outlier files were much slower; inspect unusually large or noisy source textures first.")
+    if total_failed > 0:
+        hints.append("Check batch_failure_report.csv/json for repeated failure patterns before rerun.")
+    return hints[:3]
+
+
 def _compute_tooltip_position(
     *,
     pointer_x: int,
@@ -7558,9 +7623,10 @@ if GUI_AVAILABLE:
             self.detected_context_var = tk.StringVar(value=self.manager_context.summary)
             self.preview_speed_state_var = tk.StringVar(value="")
             self.batch_perf_hint_var = tk.StringVar(value="")
-            self.safe_preset_hint_var = tk.StringVar(value="Safe presets apply conservative workflow defaults in one click.")
+            self.safe_preset_hint_var = tk.StringVar(value="Safe-default presets apply conservative, conflict-averse workflow defaults in one click.")
             self.preview_force_full_once = False
             self.preview_paused_var = tk.BooleanVar(value=False)
+            self.batch_preview_auto_paused = False
             self.normal_strength_var = tk.DoubleVar(value=2.0)
             self.parallax_strength_var = tk.DoubleVar(value=1.35)
             self.complex_strength_var = tk.DoubleVar(value=1.15)
@@ -7889,25 +7955,25 @@ if GUI_AVAILABLE:
             )
             _preset_row = ttk.Frame(_workflow_frame)
             _preset_row.grid(row=2, column=0, columnspan=3, sticky=tk.EW, pady=(4, 0))
-            ttk.Label(_preset_row, text="Safe workflow presets").pack(side=tk.LEFT)
+            ttk.Label(_preset_row, text="One-click safe-default workflow presets").pack(side=tk.LEFT)
             ttk.Button(
                 _preset_row,
-                text="Vanilla Safe",
+                text="Vanilla (Safe default)",
                 command=lambda: self._apply_safe_workflow_preset("vanilla"),
             ).pack(side=tk.LEFT, padx=(8, 2))
             ttk.Button(
                 _preset_row,
-                text="ENB Safe",
+                text="ENB (Safe default)",
                 command=lambda: self._apply_safe_workflow_preset("enb"),
             ).pack(side=tk.LEFT, padx=2)
             ttk.Button(
                 _preset_row,
-                text="CS Safe",
+                text="CS (Safe default)",
                 command=lambda: self._apply_safe_workflow_preset("community_shaders"),
             ).pack(side=tk.LEFT, padx=2)
             ttk.Button(
                 _preset_row,
-                text="TruePBR Safe",
+                text="TruePBR (Safe default)",
                 command=lambda: self._apply_safe_workflow_preset("truepbr"),
             ).pack(side=tk.LEFT, padx=2)
             ttk.Button(
@@ -8485,7 +8551,8 @@ if GUI_AVAILABLE:
                 "Automatically reduce UI overhead for heavy batch runs.\n"
                 "When many high-resolution textures are detected, live preview is turned off before processing starts.",
             )
-            ttk.Label(source_controls, text="Resume").pack(side=tk.LEFT, padx=(10, 4))
+            _resume_label = ttk.Label(source_controls, text="Resume")
+            _resume_label.pack(side=tk.LEFT, padx=(10, 4))
             _resume_combo = ttk.Combobox(
                 source_controls,
                 textvariable=self.batch_resume_mode_var,
@@ -8496,7 +8563,7 @@ if GUI_AVAILABLE:
             _resume_combo.pack(side=tk.LEFT)
             self._add_tooltip(
                 _resume_combo,
-                "start_fresh: ignore prior checkpoint entries.\nresume: skip files already completed in checkpoint.",
+                "start_fresh: ignore prior checkpoint entries.\nresume: skip files already completed in checkpoint.\nFor large 1000+ runs, resume is strongly recommended.",
             )
             _clear_checkpoint_button = ttk.Button(
                 source_controls,
@@ -8506,7 +8573,7 @@ if GUI_AVAILABLE:
             _clear_checkpoint_button.pack(side=tk.LEFT, padx=(4, 4))
             self._add_tooltip(
                 _clear_checkpoint_button,
-                "Delete the current batch checkpoint file so the next run starts from scratch.",
+                "Delete the current batch checkpoint file so the next run starts from scratch.\nUse carefully on very large runs because resume progress is lost.",
             )
             _auto_patch_nifs_check = ttk.Checkbutton(
                 source_controls,
@@ -8522,6 +8589,15 @@ if GUI_AVAILABLE:
                 "The app will look in detected mod-manager mesh folders and nearby meshes folders.\n"
                 "Off by default — always keep NIF backups before enabling.",
             )
+            advanced_batch_widgets: list[tk.Widget] = [
+                _resume_label,
+                _resume_combo,
+                _clear_checkpoint_button,
+                _auto_patch_nifs_check,
+            ]
+            _advanced_batch_pack_layout: dict[tk.Widget, dict[str, object]] = {}
+            for widget in advanced_batch_widgets:
+                _advanced_batch_pack_layout[widget] = widget.pack_info()
 
             _generated_title = ttk.Label(preview_frame, text="Generated outputs (after processing)")
             _generated_title.grid(
@@ -8580,12 +8656,22 @@ if GUI_AVAILABLE:
 
             def _sync_simplified_layout_preview(*_: object) -> None:
                 simplified = bool(self.simplified_main_layout_var.get())
+                show_advanced = (
+                    bool(self.show_advanced_generation_var.get())
+                    and not simplified
+                )
                 _show_advanced_generation_check.configure(
                     state=(tk.DISABLED if simplified else tk.NORMAL)
                 )
                 _advanced_workflow_toggle.configure(
                     state=(tk.DISABLED if simplified else tk.NORMAL)
                 )
+                for widget in advanced_batch_widgets:
+                    if show_advanced:
+                        if not widget.winfo_manager():
+                            widget.pack(**_advanced_batch_pack_layout[widget])
+                    else:
+                        widget.pack_forget()
                 if simplified:
                     _generated_title.grid_remove()
                     output_grid.grid_remove()
@@ -8594,6 +8680,7 @@ if GUI_AVAILABLE:
                     output_grid.grid(**_output_grid_layout)
 
             self.simplified_main_layout_var.trace_add("write", _sync_simplified_layout_preview)
+            self.show_advanced_generation_var.trace_add("write", _sync_simplified_layout_preview)
             _sync_simplified_layout_preview()
             self._update_preview_navigation_state()
 
@@ -9156,7 +9243,7 @@ if GUI_AVAILABLE:
             recommended_profile = self._recommended_render_profile_for_preview(self._current_preview_path())
             if normalized == "custom":
                 self.safe_preset_hint_var.set(
-                    "Custom preset (safe-default baseline): manual controls enabled with no forced renderer lock."
+                    "Custom safe-default baseline: manual controls stay available with no forced renderer lock."
                 )
                 self._update_render_profile_control_states()
                 after_state = dict(before_state)
@@ -9177,10 +9264,10 @@ if GUI_AVAILABLE:
                 recommended_profile=recommended_profile,
             )
             safe_descriptions = {
-                "vanilla": "Vanilla Safe defaults: Diffuse+Normal ON, standard env-mask mode, no ENB/PBR-only extras.",
-                "enb": "ENB Safe defaults: ENB-oriented outputs/modes ON, conflicting CS/PBR outputs kept OFF.",
-                "community_shaders": "Community Shaders Safe defaults: _cm/_c workflow guidance ON, conflicting ENB complex paths avoided.",
-                "truepbr": "TruePBR Safe defaults: canonical _rmaos path guidance ON with non-TruePBR extras kept conservative.",
+                "vanilla": "Vanilla safe-default: Diffuse+Normal ON, standard env-mask mode, ENB/PBR-only extras OFF.",
+                "enb": "ENB safe-default: ENB-oriented outputs/modes ON, conflicting Community Shaders/PBR outputs OFF.",
+                "community_shaders": "Community Shaders safe-default: _cm/_c guidance ON, conflicting ENB complex paths avoided.",
+                "truepbr": "TruePBR safe-default: canonical _rmaos guidance ON, non-TruePBR extras kept conservative.",
             }
             self.safe_preset_hint_var.set(
                 safe_descriptions.get(normalized, "Safe preset applied.")
@@ -9339,6 +9426,9 @@ if GUI_AVAILABLE:
             )
             if not processing:
                 self.reenable_batch_preview_button.configure(state=tk.DISABLED)
+                self.batch_preview_auto_paused = False
+                if not self.preview_paused_var.get():
+                    self.preview_speed_state_var.set("")
             self._update_output_location_controls()
             self._update_preview_navigation_state()
 
@@ -9653,13 +9743,15 @@ if GUI_AVAILABLE:
                             lines.append(
                                 f"High-res load: {high_4k} file(s) at 4K+, {high_8k} at 8K+ (max {max_dim}px)."
                             )
-                        perf_hints: list[str] = []
-                        if high_8k > 0 and avg_file > 1.5:
-                            perf_hints.append("8K-heavy run detected; keep lazy preview enabled and use resume checkpoints.")
-                        if high_4k > 50:
-                            perf_hints.append("Large high-res set detected; start with core outputs then add niche maps in a second pass.")
-                        if total_failed > 0:
-                            perf_hints.append("Check batch_failure_report.csv/json for repeated failure patterns before rerun.")
+                        perf_hints = build_batch_bottleneck_hints(
+                            avg_file_seconds=avg_file,
+                            max_file_seconds=max_file,
+                            high_res_4k_count=high_4k,
+                            high_res_8k_count=high_8k,
+                            resumed_completed_count=resumed,
+                            total_failed=total_failed,
+                            total_sources=total_sources,
+                        )
                         self.batch_perf_hint_var.set(" | ".join(perf_hints[:2]))
                     messagebox.showinfo("Generation complete", "\n".join(lines), parent=self.root)
                     self._refresh_preview()
@@ -9741,13 +9833,17 @@ if GUI_AVAILABLE:
             else:
                 self.status_var.set("Batch live preview disabled for faster processing.")
             if self.show_batch_preview_var.get():
+                self.batch_preview_auto_paused = False
                 self.preview_speed_state_var.set("")
                 self.reenable_batch_preview_button.configure(state=tk.DISABLED)
+            elif self.is_processing:
+                self.preview_speed_state_var.set("Preview off for speed")
 
         def _reenable_batch_preview(self) -> None:
             self.show_batch_preview_var.set(True)
             self.preview_speed_state_var.set("")
             self.reenable_batch_preview_button.configure(state=tk.DISABLED)
+            self.batch_preview_auto_paused = False
             self.status_var.set("Live batch preview re-enabled.")
 
         def _toggle_preview_pause(self) -> None:
@@ -9755,11 +9851,13 @@ if GUI_AVAILABLE:
             self.preview_paused_var.set(paused)
             if paused:
                 self.preview_pause_button.configure(text="Resume preview")
-                self.preview_speed_state_var.set("Preview paused")
+                self.preview_speed_state_var.set("Preview paused (manual)")
                 self.status_var.set("Preview paused to reduce UI overhead during long runs.")
             else:
                 self.preview_pause_button.configure(text="Pause preview")
-                if "Preview paused" in str(self.preview_speed_state_var.get()):
+                if self.batch_preview_auto_paused and not self.show_batch_preview_var.get():
+                    self.preview_speed_state_var.set("Preview off for speed")
+                else:
                     self.preview_speed_state_var.set("")
                 self.status_var.set("Preview resumed.")
                 self._refresh_preview()
@@ -9769,6 +9867,8 @@ if GUI_AVAILABLE:
             if self.preview_paused_var.get():
                 self.preview_paused_var.set(False)
                 self.preview_pause_button.configure(text="Pause preview")
+            if self.batch_preview_auto_paused and not self.show_batch_preview_var.get():
+                self.preview_speed_state_var.set("Preview off for speed")
             self.status_var.set("Rendering full preview tile set…")
             self._refresh_preview()
 
@@ -10312,6 +10412,7 @@ if GUI_AVAILABLE:
             if self.source_image is None:
                 return
             if self.preview_paused_var.get():
+                self.preview_speed_state_var.set("Preview paused (manual)")
                 for output_key, label in self.preview_output_labels.items():
                     if output_key not in self.preview_output_images:
                         label.configure(image="", text="Preview paused")
@@ -10330,24 +10431,13 @@ if GUI_AVAILABLE:
                     "roughness": bool(self.include_roughness_var.get()),
                     "complex_material": bool(self.include_complex_var.get()),
                 }
-                lazy_trigger = (
-                    bool(self.lazy_preview_mode_var.get())
-                    and not bool(self.preview_force_full_once)
-                    and (
-                        len(self.selected_inputs) >= 64
-                        or (self.source_image.width * self.source_image.height) >= (1024 * 1024)
-                    )
+                deferred_output_keys = resolve_lazy_preview_deferred_outputs(
+                    lazy_enabled=bool(self.lazy_preview_mode_var.get()),
+                    force_full_once=bool(self.preview_force_full_once),
+                    total_sources=len(self.selected_inputs),
+                    source_pixels=int(self.source_image.width * self.source_image.height),
+                    include_flags=include_flags,
                 )
-                deferred_output_keys: set[str] = set()
-                if lazy_trigger:
-                    deferred_output_keys = {
-                        "rmaos",
-                        "wetness_mask",
-                        "snow_mask",
-                        "ao",
-                        "roughness",
-                        "complex_material",
-                    }
                 # Map the GUI parallax mode combo value to the internal key.
                 _pm_raw = self.parallax_mode_var.get()
                 _parallax_mode = "occlusion" if "occlusion" in _pm_raw else "standard"
@@ -10406,19 +10496,18 @@ if GUI_AVAILABLE:
                     self.preview_output_images[output_key] = photo
                     label.configure(image=photo, text="")
                 if deferred_output_keys:
-                    deferred_enabled = sorted(
-                        key for key in deferred_output_keys if include_flags.get(key, False)
-                    )
-                    if deferred_enabled:
-                        self.render_all_preview_button.configure(state=tk.NORMAL)
+                    self.render_all_preview_button.configure(state=tk.NORMAL)
+                    if not self.preview_paused_var.get():
                         self.preview_speed_state_var.set(
-                            f"Lazy preview active ({len(deferred_enabled)} tile(s) deferred)"
+                            f"Lazy preview active ({len(deferred_output_keys)} tile(s) deferred)"
                         )
-                    else:
-                        self.render_all_preview_button.configure(state=tk.DISABLED)
                 else:
                     self.render_all_preview_button.configure(state=tk.DISABLED)
-                    if not self.is_processing or self.show_batch_preview_var.get():
+                    if self.preview_paused_var.get():
+                        self.preview_speed_state_var.set("Preview paused (manual)")
+                    elif self.batch_preview_auto_paused and not self.show_batch_preview_var.get():
+                        self.preview_speed_state_var.set("Preview off for speed")
+                    elif not self.is_processing or self.show_batch_preview_var.get():
                         self.preview_speed_state_var.set("")
             except Exception as exc:
                 self.status_var.set(f"Preview update failed: {exc}")
@@ -10577,6 +10666,7 @@ if GUI_AVAILABLE:
                     self.status_var.set("No source textures found to process.")
                     messagebox.showwarning("No source textures found", "No valid source textures were found for the selected input.", parent=self.root)
                     return
+                is_huge_batch = len(self.selected_inputs) >= 1000
                 batch_metrics = _summarize_batch_texture_dimensions(self.selected_inputs)
                 high_4k_count = int(batch_metrics.get("high_res_4k_count", 0) or 0)
                 high_8k_count = int(batch_metrics.get("high_res_8k_count", 0) or 0)
@@ -10608,6 +10698,21 @@ if GUI_AVAILABLE:
                     output_dir=output_dir,
                 )
                 self.batch_checkpoint_path_var.set(str(checkpoint_path))
+                if (
+                    is_huge_batch
+                    and self.batch_resume_mode_var.get() != "resume"
+                ):
+                    enable_resume = messagebox.askyesno(
+                        "Large batch resume recommendation",
+                        (
+                            f"You queued {len(self.selected_inputs)} textures.\n\n"
+                            "Resume mode is strongly recommended for 1000+ runs so interruptions do not waste progress.\n"
+                            "Enable Resume mode now?"
+                        ),
+                        parent=self.root,
+                    )
+                    if enable_resume:
+                        self.batch_resume_mode_var.set("resume")
                 resumed_completed_count = 0
                 completed_checkpoint_files: set[str] = set()
                 if self.batch_resume_mode_var.get() == "resume":
@@ -10630,6 +10735,19 @@ if GUI_AVAILABLE:
                             )
                             return
                 else:
+                    if is_huge_batch and checkpoint_path.exists():
+                        proceed_reset = messagebox.askyesno(
+                            "Confirm checkpoint reset",
+                            (
+                                f"A checkpoint already exists at:\n{checkpoint_path}\n\n"
+                                "Start-fresh mode will clear it. For 1000+ runs this removes resume protection.\n"
+                                "Continue with start-fresh and clear checkpoint?"
+                            ),
+                            parent=self.root,
+                        )
+                        if not proceed_reset:
+                            self.status_var.set("Large-batch start canceled. Switch Resume mode to continue safely.")
+                            return
                     checkpoint_path.unlink(missing_ok=True)
 
                 _context_source = select_generation_context_source(Path(input_value), self.selected_inputs)
@@ -10764,9 +10882,11 @@ if GUI_AVAILABLE:
                     )
                 if preview_auto_disabled:
                     perf_note += " Live preview was turned off automatically for better throughput."
-                    self.preview_speed_state_var.set("Preview paused for speed")
+                    self.batch_preview_auto_paused = True
+                    self.preview_speed_state_var.set("Preview off for speed")
                     self.reenable_batch_preview_button.configure(state=tk.NORMAL)
                 else:
+                    self.batch_preview_auto_paused = False
                     self.preview_speed_state_var.set("")
                     self.reenable_batch_preview_button.configure(state=tk.DISABLED)
                 if resumed_completed_count > 0:

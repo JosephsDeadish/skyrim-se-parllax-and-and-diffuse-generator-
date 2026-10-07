@@ -3005,6 +3005,12 @@ def _apply_patches(
                     and (not cubemap_path or cubemap_missing)
                 ):
                     restored_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
+                if (
+                    sp.shader_type == SHADER_TYPE_ENVMAP
+                    and (restored_flags1 & SLSF1_ENVIRONMENT_MAPPING)
+                    and (not env_mask_path or env_mask_missing)
+                ):
+                    restored_flags1 &= ~SLSF1_ENVIRONMENT_MAPPING
                 if (restored_flags2 & SLSF2_GLOW_MAP) and (
                     not glow_path or glow_missing
                 ):
