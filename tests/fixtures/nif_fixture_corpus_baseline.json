@@ -1,7 +1,7 @@
 {
-  "expected_total_cases": 36,
+  "expected_total_cases": 43,
   "expected_profile_counts": {
-    "skyrim": 24,
+    "skyrim": 31,
     "fallout": 10,
     "unknown": 2
   },
@@ -13,6 +13,7 @@
     "path_slot_cubemap.wrong_suffix.skyrim.",
     "path_slot_parallax.matches_diffuse.skyrim.",
     "path_slot_parallax.matches_normal.skyrim.",
+    "path_slot_glow.wrong_suffix.skyrim.",
     "path_slot_env_mask.generic_alias_suffix.skyrim.",
     "flag_env_mapping.slot4_filled_without_flag.skyrim.",
     "flag_env_mapping.slot5_filled_without_flag.skyrim.",

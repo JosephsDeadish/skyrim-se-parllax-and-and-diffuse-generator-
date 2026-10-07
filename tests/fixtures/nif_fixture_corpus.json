@@ -329,6 +329,144 @@
       ]
     },
     {
+      "id": "skyrim_family_architecture_multishader",
+      "profile": "skyrim",
+      "family": "architecture",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\architecture\\stonewall.dds",
+        "",
+        "",
+        "textures\\architecture\\stonewall.dds",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 1,
+          "flags1": 128
+        }
+      ]
+    },
+    {
+      "id": "skyrim_family_clutter_envmap_slot4_missing",
+      "profile": "skyrim",
+      "family": "clutter",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\clutter\\barrel\\barrel01.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\clutter\\barrel\\barrel01_m.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_family_armor_envmap_slot5_missing",
+      "profile": "skyrim",
+      "family": "armor",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\armor\\iron\\ironarmor.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\armor_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_family_landscape_envmask_alias",
+      "profile": "skyrim",
+      "family": "landscape",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\landscape\\rocks\\rock01.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\landscape\\rocks\\rock01_orm.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_family_foliage_cubemap_suffix",
+      "profile": "skyrim",
+      "family": "foliage",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\plants\\tree\\treepine.dds",
+        "",
+        "",
+        "",
+        "textures\\plants\\tree\\treepine_n.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_family_effects_glow_suffix",
+      "profile": "skyrim",
+      "family": "effects",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\effects\\fxmist.dds",
+        "",
+        "textures\\effects\\fxmist_n.dds",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_family_architecture_truepbr_canonical",
+      "profile": "skyrim",
+      "family": "architecture",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\pbr\\architecture\\stone.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\stone_e.dds",
+        "textures\\pbr\\architecture\\stone_rmaos.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
       "id": "fallout_legacy_11_130",
       "profile": "fallout",
       "shader_layout": "legacy",

@@ -75,6 +75,78 @@
       ]
     },
     {
+      "id": "parity_skyrim_truepbr_canonical_rmaos",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\pbr\\architecture\\stone.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\stone_e.dds",
+        "textures\\pbr\\architecture\\stone_rmaos.dds",
+        "",
+        "",
+        ""
+      ],
+      "expected_prefixes": [],
+      "expected_absent_prefixes": [
+        "path_slot_env_mask.wrong_suffix.skyrim.",
+        "path_slot_env_mask.generic_alias_suffix.skyrim."
+      ]
+    },
+    {
+      "id": "parity_skyrim_complex_material_cm_suffix",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\architecture\\stone.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\architecture\\stone_cm.dds",
+        "",
+        "",
+        ""
+      ],
+      "expected_prefixes": [],
+      "expected_absent_prefixes": [
+        "path_slot_env_mask.wrong_suffix.skyrim."
+      ]
+    },
+    {
+      "id": "parity_skyrim_multishaderblock_mixed_conflicts",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\architecture\\stone.dds",
+        "",
+        "",
+        "textures\\architecture\\stone.dds",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 1,
+          "flags1": 128
+        }
+      ],
+      "expected_prefixes": [
+        "path_slot_parallax.matches_diffuse.skyrim.",
+        "shader_state.envmap_missing_slots4_5.skyrim."
+      ]
+    },
+    {
       "id": "parity_fallout_missing_parallax_flag",
       "profile": "fallout",
       "shader_layout": "legacy",

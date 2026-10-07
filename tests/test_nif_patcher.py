@@ -69,6 +69,7 @@ _FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
 _FIXTURE_CORPUS_MANIFEST = _FIXTURE_DIR / "nif_fixture_corpus.json"
 _FIXTURE_CORPUS_BASELINE = _FIXTURE_DIR / "nif_fixture_corpus_baseline.json"
 _FIXTURE_PARITY_SAMPLE_MATRIX = _FIXTURE_DIR / "nif_parity_sample_matrix.json"
+_FIXTURE_REALMOD_SAMPLE_PACKS = _FIXTURE_DIR / "nif_realmod_sample_packs.json"
 
 
 # ---------------------------------------------------------------------------
@@ -221,9 +222,22 @@ def _build_minimal_nif(
     # --- Extra shader blocks --------------------------------------------
     extra_bodies: list[tuple[bytes, bytes]] = []
     for extra in (extra_shader_blocks or []):
+        extra_copy = dict(extra)
+        extra_texture_paths_raw = extra_copy.pop("texture_paths", None)
+        extra_texture_paths = (
+            [str(path) for path in extra_texture_paths_raw]
+            if isinstance(extra_texture_paths_raw, list) and len(extra_texture_paths_raw) == 9
+            else None
+        )
+        extra_texture_set_layout_shift = int(extra_copy.pop("texture_set_layout_shift", texture_set_layout_shift))
+        extra_texture_set_count_u16 = bool(extra_copy.pop("texture_set_count_u16", texture_set_count_u16))
         ts_idx = 2 + len(extra_bodies) * 2
-        ts_body = _build_texture_set_block()
-        sp_body = shader_builder(texture_set_ref=ts_idx, **extra)
+        ts_body = _build_texture_set_block(
+            texture_paths=extra_texture_paths,
+            texture_set_layout_shift=extra_texture_set_layout_shift,
+            texture_set_count_u16=extra_texture_set_count_u16,
+        )
+        sp_body = shader_builder(texture_set_ref=ts_idx, **extra_copy)
         extra_bodies.append((ts_body, sp_body))
 
     # --- Assemble block list --------------------------------------------
@@ -319,6 +333,16 @@ def _materialize_fixture_corpus(temp_root: Path, payload: dict[str, object]) -> 
             if isinstance(raw_texture_paths, list) and len(raw_texture_paths) == 9
             else ["textures\\arch\\stone.dds"] + [""] * 8
         )
+        raw_extra_blocks = entry.get("extra_shader_blocks")
+        extra_shader_blocks: list[dict[str, object]] = []
+        if isinstance(raw_extra_blocks, list):
+            for block in raw_extra_blocks:
+                if isinstance(block, dict):
+                    normalized_block: dict[str, object] = dict(block)
+                    raw_block_paths = normalized_block.get("texture_paths")
+                    if isinstance(raw_block_paths, list):
+                        normalized_block["texture_paths"] = [str(path) for path in raw_block_paths]
+                    extra_shader_blocks.append(normalized_block)
         raw = _build_minimal_nif(
             shader_layout=str(entry.get("shader_layout", "legacy")),
             shader_type=int(entry.get("shader_type", SHADER_TYPE_DEFAULT)),
@@ -329,6 +353,7 @@ def _materialize_fixture_corpus(temp_root: Path, payload: dict[str, object]) -> 
             texture_set_layout_shift=int(entry.get("texture_set_layout_shift", 0)),
             texture_set_count_u16=bool(entry.get("texture_set_count_u16", False)),
             texture_paths=texture_paths,
+            extra_shader_blocks=extra_shader_blocks,
         )
         target.write_bytes(raw)
         user_version = entry.get("user_version")
@@ -2830,6 +2855,8 @@ class TestParitySampleMatrix(unittest.TestCase):
             self.assertIsInstance(case, dict)
             expected_prefixes = case.get("expected_prefixes", [])
             self.assertIsInstance(expected_prefixes, list)
+            expected_absent_prefixes = case.get("expected_absent_prefixes", [])
+            self.assertIsInstance(expected_absent_prefixes, list)
             codes = [group.code for group in validation.conflict_report]
             all_codes.extend(codes)
             for prefix in expected_prefixes:
@@ -2837,12 +2864,97 @@ class TestParitySampleMatrix(unittest.TestCase):
                     any(code.startswith(str(prefix)) for code in codes),
                     f"{case.get('id', 'case')} missing {prefix}; got {codes}",
                 )
+            for prefix in expected_absent_prefixes:
+                self.assertFalse(
+                    any(code.startswith(str(prefix)) for code in codes),
+                    f"{case.get('id', 'case')} unexpectedly matched {prefix}; got {codes}",
+                )
 
         self.assertTrue(any(".skyrim." in code for code in all_codes))
         self.assertTrue(any(".fallout." in code for code in all_codes))
         report = build_parity_delta_report_text(summarize_validation_conflicts(validations), max_rows=12)
         self.assertIn("NIF parity delta report", report)
         self.assertIn("| Conflict code | Count | Files | Auto-remediation | Suggested action |", report)
+
+
+class TestRealModSamplePacks(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_pack_baselines_cover_family_counts_and_expected_conflict_profiles(self) -> None:
+        payload = _load_fixture_corpus_payload(_FIXTURE_REALMOD_SAMPLE_PACKS)
+        packs = payload.get("packs", [])
+        self.assertIsInstance(packs, list)
+        self.assertGreater(len(packs), 0)
+
+        for pack in packs:
+            self.assertIsInstance(pack, dict)
+            pack_id = str(pack.get("id", "pack")).strip() or "pack"
+            cases = pack.get("cases", [])
+            self.assertIsInstance(cases, list)
+            pack_root = self.tmp / pack_id
+            pack_root.mkdir(parents=True, exist_ok=True)
+            corpus = _materialize_fixture_corpus(pack_root, {"cases": cases})
+            self.assertEqual(len(corpus), len(cases), f"{pack_id}: case materialization mismatch")
+            validations = [validate_nif_for_parallax(path) for path in corpus]
+
+            case_map: dict[str, dict[str, object]] = {}
+            for case in cases:
+                if isinstance(case, dict):
+                    case_id = str(case.get("id", "")).strip()
+                    if case_id:
+                        case_map[case_id] = case
+
+            observed_family_case_counts: dict[str, int] = {}
+            family_pass_fail: dict[str, dict[str, int]] = {}
+            for nif_path, validation in zip(corpus, validations):
+                case = case_map.get(nif_path.stem, {})
+                family = str(case.get("family", "unknown")).strip() or "unknown"
+                observed_family_case_counts[family] = observed_family_case_counts.get(family, 0) + 1
+                family_pass_fail.setdefault(family, {"pass": 0, "fail": 0})
+                expected_prefixes = case.get("expected_prefixes", []) if isinstance(case, dict) else []
+                expected_absent_prefixes = case.get("expected_absent_prefixes", []) if isinstance(case, dict) else []
+                codes = [group.code for group in validation.conflict_report]
+                case_ok = True
+                if isinstance(expected_prefixes, list):
+                    for prefix in expected_prefixes:
+                        if not any(code.startswith(str(prefix)) for code in codes):
+                            case_ok = False
+                            break
+                if case_ok and isinstance(expected_absent_prefixes, list):
+                    for prefix in expected_absent_prefixes:
+                        if any(code.startswith(str(prefix)) for code in codes):
+                            case_ok = False
+                            break
+                if case_ok:
+                    family_pass_fail[family]["pass"] += 1
+                else:
+                    family_pass_fail[family]["fail"] += 1
+
+            expected_family_case_counts = pack.get("expected_family_case_counts", {})
+            self.assertIsInstance(expected_family_case_counts, dict)
+            self.assertEqual(
+                observed_family_case_counts,
+                {str(k): int(v) for k, v in expected_family_case_counts.items()},
+                f"{pack_id}: family case counts changed",
+            )
+            for family, stats in family_pass_fail.items():
+                self.assertEqual(stats["fail"], 0, f"{pack_id}: family {family} has failing parity expectations")
+                self.assertGreater(stats["pass"], 0, f"{pack_id}: family {family} has zero passing cases")
+
+            summary = summarize_validation_conflicts(validations)
+            summary_codes = [group.code for group in summary]
+            required_prefixes = pack.get("required_summary_code_prefixes", [])
+            self.assertIsInstance(required_prefixes, list)
+            for prefix in required_prefixes:
+                self.assertTrue(
+                    any(code.startswith(str(prefix)) for code in summary_codes),
+                    f"{pack_id}: missing required prefix {prefix!r}",
+                )
 
 
 class TestBatchConflictSummaries(unittest.TestCase):
@@ -3121,6 +3233,7 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertTrue(str(opts.env_mask_texture_path).lower().endswith("_m.dds"))
         self.assertIn("set_slot4_cubemap_for_missing_envmap_slots4_5", steps)
         self.assertIn("set_slot5_env_mask_for_missing_envmap_slots4_5", steps)
+        self.assertNotIn("disable_env_mapping_for_missing_slots4_5", steps)
         self.assertFalse(opts.disable_env_mapping)
 
     def test_auto_remediation_build_options_disables_env_mapping_for_missing_envmap_slots_without_guesses(self) -> None:
@@ -3160,6 +3273,7 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         assert opts is not None
         self.assertTrue(str(opts.cubemap_texture_path).lower().endswith("_e.dds"))
         self.assertIn("set_slot4_cubemap_for_missing_envmap_slot4", steps)
+        self.assertNotIn("disable_env_mapping_for_missing_slot4", steps)
 
     def test_auto_remediation_build_options_disables_env_mapping_for_missing_envmap_slot4_without_guess(self) -> None:
         paths = [""] * 9
@@ -3187,6 +3301,7 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         assert opts is not None
         self.assertTrue(str(opts.env_mask_texture_path).lower().endswith("_m.dds"))
         self.assertIn("set_slot5_env_mask_for_missing_envmap_slot5", steps)
+        self.assertNotIn("disable_env_mapping_for_missing_slot5", steps)
 
     def test_auto_remediation_build_options_disables_env_mapping_and_pom_for_mixed_envmap_pom_conflict(self) -> None:
         nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP)

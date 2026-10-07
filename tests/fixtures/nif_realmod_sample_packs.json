@@ -1,0 +1,232 @@
+{
+  "packs": [
+    {
+      "id": "skyrim_realmod_family_pack",
+      "expected_family_case_counts": {
+        "architecture": 2,
+        "clutter": 1,
+        "armor": 1,
+        "landscape": 1,
+        "foliage": 1,
+        "effects": 1
+      },
+      "required_summary_code_prefixes": [
+        "path_slot_parallax.matches_diffuse.skyrim.",
+        "shader_state.envmap_missing_slots4_5.skyrim.",
+        "shader_state.envmap_missing_slot4.skyrim.",
+        "shader_state.envmap_missing_slot5.skyrim.",
+        "path_slot_env_mask.generic_alias_suffix.skyrim.",
+        "path_slot_cubemap.wrong_suffix.skyrim.",
+        "path_slot_glow.wrong_suffix.skyrim."
+      ],
+      "cases": [
+        {
+          "id": "pack_skyrim_architecture_parallax_diffuse_reuse",
+          "family": "architecture",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "texture_paths": [
+            "textures\\architecture\\stonewall.dds",
+            "",
+            "",
+            "textures\\architecture\\stonewall.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "path_slot_parallax.matches_diffuse.skyrim."
+          ]
+        },
+        {
+          "id": "pack_skyrim_architecture_multishader_envmap",
+          "family": "architecture",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "texture_paths": [
+            "textures\\architecture\\column.dds",
+            "",
+            "",
+            "textures\\architecture\\column.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 1,
+              "flags1": 128
+            }
+          ],
+          "expected_prefixes": [
+            "path_slot_parallax.matches_diffuse.skyrim.",
+            "shader_state.envmap_missing_slots4_5.skyrim."
+          ]
+        },
+        {
+          "id": "pack_skyrim_clutter_envmap_slot4_missing",
+          "family": "clutter",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_paths": [
+            "textures\\clutter\\barrel\\barrel01.dds",
+            "",
+            "",
+            "",
+            "",
+            "textures\\clutter\\barrel\\barrel01_m.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_missing_slot4.skyrim."
+          ]
+        },
+        {
+          "id": "pack_skyrim_armor_envmap_slot5_missing",
+          "family": "armor",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_paths": [
+            "textures\\armor\\iron\\ironarmor.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\armor_e.dds",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_missing_slot5.skyrim."
+          ]
+        },
+        {
+          "id": "pack_skyrim_landscape_envmask_alias",
+          "family": "landscape",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "texture_paths": [
+            "textures\\landscape\\rocks\\rock01.dds",
+            "",
+            "",
+            "",
+            "",
+            "textures\\landscape\\rocks\\rock01_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "path_slot_env_mask.generic_alias_suffix.skyrim."
+          ]
+        },
+        {
+          "id": "pack_skyrim_foliage_env_slot4_wrong_suffix",
+          "family": "foliage",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "texture_paths": [
+            "textures\\plants\\tree\\treepine.dds",
+            "",
+            "",
+            "",
+            "textures\\plants\\tree\\treepine_n.dds",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "path_slot_cubemap.wrong_suffix.skyrim."
+          ]
+        },
+        {
+          "id": "pack_skyrim_effects_glow_wrong_suffix",
+          "family": "effects",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "texture_paths": [
+            "textures\\effects\\fxmist.dds",
+            "",
+            "textures\\effects\\fxmist_n.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "path_slot_glow.wrong_suffix.skyrim."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fallout_guarded_family_pack",
+      "expected_family_case_counts": {
+        "architecture": 1,
+        "effects": 1
+      },
+      "required_summary_code_prefixes": [
+        "shader_state.envmap_missing_slots4_5.fallout.",
+        "flag_env_mapping.slot5_filled_without_flag.fallout."
+      ],
+      "cases": [
+        {
+          "id": "pack_fallout_architecture_envmap_missing_slots",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "legacy",
+          "user_version": 11,
+          "user_ver2": 130,
+          "shader_type": 1,
+          "flags1": 128,
+          "expected_prefixes": [
+            "shader_state.envmap_missing_slots4_5.fallout."
+          ]
+        },
+        {
+          "id": "pack_fallout_effects_env_slot5_without_flag",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "legacy",
+          "user_version": 11,
+          "user_ver2": 130,
+          "texture_paths": [
+            "textures\\effects\\fxsmoke.dds",
+            "",
+            "",
+            "",
+            "",
+            "textures\\effects\\fxsmoke_m.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "flag_env_mapping.slot5_filled_without_flag.fallout."
+          ]
+        }
+      ]
+    }
+  ]
+}
