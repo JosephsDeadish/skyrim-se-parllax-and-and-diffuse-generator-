@@ -235,15 +235,149 @@ def _build_realmod_family_trend_snapshot() -> dict[str, object]:
     }
 
 
+def _build_parity_matrix_feature_report() -> dict[str, object]:
+    from nif_patcher import (
+        build_auto_remediation_patch_options,
+        validate_nif_for_parallax,
+    )
+    from tests.test_nif_patcher import (
+        _FIXTURE_PARITY_SAMPLE_MATRIX,
+        _load_fixture_corpus_payload,
+        _materialize_fixture_corpus,
+    )
+
+    payload = _load_fixture_corpus_payload(_FIXTURE_PARITY_SAMPLE_MATRIX)
+    cases = payload.get("cases", [])
+    if not isinstance(cases, list):
+        cases = []
+    case_rows: list[dict[str, object]] = []
+
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        corpus = _materialize_fixture_corpus(temp_root, payload)
+        validations = [validate_nif_for_parallax(path) for path in corpus]
+
+        for case, validation in zip(cases, validations):
+            if not isinstance(case, dict):
+                continue
+            code_rows = [group.code for group in validation.conflict_report]
+            base_families = sorted({_conflict_base_code(code) for code in code_rows})
+            _, rem_steps_tuple = build_auto_remediation_patch_options(
+                validation.nif_path,
+                code_rows,
+                backup=False,
+            )
+            rem_steps = [str(step) for step in rem_steps_tuple]
+            expected_steps = [str(step) for step in case.get("expected_remediation_steps", []) if str(step).strip()]
+            expected_absent_steps = [
+                str(step) for step in case.get("expected_absent_remediation_steps", []) if str(step).strip()
+            ]
+            missing_expected_steps = [step for step in expected_steps if step not in rem_steps]
+            unexpected_present_steps = [step for step in expected_absent_steps if step in rem_steps]
+
+            has_rebuild_steps = any(step.startswith("set_slot") for step in rem_steps)
+            has_disable_steps = any(step.startswith("disable_") or step.startswith("clear_") for step in rem_steps)
+            has_enable_steps = any(step.startswith("enable_") for step in rem_steps)
+            if has_rebuild_steps and has_disable_steps:
+                remediation_mode = "mixed_rebuild_and_disable"
+            elif has_rebuild_steps:
+                remediation_mode = "rebuild"
+            elif has_disable_steps:
+                remediation_mode = "disable"
+            elif has_enable_steps:
+                remediation_mode = "enable_or_flag_only"
+            else:
+                remediation_mode = "manual_or_noop"
+
+            case_rows.append(
+                {
+                    "case_id": str(case.get("id", validation.nif_path.stem)),
+                    "profile": str(case.get("profile", "")),
+                    "shader_layout": str(case.get("shader_layout", "")),
+                    "detected_conflict_families": base_families,
+                    "detected_conflict_codes": code_rows,
+                    "remediation_steps": rem_steps,
+                    "remediation_mode": remediation_mode,
+                    "fallback_used": bool(has_disable_steps),
+                    "expected_remediation_steps": expected_steps,
+                    "expected_absent_remediation_steps": expected_absent_steps,
+                    "missing_expected_remediation_steps": missing_expected_steps,
+                    "unexpected_present_remediation_steps": unexpected_present_steps,
+                    "pgpatcher_strategy": str(case.get("pgpatcher_strategy", "") or ""),
+                    "local_strategy": str(case.get("local_strategy", "") or ""),
+                    "intentional_strategy_difference": bool(case.get("intentional_strategy_difference", False)),
+                    "safety_difference_note": str(case.get("safety_difference_note", "") or ""),
+                }
+            )
+
+    mode_counts: dict[str, int] = {}
+    fallback_count = 0
+    for row in case_rows:
+        mode = str(row.get("remediation_mode", "manual_or_noop"))
+        mode_counts[mode] = int(mode_counts.get(mode, 0)) + 1
+        if bool(row.get("fallback_used", False)):
+            fallback_count += 1
+
+    return {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "case_count": len(case_rows),
+        "fallback_case_count": fallback_count,
+        "remediation_mode_counts": dict(sorted(mode_counts.items())),
+        "cases": case_rows,
+    }
+
+
+def _render_parity_feature_report_markdown(report: dict[str, object]) -> str:
+    rows = report.get("cases", [])
+    lines = [
+        "# NIF parity feature report",
+        "",
+        f"- Generated: {report.get('generated_at_utc', '')}",
+        f"- Cases: {report.get('case_count', 0)}",
+        f"- Cases using disable/clear fallback: {report.get('fallback_case_count', 0)}",
+        "",
+        "| Case | Profile/layout | Detected family count | Remediation mode | Fallback used | Intentional strategy diff |",
+        "| --- | --- | ---: | --- | --- | --- |",
+    ]
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            case_id = str(row.get("case_id", "")).replace("|", "\\|")
+            profile_layout = f"{row.get('profile', '?')}/{row.get('shader_layout', '?')}".replace("|", "\\|")
+            family_count = len(row.get("detected_conflict_families", [])) if isinstance(
+                row.get("detected_conflict_families"), list
+            ) else 0
+            mode = str(row.get("remediation_mode", "manual_or_noop")).replace("|", "\\|")
+            fallback = "yes" if bool(row.get("fallback_used", False)) else "no"
+            strategy_diff = "yes" if bool(row.get("intentional_strategy_difference", False)) else "no"
+            lines.append(
+                f"| `{case_id}` | `{profile_layout}` | {family_count} | `{mode}` | {fallback} | {strategy_diff} |"
+            )
+    lines.extend(
+        [
+            "",
+            "Use the JSON artifact for full per-case details (detected families/codes, remediation steps, expected-step deltas, and safety-difference notes).",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _write_release_artifacts(
     *,
     artifact_dir: Path,
     step_status: list[tuple[str, str]],
     trend_snapshot: dict[str, object],
-) -> tuple[Path, Path]:
+    parity_report: dict[str, object],
+) -> tuple[Path, Path, Path, Path]:
     artifact_dir.mkdir(parents=True, exist_ok=True)
     trend_path = artifact_dir / "nif_family_trend_snapshot.json"
     trend_path.write_text(json.dumps(trend_snapshot, indent=2, sort_keys=True), encoding="utf-8")
+    parity_json_path = artifact_dir / "nif_parity_feature_report.json"
+    parity_json_path.write_text(json.dumps(parity_report, indent=2, sort_keys=True), encoding="utf-8")
+    parity_md_path = artifact_dir / "nif_parity_feature_report.md"
+    parity_md_path.write_text(_render_parity_feature_report_markdown(parity_report), encoding="utf-8")
 
     checklist_path = artifact_dir / "release_checklist.md"
     lines = [
@@ -261,6 +395,11 @@ def _write_release_artifacts(
             "## NIF real-sample family trend snapshot",
             "",
             f"- Snapshot JSON: `{trend_path.name}`",
+            "",
+            "## NIF parity feature report snapshot",
+            "",
+            f"- Parity JSON: `{parity_json_path.name}`",
+            f"- Parity markdown: `{parity_md_path.name}`",
         ]
     )
     for pack in trend_snapshot.get("packs", []):
@@ -277,7 +416,7 @@ def _write_release_artifacts(
                 f"  - {family.get('family')}: pass {family.get('pass_count', 0)}/{family.get('case_count', 0)}, fail {family.get('fail_count', 0)}"
             )
     checklist_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return checklist_path, trend_path
+    return checklist_path, trend_path, parity_json_path, parity_md_path
 
 
 def _load_history_rows(history_file: Path) -> list[dict[str, object]]:
@@ -393,10 +532,12 @@ def main() -> int:
         _run_packaging_smoke(args.artifact_dir)
         step_status.append(("Packaging smoke build", "pass"))
     trend_snapshot = _build_realmod_family_trend_snapshot()
-    checklist_path, trend_path = _write_release_artifacts(
+    parity_report = _build_parity_matrix_feature_report()
+    checklist_path, trend_path, parity_json_path, parity_md_path = _write_release_artifacts(
         artifact_dir=args.artifact_dir,
         step_status=step_status,
         trend_snapshot=trend_snapshot,
+        parity_report=parity_report,
     )
     history_path = None
     if args.history_file is not None:
@@ -407,6 +548,8 @@ def main() -> int:
         )
     print(f"\nRelease checklist artifact: {checklist_path}")
     print(f"NIF trend snapshot artifact: {trend_path}")
+    print(f"NIF parity feature report JSON artifact: {parity_json_path}")
+    print(f"NIF parity feature report markdown artifact: {parity_md_path}")
     if history_path is not None:
         print(f"NIF trend history artifact: {history_path}")
     print("\nPre-release validation passed.")

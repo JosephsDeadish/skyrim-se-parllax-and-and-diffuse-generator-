@@ -3,8 +3,8 @@
     {
       "id": "skyrim_realmod_family_pack",
       "expected_family_case_counts": {
-        "architecture": 4,
-        "clutter": 1,
+        "architecture": 5,
+        "clutter": 2,
         "armor": 1,
         "landscape": 1,
         "foliage": 1,
@@ -286,6 +286,50 @@
           "expected_prefixes": [
             "shader_state.envmap_missing_slot5.skyrim.real",
             "path_slot_glow.wrong_suffix.skyrim.real"
+          ]
+        },
+        {
+          "id": "pack_skyrim_architecture_le_u16_envmask_alias",
+          "family": "architecture",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 34,
+          "texture_set_count_u16": true,
+          "texture_paths": [
+            "textures\\architecture\\farmhouse\\wood.dds",
+            "",
+            "",
+            "",
+            "",
+            "textures\\architecture\\farmhouse\\wood_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "path_slot_env_mask.generic_alias_suffix.skyrim."
+          ]
+        },
+        {
+          "id": "pack_skyrim_clutter_vr_crlf_parallax_normal_reuse",
+          "family": "clutter",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 100,
+          "header_line_ending": "crlf",
+          "texture_paths": [
+            "textures\\clutter\\urn\\urn01.dds",
+            "textures\\clutter\\urn\\urn01_n.dds",
+            "",
+            "textures\\clutter\\urn\\urn01_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "path_slot_parallax.matches_normal.skyrim."
           ]
         }
       ]

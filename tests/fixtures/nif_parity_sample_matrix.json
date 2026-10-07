@@ -24,6 +24,10 @@
         "set_slot5_env_mask_for_missing_envmap_slots4_5",
         "enable_env_mapping_for_missing_envmap_slots4_5"
       ],
+      "pgpatcher_strategy": "rebuild_env_slots_or_disable",
+      "local_strategy": "rebuild_env_slots_when_guessable_else_disable",
+      "intentional_strategy_difference": true,
+      "safety_difference_note": "Safety-first fallback disables environment mapping when slot-4/slot-5 paths cannot be safely guessed.",
       "expected_absent_remediation_steps": [
         "disable_env_mapping_for_missing_slots4_5"
       ]
@@ -51,7 +55,11 @@
       ],
       "expected_remediation_steps": [
         "set_slot5_env_mask_for_missing_envmap_slot5"
-      ]
+      ],
+      "pgpatcher_strategy": "rebuild_slot5_when_possible",
+      "local_strategy": "rebuild_slot5_when_guessable_else_disable",
+      "intentional_strategy_difference": true,
+      "safety_difference_note": "If no reliable slot-5 guess exists, local strategy disables env mapping to avoid invalid reflective states."
     },
     {
       "id": "parity_skyrim_parallax_envmap_glow_unresolved",
@@ -428,7 +436,11 @@
       ,
       "expected_absent_remediation_steps": [
         "disable_env_mapping_for_missing_slot5"
-      ]
+      ],
+      "pgpatcher_strategy": "fallout_env_slot_rebuild",
+      "local_strategy": "guarded_rebuild_then_disable",
+      "intentional_strategy_difference": true,
+      "safety_difference_note": "Guarded Fallout mode prioritizes non-destructive slot restoration and only disables mapping as a safe fallback."
     },
     {
       "id": "parity_fallout_real_multiblock_envmap_slot4_and_parallax_diffuse",
