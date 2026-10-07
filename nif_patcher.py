@@ -1199,7 +1199,7 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
         profile = _detect_game_profile(user_version, user_version_2)
         if profile == _GAME_PROFILE_FALLOUT:
             diagnostics.append(
-                "Detected user_version=11 (likely Fallout-era NIF header). "
+                f"Detected Fallout-era NIF header (user_version={user_version}, user_version_2={user_version_2}). "
                 "Fallout patching is available in guarded experimental mode."
             )
             diagnostics.append(
@@ -2231,8 +2231,6 @@ def _classify_shader_type_resolution(resolution: str) -> ShaderTypeResolutionRes
         "texture_slot_cubemap",
     }:
         return ShaderTypeResolutionResult(RESOLUTION_WEAK, 0.65, "heuristic")
-    if resolution in {"fallback_default", "default_fallback", "unknown", "real_payload_default_fallback"}:
-        return ShaderTypeResolutionResult(RESOLUTION_UNRESOLVED, 0.0, "fallback")
     return ShaderTypeResolutionResult(RESOLUTION_UNRESOLVED, 0.0, "fallback")
 
 
@@ -2619,8 +2617,6 @@ def _apply_patches(
     for sp in shader_props:
         new_flags1 = sp.flags1
         new_flags2 = sp.flags2
-        shader_type_changed = False
-
         # ---- Determine whether parallax is safe to enable on this block ----
         enabling_parallax = _should_enable_parallax_on_shader(
             sp,
@@ -2658,7 +2654,7 @@ def _apply_patches(
             new_flags2 &= ~SLSF2_UNUSED01
 
         flags_changed = (new_flags1 != sp.flags1) or (new_flags2 != sp.flags2)
-        if flags_changed or shader_type_changed:
+        if flags_changed:
             buf.write_u32_at(sp.flags1_offset, new_flags1)
             buf.write_u32_at(sp.flags2_offset, new_flags2)
             props_patched += 1
@@ -2873,10 +2869,9 @@ def _summarize_binary_diff(
                 start = idx
             end = idx
         elif start is not None:
-            changed_ranges.append((start, end))
+            if len(changed_ranges) < max_ranges:
+                changed_ranges.append((start, end))
             start = None
-            if len(changed_ranges) >= max_ranges:
-                break
     if start is not None and len(changed_ranges) < max_ranges:
         changed_ranges.append((start, end))
     if len(original_data) != len(new_data):
@@ -2913,7 +2908,7 @@ def _validate_patched_bytes_before_write(
             unknown_shader_type_map,
             allow_num_extra_fallback=False,
         )
-    except Exception as exc:  # noqa: BLE001
+    except (ValueError, struct.error, IndexError, RuntimeError) as exc:
         errors.append(f"Pre-write block-map validation failed: {exc}")
         return errors
     if not shader_props and parse_errors:
@@ -2924,7 +2919,7 @@ def _validate_patched_bytes_before_write(
                 unknown_shader_type_map,
                 allow_num_extra_fallback=True,
             )
-        except Exception as exc:  # noqa: BLE001
+        except (ValueError, struct.error, IndexError, RuntimeError) as exc:
             errors.append(f"Pre-write tolerant block-map validation failed: {exc}")
             return errors
         if fallback_shader_props and not fallback_parse_errors:
@@ -3168,22 +3163,8 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         if opts.force_shader_type_3 and effective_parallax and _is_retryable_force_type3_error(exc):
             try:
                 fallback_opts = replace(opts, force_shader_type_3=False)
-                fallback_shader_props, fallback_texture_sets, fallback_parse_errors = _build_block_map(
-                    original_data,
-                    header,
-                    fallback_opts.unknown_shader_type_map,
-                    allow_num_extra_fallback=True,
-                )
-                if not fallback_shader_props:
-                    if fallback_parse_errors:
-                        result.errors.extend(fallback_parse_errors)
-                    if fallback_parse_errors:
-                        result.message = f"No patchable BSLightingShaderProperty blocks found ({fallback_parse_errors[0]})."
-                    else:
-                        result.message = "No BSLightingShaderProperty blocks found — nothing to patch."
-                    return result
                 new_data, props_patched, sets_patched, upgraded = _apply_patches(
-                    original_data, header, fallback_shader_props, fallback_texture_sets, fallback_opts
+                    original_data, header, shader_props, texture_sets, fallback_opts
                 )
                 result.warnings.append(
                     "Skipped shader type-3 block expansion due to layout mismatch; "
@@ -3271,7 +3252,10 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
     return result
 
 
-def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]]:
+def scan_nif_diagnostics(
+    nif_path: Path,
+    mapping_table: dict[int, int] | None = None,
+) -> tuple[list[NifShaderInfo], list[str]]:
     """Return ``(shader_infos, diagnostics)`` for every shader block in the NIF."""
     diagnostics: list[str] = []
     try:
@@ -3295,7 +3279,23 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
         diagnostics.append(
             "Detected Fallout-era profile. Patch-write support is experimental; keep backups and verify in-game."
         )
-    shader_props, texture_sets, parse_errors = _build_block_map(data, header)
+    shader_props, texture_sets, parse_errors = _build_block_map(data, header, mapping_table)
+    if not shader_props and parse_errors:
+        fallback_shader_props, fallback_texture_sets, fallback_parse_errors = _build_block_map(
+            data,
+            header,
+            mapping_table,
+            allow_num_extra_fallback=True,
+        )
+        if fallback_shader_props:
+            shader_props, texture_sets, parse_errors = (
+                fallback_shader_props,
+                fallback_texture_sets,
+                fallback_parse_errors,
+            )
+            diagnostics.append(
+                "Recovered shader-block scan using tolerant num_extra parsing for malformed NiObjectNET extra-data counts."
+            )
     diagnostics.extend(parse_errors)
     diagnostics.extend(_shader_resolution_notes(shader_props))
     if not shader_props:
@@ -3334,9 +3334,12 @@ def scan_nif_diagnostics(nif_path: Path) -> tuple[list[NifShaderInfo], list[str]
     return results, diagnostics
 
 
-def scan_nif(nif_path: Path) -> list[NifShaderInfo]:
+def scan_nif(
+    nif_path: Path,
+    mapping_table: dict[int, int] | None = None,
+) -> list[NifShaderInfo]:
     """Return a list of :class:`NifShaderInfo` for every shader block in the NIF."""
-    infos, _diagnostics = scan_nif_diagnostics(nif_path)
+    infos, _diagnostics = scan_nif_diagnostics(nif_path, mapping_table)
     return infos
 
 
@@ -3707,8 +3710,6 @@ def _classify_conflict_code(message: str) -> str:
         return "path_slot_cubemap"
     if "slot 5 " in lowered:
         return "path_slot_env_mask"
-    if "slot " in lowered or "path '" in lowered:
-        return "fallback_or_unknown"
     return "fallback_or_unknown"
 
 
@@ -3866,9 +3867,13 @@ def summarize_plugin_aware_validation_conflicts(
 ) -> list[NifPluginAwareConflictSummary]:
     """Aggregate conflicts with optional plugin/record linkage by mesh path."""
     plugin_context = plugin_context or {}
+
+    def _normalize_nif_path_key(path: Path | str) -> str:
+        return str(Path(path).resolve()).lower()
+
     grouped: dict[str, dict[str, object]] = {}
     for validation in validations:
-        file_key = str(validation.nif_path).lower()
+        file_key = _normalize_nif_path_key(validation.nif_path)
         refs = plugin_context.get(file_key, [])
         report = getattr(validation, "conflict_report", None) or []
         seen_codes_for_file: set[str] = set()
@@ -4005,11 +4010,18 @@ def build_auto_remediation_patch_options(
     guessed_normal = guess_normal_path_for_nif(nif_path)
     guessed_glow = guess_glow_path_for_nif(nif_path)
     guessed_env = guess_env_mask_path_for_nif(nif_path)
+    guessed_cubemap = guess_cubemap_path_for_nif(nif_path)
+    has_non_heightmap_pom_conflict = any(
+        code.startswith("flag_pom.non_heightmap_shader") for code in base_codes
+    )
 
     if any(code.startswith("missing_parallax_flag") for code in base_codes):
         opts.enable_parallax = True
         applied_steps.append("enable_parallax")
-    if any(code.startswith("flag_pom.without_base_parallax") for code in base_codes):
+    if (
+        any(code.startswith("flag_pom.without_base_parallax") for code in base_codes)
+        and not has_non_heightmap_pom_conflict
+    ):
         opts.enable_parallax = True
         applied_steps.append("enable_parallax_for_pom")
     if any(code.startswith("flag_env_mapping.slot5_filled_without_flag") for code in base_codes):
@@ -4034,12 +4046,19 @@ def build_auto_remediation_patch_options(
         if guessed_env:
             opts.env_mask_texture_path = guessed_env
             applied_steps.append("set_slot5_env_mask")
-    if any(code.startswith("path_slot_cubemap") for code in base_codes) and allow_destructive:
-        opts.clear_cubemap_texture_path = True
-        applied_steps.append("clear_slot4_cubemap")
+    if any(code.startswith("path_slot_cubemap") for code in base_codes):
+        if guessed_cubemap:
+            opts.cubemap_texture_path = guessed_cubemap
+            applied_steps.append("set_slot4_cubemap")
+        elif allow_destructive:
+            opts.clear_cubemap_texture_path = True
+            applied_steps.append("clear_slot4_cubemap")
     if any(code.startswith("path_slot_diffuse") for code in base_codes) and allow_destructive:
         opts.clear_diffuse_texture_path = True
         applied_steps.append("clear_slot0_diffuse")
+    if has_non_heightmap_pom_conflict:
+        opts.disable_pom = True
+        applied_steps.append("disable_pom_for_non_heightmap_shader")
 
     if not applied_steps:
         return None, (
@@ -4092,6 +4111,7 @@ def validate_nif_for_parallax(
     nif_path: Path,
     *,
     skip_single_pass: bool = True,
+    unknown_shader_type_map: dict[int, int] | None = None,
 ) -> NifValidationResult:
     """Check whether a NIF is ready for parallax, and suggest fixes.
 
@@ -4119,7 +4139,10 @@ def validate_nif_for_parallax(
     result.detected_game_profile = _detect_game_profile_from_bytes(raw)
     result.has_havok = b"BSBehaviorGraphExtraData" in raw
 
-    infos, diagnostics = scan_nif_diagnostics(nif_path)
+    infos, diagnostics = scan_nif_diagnostics(
+        nif_path,
+        mapping_table=unknown_shader_type_map,
+    )
     guessed_parallax = guess_parallax_path_for_nif(nif_path)
 
     def _append_unique(items: list[str], message: str) -> None:
@@ -5028,6 +5051,9 @@ def _main() -> None:  # pragma: no cover
             )
             sys.exit(1)
 
+    if not args.compatibility_report and not args.nif:
+        parser.error("the following arguments are required: nif")
+
     # Parse --unknown-shader-type-map
     parsed_shader_map: dict[int, int] | None = None
     if args.unknown_shader_type_map is not None:
@@ -5075,13 +5101,16 @@ def _main() -> None:  # pragma: no cover
                 file=sys.stderr,
             )
             sys.exit(1)
+    elif args.plugin_conflict_context is not None and not args.conflict_report_summary:
+        print(
+            "Error: --plugin-conflict-context requires --conflict-report-summary when used with --validate.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     if args.compatibility_report:
         print(build_compatibility_report_text())
         return
-
-    if not args.nif:
-        parser.error("the following arguments are required: nif")
 
     nif_files: list[Path] = []
     for p in args.nif:
@@ -5121,9 +5150,11 @@ def _main() -> None:  # pragma: no cover
                             )
                         elif isinstance(ref, str):
                             parsed_refs.append(NifPluginConflictRef(plugin_name=ref.strip()))
-                    plugin_context[str(Path(nif_key)).lower()] = [r for r in parsed_refs if r.plugin_name]
+                    plugin_context[str(Path(nif_key).resolve()).lower()] = [
+                        r for r in parsed_refs if r.plugin_name
+                    ]
         for nif in nif_files:
-            v = validate_nif_for_parallax(nif)
+            v = validate_nif_for_parallax(nif, unknown_shader_type_map=parsed_shader_map)
             validation_results.append(v)
             status = "READY" if v.ready_count == v.shader_count else "NEEDS PATCH"
             print(f"[{status}] {nif.name}: "
@@ -5181,7 +5212,10 @@ def _main() -> None:  # pragma: no cover
                     for err in rem_result.errors:
                         print(f"       {err}", file=sys.stderr)
                     if rem_result.success and not args.dry_run:
-                        validation_results[-1] = validate_nif_for_parallax(nif)
+                        validation_results[-1] = validate_nif_for_parallax(
+                            nif,
+                            unknown_shader_type_map=parsed_shader_map,
+                        )
         if args.conflict_report_summary:
             summary = summarize_validation_conflicts(validation_results)
             if summary:

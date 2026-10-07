@@ -2675,6 +2675,48 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         assert opts is not None
         self.assertFalse(opts.skip_single_pass)
 
+    def test_auto_remediation_build_options_disables_pom_for_non_heightmap_conflict(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["flag_pom.non_heightmap_shader.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(opts.disable_pom)
+        self.assertIn("disable_pom_for_non_heightmap_shader", steps)
+
+    def test_auto_remediation_skips_enable_parallax_when_disabling_non_heightmap_pom(self) -> None:
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            [
+                "flag_pom.without_base_parallax.skyrim.legacy",
+                "flag_pom.non_heightmap_shader.skyrim.legacy",
+            ],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertFalse(opts.enable_parallax)
+        self.assertTrue(opts.disable_pom)
+        self.assertNotIn("enable_parallax_for_pom", steps)
+        self.assertIn("disable_pom_for_non_heightmap_shader", steps)
+
+    def test_auto_remediation_build_options_sets_cubemap_slot_when_guess_available(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["path_slot_cubemap.wrong_suffix.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(str(opts.cubemap_texture_path).lower().endswith("_e.dds"))
+        self.assertIn("set_slot4_cubemap", steps)
+
 
 class TestCompatibilityReport(unittest.TestCase):
     def test_game_profile_support_matrix_has_expected_profiles(self) -> None:

@@ -458,10 +458,10 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(normalized["env_mask_mode"]), "standard")
         self.assertEqual(str(normalized["parallax_mode"]), "occlusion (ENB/POM)")
         self.assertEqual(str(normalized["render_profile"]), "custom")
-        self.assertAlmostEqual(float(normalized["normal_strength"]), 8.0)
+        self.assertAlmostEqual(float(normalized["normal_strength"]), 12.0)
         self.assertAlmostEqual(float(normalized["parallax_strength"]), 0.1)
         self.assertEqual(int(normalized["glow_threshold"]), 255)
-        self.assertAlmostEqual(float(normalized["environment_mask_strength"]), 8.0)
+        self.assertAlmostEqual(float(normalized["environment_mask_strength"]), 12.0)
         self.assertAlmostEqual(float(normalized["complex_strength"]), 0.1)
         self.assertAlmostEqual(float(normalized["specular_strength"]), 0.1)
 
@@ -5208,7 +5208,7 @@ class ParallaxOcclusionTests(unittest.TestCase):
     def test_generate_parallax_occlusion_strength_slider_has_stronger_min_max_separation(self) -> None:
         source = _detailed_bright_image()
         low = generate_parallax_occlusion(source, strength=0.2)
-        high = generate_parallax_occlusion(source, strength=6.0)
+        high = generate_parallax_occlusion(source, strength=10.0)
         low_range = low.getextrema()[1] - low.getextrema()[0]
         high_range = high.getextrema()[1] - high.getextrema()[0]
         self.assertGreater(high_range, low_range + 18)
@@ -5216,7 +5216,7 @@ class ParallaxOcclusionTests(unittest.TestCase):
     def test_map_parallax_strength_to_nif_scale_boosts_in_game_depth(self) -> None:
         self.assertAlmostEqual(float(_map_parallax_strength_to_nif_scale(0.1) or 0.0), 0.34, places=2)
         self.assertGreater(float(_map_parallax_strength_to_nif_scale(1.35) or 0.0), 2.0)
-        self.assertAlmostEqual(float(_map_parallax_strength_to_nif_scale(6.0) or 0.0), 10.0, places=3)
+        self.assertAlmostEqual(float(_map_parallax_strength_to_nif_scale(10.0) or 0.0), 10.0, places=3)
 
     def test_parallax_occlusion_flat_input_returns_mid_gray(self) -> None:
         flat = Image.new("RGB", (16, 16), color=(128, 128, 128))

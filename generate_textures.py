@@ -510,27 +510,27 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     else:
         state["render_profile"] = str(_GUI_STATE_DEFAULTS["render_profile"])
     state["target_game"] = _normalize_texture_target_game(str(raw.get("target_game", state["target_game"]) or state["target_game"]))
-    state["normal_strength"] = _coerce_float(raw.get("normal_strength"), float(state["normal_strength"]), 0.1, 8.0)
-    state["parallax_strength"] = _coerce_float(raw.get("parallax_strength"), float(state["parallax_strength"]), 0.1, 6.0)
+    state["normal_strength"] = _coerce_float(raw.get("normal_strength"), float(state["normal_strength"]), 0.1, 12.0)
+    state["parallax_strength"] = _coerce_float(raw.get("parallax_strength"), float(state["parallax_strength"]), 0.1, 10.0)
     state["glow_threshold"] = _coerce_int(raw.get("glow_threshold"), int(state["glow_threshold"]), 0, 255)
     state["auto_patch_nifs"] = _coerce_bool(raw.get("auto_patch_nifs"), bool(state["auto_patch_nifs"]))
     state["environment_mask_strength"] = _coerce_float(
-        raw.get("environment_mask_strength"), float(state["environment_mask_strength"]), 0.1, 8.0
+        raw.get("environment_mask_strength"), float(state["environment_mask_strength"]), 0.1, 12.0
     )
     state["rmaos_strength"] = _coerce_float(
-        raw.get("rmaos_strength"), float(state["rmaos_strength"]), 0.1, 8.0
+        raw.get("rmaos_strength"), float(state["rmaos_strength"]), 0.1, 12.0
     )
-    state["complex_strength"] = _coerce_float(raw.get("complex_strength"), float(state["complex_strength"]), 0.1, 8.0)
-    state["specular_strength"] = _coerce_float(raw.get("specular_strength"), float(state["specular_strength"]), 0.1, 8.0)
+    state["complex_strength"] = _coerce_float(raw.get("complex_strength"), float(state["complex_strength"]), 0.1, 12.0)
+    state["specular_strength"] = _coerce_float(raw.get("specular_strength"), float(state["specular_strength"]), 0.1, 12.0)
     state["wetness_mask_strength"] = _coerce_float(
         raw.get("wetness_mask_strength"), float(state["wetness_mask_strength"]), 0.1, 3.0
     )
     state["snow_mask_strength"] = _coerce_float(
         raw.get("snow_mask_strength"), float(state["snow_mask_strength"]), 0.1, 3.0
     )
-    state["ao_strength"] = _coerce_float(raw.get("ao_strength"), float(state["ao_strength"]), 0.1, 8.0)
+    state["ao_strength"] = _coerce_float(raw.get("ao_strength"), float(state["ao_strength"]), 0.1, 12.0)
     state["roughness_strength"] = _coerce_float(
-        raw.get("roughness_strength"), float(state["roughness_strength"]), 0.1, 8.0
+        raw.get("roughness_strength"), float(state["roughness_strength"]), 0.1, 12.0
     )
     raw_dismissed = raw.get("dismissed_warnings", [])
     if isinstance(raw_dismissed, list):
@@ -3438,12 +3438,12 @@ def generate_parallax(source: Image.Image, strength: float = 1.35, relief_mode: 
         for a full bas-relief effect.
     """
     pressure = _detail_pressure(source)
-    normalized_strength = _clamp((float(strength) - 0.1) / (6.0 - 0.1), 0.0, 1.0)
+    normalized_strength = _clamp((float(strength) - 0.1) / (10.0 - 0.1), 0.0, 1.0)
     if relief_mode:
         height_map = _prepare_relief_height_map(source, pressure=pressure)
         smoothed = height_map.filter(ImageFilter.GaussianBlur(radius=0.9))
         contrasted = ImageEnhance.Contrast(smoothed).enhance(
-            _clamp((strength * 1.16) * (1.0 - (pressure * 0.08)), 0.1, 6.0)
+            _clamp((strength * 1.16) * (1.0 - (pressure * 0.08)), 0.1, 10.0)
         )
         normalized = ImageOps.autocontrast(contrasted, cutoff=1)
         depth_blend = _clamp(0.34 + (normalized_strength * 0.9), 0.34, 1.0)
@@ -3460,7 +3460,7 @@ def generate_parallax(source: Image.Image, strength: float = 1.35, relief_mode: 
         offset=128,
     )
     merged = ImageChops.add(softened, micro_detail, scale=1.35 - (pressure * 0.35), offset=int(-20 + (pressure * 10.0)))
-    contrasted = ImageEnhance.Contrast(merged).enhance(_clamp((strength * 1.08) * (1.0 - (pressure * 0.14)), 0.1, 6.0))
+    contrasted = ImageEnhance.Contrast(merged).enhance(_clamp((strength * 1.08) * (1.0 - (pressure * 0.14)), 0.1, 10.0))
     normalized = ImageOps.autocontrast(contrasted, cutoff=1)
     depth_blend = _clamp(0.2 + (normalized_strength * 0.9), 0.2, 1.0)
     tuned = Image.blend(Image.new("L", normalized.size, color=127), normalized, alpha=depth_blend)
@@ -3505,7 +3505,7 @@ def generate_parallax_occlusion(source: Image.Image, strength: float = 1.35, *, 
     base_height = _prepare_relief_height_map(source) if relief_mode else _prepare_height_map(source)
     pressure = _detail_pressure(source)
     resolution_scale = _clamp(math.sqrt((source.width * source.height) / (1024.0 * 1024.0)), 1.0, 2.6)
-    normalized_strength = _clamp((float(strength) - 0.1) / (6.0 - 0.1), 0.0, 1.0)
+    normalized_strength = _clamp((float(strength) - 0.1) / (10.0 - 0.1), 0.0, 1.0)
 
     # Multi-scale smoothing keeps large silhouette/macro gradients while reducing
     # high-frequency stair-stepping artefacts under ENB POM ray-marching.
@@ -3522,7 +3522,7 @@ def generate_parallax_occlusion(source: Image.Image, strength: float = 1.35, *, 
     # Contrast enhancement proportional to requested strength, clamped so that
     # extreme values do not produce depth artefacts at steep view angles.
     contrast_drive = strength * (1.04 if relief_mode else 0.98)
-    contrasted = ImageEnhance.Contrast(normalized).enhance(_clamp(contrast_drive * (0.98 - (pressure * 0.12)), 0.1, 6.0))
+    contrasted = ImageEnhance.Contrast(normalized).enhance(_clamp(contrast_drive * (0.98 - (pressure * 0.12)), 0.1, 10.0))
 
     # Final light smooth pass removes any residual pixel-edge artefacts.
     final = contrasted.filter(ImageFilter.GaussianBlur(radius=0.65 + (pressure * 0.35)))
@@ -3538,14 +3538,14 @@ def generate_parallax_occlusion(source: Image.Image, strength: float = 1.35, *, 
 
 
 def _map_parallax_strength_to_nif_scale(parallax_strength: float | None) -> float | None:
-    """Map GUI/CLI parallax strength (0.1–6.0) to NIF parallax_scale (0.1–10.0)."""
+    """Map GUI/CLI parallax strength (0.1–10.0) to NIF parallax_scale (0.1–10.0)."""
     if parallax_strength is None:
         return None
-    strength = _clamp(float(parallax_strength), 0.1, 6.0)
+    strength = _clamp(float(parallax_strength), 0.1, 10.0)
     if strength <= 1.0:
         mapped = 0.2 + (strength * 1.4)
     else:
-        mapped = 1.6 + ((strength - 1.0) * (8.4 / 5.0))
+        mapped = 1.6 + ((strength - 1.0) * (8.4 / 9.0))
     return _clamp(mapped, 0.1, 10.0)
 
 
@@ -7740,6 +7740,18 @@ if GUI_AVAILABLE:
             )
             _auto_sugg_check.grid(row=1, column=0, columnspan=5, sticky=tk.W, pady=(6, 2))
             self._add_tooltip(_auto_sugg_check, "🤖 Let the AI™ (actually just math) pick slider values.\nUncheck if you think YOU know better than the algorithm. Spoiler: maybe you do.")
+            show_advanced_generation_var = tk.BooleanVar(value=False)
+            _show_advanced_generation_check = ttk.Checkbutton(
+                options_frame,
+                text="Show advanced generation controls",
+                variable=show_advanced_generation_var,
+            )
+            _show_advanced_generation_check.grid(row=1, column=3, columnspan=2, sticky=tk.E, pady=(6, 2))
+            self._add_tooltip(
+                _show_advanced_generation_check,
+                "Enable to show advanced format/mode and extended strength controls.\n"
+                "Leave disabled for a cleaner preset-focused workflow.",
+            )
 
             _render_profile_label = ttk.Label(options_frame, text="Target renderer")
             _render_profile_label.grid(row=2, column=0, sticky=tk.W, pady=8)
@@ -7823,16 +7835,17 @@ if GUI_AVAILABLE:
             self.env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
             self.env_mask_mode_combo.bind("<<ComboboxSelected>>", self._on_env_mask_mode_changed)
             self._add_tooltip(self.env_mask_mode_combo, "🌍 'standard' = greyscale _m for vanilla-style reflection masks.\n'complex' = packed RGBA map data (ENB _m RGBA or renderer-specific packed paths).\nCS Extended Materials usually uses _cm/_c; TruePBR usually uses _rmaos/_ramos (+ JSON), not generic _orm/_mrao aliases.\nAlways match this with your selected Target renderer.")
-            ttk.Label(
+            _env_mode_hint_label = ttk.Label(
                 options_frame,
                 text="standard = vanilla Skyrim SE  |  complex = packed RGBA (renderer-specific channels)",
                 foreground="gray",
-            ).grid(row=3, column=4, sticky=tk.W, padx=(4, 0))
+            )
+            _env_mode_hint_label.grid(row=3, column=4, sticky=tk.W, padx=(4, 0))
 
             _normal_label = ttk.Label(options_frame, text="Normal strength")
             _normal_label.grid(row=4, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_normal_label, "💪 Controls normal-map intensity.\nHigher = sharper fake detail. Lower = smooth potato mode.")
-            self.normal_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.normal_strength_var, command=lambda _: self._on_slider_changed())
+            self.normal_scale = ttk.Scale(options_frame, from_=0.1, to=12.0, variable=self.normal_strength_var, command=lambda _: self._on_slider_changed())
             self.normal_scale.grid(row=4, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.normal_scale, "💪 Drag right for epic bumps, left for subtle detail.\nLive value is shown next to the slider so you can stop guessing.")
             self.normal_strength_display_label = ttk.Label(options_frame, textvariable=self.normal_strength_display_var)
@@ -7844,7 +7857,7 @@ if GUI_AVAILABLE:
             _parallax_label = ttk.Label(options_frame, text="Parallax strength")
             _parallax_label.grid(row=5, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_parallax_label, "🏔 Controls height-map (parallax/_p) depth contrast.\nSets the height data written to the _p texture.\nFor CS TruePBR the depth of the in-game effect is controlled by 'displacement_scale' in the JSON sidecar — this slider sets the source height strength, not the TruePBR displacement scale directly.")
-            self.parallax_scale = ttk.Scale(options_frame, from_=0.1, to=6.0, variable=self.parallax_strength_var, command=lambda _: self._on_slider_changed())
+            self.parallax_scale = ttk.Scale(options_frame, from_=0.1, to=10.0, variable=self.parallax_strength_var, command=lambda _: self._on_slider_changed())
             self.parallax_scale.grid(row=5, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.parallax_scale, "🏔 Slide right for deeper height data in the _p file, left for subtle relief.\nFor TruePBR, tune displacement_scale in the generated JSON sidecar to control in-game POM depth.\nYes, this can absolutely make stones look dramatic.")
             self.parallax_strength_display_label = ttk.Label(options_frame, textvariable=self.parallax_strength_display_var)
@@ -7868,7 +7881,7 @@ if GUI_AVAILABLE:
             _env_mask_label = ttk.Label(options_frame, text="Environment mask strength")
             _env_mask_label.grid(row=7, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_env_mask_label, "🪞 Controls environment-mask contrast.\nHigher = stronger shiny-vs-matte separation. Great for dramatic materials.")
-            self.environment_mask_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.environment_mask_strength_var, command=lambda _: self._on_slider_changed())
+            self.environment_mask_scale = ttk.Scale(options_frame, from_=0.1, to=12.0, variable=self.environment_mask_strength_var, command=lambda _: self._on_slider_changed())
             self.environment_mask_scale.grid(row=7, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.environment_mask_scale, "🪞 Slide right for stronger reflection contrast.\nSlide left for chill, less dramatic materials.")
             self.environment_mask_strength_display_label = ttk.Label(options_frame, textvariable=self.environment_mask_strength_display_var)
@@ -7880,7 +7893,7 @@ if GUI_AVAILABLE:
             _rmaos_label = ttk.Label(options_frame, text="RMAOS strength")
             _rmaos_label.grid(row=8, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_rmaos_label, "🧩 Controls TruePBR _rmaos channel contrast/intensity packing.\nNote: for CS TruePBR the 'parallax' flag (POM on/off) and 'displacement_scale' (POM depth) in the generated JSON sidecar are separate controls — see the JSON sidecar for material-specific defaults.")
-            self.rmaos_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.rmaos_strength_var, command=lambda _: self._on_slider_changed())
+            self.rmaos_scale = ttk.Scale(options_frame, from_=0.1, to=12.0, variable=self.rmaos_strength_var, command=lambda _: self._on_slider_changed())
             self.rmaos_scale.grid(row=8, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.rmaos_scale, "🧩 Higher values push stronger channel separation for _rmaos output.")
             self.rmaos_strength_display_label = ttk.Label(options_frame, textvariable=self.rmaos_strength_display_var)
@@ -7892,7 +7905,7 @@ if GUI_AVAILABLE:
             _complex_label = ttk.Label(options_frame, text="Complex strength")
             _complex_label.grid(row=9, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_complex_label, "Controls complex-material contrast.\nHigher = stronger ENB material response. Lower = subtler output.")
-            self.complex_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.complex_strength_var, command=lambda _: self._on_slider_changed())
+            self.complex_scale = ttk.Scale(options_frame, from_=0.1, to=12.0, variable=self.complex_strength_var, command=lambda _: self._on_slider_changed())
             self.complex_scale.grid(row=9, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.complex_scale, "Move right for stronger material definition.\nMove left for subtler output.")
             self.complex_strength_display_label = ttk.Label(options_frame, textvariable=self.complex_strength_display_var)
@@ -7904,7 +7917,7 @@ if GUI_AVAILABLE:
             _specular_label = ttk.Label(options_frame, text="Specular strength (_msn alpha)")
             _specular_label.grid(row=10, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_specular_label, "✨ Controls specular highlight intensity in _msn alpha.\nHigher = shinier. Lower = dusty realism.")
-            self.specular_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.specular_strength_var, command=lambda _: self._on_slider_changed())
+            self.specular_scale = ttk.Scale(options_frame, from_=0.1, to=12.0, variable=self.specular_strength_var, command=lambda _: self._on_slider_changed())
             self.specular_scale.grid(row=10, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.specular_scale, "✨ Turn it up for glorious shine, down for ancient weathered stone.\nLive value shown beside slider.")
             self.specular_strength_display_label = ttk.Label(options_frame, textvariable=self.specular_strength_display_var)
@@ -7916,7 +7929,7 @@ if GUI_AVAILABLE:
             _ao_label = ttk.Label(options_frame, text="AO strength")
             _ao_label.grid(row=11, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_ao_label, "🌑 Controls ambient occlusion (cavity/self-shadowing) contrast.\nHigher = deeper shadows in crevices.")
-            self.ao_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.ao_strength_var, command=lambda _: self._on_slider_changed())
+            self.ao_scale = ttk.Scale(options_frame, from_=0.1, to=12.0, variable=self.ao_strength_var, command=lambda _: self._on_slider_changed())
             self.ao_scale.grid(row=11, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.ao_scale, "🌑 Right = stronger AO bake, left = subtle cavity hints.")
             self.ao_strength_display_label = ttk.Label(options_frame, textvariable=self.ao_strength_display_var)
@@ -7928,7 +7941,7 @@ if GUI_AVAILABLE:
             _roughness_label = ttk.Label(options_frame, text="Roughness strength")
             _roughness_label.grid(row=12, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(_roughness_label, "🪨 Controls roughness map contrast. Material-aware: stone=rougher, glass=smoother.")
-            self.roughness_scale = ttk.Scale(options_frame, from_=0.1, to=8.0, variable=self.roughness_strength_var, command=lambda _: self._on_slider_changed())
+            self.roughness_scale = ttk.Scale(options_frame, from_=0.1, to=12.0, variable=self.roughness_strength_var, command=lambda _: self._on_slider_changed())
             self.roughness_scale.grid(row=12, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.roughness_scale, "🪨 Right = higher contrast roughness, left = uniform surface.")
             self.roughness_strength_display_label = ttk.Label(options_frame, textvariable=self.roughness_strength_display_var)
@@ -8010,6 +8023,56 @@ if GUI_AVAILABLE:
                 "If a selector is disabled in Custom mode, enable the matching output checkbox first.",
             )
             self._render_profile_mode_widgets = [self.complex_format_combo, self.env_mask_mode_combo, self.parallax_mode_combo]
+
+            advanced_generation_widgets: list[tk.Widget] = [
+                _complex_fmt_label,
+                self.complex_format_combo,
+                _env_mode_row,
+                _env_mode_hint_label,
+                _env_mask_label,
+                self.environment_mask_scale,
+                self.environment_mask_strength_display_label,
+                self.auto_environment_mask_check,
+                _rmaos_label,
+                self.rmaos_scale,
+                self.rmaos_strength_display_label,
+                self.auto_rmaos_check,
+                _complex_label,
+                self.complex_scale,
+                self.complex_strength_display_label,
+                self.auto_complex_check,
+                _specular_label,
+                self.specular_scale,
+                self.specular_strength_display_label,
+                self.auto_specular_check,
+                _ao_label,
+                self.ao_scale,
+                self.ao_strength_display_label,
+                self.auto_ao_check,
+                _roughness_label,
+                self.roughness_scale,
+                self.roughness_strength_display_label,
+                self.auto_roughness_check,
+                _emboss_check,
+                _relief_check,
+                _parallax_mode_label,
+                self.parallax_mode_combo,
+                self.mode_controls_hint_label,
+            ]
+            _advanced_generation_layout: dict[tk.Widget, dict[str, object]] = {}
+            for widget in advanced_generation_widgets:
+                _advanced_generation_layout[widget] = widget.grid_info()
+
+            def _sync_advanced_generation_controls(*_: object) -> None:
+                show_advanced = bool(show_advanced_generation_var.get())
+                for widget in advanced_generation_widgets:
+                    if show_advanced:
+                        widget.grid(**_advanced_generation_layout[widget])
+                    else:
+                        widget.grid_remove()
+
+            show_advanced_generation_var.trace_add("write", _sync_advanced_generation_controls)
+            _sync_advanced_generation_controls()
 
             options_frame.columnconfigure(2, weight=1)
             options_frame.columnconfigure(3, weight=1)
@@ -9060,7 +9123,7 @@ if GUI_AVAILABLE:
                 return f"{value}  ◉ AUTO" if (auto_all and auto_var.get()) else value
 
             self.normal_strength_display_var.set(_fmt(f"{float(self.normal_strength_var.get()):.2f} (0.1–8.0)", self.auto_normal_suggestion_var))
-            self.parallax_strength_display_var.set(_fmt(f"{float(self.parallax_strength_var.get()):.2f} (0.1–6.0)", self.auto_parallax_suggestion_var))
+            self.parallax_strength_display_var.set(_fmt(f"{float(self.parallax_strength_var.get()):.2f} (0.1–10.0)", self.auto_parallax_suggestion_var))
             self.glow_threshold_display_var.set(_fmt(f"{int(round(self.glow_threshold_var.get()))} (0–255)", self.auto_glow_suggestion_var))
             self.environment_mask_strength_display_var.set(
                 _fmt(f"{float(self.environment_mask_strength_var.get()):.2f} (0.1–8.0)", self.auto_environment_mask_suggestion_var)
