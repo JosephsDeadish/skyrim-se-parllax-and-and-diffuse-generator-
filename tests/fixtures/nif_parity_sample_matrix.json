@@ -74,6 +74,58 @@
       ]
     },
     {
+      "id": "parity_skyrim_envmap_pom_crossblock_normal_reuse",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 268437632,
+      "texture_paths": [
+        "textures\\effects\\chain\\shock.dds",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_paths": [
+            "textures\\effects\\chain\\shock.dds",
+            "textures\\effects\\chain\\shock_n.dds",
+            "",
+            "textures\\effects\\chain\\shock_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "expected_prefixes": [
+        "shader_state.envmap_pom_missing_env_slots.skyrim.",
+        "path_slot_parallax.matches_normal.skyrim.",
+        "shader_state.parallax_envmap_missing_slots3_4_5.skyrim."
+      ],
+      "expected_remediation_steps": [
+        "disable_env_mapping_for_envmap_pom_mixed_unresolved",
+        "disable_pom_for_envmap_pom_mixed_unresolved",
+        "set_slot3_parallax",
+        "disable_env_mapping_for_parallax_envmap_mixed_unresolved",
+        "disable_parallax_for_parallax_envmap_mixed_unresolved",
+        "disable_pom_for_parallax_envmap_mixed_unresolved"
+      ],
+      "pgpatcher_strategy": "disable_envmap_and_pom_when_env_slots_unresolved",
+      "local_strategy": "disable_envmap_and_pom_safely_then_rebuild_slot3_when_guessable",
+      "intentional_strategy_difference": true,
+      "safety_difference_note": "Local behavior prioritizes safety-first flag cleanup while still rebuilding independent parallax slots when deterministic."
+    },
+    {
       "id": "parity_skyrim_parallax_diffuse_reuse",
       "profile": "skyrim",
       "shader_layout": "legacy",
@@ -486,6 +538,37 @@
         "set_slot4_cubemap_for_missing_envmap_slot4",
         "enable_env_mapping_for_missing_envmap_slot4"
       ]
+    },
+    {
+      "id": "parity_fallout_real_crlf_u16_shifted_parallax_envmap_mixed",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 2176,
+      "texture_paths": [
+        "textures\\architecture\\vault\\vaulttrim.dds",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "expected_prefixes": [
+        "shader_state.parallax_envmap_missing_slots3_4_5.fallout.real"
+      ],
+      "expected_remediation_steps": [
+        "disable_env_mapping_for_parallax_envmap_mixed_unresolved",
+        "disable_parallax_for_parallax_envmap_mixed_unresolved",
+        "disable_pom_for_parallax_envmap_mixed_unresolved"
+      ],
+      "pgpatcher_strategy": "guarded_disable_parallax_envmap_combo_when_slots_missing",
+      "local_strategy": "guarded_disable_parallax_envmap_combo_when_slots_missing"
     }
   ]
 }

@@ -2955,6 +2955,26 @@ class TestParitySampleMatrix(unittest.TestCase):
 
         self.assertTrue(any(".skyrim." in code for code in all_codes))
         self.assertTrue(any(".fallout." in code for code in all_codes))
+        annotated_strategy_cases = [
+            case
+            for case in cases
+            if isinstance(case, dict)
+            and str(case.get("pgpatcher_strategy", "")).strip()
+            and str(case.get("local_strategy", "")).strip()
+        ]
+        self.assertGreaterEqual(
+            len(annotated_strategy_cases),
+            5,
+            "Parity sample matrix should keep enough side-by-side strategy annotations for parity review.",
+        )
+        self.assertTrue(
+            any(bool(case.get("intentional_strategy_difference", False)) for case in annotated_strategy_cases),
+            "Parity sample matrix should include at least one intentional strategy divergence case.",
+        )
+        self.assertTrue(
+            any(not bool(case.get("intentional_strategy_difference", False)) for case in annotated_strategy_cases),
+            "Parity sample matrix should include at least one aligned strategy case.",
+        )
         report = build_parity_delta_report_text(summarize_validation_conflicts(validations), max_rows=12)
         self.assertIn("NIF parity delta report", report)
         self.assertIn("| Conflict code | Count | Files | Auto-remediation | Suggested action |", report)
@@ -2995,6 +3015,7 @@ class TestRealModSamplePacks(unittest.TestCase):
             observed_family_case_counts: dict[str, int] = {}
             family_pass_fail: dict[str, dict[str, int]] = {}
             family_remediation_expectation_coverage: dict[str, dict[str, int]] = {}
+            family_strategy_alignment: dict[str, dict[str, int]] = {}
             for nif_path, validation in zip(corpus, validations):
                 case = case_map.get(nif_path.stem, {})
                 family = str(case.get("family", "unknown")).strip() or "unknown"
@@ -3003,6 +3024,10 @@ class TestRealModSamplePacks(unittest.TestCase):
                 family_remediation_expectation_coverage.setdefault(
                     family,
                     {"with_expectation": 0, "total": 0},
+                )
+                family_strategy_alignment.setdefault(
+                    family,
+                    {"aligned": 0, "annotated": 0},
                 )
                 expected_prefixes = case.get("expected_prefixes", []) if isinstance(case, dict) else []
                 expected_absent_prefixes = case.get("expected_absent_prefixes", []) if isinstance(case, dict) else []
@@ -3014,6 +3039,21 @@ class TestRealModSamplePacks(unittest.TestCase):
                 )
                 expected_no_auto_remediation = (
                     bool(case.get("expected_no_auto_remediation", False))
+                    if isinstance(case, dict)
+                    else False
+                )
+                pgpatcher_strategy = (
+                    str(case.get("pgpatcher_strategy", "")).strip()
+                    if isinstance(case, dict)
+                    else ""
+                )
+                local_strategy = (
+                    str(case.get("local_strategy", "")).strip()
+                    if isinstance(case, dict)
+                    else ""
+                )
+                intentional_strategy_difference = (
+                    bool(case.get("intentional_strategy_difference", False))
                     if isinstance(case, dict)
                     else False
                 )
@@ -3035,6 +3075,10 @@ class TestRealModSamplePacks(unittest.TestCase):
                     or expected_no_auto_remediation
                 )
                 family_remediation_expectation_coverage[family]["total"] += 1
+                if pgpatcher_strategy and local_strategy:
+                    family_strategy_alignment[family]["annotated"] += 1
+                    if not intentional_strategy_difference:
+                        family_strategy_alignment[family]["aligned"] += 1
                 if has_remediation_expectation:
                     family_remediation_expectation_coverage[family]["with_expectation"] += 1
                     opts, rem_steps = build_auto_remediation_patch_options(
@@ -3117,6 +3161,37 @@ class TestRealModSamplePacks(unittest.TestCase):
                     min_ratio,
                     (
                         f"{pack_id}: family {family_name} remediation expectation coverage {observed_ratio:.3f} "
+                        f"below threshold {min_ratio:.3f}"
+                    ),
+                )
+
+            expected_family_min_strategy_alignment = pack.get(
+                "expected_family_min_strategy_alignment_ratio",
+                {},
+            )
+            self.assertIsInstance(expected_family_min_strategy_alignment, dict)
+            for family, min_ratio_raw in expected_family_min_strategy_alignment.items():
+                family_name = str(family)
+                min_ratio = float(min_ratio_raw)
+                alignment = family_strategy_alignment.get(family_name)
+                self.assertIsNotNone(
+                    alignment,
+                    f"{pack_id}: strategy-alignment threshold references unknown family {family_name!r}",
+                )
+                assert alignment is not None
+                annotated = int(alignment["annotated"])
+                self.assertGreater(
+                    annotated,
+                    0,
+                    f"{pack_id}: family {family_name} has no strategy annotations for alignment threshold checks",
+                )
+                aligned = int(alignment["aligned"])
+                observed_ratio = float(aligned) / float(annotated)
+                self.assertGreaterEqual(
+                    observed_ratio,
+                    min_ratio,
+                    (
+                        f"{pack_id}: family {family_name} strategy alignment ratio {observed_ratio:.3f} "
                         f"below threshold {min_ratio:.3f}"
                     ),
                 )

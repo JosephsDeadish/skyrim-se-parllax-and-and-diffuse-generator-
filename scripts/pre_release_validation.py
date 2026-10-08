@@ -218,10 +218,19 @@ def _build_realmod_family_trend_snapshot() -> dict[str, object]:
                         "case_count": 0,
                         "pass_count": 0,
                         "fail_count": 0,
+                        "strategy_aligned_count": 0,
+                        "strategy_annotated_count": 0,
                         "top_conflicts": {},
                     },
                 )
                 family_payload["case_count"] = int(family_payload["case_count"]) + 1
+                pgpatcher_strategy = str(case.get("pgpatcher_strategy", "") or "").strip()
+                local_strategy = str(case.get("local_strategy", "") or "").strip()
+                intentional_strategy_difference = bool(case.get("intentional_strategy_difference", False))
+                if pgpatcher_strategy and local_strategy:
+                    family_payload["strategy_annotated_count"] = int(family_payload["strategy_annotated_count"]) + 1
+                    if not intentional_strategy_difference:
+                        family_payload["strategy_aligned_count"] = int(family_payload["strategy_aligned_count"]) + 1
                 case_ok = True
                 if isinstance(expected_prefixes, list):
                     for prefix in expected_prefixes:
@@ -257,6 +266,14 @@ def _build_realmod_family_trend_snapshot() -> dict[str, object]:
                         "case_count": int(row.get("case_count", 0)),
                         "pass_count": int(row.get("pass_count", 0)),
                         "fail_count": int(row.get("fail_count", 0)),
+                        "strategy_aligned_count": int(row.get("strategy_aligned_count", 0)),
+                        "strategy_annotated_count": int(row.get("strategy_annotated_count", 0)),
+                        "strategy_alignment_ratio": (
+                            float(int(row.get("strategy_aligned_count", 0)))
+                            / float(int(row.get("strategy_annotated_count", 0)))
+                            if int(row.get("strategy_annotated_count", 0)) > 0
+                            else 0.0
+                        ),
                         "top_conflicts": sorted_conflicts,
                     }
                 )
@@ -598,8 +615,13 @@ def _write_release_artifacts(
         for family in families:
             if not isinstance(family, dict):
                 continue
+            strategy_annotated = int(family.get("strategy_annotated_count", 0) or 0)
+            strategy_aligned = int(family.get("strategy_aligned_count", 0) or 0)
+            strategy_ratio = float(family.get("strategy_alignment_ratio", 0.0) or 0.0)
             lines.append(
-                f"  - {family.get('family')}: pass {family.get('pass_count', 0)}/{family.get('case_count', 0)}, fail {family.get('fail_count', 0)}"
+                f"  - {family.get('family')}: pass {family.get('pass_count', 0)}/{family.get('case_count', 0)}, "
+                f"fail {family.get('fail_count', 0)}, strategy alignment {strategy_aligned}/{strategy_annotated} "
+                f"({strategy_ratio:.2f})"
             )
     checklist_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return (
