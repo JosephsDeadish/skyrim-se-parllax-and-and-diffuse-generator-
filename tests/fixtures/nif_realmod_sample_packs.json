@@ -477,13 +477,12 @@
           "local_strategy": "guarded_rebuild_then_disable"
         },
         {
-          "id": "pack_fallout_architecture_real_crlf_shifted_envmap_glow_mixed",
+          "id": "pack_fallout_architecture_real_shifted_envmap_glow_mixed",
           "family": "architecture",
           "profile": "fallout",
           "shader_layout": "real",
           "user_version": 11,
           "user_ver2": 131,
-          "header_line_ending": "crlf",
           "texture_set_layout_shift": 4,
           "shader_type": 1,
           "flags1": 128,
