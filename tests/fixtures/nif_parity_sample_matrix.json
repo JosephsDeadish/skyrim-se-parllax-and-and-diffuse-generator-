@@ -74,6 +74,36 @@
       ]
     },
     {
+      "id": "parity_skyrim_envmap_glow_slot2_only_unresolved",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\effects\\aurora\\aurora.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\aurora_e.dds",
+        "textures\\effects\\aurora\\aurora_m.dds",
+        "",
+        "",
+        ""
+      ],
+      "expected_prefixes": [
+        "shader_state.envmap_glow_missing_slot2.skyrim."
+      ],
+      "expected_remediation_steps": [
+        "set_slot2_glow_for_envmap_glow_slot2_only",
+        "enable_glow_map_for_envmap_glow_slot2_only"
+      ],
+      "pgpatcher_strategy": "restore_missing_glow_texture_without_disabling_envmap",
+      "local_strategy": "restore_slot2_glow_when_guessable_and_keep_env_mapping",
+      "intentional_strategy_difference": false
+    },
+    {
       "id": "parity_skyrim_envmap_pom_crossblock_normal_reuse",
       "profile": "skyrim",
       "shader_layout": "legacy",
