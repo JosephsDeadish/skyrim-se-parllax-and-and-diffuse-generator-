@@ -814,9 +814,9 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 15,
+        "architecture": 16,
         "effects": 10,
-        "clutter": 8,
+        "clutter": 9,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -843,7 +843,7 @@
       "expected_family_min_strategy_alignment_ratio": {
         "architecture": 0.2,
         "effects": 0.4,
-        "clutter": 0.4
+        "clutter": 0.375
       },
       "required_summary_code_prefixes": [
         "shader_state.envmap_missing_slots4_5.fallout.",
@@ -857,6 +857,8 @@
         "shader_state.parallax_type_missing_slot3.fallout.",
         "path_slot_parallax.matches_normal.fallout.",
         "shader_state.envmap_glow_missing_slot2.fallout.",
+        "incompatible_shader_type.fallout.",
+        "skip_alpha_decal_lighting.decal_flag.fallout.",
         "unsupported_header."
       ],
       "cases": [
@@ -877,6 +879,24 @@
           "intentional_strategy_difference": true,
           "expected_difference_bucket": "guarded_fallout",
           "safety_difference_note": "Guarded Fallout divergence keeps higher-risk writes constrained unless safety gates are explicitly enabled."
+        },
+        {
+          "id": "pack_fallout_architecture_incompatible_shader_guarded_noop",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "legacy",
+          "user_version": 11,
+          "user_ver2": 130,
+          "shader_type": 5,
+          "expected_prefixes": [
+            "incompatible_shader_type.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "force_shader_transform_on_incompatible_type",
+          "local_strategy": "guarded_noop_for_incompatible_shader_type",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout mode avoids speculative shader-type coercion on incompatible blocks and requires explicit manual correction."
         },
         {
           "id": "pack_fallout_architecture_real_shifted_envmap_glow_mixed",
@@ -1137,6 +1157,24 @@
           "expected_prefixes": [
             "skip_single_pass.fallout."
           ]
+        },
+        {
+          "id": "pack_fallout_clutter_decal_guarded_skip_family",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "legacy",
+          "user_version": 11,
+          "user_ver2": 130,
+          "flags1": 67108864,
+          "expected_prefixes": [
+            "skip_alpha_decal_lighting.decal_flag.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_parallax_patch_on_decal_marked_block",
+          "local_strategy": "guarded_skip_decal_tagged_block",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout mode keeps decal-tagged blocks out of automatic parallax writes to reduce rendering/CTD risk."
         },
         {
           "id": "pack_fallout_clutter_real_crossblock_partial_glow_only_recovery",

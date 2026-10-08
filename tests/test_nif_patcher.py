@@ -3323,6 +3323,14 @@ class TestRealModSamplePacks(unittest.TestCase):
                 codes = [group.code for group in validation.conflict_report]
                 if intentional_strategy_difference:
                     self.assertTrue(
+                        pgpatcher_strategy,
+                        f"{pack_id}/{nif_path.stem}: intentional strategy differences must declare pgpatcher_strategy",
+                    )
+                    self.assertTrue(
+                        local_strategy,
+                        f"{pack_id}/{nif_path.stem}: intentional strategy differences must declare local_strategy",
+                    )
+                    self.assertTrue(
                         expected_difference_bucket,
                         f"{pack_id}/{nif_path.stem}: intentional strategy differences must declare expected_difference_bucket",
                     )
