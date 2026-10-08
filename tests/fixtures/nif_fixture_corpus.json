@@ -898,6 +898,104 @@
       ]
     },
     {
+      "id": "fallout_real_num_blocks_corrupt_envmap",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "shader_type": 1,
+      "flags1": 128,
+      "num_blocks_delta": 2
+    },
+    {
+      "id": "fallout_real_crossblock_texture_ref_mismatch",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\architecture\\factory\\bulkhead.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\bulkhead_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_paths": [
+            "textures\\architecture\\factory\\bulkhead.dds",
+            "textures\\architecture\\factory\\bulkhead_n.dds",
+            "",
+            "textures\\architecture\\factory\\bulkhead_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "extra_shader_texture_set_refs": [
+        0
+      ]
+    },
+    {
+      "id": "fallout_real_crossblock_invalid_texture_ref_with_size_corruption",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "shader_size_delta": 8,
+      "texture_paths": [
+        "textures\\effects\\reactor\\reactorfx.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\reactorfx_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "flags1": 32,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\effects\\reactor\\reactorfx.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "extra_shader_texture_set_refs": [
+        99
+      ],
+      "extra_shader_size_deltas": [
+        4
+      ]
+    },
+    {
       "id": "unknown_header_signature",
       "profile": "unknown",
       "shader_layout": "legacy",

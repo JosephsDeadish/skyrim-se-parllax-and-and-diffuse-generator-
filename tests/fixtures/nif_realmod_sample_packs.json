@@ -814,8 +814,8 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 11,
-        "effects": 6,
+        "architecture": 12,
+        "effects": 7,
         "clutter": 6,
         "armor": 1,
         "landscape": 1,
@@ -1778,6 +1778,75 @@
           "intentional_strategy_difference": true,
           "expected_difference_bucket": "guarded_fallout",
           "safety_difference_note": "Guarded Fallout handling preserves no-op behavior for malformed shifted real-layout clutter exports to avoid unsafe writes."
+        },
+        {
+          "id": "pack_fallout_architecture_real_num_blocks_corrupt_manual_review",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "shader_type": 1,
+          "flags1": 128,
+          "num_blocks_delta": 2,
+          "expected_prefixes": [
+            "fallback_or_unknown."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "guarded_best_effort_header_repair",
+          "local_strategy": "guarded_noop_for_unsupported_header",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout mode keeps malformed block-count headers in manual-review/no-op mode to avoid speculative writes."
+        },
+        {
+          "id": "pack_fallout_effects_real_crossblock_texture_ref_mismatch",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_paths": [
+            "textures\\effects\\reactor\\reactorfx.dds",
+            "textures\\effects\\reactor\\reactorfx_n.dds",
+            "",
+            "textures\\effects\\reactor\\reactorfx_n.dds",
+            "textures\\cubemaps\\reactorfx_e.dds",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "texture_paths": [
+                "textures\\effects\\reactor\\reactorfx.dds",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            0
+          ],
+          "expected_prefixes": [
+            "path_slot_parallax.matches_normal.fallout."
+          ],
+          "expected_remediation_steps": [
+            "set_slot3_parallax"
+          ],
+          "pgpatcher_strategy": "crossblock_best_effort_parallax_repair",
+          "local_strategy": "crossblock_repair_when_guessable_else_manual_review",
+          "intentional_strategy_difference": false
         },
         {
           "id": "pack_fallout_architecture_real_crlf_u16_shifted_multiblock_malformed_long_tail",

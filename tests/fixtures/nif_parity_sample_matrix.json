@@ -648,6 +648,73 @@
       "expected_difference_bucket": "guarded_fallout",
       "safety_difference_note": "Guarded Fallout mode keeps non-destructive slot normalization and explicit env-flag enablement before any disable fallback.",
       "expected_no_auto_remediation": true
+    },
+    {
+      "id": "parity_fallout_real_num_blocks_corrupt_manual_review",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "shader_type": 1,
+      "flags1": 128,
+      "num_blocks_delta": 2,
+      "expected_prefixes": [
+        "fallback_or_unknown."
+      ],
+      "expected_no_auto_remediation": true,
+      "pgpatcher_strategy": "guarded_best_effort_header_repair",
+      "local_strategy": "guarded_noop_for_unsupported_header",
+      "intentional_strategy_difference": true,
+      "expected_difference_bucket": "guarded_fallout",
+      "safety_difference_note": "Guarded Fallout mode keeps malformed block-count headers in manual-review/no-op mode to avoid speculative writes."
+    },
+    {
+      "id": "parity_fallout_real_crossblock_texture_ref_mismatch",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\architecture\\factory\\bulkhead.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\bulkhead_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_paths": [
+            "textures\\architecture\\factory\\bulkhead.dds",
+            "textures\\architecture\\factory\\bulkhead_n.dds",
+            "",
+            "textures\\architecture\\factory\\bulkhead_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "extra_shader_texture_set_refs": [
+        0
+      ],
+      "expected_prefixes": [
+        "path_slot_parallax.matches_normal.fallout."
+      ],
+      "expected_remediation_steps": [
+        "set_slot3_parallax"
+      ],
+      "pgpatcher_strategy": "crossblock_best_effort_parallax_repair",
+      "local_strategy": "crossblock_repair_when_guessable_else_manual_review",
+      "intentional_strategy_difference": false
     }
   ]
 }

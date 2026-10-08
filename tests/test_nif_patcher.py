@@ -303,6 +303,102 @@ def _rewrite_user_version(path: Path, value: int) -> None:
     path.write_bytes(bytes(raw))
 
 
+def _rewrite_user_version_2(path: Path, value: int) -> None:
+    raw = bytearray(path.read_bytes())
+    user_version_2_offset = len(b"Gamebryo File Format, Version 20.2.0.7\n") + 4 + 1 + 4 + 4
+    struct.pack_into("<I", raw, user_version_2_offset, value)
+    path.write_bytes(bytes(raw))
+
+
+def _rewrite_num_blocks(path: Path, delta: int) -> None:
+    raw = bytearray(path.read_bytes())
+    header_line_len = len(b"Gamebryo File Format, Version 20.2.0.7\n")
+    num_blocks_offset = header_line_len + 4 + 1 + 4
+    current = struct.unpack_from("<I", raw, num_blocks_offset)[0]
+    patched = max(0, current + int(delta))
+    struct.pack_into("<I", raw, num_blocks_offset, patched)
+    path.write_bytes(bytes(raw))
+
+
+def _shader_block_indices_for_fixture(path: Path) -> list[int]:
+    data = path.read_bytes()
+    header = _read_header(_Buf(data))
+    if header is None:
+        return []
+    return [idx for idx, type_idx in enumerate(header.block_type_idx) if type_idx == 1]
+
+
+def _patch_shader_size_delta(path: Path, shader_ordinal: int, delta: int) -> None:
+    data = path.read_bytes()
+    header = _read_header(_Buf(data))
+    if header is None:
+        return
+    shader_blocks = _shader_block_indices_for_fixture(path)
+    if shader_ordinal < 0 or shader_ordinal >= len(shader_blocks):
+        return
+    block_index = shader_blocks[shader_ordinal]
+    offset = header.block_sizes_offset + block_index * 4
+    current = struct.unpack_from("<I", data, offset)[0]
+    patched = max(1, current + int(delta))
+    raw = bytearray(data)
+    struct.pack_into("<I", raw, offset, patched)
+    path.write_bytes(bytes(raw))
+
+
+def _patch_shader_texture_set_ref(path: Path, shader_ordinal: int, texture_set_ref: int, *, shader_layout: str) -> None:
+    data = path.read_bytes()
+    header = _read_header(_Buf(data))
+    if header is None:
+        return
+    shader_blocks = _shader_block_indices_for_fixture(path)
+    if shader_ordinal < 0 or shader_ordinal >= len(shader_blocks):
+        return
+    block_starts = [header.blocks_start]
+    for size in header.block_sizes[:-1]:
+        block_starts.append(block_starts[-1] + size)
+    block_index = shader_blocks[shader_ordinal]
+    block_start = block_starts[block_index]
+    ref_offset = block_start + (40 if shader_layout == "legacy" else 36)
+    raw = bytearray(data)
+    if ref_offset + 4 > len(raw):
+        return
+    struct.pack_into("<i", raw, ref_offset, int(texture_set_ref))
+    path.write_bytes(bytes(raw))
+
+
+def _apply_fixture_post_mutations(target: Path, entry: dict[str, object], *, shader_layout: str) -> None:
+    user_version_2_override = entry.get("user_ver2_override")
+    if user_version_2_override is not None:
+        _rewrite_user_version_2(target, int(user_version_2_override))
+    num_blocks_delta = entry.get("num_blocks_delta")
+    if num_blocks_delta is not None:
+        _rewrite_num_blocks(target, int(num_blocks_delta))
+    shader_size_delta = entry.get("shader_size_delta")
+    if shader_size_delta is not None:
+        _patch_shader_size_delta(target, 0, int(shader_size_delta))
+    extra_shader_size_deltas = entry.get("extra_shader_size_deltas")
+    if isinstance(extra_shader_size_deltas, list):
+        for idx, delta in enumerate(extra_shader_size_deltas, start=1):
+            _patch_shader_size_delta(target, idx, int(delta))
+    shader_texture_set_ref = entry.get("shader_texture_set_ref")
+    if shader_texture_set_ref is not None:
+        _patch_shader_texture_set_ref(
+            target,
+            0,
+            int(shader_texture_set_ref),
+            shader_layout=shader_layout,
+        )
+    extra_shader_texture_set_refs = entry.get("extra_shader_texture_set_refs")
+    if isinstance(extra_shader_texture_set_refs, list):
+        for idx, ref in enumerate(extra_shader_texture_set_refs, start=1):
+            _patch_shader_texture_set_ref(
+                target,
+                idx,
+                int(ref),
+                shader_layout=shader_layout,
+            )
+
+
 def _load_fixture_corpus_payload(path: Path) -> dict[str, object]:
     raw = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
@@ -343,8 +439,9 @@ def _materialize_fixture_corpus(temp_root: Path, payload: dict[str, object]) -> 
                     if isinstance(raw_block_paths, list):
                         normalized_block["texture_paths"] = [str(path) for path in raw_block_paths]
                     extra_shader_blocks.append(normalized_block)
+        shader_layout = str(entry.get("shader_layout", "legacy"))
         raw = _build_minimal_nif(
-            shader_layout=str(entry.get("shader_layout", "legacy")),
+            shader_layout=shader_layout,
             shader_type=int(entry.get("shader_type", SHADER_TYPE_DEFAULT)),
             flags1=int(entry.get("flags1", 0)),
             flags2=int(entry.get("flags2", 0)),
@@ -359,6 +456,7 @@ def _materialize_fixture_corpus(temp_root: Path, payload: dict[str, object]) -> 
         user_version = entry.get("user_version")
         if user_version is not None:
             _rewrite_user_version(target, int(user_version))
+        _apply_fixture_post_mutations(target, entry, shader_layout=shader_layout)
         created.append(target)
     return created
 
@@ -3945,6 +4043,72 @@ class TestFixtureCorpusBaselinePack(unittest.TestCase):
                 any(code.startswith(str(prefix)) for code in summary_codes),
                 f"Missing required summary code prefix: {prefix!r}",
             )
+
+
+class TestFixturePostMutations(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_materialize_supports_cross_block_texture_ref_mismatch(self) -> None:
+        payload = {
+            "cases": [
+                {
+                    "id": "cross_block_ref",
+                    "profile": "fallout",
+                    "shader_layout": "real",
+                    "user_version": 11,
+                    "user_ver2": 131,
+                    "shader_type": SHADER_TYPE_ENVMAP,
+                    "flags1": SLSF1_ENVIRONMENT_MAPPING,
+                    "texture_paths": ["textures\\arch\\stone.dds"] + [""] * 8,
+                    "extra_shader_blocks": [
+                        {
+                            "shader_type": SHADER_TYPE_DEFAULT,
+                            "texture_paths": [
+                                "textures\\arch\\stone.dds",
+                                "textures\\arch\\stone_n.dds",
+                                "",
+                                "textures\\arch\\stone_n.dds",
+                                "",
+                                "",
+                                "",
+                                "",
+                                "",
+                            ],
+                        }
+                    ],
+                    "extra_shader_texture_set_refs": [0],
+                }
+            ]
+        }
+        corpus = _materialize_fixture_corpus(self.tmp, payload)
+        self.assertEqual(len(corpus), 1)
+        validation = validate_nif_for_parallax(corpus[0])
+        codes = [group.code for group in validation.conflict_report]
+        self.assertTrue(any(code.startswith("path_slot_parallax.matches_normal.") for code in codes))
+
+    def test_materialize_supports_header_num_block_corruption_delta(self) -> None:
+        payload = {
+            "cases": [
+                {
+                    "id": "header_blocks_delta",
+                    "profile": "fallout",
+                    "shader_layout": "real",
+                    "user_version": 11,
+                    "user_ver2": 131,
+                    "num_blocks_delta": 2,
+                }
+            ]
+        }
+        corpus = _materialize_fixture_corpus(self.tmp, payload)
+        self.assertEqual(len(corpus), 1)
+        validation = validate_nif_for_parallax(corpus[0])
+        self.assertFalse(validation.valid)
+        self.assertTrue(any(group.code.startswith("fallback_or_unknown.") for group in validation.conflict_report))
 
 
 # ---------------------------------------------------------------------------
