@@ -1108,6 +1108,124 @@
       ]
     },
     {
+      "id": "fallout_real_crossblock_texture_ref_drift_plus_size_skew",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_layout_shift": 4,
+      "texture_set_count_u16": true,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\architecture\\vault\\vaultpanel.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\vaultpanel_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "flags1": 2176,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\vault\\vaultpanel.dds",
+            "textures\\architecture\\vault\\vaultpanel_n.dds",
+            "",
+            "textures\\architecture\\vault\\vaultpanel_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "extra_shader_texture_set_refs": [
+        99
+      ],
+      "block_size_delta_overrides": [
+        {
+          "ordinal": 1,
+          "delta": 10
+        },
+        {
+          "ordinal": 3,
+          "delta": -4
+        }
+      ]
+    },
+    {
+      "id": "fallout_real_crlf_u16_shifted_multiblock_glow_env_drift",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\effects\\facility\\warninglight.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\effects\\facility\\warninglight_mrao.dds",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "flags1": 32,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\effects\\facility\\warninglight.dds",
+            "textures\\effects\\facility\\warninglight_n.dds",
+            "",
+            "textures\\effects\\facility\\warninglight_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        },
+        {
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\effects\\facility\\warninglight.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\warninglight_e.dds",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "extra_shader_texture_set_refs": [
+        77,
+        99
+      ]
+    },
+    {
       "id": "fallout_mixed_signature_drift_user11_u83",
       "profile": "unknown",
       "shader_layout": "legacy",

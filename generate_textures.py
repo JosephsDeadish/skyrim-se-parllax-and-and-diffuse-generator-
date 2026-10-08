@@ -12179,20 +12179,20 @@ if GUI_AVAILABLE:
                 _sync_target_game_controls()
                 self._add_tooltip(
                     renderer_label,
-                    "🎮 Pick your target renderer to auto-apply sane NIF patch toggles for that workflow.",
+                    "Select the target renderer profile to apply matching safe NIF patch defaults.",
                 )
                 self._add_tooltip(
                     renderer_combo,
-                    "🎯 Renderer preset helper.\nAuto applies patch options for Vanilla, Community Shaders, TruePBR, or ENB.",
+                    "Renderer preset helper.\nApplies patch defaults for Vanilla, Community Shaders, TruePBR, or ENB.",
                 )
-                self._add_tooltip(enable_parallax_check, "🪨 Enables Skyrim parallax shader flag and slot-3 _p usage.\nNote: auto-checked when ENB POM is enabled (both flags are required for POM).")
-                self._add_tooltip(enable_pom_check, "🌊 ENB-only parallax occlusion mode. Also auto-enables standard parallax (required). Leave off for vanilla workflows.")
-                self._add_tooltip(enable_env_check, "🪞 Enables environment-mapping shader flag for reflective materials.")
-                self._add_tooltip(enable_glow_check, "✨ Enables glow/emissive flag so slot 2 _g textures render in-game.")
-                self._add_tooltip(enable_pbr_check, "🧪 Enables the Community Shaders TruePBR flag on the mesh so _rmaos + JSON workflows can render.")
-                self._add_tooltip(force_type3_check, "💪 Upgrades shader type so stronger parallax scale can be written.")
-                self._add_tooltip(backup_check, "🧷 Writes .nif.bak safety copies before patching.")
-                self._add_tooltip(dry_run_check, "🧪 Scan and simulate changes without writing file edits.")
+                self._add_tooltip(enable_parallax_check, "Enable the Skyrim parallax flag and slot-3 _p usage.\nAuto-enabled when ENB POM is enabled because both flags are required.")
+                self._add_tooltip(enable_pom_check, "Enable ENB POM/occlusion mode.\nAlso enables standard parallax automatically; leave off for vanilla workflows.")
+                self._add_tooltip(enable_env_check, "Enable the environment-mapping flag for reflective materials.")
+                self._add_tooltip(enable_glow_check, "Enable glow/emissive flag so slot-2 _g textures render in game.")
+                self._add_tooltip(enable_pbr_check, "Enable the Community Shaders TruePBR/PBR flag for _rmaos + JSON workflows.")
+                self._add_tooltip(force_type3_check, "Force shader type 3 so stronger parallax-scale writes are allowed.")
+                self._add_tooltip(backup_check, "Write .nif.bak safety copies before patching.")
+                self._add_tooltip(dry_run_check, "Scan and simulate changes without writing file edits.")
                 self._add_tooltip(
                     dry_run_diff_check,
                     "With Dry run enabled, include changed-byte ranges in the summary.",
@@ -12210,11 +12210,11 @@ if GUI_AVAILABLE:
                 self._add_tooltip(target_game_combo, "Use auto for normal use. Choose fallout only for Fallout-target guarded patching.")
                 self._add_tooltip(
                     experimental_fallout_check,
-                    "Required before any Fallout write operation. Keep backups on; Fallout support is guarded/best-effort.",
+                    "Required before any Fallout write operation.\nKeep backups enabled; Fallout support is guarded and best-effort.",
                 )
                 self._add_tooltip(
                     fallout_gate_label,
-                    "Each gate unlocks one higher-risk Fallout write type. Leave off unless you need that exact write.",
+                    "Each gate unlocks one higher-risk Fallout write type.\nLeave gates off unless that exact write is required.",
                 )
                 self._add_tooltip(
                     fallout_allow_parallax_scale_check,

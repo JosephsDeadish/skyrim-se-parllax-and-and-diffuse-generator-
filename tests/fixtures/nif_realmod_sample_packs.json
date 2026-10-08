@@ -814,9 +814,9 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 13,
-        "effects": 8,
-        "clutter": 6,
+        "architecture": 14,
+        "effects": 9,
+        "clutter": 7,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -841,9 +841,9 @@
         "architecture": 0.55
       },
       "expected_family_min_strategy_alignment_ratio": {
-        "architecture": 0.25,
-        "effects": 0.5,
-        "clutter": 0.5
+        "architecture": 0.2,
+        "effects": 0.4,
+        "clutter": 0.4
       },
       "required_summary_code_prefixes": [
         "shader_state.envmap_missing_slots4_5.fallout.",
@@ -2032,6 +2032,126 @@
           "safety_difference_note": "Guarded binary-drift bucket: local strategy avoids speculative multiblock binary repairs without deterministic offsets."
         },
         {
+          "id": "pack_fallout_architecture_real_crlf_u16_multiblock_partial_recoverability_drift",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\architecture\\vault\\vaultpanel.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\vaultpanel_e.dds",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "flags1": 2176,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\architecture\\vault\\vaultpanel.dds",
+                "textures\\architecture\\vault\\vaultpanel_n.dds",
+                "",
+                "textures\\architecture\\vault\\vaultpanel_n.dds",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            99
+          ],
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 10
+            },
+            {
+              "ordinal": 3,
+              "delta": -4
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_partial_crossblock_binary_recovery_then_patch",
+          "local_strategy": "guarded_partial_recoverability_bucket_then_manual_review",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Partial recoverability bucket: local strategy keeps malformed multiblock drift in guarded manual-review mode instead of speculative binary rewrites."
+        },
+        {
+          "id": "pack_fallout_effects_real_crlf_u16_multiblock_partial_recoverability_glow_env",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\effects\\facility\\warninglight.dds",
+            "",
+            "",
+            "",
+            "",
+            "textures\\effects\\facility\\warninglight_mrao.dds",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "flags1": 32,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\effects\\facility\\warninglight.dds",
+                "textures\\effects\\facility\\warninglight_n.dds",
+                "",
+                "textures\\effects\\facility\\warninglight_n.dds",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            99
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_partial_env_glow_recovery_then_patch",
+          "local_strategy": "guarded_partial_recoverability_bucket_then_manual_review",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Partial recoverability bucket: malformed env/glow multiblock drift is kept in guarded manual review instead of speculative writes."
+        },
+        {
           "id": "pack_fallout_clutter_legacy_crlf_u16_shifted_malformed_single_pass_long_tail",
           "family": "clutter",
           "profile": "fallout",
@@ -2060,32 +2180,74 @@
           "expected_no_auto_remediation": true,
           "pgpatcher_strategy": "guarded_best_effort_singlepass_header_repair",
           "local_strategy": "guarded_noop_for_unsupported_header"
+        },
+        {
+          "id": "pack_fallout_clutter_real_crlf_u16_partial_recoverability_single_pass_drift",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 0,
+          "flags1": 32,
+          "texture_paths": [
+            "textures\\clutter\\factory\\console.dds",
+            "",
+            "",
+            "textures\\clutter\\factory\\console_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_texture_set_refs": [
+            99
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_partial_singlepass_recovery_then_patch",
+          "local_strategy": "guarded_partial_recoverability_bucket_then_manual_review",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Partial recoverability bucket: malformed single-pass drift remains manual-review-only in guarded Fallout mode."
         }
       ],
       "expected_family_allowed_difference_buckets": {
         "architecture": [
           "guarded_fallout",
-          "binary_drift_guarded"
+          "binary_drift_guarded",
+          "partial_recoverability_guarded"
         ],
         "effects": [
           "guarded_fallout",
-          "binary_drift_guarded"
+          "binary_drift_guarded",
+          "partial_recoverability_guarded"
         ],
         "clutter": [
-          "guarded_fallout"
+          "guarded_fallout",
+          "partial_recoverability_guarded"
         ]
       },
       "expected_family_min_difference_bucket_counts": {
         "architecture": {
           "guarded_fallout": 3,
-          "binary_drift_guarded": 1
+          "binary_drift_guarded": 1,
+          "partial_recoverability_guarded": 1
         },
         "effects": {
           "guarded_fallout": 1,
-          "binary_drift_guarded": 1
+          "binary_drift_guarded": 1,
+          "partial_recoverability_guarded": 1
         },
         "clutter": {
-          "guarded_fallout": 2
+          "guarded_fallout": 2,
+          "partial_recoverability_guarded": 1
         }
       }
     }

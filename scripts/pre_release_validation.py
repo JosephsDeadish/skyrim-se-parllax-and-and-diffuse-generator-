@@ -311,6 +311,13 @@ def _classify_intended_difference_bucket(
     lowered_profile = profile.lower()
     lowered_local = local_strategy.lower()
     lowered_note = safety_difference_note.lower()
+    if (
+        "partial recover" in lowered_local
+        or "partial recover" in lowered_note
+        or "partial-recover" in lowered_local
+        or "partial-recover" in lowered_note
+    ):
+        return "partial_recoverability_guarded"
     if "fallout" in lowered_profile or "guarded fallout" in lowered_local or "fallout" in lowered_note:
         return "guarded_fallout"
     if "destructive" in lowered_local or "destructive" in lowered_note:
@@ -787,7 +794,7 @@ def _render_realmod_side_by_side_delta_markdown(report: dict[str, object]) -> st
     lines.extend(
         [
             "",
-            "Bucket legend: `safety_first` = conservative disable/guard fallback, `guarded_fallout` = Fallout safety policy divergence, `destructive_disabled` = intentionally avoids destructive cleanup paths.",
+            "Bucket legend: `safety_first` = conservative disable/guard fallback, `guarded_fallout` = Fallout safety policy divergence, `partial_recoverability_guarded` = intentionally limited rebuild path with guarded fallback, `destructive_disabled` = intentionally avoids destructive cleanup paths.",
             "",
         ]
     )
