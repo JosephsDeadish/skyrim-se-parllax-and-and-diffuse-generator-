@@ -3,7 +3,7 @@
     {
       "id": "skyrim_realmod_family_pack",
       "expected_family_case_counts": {
-        "architecture": 7,
+        "architecture": 8,
         "clutter": 2,
         "armor": 1,
         "landscape": 1,
@@ -23,7 +23,7 @@
         "effects": 0.33
       },
       "expected_family_min_strategy_alignment_ratio": {
-        "architecture": 0.5,
+        "architecture": 0.33,
         "clutter": 0.5,
         "effects": 0.5
       },
@@ -624,6 +624,54 @@
           ],
           "pgpatcher_strategy": "disable_conflicting_flags_when_textures_missing",
           "local_strategy": "disable_conflicting_flags_when_no_safe_rebuild_source"
+        },
+        {
+          "id": "pack_skyrim_architecture_real_crossblock_parallax_envmap_glow_no_source",
+          "family": "architecture",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 268437632,
+          "flags2": 64,
+          "texture_paths": [
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\architecture\\bridge\\stonebridge.dds",
+                "textures\\architecture\\bridge\\stonebridge_n.dds",
+                "",
+                "textures\\architecture\\bridge\\stonebridge_n.dds",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim.real",
+            "path_slot_parallax.matches_normal.skyrim.real"
+          ],
+          "pgpatcher_strategy": "aggressive_crossblock_rebuild_for_missing_slots",
+          "local_strategy": "safety_first_disable_when_no_deterministic_rebuild_source",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "safety_first",
+          "safety_difference_note": "Safety-first divergence: local strategy prefers guarded disable fallback when a full cross-block rebuild source is ambiguous."
         }
       ],
       "expected_family_allowed_difference_buckets": {
@@ -639,7 +687,7 @@
       },
       "expected_family_min_difference_bucket_counts": {
         "architecture": {
-          "safety_first": 1
+          "safety_first": 2
         },
         "effects": {
           "safety_first": 1
@@ -649,7 +697,7 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 6,
+        "architecture": 7,
         "effects": 2,
         "clutter": 2,
         "armor": 1,
@@ -687,7 +735,8 @@
         "shader_state.envmap_glow_missing_slots2_4_5.fallout.",
         "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.fallout.",
         "missing_parallax_flag.flag1_not_set.fallout.",
-        "shader_state.parallax_type_missing_slot3.fallout."
+        "shader_state.parallax_type_missing_slot3.fallout.",
+        "path_slot_parallax.matches_normal.fallout."
       ],
       "cases": [
         {
@@ -1150,6 +1199,55 @@
           "intentional_strategy_difference": true,
           "expected_difference_bucket": "guarded_fallout",
           "safety_difference_note": "Guarded Fallout behavior keeps malformed shifted/u16/crlf exports non-destructive when header support confidence is low."
+        },
+        {
+          "id": "pack_fallout_architecture_real_crossblock_parallax_envmap_glow_no_source",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 268437632,
+          "flags2": 64,
+          "texture_paths": [
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\clutter\\factory\\console.dds",
+                "textures\\clutter\\factory\\console_n.dds",
+                "",
+                "textures\\clutter\\factory\\console_n.dds",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.fallout.real",
+            "path_slot_parallax.matches_normal.fallout.real"
+          ],
+          "pgpatcher_strategy": "guarded_crossblock_rebuild_for_missing_slots",
+          "local_strategy": "guarded_disable_when_no_deterministic_rebuild_source",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout divergence keeps higher-risk cross-block rebuild writes constrained unless safety gates and deterministic inputs are present."
         }
       ],
       "expected_family_allowed_difference_buckets": {
@@ -1159,7 +1257,7 @@
       },
       "expected_family_min_difference_bucket_counts": {
         "architecture": {
-          "guarded_fallout": 1
+          "guarded_fallout": 2
         }
       }
     }

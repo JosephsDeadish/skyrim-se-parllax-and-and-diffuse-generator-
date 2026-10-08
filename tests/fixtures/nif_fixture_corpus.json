@@ -329,6 +329,44 @@
       ]
     },
     {
+      "id": "skyrim_real_crossblock_parallax_envmap_glow_no_source",
+      "profile": "skyrim",
+      "shader_layout": "real",
+      "user_ver2": 130,
+      "shader_type": 1,
+      "flags1": 268437632,
+      "flags2": 64,
+      "texture_set_layout_shift": 4,
+      "texture_paths": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\bridge\\stonebridge.dds",
+            "textures\\architecture\\bridge\\stonebridge_n.dds",
+            "",
+            "textures\\architecture\\bridge\\stonebridge_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    {
       "id": "skyrim_family_architecture_multishader",
       "profile": "skyrim",
       "family": "architecture",
@@ -729,6 +767,45 @@
             "textures\\architecture\\factory\\wallpanel_n.dds",
             "",
             "textures\\architecture\\factory\\wallpanel_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fallout_real_crossblock_parallax_envmap_glow_no_source",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "shader_type": 1,
+      "flags1": 268437632,
+      "flags2": 64,
+      "texture_set_layout_shift": 4,
+      "texture_paths": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\clutter\\factory\\console.dds",
+            "textures\\clutter\\factory\\console_n.dds",
+            "",
+            "textures\\clutter\\factory\\console_n.dds",
             "",
             "",
             "",
