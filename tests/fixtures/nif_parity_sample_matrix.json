@@ -715,6 +715,54 @@
       "pgpatcher_strategy": "crossblock_best_effort_parallax_repair",
       "local_strategy": "crossblock_repair_when_guessable_else_manual_review",
       "intentional_strategy_difference": false
+    },
+    {
+      "id": "parity_fallout_real_num_block_types_drift_manual_review",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "shader_type": 1,
+      "flags1": 128,
+      "num_block_types_delta": -1,
+      "expected_prefixes": [
+        "unsupported_header."
+      ],
+      "expected_no_auto_remediation": true,
+      "pgpatcher_strategy": "guarded_best_effort_block_table_repair",
+      "local_strategy": "guarded_noop_for_unsupported_header",
+      "intentional_strategy_difference": true,
+      "expected_difference_bucket": "guarded_fallout",
+      "safety_difference_note": "Guarded Fallout mode keeps malformed block-type-table drift in manual-review/no-op mode to avoid speculative writes."
+    },
+    {
+      "id": "parity_fallout_real_block_type_index_table_drift",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "block_type_index_overrides": [
+        {
+          "ordinal": 0,
+          "value": 65535
+        }
+      ],
+      "expected_prefixes": [
+        "fallback_or_unknown."
+      ],
+      "expected_remediation_steps": [
+        "set_slot4_cubemap_for_missing_envmap_slots4_5",
+        "set_slot5_env_mask_for_missing_envmap_slots4_5"
+      ],
+      "pgpatcher_strategy": "guarded_best_effort_block_index_repair",
+      "local_strategy": "guarded_partial_recovery_when_slots_are_guessable",
+      "intentional_strategy_difference": false
     }
   ]
 }

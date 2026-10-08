@@ -996,6 +996,53 @@
       ]
     },
     {
+      "id": "fallout_real_num_block_types_drift_corrupt",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "shader_type": 1,
+      "flags1": 128,
+      "num_block_types_delta": -1
+    },
+    {
+      "id": "fallout_real_block_type_index_table_drift",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "texture_set_layout_shift": 4,
+      "texture_set_count_u16": true,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "block_type_index_overrides": [
+        {
+          "ordinal": 0,
+          "value": 65535
+        }
+      ]
+    },
+    {
+      "id": "fallout_mixed_signature_drift_user11_u83",
+      "profile": "unknown",
+      "shader_layout": "legacy",
+      "user_version": 11,
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\architecture\\factory\\bulkhead.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\bulkhead_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
       "id": "unknown_header_signature",
       "profile": "unknown",
       "shader_layout": "legacy",

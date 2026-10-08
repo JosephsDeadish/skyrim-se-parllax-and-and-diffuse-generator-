@@ -458,6 +458,10 @@ def build_batch_bottleneck_hints(
     total_sources: int,
 ) -> list[str]:
     hints: list[str] = []
+    if total_sources >= 1000 and resumed_completed_count > 0:
+        hints.append(
+            "Large 1000+ run resumed: keep Resume mode on and only switch to Start fresh when you intentionally need a full rerun."
+        )
     if high_res_8k_count > 0 and avg_file_seconds > 1.5:
         hints.append("8K-heavy run detected; keep staged/lazy preview on and leave Resume mode enabled for safer restarts.")
     if total_sources >= 1000 and resumed_completed_count == 0:
@@ -8062,7 +8066,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(_snow_mask_check, "❄ Generate a Community Shaders Dynamic Snow mask (_sm.dds).\nMarks where snow accumulates in supported shader/mod setups; this is workflow-specific, not a universal vanilla slot.")
             _advanced_workflow_toggle = ttk.Checkbutton(
                 _workflow_frame,
-                text="Show Advanced workflow outputs (RMAOS/Wetness/Snow/AO/Roughness)",
+                text="Show advanced workflow outputs (RMAOS/Wetness/Snow/AO/Roughness)",
                 variable=self.show_advanced_workflow_outputs_var,
             )
             _advanced_workflow_toggle.grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
@@ -8104,8 +8108,8 @@ if GUI_AVAILABLE:
             _preset_usage_hint = ttk.Label(
                 _workflow_frame,
                 text=(
-                    "When to use: Vanilla = stock Skyrim SE, ENB = ENB complex workflows, "
-                    "CS = Community Shaders Extended Materials, TruePBR = CS TruePBR JSON workflows."
+                    "Quick guide: Vanilla = stock Skyrim. ENB = ENB complex materials. "
+                    "CS = Extended Materials. TruePBR = CS TruePBR JSON workflow."
                 ),
                 foreground="gray",
             )
@@ -8126,7 +8130,7 @@ if GUI_AVAILABLE:
             ]
             _auto_sugg_check = ttk.Checkbutton(
                 options_frame,
-                text="Automatic suggestions (master switch: enables per-slider Auto toggles)",
+                text="Automatic suggestions (master: enables per-slider Auto)",
                 variable=self.auto_suggestions_var,
                 command=self._toggle_auto_suggestions,
             )
@@ -8137,7 +8141,7 @@ if GUI_AVAILABLE:
             )
             _show_advanced_generation_check = ttk.Checkbutton(
                 options_frame,
-                text="Show Advanced controls (renderer/workflow modes + extended sliders)",
+                text="Show advanced controls (renderer/workflow + extended sliders)",
                 variable=self.show_advanced_generation_var,
             )
             _show_advanced_generation_check.grid(row=1, column=3, columnspan=2, sticky=tk.E, pady=(6, 2))
@@ -9510,9 +9514,13 @@ if GUI_AVAILABLE:
         def _update_batch_resume_hint(self, *_args: object) -> None:
             mode = str(self.batch_resume_mode_var.get() or "start_fresh").strip().lower()
             if mode == "resume":
-                self.batch_resume_hint_var.set("Checkpoint mode: Resume (recommended for long/1000+ runs) — skip files already completed in checkpoint.")
+                self.batch_resume_hint_var.set(
+                    "Checkpoint mode: Resume (recommended for long/1000+ runs) — continue from checkpoint and skip completed files."
+                )
             else:
-                self.batch_resume_hint_var.set("Checkpoint mode: Start fresh — rerun all selected files and ignore saved checkpoint progress.")
+                self.batch_resume_hint_var.set(
+                    "Checkpoint mode: Start fresh — rerun all selected files and ignore previous checkpoint progress."
+                )
 
         def _load_batch_checkpoint_completed_files(self, checkpoint_path: Path) -> set[str]:
             if not checkpoint_path.exists():
@@ -10063,6 +10071,10 @@ if GUI_AVAILABLE:
                         )
                         if resumed > 0:
                             lines.append(f"Resume mode skipped {resumed} file(s) from checkpoint.")
+                        if total_sources + resumed >= 1000:
+                            lines.append(
+                                "Large-run guidance: keep Resume mode enabled and leave live preview paused except for quick spot-checks."
+                            )
                         if high_4k > 0:
                             lines.append(
                                 f"High-res load: {high_4k} file(s) at 4K+, {high_8k} at 8K+ (max {max_dim}px)."

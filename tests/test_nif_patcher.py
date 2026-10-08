@@ -366,6 +366,77 @@ def _patch_shader_texture_set_ref(path: Path, shader_ordinal: int, texture_set_r
     path.write_bytes(bytes(raw))
 
 
+def _locate_header_table_offsets(path: Path) -> tuple[int, int, int] | None:
+    data = path.read_bytes()
+    line_end = data.find(b"\n")
+    if line_end < 0:
+        return None
+    pos = line_end + 1
+    if pos + 17 > len(data):
+        return None
+    # version (4) + endian (1) + user_version (4) + num_blocks (4) + user_version_2 (4)
+    pos += 4 + 1 + 4 + 4
+    user_ver2 = struct.unpack_from("<I", data, pos)[0]
+    pos += 4
+
+    def _read_u8_string_offset(start: int) -> int:
+        if start >= len(data):
+            return len(data)
+        slen = data[start]
+        return start + 1 + int(slen)
+
+    pos = _read_u8_string_offset(pos)  # author
+    if user_ver2 > 130:
+        pos += 4
+    if user_ver2 < 131:
+        pos = _read_u8_string_offset(pos)  # process script
+    pos = _read_u8_string_offset(pos)  # export script
+    if user_ver2 >= 103:
+        pos = _read_u8_string_offset(pos)  # max filepath
+    if pos + 2 > len(data):
+        return None
+    num_block_types_offset = pos
+    num_block_types = struct.unpack_from("<H", data, pos)[0]
+    pos += 2
+    for _ in range(num_block_types):
+        if pos + 4 > len(data):
+            return None
+        name_len = struct.unpack_from("<I", data, pos)[0]
+        pos += 4 + int(name_len)
+    block_type_indices_offset = pos
+    header = _read_header(_Buf(data))
+    if header is None:
+        return None
+    return num_block_types_offset, block_type_indices_offset, int(header.num_blocks)
+
+
+def _patch_num_block_types_delta(path: Path, delta: int) -> None:
+    offsets = _locate_header_table_offsets(path)
+    if offsets is None:
+        return
+    num_block_types_offset, _, _ = offsets
+    data = bytearray(path.read_bytes())
+    current = struct.unpack_from("<H", data, num_block_types_offset)[0]
+    patched = max(1, min(65535, int(current) + int(delta)))
+    struct.pack_into("<H", data, num_block_types_offset, patched)
+    path.write_bytes(bytes(data))
+
+
+def _patch_block_type_index(path: Path, block_ordinal: int, value: int) -> None:
+    offsets = _locate_header_table_offsets(path)
+    if offsets is None:
+        return
+    _, block_type_indices_offset, num_blocks = offsets
+    if block_ordinal < 0 or block_ordinal >= num_blocks:
+        return
+    data = bytearray(path.read_bytes())
+    offset = block_type_indices_offset + block_ordinal * 2
+    if offset + 2 > len(data):
+        return
+    struct.pack_into("<H", data, offset, max(0, min(65535, int(value))))
+    path.write_bytes(bytes(data))
+
+
 def _apply_fixture_post_mutations(target: Path, entry: dict[str, object], *, shader_layout: str) -> None:
     user_version_2_override = entry.get("user_ver2_override")
     if user_version_2_override is not None:
@@ -373,6 +444,17 @@ def _apply_fixture_post_mutations(target: Path, entry: dict[str, object], *, sha
     num_blocks_delta = entry.get("num_blocks_delta")
     if num_blocks_delta is not None:
         _rewrite_num_blocks(target, int(num_blocks_delta))
+    num_block_types_delta = entry.get("num_block_types_delta")
+    if num_block_types_delta is not None:
+        _patch_num_block_types_delta(target, int(num_block_types_delta))
+    block_type_index_overrides = entry.get("block_type_index_overrides")
+    if isinstance(block_type_index_overrides, list):
+        for override in block_type_index_overrides:
+            if not isinstance(override, dict):
+                continue
+            ordinal = int(override.get("ordinal", -1))
+            value = int(override.get("value", 65535))
+            _patch_block_type_index(target, ordinal, value)
     shader_size_delta = entry.get("shader_size_delta")
     if shader_size_delta is not None:
         _patch_shader_size_delta(target, 0, int(shader_size_delta))

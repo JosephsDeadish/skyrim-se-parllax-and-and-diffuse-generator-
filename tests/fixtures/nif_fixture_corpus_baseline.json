@@ -1,9 +1,9 @@
 {
-  "expected_total_cases": 56,
+  "expected_total_cases": 59,
   "expected_profile_counts": {
     "skyrim": 32,
-    "fallout": 14,
-    "unknown": 10
+    "fallout": 15,
+    "unknown": 12
   },
   "required_summary_code_prefixes": [
     "missing_parallax_flag.flag1_not_set.skyrim.",
@@ -29,6 +29,7 @@
     "skip_single_pass.fallout.",
     "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.fallout.",
     "path_slot_parallax.matches_normal.fallout.",
+    "fallback_or_unknown.fallout.",
     "unsupported_header.",
     "shader_state.envmap_glow_missing_slots2_4_5.fallout."
   ]
