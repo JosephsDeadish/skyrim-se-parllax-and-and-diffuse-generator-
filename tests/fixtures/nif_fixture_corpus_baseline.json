@@ -29,7 +29,7 @@
     "skip_single_pass.fallout.",
     "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.fallout.",
     "path_slot_parallax.matches_normal.fallout.",
-    "fallback_or_unknown.fallout.",
+    "fallout_profile.experimental_notice.fallout.",
     "unsupported_header.",
     "shader_state.envmap_glow_missing_slots2_4_5.fallout."
   ]

@@ -814,9 +814,9 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 20,
-        "effects": 15,
-        "clutter": 13,
+        "architecture": 21,
+        "effects": 16,
+        "clutter": 14,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -2821,6 +2821,133 @@
           ],
           "expected_difference_bucket": "guarded_fallout",
           "safety_difference_note": "Guarded Fallout mixed-state family: single-pass skip remains explicit while low-risk slot-path rebuilds are preferred over immediate disable-only remediation."
+        },
+        {
+          "id": "pack_fallout_architecture_real_crossblock_envmap_glow_multidrift_guarded_noop_split",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 268435584,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\architecture\\industrial\\boilerwall.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 1,
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 14
+            },
+            {
+              "ordinal": 2,
+              "delta": -9
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            61
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Fresh architecture drift split: cross-block EnvMap+POM+glow mixed states remain guarded no-op when block-size and texture-ref drift appear together."
+        },
+        {
+          "id": "pack_fallout_effects_real_envmap_glow_alias_multidrift_guarded_noop_tail",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 160,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\effects\\volumetric\\haze.dds",
+            "",
+            "textures\\effects\\volumetric\\haze_glow.dds",
+            "",
+            "",
+            "textures\\effects\\volumetric\\haze_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 2,
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 16
+            },
+            {
+              "ordinal": 3,
+              "delta": -12
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Fresh effects long-tail drift: alias-heavy EnvMap+glow single-pass combinations stay guarded no-op under multidrift corruption."
+        },
+        {
+          "id": "pack_fallout_clutter_real_crossblock_singlepass_envmap_multidrift_guarded_noop_tail",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 160,
+          "texture_paths": [
+            "textures\\clutter\\factory\\console.dds",
+            "",
+            "",
+            "textures\\clutter\\factory\\console_n.dds",
+            "",
+            "textures\\clutter\\factory\\console_m.dds",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 1,
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 2,
+              "delta": 10
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            83
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Fresh clutter drift edge: cross-block single-pass + envmap mismatch under multidrift remains manual-review/no-op until deterministic recovery confidence improves."
         }
       ],
       "expected_family_allowed_difference_buckets": {

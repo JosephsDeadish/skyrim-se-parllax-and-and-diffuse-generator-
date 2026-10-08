@@ -659,7 +659,8 @@
       "flags1": 128,
       "num_blocks_delta": 2,
       "expected_prefixes": [
-        "fallback_or_unknown."
+        "unsupported_header.malformed_or_truncated.",
+        "unsupported_header.reexport_resolution."
       ],
       "expected_no_auto_remediation": true,
       "pgpatcher_strategy": "guarded_best_effort_header_repair",
@@ -754,7 +755,8 @@
         }
       ],
       "expected_prefixes": [
-        "fallback_or_unknown."
+        "shader_state.envmap_missing_slots4_5.fallout.",
+        "unknown_shader_type.semantic_resolved.fallout."
       ],
       "expected_remediation_steps": [
         "set_slot4_cubemap_for_missing_envmap_slots4_5",

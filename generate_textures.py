@@ -8571,8 +8571,16 @@ if GUI_AVAILABLE:
                 "Live status updates for generation and patching tasks.",
             )
             self._add_tooltip(
+                self.preview_speed_badge,
+                "Preview speed state.\n"
+                "Manual pause = you paused preview.\n"
+                "Auto speed-off = preview was paused automatically for performance.\n"
+                "Staged/Lazy = deferred preview tiles are rendering gradually.",
+            )
+            self._add_tooltip(
                 self.reenable_batch_preview_button,
-                "Turn live batch preview back on after an auto speed pause.",
+                "Turn live batch preview back on after an auto speed pause.\n"
+                "Use this after heavy batches when you want live updates again.",
             )
             _perf_hint_label = ttk.Label(actions, textvariable=self.batch_perf_hint_var, foreground="gray")
             _perf_hint_label.pack(side=tk.LEFT, padx=(0, 4))

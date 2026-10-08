@@ -897,6 +897,7 @@ def _write_release_artifacts(
             "",
             "- [ ] Review `release-readiness-artifacts` in CI and confirm no unexpected conflict-family drift.",
             "- [ ] Review packaged executable artifacts and verify CLI `--help` plus expected files are present.",
+            "- [ ] Review `packaged-smoke-artifacts` in CI and confirm end-to-end smoke outputs (`sample_input.png` + generated `.dds`) are present.",
             "- [ ] Run representative in-game smoke checks (at least one Skyrim set and one guarded Fallout set) and confirm no new visual/CTD regressions.",
         ]
     )

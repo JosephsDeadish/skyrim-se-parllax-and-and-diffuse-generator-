@@ -56,6 +56,7 @@ from nif_patcher import (
     _Buf,
     _build_block_map,
     _actions_for_conflict_code,
+    _classify_conflict_code,
     _classify_shader_type_resolution,
     _is_retryable_force_type3_error,
     _renderer_compatibility,
@@ -1050,6 +1051,24 @@ class TestValidateNifForParallax(unittest.TestCase):
         _rewrite_user_version(nif, 11)
         v = validate_nif_for_parallax(nif)
         self.assertTrue(any(".fallout." in group.code for group in v.conflict_report))
+
+    def test_conflict_classifier_maps_fallout_experimental_notice(self) -> None:
+        code = _classify_conflict_code(
+            "Detected Fallout-era profile. Patch-write support is experimental; keep backups and verify in-game."
+        )
+        self.assertEqual(code, "fallout_profile.experimental_notice")
+
+    def test_conflict_classifier_maps_reexport_resolution_notice(self) -> None:
+        code = _classify_conflict_code(
+            "Resolution: open the mesh in NifSkope or the Creation Kit and re-save/export it as a clean Skyrim or Fallout NIF, then run the patch again."
+        )
+        self.assertEqual(code, "unsupported_header.reexport_resolution")
+
+    def test_conflict_classifier_maps_semantic_shader_resolution_notes(self) -> None:
+        code = _classify_conflict_code(
+            "Block 1: raw shader_type 0x00000080 resolved to Environment Map via semantic_flag_envmap (RESOLVED, confidence=0.95, method=semantic)."
+        )
+        self.assertEqual(code, "unknown_shader_type.semantic_resolved")
 
     def test_conflict_report_classifies_slot_specific_paths(self) -> None:
         paths = ["textures\\arch\\stone_n.dds"] + [""] * 8
@@ -3268,6 +3287,8 @@ class TestRealModSamplePacks(unittest.TestCase):
             family_remediation_expectation_coverage: dict[str, dict[str, int]] = {}
             family_strategy_alignment: dict[str, dict[str, int]] = {}
             family_difference_buckets: dict[str, dict[str, int]] = {}
+            fallback_conflict_groups = 0
+            total_conflict_groups = 0
             for nif_path, validation in zip(corpus, validations):
                 case = case_map.get(nif_path.stem, {})
                 family = str(case.get("family", "unknown")).strip() or "unknown"
@@ -3321,6 +3342,10 @@ class TestRealModSamplePacks(unittest.TestCase):
                     else ""
                 )
                 codes = [group.code for group in validation.conflict_report]
+                total_conflict_groups += len(codes)
+                fallback_conflict_groups += sum(
+                    1 for code in codes if str(code).startswith("fallback_or_unknown.")
+                )
                 if intentional_strategy_difference:
                     self.assertTrue(
                         pgpatcher_strategy,
@@ -3404,6 +3429,15 @@ class TestRealModSamplePacks(unittest.TestCase):
                 observed_family_case_counts,
                 {str(k): int(v) for k, v in expected_family_case_counts.items()},
                 f"{pack_id}: family case counts changed",
+            )
+            allowed_fallback_groups = max(2, int(total_conflict_groups * 0.08))
+            self.assertLessEqual(
+                fallback_conflict_groups,
+                allowed_fallback_groups,
+                (
+                    f"{pack_id}: fallback_or_unknown groups {fallback_conflict_groups} exceed threshold "
+                    f"{allowed_fallback_groups} out of {total_conflict_groups} grouped conflicts"
+                ),
             )
             for family, stats in family_pass_fail.items():
                 self.assertEqual(stats["fail"], 0, f"{pack_id}: family {family} has failing parity expectations")

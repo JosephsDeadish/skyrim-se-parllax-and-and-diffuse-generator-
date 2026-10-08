@@ -3865,6 +3865,15 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
         "Enable target_game='fallout' with experimental_fallout_write for guarded patching.",
         "Avoid force_shader_type_3/parallax_scale/advanced shader-field writes in Fallout mode.",
     ),
+    "fallout_profile.experimental_notice": (
+        "Detected Fallout-era profile notice: keep guarded mode enabled, keep backups, and verify in-game after patching.",
+    ),
+    "unsupported_header.reexport_resolution": (
+        "Re-open and re-export/re-save the mesh in NifSkope or the Creation Kit to rebuild malformed header/block tables before patching.",
+    ),
+    "unknown_shader_type.semantic_resolved": (
+        "Unknown raw shader type was semantically inferred from flags/slots; verify block intent manually when processing malformed long-tail meshes.",
+    ),
     "incompatible_shader_type": (
         "Patch only Default(0), Heightmap(3), or EnvMap(1) shader blocks.",
         "Use unknown_shader_type_map for explicit raw shader-type overrides when safe.",
@@ -4013,8 +4022,16 @@ def _classify_conflict_code(message: str) -> str:
         return "unsupported_header.shader_block_parse_error"
     if "failed to parse bsshadertextureset" in lowered or "texture-set parse error" in lowered:
         return "unsupported_header.texture_set_parse_error"
+    if "resolution: open the mesh in nifskope or the creation kit and re-save/export it as a clean skyrim or fallout nif" in lowered:
+        return "unsupported_header.reexport_resolution"
+    if "resolution: open the mesh in nifskope or the creation kit and re-save/export it as a clean skyrim se nif" in lowered:
+        return "unsupported_header.reexport_resolution"
     if "fallout profile" in lowered or "experimental_fallout_write" in lowered:
         return "fallout_profile"
+    if "detected fallout-era profile" in lowered:
+        return "fallout_profile.experimental_notice"
+    if "raw shader_type 0x" in lowered and "resolved to" in lowered and "method=semantic" in lowered:
+        return "unknown_shader_type.semantic_resolved"
     if "incompatible shader type" in lowered:
         return "incompatible_shader_type"
     if "bsbehaviorgraphextradata" in lowered or "havok animation graph" in lowered:
