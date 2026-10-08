@@ -484,8 +484,7 @@
       ],
       "expected_remediation_steps": [
         "set_slot5_env_mask_for_missing_envmap_slot5"
-      ]
-      ,
+      ],
       "expected_absent_remediation_steps": [
         "disable_env_mapping_for_missing_slot5"
       ],
@@ -569,6 +568,56 @@
       ],
       "pgpatcher_strategy": "guarded_disable_parallax_envmap_combo_when_slots_missing",
       "local_strategy": "guarded_disable_parallax_envmap_combo_when_slots_missing"
+    },
+    {
+      "id": "parity_skyrim_single_pass_manual_review",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "flags1": 32,
+      "expected_prefixes": [
+        "skip_single_pass.skyrim."
+      ],
+      "expected_no_auto_remediation": true
+    },
+    {
+      "id": "parity_unknown_unsupported_header_manual_review",
+      "profile": "unknown",
+      "shader_layout": "legacy",
+      "user_ver2": 155,
+      "expected_prefixes": [
+        "unsupported_header."
+      ],
+      "expected_no_auto_remediation": true
+    },
+    {
+      "id": "parity_fallout_real_crlf_u16_shifted_env_alias_without_flag",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 132,
+      "header_line_ending": "crlf",
+      "texture_set_layout_shift": 4,
+      "texture_paths": [
+        "textures\\architecture\\factory\\factorywall.dds",
+        "",
+        "",
+        "",
+        "textures\\architecture\\factory\\factorywall_n.dds",
+        "textures\\architecture\\factory\\factorywall_orm.dds",
+        "",
+        "",
+        ""
+      ],
+      "expected_prefixes": [
+        "unsupported_header."
+      ],
+      "pgpatcher_strategy": "guarded_env_alias_normalization",
+      "local_strategy": "guarded_rebuild_then_disable",
+      "intentional_strategy_difference": true,
+      "expected_difference_bucket": "guarded_fallout",
+      "safety_difference_note": "Guarded Fallout mode keeps non-destructive slot normalization and explicit env-flag enablement before any disable fallback.",
+      "expected_no_auto_remediation": true
     }
   ]
 }

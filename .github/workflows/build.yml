@@ -95,7 +95,8 @@ jobs:
           python scripts/pre_release_validation.py \
             --artifact-dir artifacts/release_readiness \
             --history-file artifacts/release_readiness/nif_family_trend_history.json \
-            --seed-history-file artifacts/previous_release_readiness/nif_family_trend_history.json
+            --seed-history-file artifacts/previous_release_readiness/nif_family_trend_history.json \
+            --seed-realmod-delta-file artifacts/previous_release_readiness/nif_realmod_parity_delta_report.json
 
       - name: Upload release-readiness artifacts
         uses: actions/upload-artifact@v4

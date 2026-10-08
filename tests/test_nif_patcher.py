@@ -2975,6 +2975,28 @@ class TestParitySampleMatrix(unittest.TestCase):
             any(not bool(case.get("intentional_strategy_difference", False)) for case in annotated_strategy_cases),
             "Parity sample matrix should include at least one aligned strategy case.",
         )
+        manual_review_cases = [
+            case
+            for case in cases
+            if isinstance(case, dict) and bool(case.get("expected_no_auto_remediation", False))
+        ]
+        auto_remediable_cases = [
+            case
+            for case in cases
+            if isinstance(case, dict)
+            and isinstance(case.get("expected_remediation_steps", []), list)
+            and len(case.get("expected_remediation_steps", [])) > 0
+        ]
+        self.assertGreaterEqual(
+            len(manual_review_cases),
+            2,
+            "Parity sample matrix should include manual-review conflict families in addition to auto-remediable ones.",
+        )
+        self.assertGreaterEqual(
+            len(auto_remediable_cases),
+            5,
+            "Parity sample matrix should include several auto-remediable families for parity tracking.",
+        )
         report = build_parity_delta_report_text(summarize_validation_conflicts(validations), max_rows=12)
         self.assertIn("NIF parity delta report", report)
         self.assertIn("| Conflict code | Count | Files | Auto-remediation | Suggested action |", report)
@@ -3016,6 +3038,7 @@ class TestRealModSamplePacks(unittest.TestCase):
             family_pass_fail: dict[str, dict[str, int]] = {}
             family_remediation_expectation_coverage: dict[str, dict[str, int]] = {}
             family_strategy_alignment: dict[str, dict[str, int]] = {}
+            family_difference_buckets: dict[str, dict[str, int]] = {}
             for nif_path, validation in zip(corpus, validations):
                 case = case_map.get(nif_path.stem, {})
                 family = str(case.get("family", "unknown")).strip() or "unknown"
@@ -3029,6 +3052,7 @@ class TestRealModSamplePacks(unittest.TestCase):
                     family,
                     {"aligned": 0, "annotated": 0},
                 )
+                family_difference_buckets.setdefault(family, {})
                 expected_prefixes = case.get("expected_prefixes", []) if isinstance(case, dict) else []
                 expected_absent_prefixes = case.get("expected_absent_prefixes", []) if isinstance(case, dict) else []
                 expected_remediation_steps = (
@@ -3057,7 +3081,29 @@ class TestRealModSamplePacks(unittest.TestCase):
                     if isinstance(case, dict)
                     else False
                 )
+                expected_difference_bucket = (
+                    str(case.get("expected_difference_bucket", "")).strip()
+                    if isinstance(case, dict)
+                    else ""
+                )
+                safety_difference_note = (
+                    str(case.get("safety_difference_note", "")).strip()
+                    if isinstance(case, dict)
+                    else ""
+                )
                 codes = [group.code for group in validation.conflict_report]
+                if intentional_strategy_difference:
+                    self.assertTrue(
+                        expected_difference_bucket,
+                        f"{pack_id}/{nif_path.stem}: intentional strategy differences must declare expected_difference_bucket",
+                    )
+                    self.assertTrue(
+                        safety_difference_note,
+                        f"{pack_id}/{nif_path.stem}: intentional strategy differences must include safety_difference_note",
+                    )
+                if expected_difference_bucket:
+                    buckets = family_difference_buckets[family]
+                    buckets[expected_difference_bucket] = int(buckets.get(expected_difference_bucket, 0)) + 1
                 case_ok = True
                 if isinstance(expected_prefixes, list):
                     for prefix in expected_prefixes:
@@ -3195,6 +3241,63 @@ class TestRealModSamplePacks(unittest.TestCase):
                         f"below threshold {min_ratio:.3f}"
                     ),
                 )
+
+            expected_family_allowed_difference_buckets = pack.get(
+                "expected_family_allowed_difference_buckets",
+                {},
+            )
+            self.assertIsInstance(expected_family_allowed_difference_buckets, dict)
+            for family, allowed_raw in expected_family_allowed_difference_buckets.items():
+                family_name = str(family)
+                allowed = {str(value) for value in allowed_raw} if isinstance(allowed_raw, list) else set()
+                self.assertTrue(allowed, f"{pack_id}: {family_name} must define at least one allowed difference bucket")
+                observed_buckets = family_difference_buckets.get(family_name, {})
+                self.assertIsNotNone(
+                    observed_buckets,
+                    f"{pack_id}: allowed-difference-bucket rule references unknown family {family_name!r}",
+                )
+                assert observed_buckets is not None
+                for bucket_name, bucket_count in observed_buckets.items():
+                    if int(bucket_count) <= 0:
+                        continue
+                    self.assertIn(
+                        str(bucket_name),
+                        allowed,
+                        (
+                            f"{pack_id}: family {family_name} used unexpected intentional-difference bucket "
+                            f"{bucket_name!r}; allowed={sorted(allowed)}"
+                        ),
+                    )
+
+            expected_family_min_difference_bucket_counts = pack.get(
+                "expected_family_min_difference_bucket_counts",
+                {},
+            )
+            self.assertIsInstance(expected_family_min_difference_bucket_counts, dict)
+            for family, bucket_thresholds in expected_family_min_difference_bucket_counts.items():
+                family_name = str(family)
+                self.assertIsInstance(
+                    bucket_thresholds,
+                    dict,
+                    f"{pack_id}: {family_name} min-difference-bucket thresholds must be an object",
+                )
+                observed_buckets = family_difference_buckets.get(family_name, {})
+                self.assertIsNotNone(
+                    observed_buckets,
+                    f"{pack_id}: min-difference-bucket thresholds reference unknown family {family_name!r}",
+                )
+                assert observed_buckets is not None
+                for bucket_name, min_count_raw in bucket_thresholds.items():
+                    min_count = int(min_count_raw)
+                    observed_count = int(observed_buckets.get(str(bucket_name), 0))
+                    self.assertGreaterEqual(
+                        observed_count,
+                        min_count,
+                        (
+                            f"{pack_id}: family {family_name} intentional-difference bucket {bucket_name!r} "
+                            f"count {observed_count} below threshold {min_count}"
+                        ),
+                    )
 
             summary = summarize_validation_conflicts(validations)
             summary_codes = [group.code for group in summary]

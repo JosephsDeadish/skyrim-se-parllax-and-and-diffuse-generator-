@@ -554,6 +554,89 @@
       "flags2": 64
     },
     {
+      "id": "fallout_real_crlf_u16_shifted_envmap_slot5_missing",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\architecture\\vault\\vaulttrim.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\vaulttrim_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_real_crlf_u16_shifted_env_slot5_alias_without_flag",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 132,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "texture_paths": [
+        "textures\\architecture\\factory\\factorywall.dds",
+        "",
+        "",
+        "",
+        "textures\\architecture\\factory\\factorywall_n.dds",
+        "textures\\architecture\\factory\\factorywall_orm.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_real_shifted_multiblock_envmap_glow_parallax_reuse",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\clutter\\factory\\console.dds",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\clutter\\factory\\console.dds",
+            "textures\\clutter\\factory\\console_n.dds",
+            "textures\\clutter\\factory\\console_n.dds",
+            "textures\\clutter\\factory\\console.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    {
       "id": "unknown_header_signature",
       "profile": "unknown",
       "shader_layout": "legacy",

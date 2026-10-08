@@ -386,6 +386,91 @@ def _build_realmod_side_by_side_delta_report() -> dict[str, object]:
     }
 
 
+def _normalize_bucket_distribution(
+    bucket_counts: dict[str, int] | None,
+) -> dict[str, float]:
+    if not isinstance(bucket_counts, dict):
+        return {}
+    normalized_counts: dict[str, int] = {}
+    total = 0
+    for key, value in bucket_counts.items():
+        bucket = str(key).strip() or "none"
+        count = max(0, int(value))
+        normalized_counts[bucket] = normalized_counts.get(bucket, 0) + count
+        total += count
+    if total <= 0:
+        return {}
+    return {
+        bucket: (float(count) / float(total))
+        for bucket, count in sorted(normalized_counts.items())
+    }
+
+
+def _load_prior_bucket_distribution(
+    seed_files: list[Path] | None,
+) -> dict[str, float]:
+    if not seed_files:
+        return {}
+    latest_payload: dict[str, object] | None = None
+    latest_mtime = -1.0
+    for seed in seed_files:
+        if seed is None or not seed.exists():
+            continue
+        try:
+            mtime = seed.stat().st_mtime
+            payload = json.loads(seed.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if mtime > latest_mtime:
+            latest_payload = payload
+            latest_mtime = mtime
+    if latest_payload is None:
+        return {}
+    return _normalize_bucket_distribution(
+        latest_payload.get("intended_difference_bucket_counts"),
+    )
+
+
+def _assert_bucket_distribution_drift_within_limit(
+    *,
+    current_report: dict[str, object],
+    baseline_distribution: dict[str, float],
+    max_drift_ratio: float,
+) -> None:
+    if max_drift_ratio < 0:
+        raise SystemExit("--max-bucket-drift-ratio must be >= 0.")
+    if not baseline_distribution:
+        print("Bucket-drift gate skipped (no prior parity-delta seed distribution found).")
+        return
+    current_distribution = _normalize_bucket_distribution(
+        current_report.get("intended_difference_bucket_counts"),
+    )
+    if not current_distribution:
+        print("Bucket-drift gate skipped (current parity-delta report has no bucket counts).")
+        return
+    buckets = sorted(set(current_distribution) | set(baseline_distribution))
+    violations: list[str] = []
+    for bucket in buckets:
+        current_ratio = float(current_distribution.get(bucket, 0.0))
+        baseline_ratio = float(baseline_distribution.get(bucket, 0.0))
+        drift = abs(current_ratio - baseline_ratio)
+        if drift > max_drift_ratio:
+            violations.append(
+                f"{bucket}: baseline={baseline_ratio:.3f}, current={current_ratio:.3f}, drift={drift:.3f}"
+            )
+    if violations:
+        print("Bucket-drift gate failed:")
+        for row in violations:
+            print(" -", row)
+        raise SystemExit(1)
+    print(
+        f"Bucket-drift gate passed (max drift {max_drift_ratio:.3f}, "
+        f"{len(buckets)} bucket(s) compared)."
+    )
+
+
 def _build_parity_matrix_feature_report() -> dict[str, object]:
     from nif_patcher import (
         build_auto_remediation_patch_options,
@@ -709,6 +794,25 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--seed-realmod-delta-file",
+        action="append",
+        type=Path,
+        default=[],
+        help=(
+            "Optional prior nif_realmod_parity_delta_report.json artifact(s) used as "
+            "baseline for intended-difference bucket drift checks."
+        ),
+    )
+    parser.add_argument(
+        "--max-bucket-drift-ratio",
+        type=float,
+        default=0.25,
+        help=(
+            "Maximum allowed absolute drift for intended-difference bucket ratios "
+            "versus prior realmod parity-delta baseline."
+        ),
+    )
+    parser.add_argument(
         "--skip-packaging-smoke",
         action="store_true",
         help="Skip local PyInstaller packaging smoke build.",
@@ -778,6 +882,14 @@ def main() -> int:
     print(f"NIF real-sample parity delta markdown artifact: {realmod_delta_md_path}")
     if history_path is not None:
         print(f"NIF trend history artifact: {history_path}")
+    prior_bucket_distribution = _load_prior_bucket_distribution(
+        [path for path in args.seed_realmod_delta_file if path is not None],
+    )
+    _assert_bucket_distribution_drift_within_limit(
+        current_report=realmod_delta_report,
+        baseline_distribution=prior_bucket_distribution,
+        max_drift_ratio=float(args.max_bucket_drift_ratio),
+    )
     print("\nPre-release validation passed.")
     return 0
 

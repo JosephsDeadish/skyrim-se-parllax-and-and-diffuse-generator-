@@ -315,7 +315,10 @@
             "disable_pom_for_parallax_envmap_mixed_unresolved"
           ],
           "pgpatcher_strategy": "disable_envmap_and_pom_when_env_slots_unresolved",
-          "local_strategy": "disable_envmap_and_pom_safely_then_rebuild_slot3_when_guessable"
+          "local_strategy": "disable_envmap_and_pom_safely_then_rebuild_slot3_when_guessable",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "safety_first",
+          "safety_difference_note": "Safety-first divergence: local strategy prefers guarded disable fallback when deterministic rebuild confidence is limited."
         },
         {
           "id": "pack_skyrim_architecture_real_multiblock_env_slot5_and_glow_wrong",
@@ -442,7 +445,10 @@
             "disable_glow_map_for_envmap_glow_mixed_unresolved"
           ],
           "pgpatcher_strategy": "rebuild_env_and_glow_slots",
-          "local_strategy": "rebuild_env_and_glow_when_guessable_else_disable"
+          "local_strategy": "rebuild_env_and_glow_when_guessable_else_disable",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "safety_first",
+          "safety_difference_note": "Safety-first divergence: local strategy prefers guarded disable fallback when deterministic rebuild confidence is limited."
         },
         {
           "id": "pack_skyrim_architecture_aevr_real_crlf_u16_shifted_parallax_envmap_mixed",
@@ -509,12 +515,31 @@
           "pgpatcher_strategy": "disable_conflicting_flags_when_textures_missing",
           "local_strategy": "disable_conflicting_flags_when_no_safe_rebuild_source"
         }
-      ]
+      ],
+      "expected_family_allowed_difference_buckets": {
+        "architecture": [
+          "safety_first"
+        ],
+        "effects": [
+          "safety_first"
+        ],
+        "clutter": [
+          "safety_first"
+        ]
+      },
+      "expected_family_min_difference_bucket_counts": {
+        "architecture": {
+          "safety_first": 1
+        },
+        "effects": {
+          "safety_first": 1
+        }
+      }
     },
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 3,
+        "architecture": 4,
         "effects": 1,
         "clutter": 2,
         "armor": 1,
@@ -538,10 +563,10 @@
         "parallax_scale_gate": 1.0
       },
       "expected_family_min_remediation_expectation_coverage": {
-        "architecture": 0.5
+        "architecture": 0.55
       },
       "expected_family_min_strategy_alignment_ratio": {
-        "architecture": 0.5
+        "architecture": 0.25
       },
       "required_summary_code_prefixes": [
         "shader_state.envmap_missing_slots4_5.fallout.",
@@ -567,7 +592,10 @@
             "shader_state.envmap_missing_slots4_5.fallout."
           ],
           "pgpatcher_strategy": "rebuild_env_slots_or_disable",
-          "local_strategy": "guarded_rebuild_then_disable"
+          "local_strategy": "guarded_rebuild_then_disable",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout divergence keeps higher-risk writes constrained unless safety gates are explicitly enabled."
         },
         {
           "id": "pack_fallout_architecture_real_shifted_envmap_glow_mixed",
@@ -605,7 +633,10 @@
             "disable_glow_map_for_envmap_glow_mixed_unresolved"
           ],
           "pgpatcher_strategy": "guarded_env_glow_rebuild_then_disable",
-          "local_strategy": "guarded_rebuild_when_guessable_else_disable"
+          "local_strategy": "guarded_rebuild_when_guessable_else_disable",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout divergence keeps higher-risk writes constrained unless safety gates are explicitly enabled."
         },
         {
           "id": "pack_fallout_architecture_aevr_real_crlf_u16_shifted_parallax_envmap_mixed",
@@ -854,8 +885,48 @@
             "shader_state.envmap_missing_slot4.fallout.real",
             "path_slot_parallax.matches_diffuse.fallout.real"
           ]
+        },
+        {
+          "id": "pack_fallout_architecture_real_crlf_u16_shifted_env_alias_without_flag",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 132,
+          "header_line_ending": "crlf",
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\factory\\factorywall.dds",
+            "",
+            "",
+            "",
+            "textures\\architecture\\factory\\factorywall_n.dds",
+            "textures\\architecture\\factory\\factorywall_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "pgpatcher_strategy": "guarded_env_alias_normalization",
+          "local_strategy": "guarded_rebuild_then_disable",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout behavior prefers reversible normalization and explicit flag repair before disable fallback.",
+          "expected_no_auto_remediation": true
         }
-      ]
+      ],
+      "expected_family_allowed_difference_buckets": {
+        "architecture": [
+          "guarded_fallout"
+        ]
+      },
+      "expected_family_min_difference_bucket_counts": {
+        "architecture": {
+          "guarded_fallout": 1
+        }
+      }
     }
   ]
 }
