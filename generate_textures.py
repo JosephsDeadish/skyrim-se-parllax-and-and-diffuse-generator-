@@ -8145,8 +8145,8 @@ if GUI_AVAILABLE:
             _show_advanced_generation_check.grid(row=1, column=3, columnspan=2, sticky=tk.E, pady=(6, 2))
             self._add_tooltip(
                 _show_advanced_generation_check,
-                "Enable to reveal renderer/workflow mode selectors and extended sliders.\n"
-                "Leave disabled for a cleaner beginner-safe workflow.",
+                "Show advanced renderer/workflow selectors and extended sliders.\n"
+                "This only changes visible controls; output changes only if you change values.",
             )
 
             _render_profile_label = ttk.Label(options_frame, text="Target renderer (advanced)")
@@ -8231,6 +8231,10 @@ if GUI_AVAILABLE:
             self.env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
             self.env_mask_mode_combo.bind("<<ComboboxSelected>>", self._on_env_mask_mode_changed)
             self._add_tooltip(self.env_mask_mode_combo, "standard: vanilla/ENB _m greyscale. complex: packed RGBA map. Match this to Target renderer.")
+            self._add_tooltip(
+                _env_mode_hint_label,
+                "Use standard for most vanilla/ENB workflows. Use complex only when your chosen renderer/workflow expects packed slot-5 channels.",
+            )
             _env_mode_hint_label = ttk.Label(
                 options_frame,
                 text="standard = vanilla Skyrim SE  |  complex = packed RGBA (renderer-specific channels)",
@@ -8662,7 +8666,8 @@ if GUI_AVAILABLE:
             _lazy_preview_check.pack(side=tk.LEFT, padx=(10, 4))
             self._add_tooltip(
                 _lazy_preview_check,
-                "Render core maps first and defer niche maps for faster previews on large sets.",
+                "Render core maps first and defer niche maps for faster previews on large sets.\n"
+                "Recommended for 4K/8K and 1000+ file runs.",
             )
             _staged_preview_check = ttk.Checkbutton(
                 source_controls,
@@ -8673,7 +8678,8 @@ if GUI_AVAILABLE:
             _staged_preview_check.pack(side=tk.LEFT, padx=(6, 4))
             self._add_tooltip(
                 _staged_preview_check,
-                "Render deferred tiles gradually in background after core tiles load.",
+                "After core tiles load, render deferred tiles gradually in background.\n"
+                "Disable if you want strictly manual 'Render all preview tiles now' behavior.",
             )
             self.render_all_preview_button = ttk.Button(
                 source_controls,
@@ -8729,7 +8735,8 @@ if GUI_AVAILABLE:
             _resume_combo.pack(side=tk.LEFT)
             self._add_tooltip(
                 _resume_combo,
-                "start_fresh runs all selected files. resume skips files already completed in checkpoint.",
+                "start_fresh: process everything and ignore prior checkpoint entries.\n"
+                "resume: skip files already recorded as completed in the checkpoint.",
             )
             _resume_hint_label = ttk.Label(source_controls, textvariable=self.batch_resume_hint_var, foreground="gray")
             _resume_hint_label.pack(side=tk.LEFT, padx=(6, 4))
@@ -8747,7 +8754,8 @@ if GUI_AVAILABLE:
             _clear_checkpoint_button.pack(side=tk.LEFT, padx=(4, 4))
             self._add_tooltip(
                 _clear_checkpoint_button,
-                "Delete checkpoint data so the next run starts from scratch.",
+                "Delete checkpoint data for this run target.\n"
+                "Use this only when you intentionally want to rerun all files.",
             )
             self.checkpoint_health_label = ttk.Label(source_controls, textvariable=self.checkpoint_health_var, foreground="gray")
             self.checkpoint_health_label.pack(side=tk.LEFT, padx=(10, 4))

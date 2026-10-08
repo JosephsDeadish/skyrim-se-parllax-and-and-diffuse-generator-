@@ -1244,6 +1244,106 @@
       ]
     },
     {
+      "id": "fallout_real_crlf_u16_numblocks_drift_unknown_tail",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "num_blocks_delta": 2,
+      "texture_paths": [
+        "textures\\architecture\\factory\\controlpanel.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\controlpanel_e.dds",
+        "textures\\architecture\\factory\\controlpanel_orm.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_real_shifted_block_type_table_drift",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "num_block_types_delta": -1,
+      "block_type_index_overrides": [
+        {
+          "ordinal": 0,
+          "value": 65535
+        }
+      ],
+      "texture_paths": [
+        "textures\\effects\\vault\\vaultspark.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\vaultspark_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_legacy_u16_blocksize_drift_multiblock",
+      "profile": "fallout",
+      "shader_layout": "legacy",
+      "user_version": 11,
+      "user_ver2": 130,
+      "texture_set_count_u16": true,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\clutter\\pipes\\reactorpipes.dds",
+        "textures\\clutter\\pipes\\reactorpipes_n.dds",
+        "",
+        "textures\\clutter\\pipes\\reactorpipes_n.dds",
+        "",
+        "textures\\clutter\\pipes\\reactorpipes_orm.dds",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "flags1": 32,
+          "texture_paths": [
+            "textures\\clutter\\pipes\\reactorpipes.dds",
+            "textures\\clutter\\pipes\\reactorpipes_n.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "block_size_delta_overrides": [
+        {
+          "ordinal": 1,
+          "delta": 14
+        },
+        {
+          "ordinal": 3,
+          "delta": -6
+        }
+      ]
+    },
+    {
       "id": "unknown_header_signature",
       "profile": "unknown",
       "shader_layout": "legacy",

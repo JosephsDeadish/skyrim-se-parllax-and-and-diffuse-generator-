@@ -814,9 +814,9 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 14,
-        "effects": 9,
-        "clutter": 7,
+        "architecture": 15,
+        "effects": 10,
+        "clutter": 8,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -2216,6 +2216,90 @@
           "intentional_strategy_difference": true,
           "expected_difference_bucket": "partial_recoverability_guarded",
           "safety_difference_note": "Partial recoverability bucket: malformed single-pass drift remains manual-review-only in guarded Fallout mode."
+        },
+        {
+          "id": "pack_fallout_architecture_real_u16_numblocktypes_drift_long_tail",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 155,
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "num_block_types_delta": -1,
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "guarded_best_effort_table_rebuild_then_patch",
+          "local_strategy": "guarded_noop_for_unsupported_header",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout mode keeps malformed block-type table drift in manual-review mode to avoid speculative table rewrites."
+        },
+        {
+          "id": "pack_fallout_effects_real_crlf_numblocks_drift_alias_mix_long_tail",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 155,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "num_blocks_delta": 2,
+          "texture_paths": [
+            "textures\\effects\\facility\\steamvent.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\steamvent_e.dds",
+            "textures\\effects\\facility\\steamvent_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "guarded_best_effort_header_count_repair_then_patch",
+          "local_strategy": "guarded_noop_for_unsupported_header",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout mode avoids speculative num-block header repair on malformed effects exports."
+        },
+        {
+          "id": "pack_fallout_clutter_legacy_shifted_blockindex_drift_long_tail",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "legacy",
+          "user_version": 11,
+          "user_ver2": 155,
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 0,
+          "flags1": 32,
+          "block_type_index_overrides": [
+            {
+              "ordinal": 0,
+              "value": 65535
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "guarded_best_effort_block_index_repair_then_patch",
+          "local_strategy": "guarded_noop_for_unsupported_header",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout mode leaves malformed block-index drift as manual review instead of speculative rewrites."
         }
       ],
       "expected_family_allowed_difference_buckets": {
