@@ -698,8 +698,8 @@
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
         "architecture": 7,
-        "effects": 2,
-        "clutter": 2,
+        "effects": 3,
+        "clutter": 3,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -724,7 +724,9 @@
         "architecture": 0.55
       },
       "expected_family_min_strategy_alignment_ratio": {
-        "architecture": 0.25
+        "architecture": 0.25,
+        "effects": 0.5,
+        "clutter": 0.5
       },
       "required_summary_code_prefixes": [
         "shader_state.envmap_missing_slots4_5.fallout.",
@@ -894,6 +896,59 @@
           "intentional_strategy_difference": true,
           "expected_difference_bucket": "guarded_fallout",
           "safety_difference_note": "Guarded Fallout divergence keeps higher-risk writes constrained unless safety gates are explicitly enabled."
+        },
+        {
+          "id": "pack_fallout_effects_real_crlf_u16_shifted_crossblock_envmap_glow_parallax",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\effects\\arc\\arcflare.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\effects\\arc\\arcflare.dds",
+                "textures\\effects\\arc\\arcflare_n.dds",
+                "",
+                "textures\\effects\\arc\\arcflare_n.dds",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_absent_prefixes": [
+            "shader_state.envmap_glow_missing_slots2_4_5.fallout.real",
+            "path_slot_parallax.matches_normal.fallout.real"
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "guarded_crossblock_env_glow_rebuild_with_slot3_repair",
+          "local_strategy": "guarded_crossblock_rebuild_with_slot3_repair_when_guessable",
+          "intentional_strategy_difference": false
         },
         {
           "id": "pack_fallout_clutter_single_pass_skip",
@@ -1087,7 +1142,74 @@
           "expected_prefixes": [
             "shader_state.envmap_missing_slot4.fallout.real",
             "path_slot_parallax.matches_diffuse.fallout.real"
-          ]
+          ],
+          "expected_remediation_steps": [
+            "enable_parallax",
+            "set_slot3_parallax",
+            "set_slot4_cubemap_for_missing_envmap_slot4",
+            "enable_env_mapping_for_missing_envmap_slot4"
+          ],
+          "expected_absent_remediation_steps": [
+            "disable_env_mapping_for_missing_slot4",
+            "clear_slot4_cubemap"
+          ],
+          "pgpatcher_strategy": "guarded_slot4_disable_with_slot3_repair",
+          "local_strategy": "guarded_slot4_disable_with_slot3_repair",
+          "intentional_strategy_difference": false
+        },
+        {
+          "id": "pack_fallout_clutter_real_crlf_u16_shifted_crossblock_no_source_disable_family",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 268437632,
+          "flags2": 64,
+          "texture_paths": [
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_absent_prefixes": [
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.fallout.real"
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "guarded_crossblock_rebuild_for_missing_slots",
+          "local_strategy": "guarded_disable_when_no_deterministic_rebuild_source",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout divergence keeps malformed cross-block shifted/u16/crlf combinations in disable-first mode when rebuild confidence is non-deterministic."
         },
         {
           "id": "pack_fallout_architecture_real_crlf_u16_shifted_env_alias_without_flag",
@@ -1253,11 +1375,23 @@
       "expected_family_allowed_difference_buckets": {
         "architecture": [
           "guarded_fallout"
+        ],
+        "effects": [
+          "guarded_fallout"
+        ],
+        "clutter": [
+          "guarded_fallout"
         ]
       },
       "expected_family_min_difference_bucket_counts": {
         "architecture": {
           "guarded_fallout": 2
+        },
+        "effects": {
+          "guarded_fallout": 1
+        },
+        "clutter": {
+          "guarded_fallout": 1
         }
       }
     }
