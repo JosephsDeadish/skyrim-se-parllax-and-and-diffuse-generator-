@@ -814,8 +814,8 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 19,
-        "effects": 14,
+        "architecture": 20,
+        "effects": 15,
         "clutter": 13,
         "armor": 1,
         "landscape": 1,
@@ -1841,7 +1841,7 @@
           "flags1": 128,
           "num_blocks_delta": 2,
           "expected_prefixes": [
-            "fallback_or_unknown."
+            "unsupported_header."
           ],
           "expected_no_auto_remediation": true,
           "pgpatcher_strategy": "guarded_best_effort_header_repair",
@@ -2741,6 +2741,86 @@
           ],
           "expected_difference_bucket": "guarded_fallout",
           "safety_difference_note": "Fresh multi-drift Fallout family: cross-block parallax/envmap conflicts keep guarded disable-first remediation while still rebuilding safe slot-3 texture paths."
+        },
+        {
+          "id": "pack_fallout_architecture_real_envmap_glow_pom_multidrift_guarded_noop_edge",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 268435584,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\architecture\\industrial\\reactorwall.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 1,
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 12
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_partial_mixed_state_recovery_under_binary_drift",
+          "local_strategy": "guarded_noop_for_multidrift_envmap_glow_pom_state",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Guarded Fallout edge pattern: when multi-drift headers collide with mixed EnvMap+POM+glow flags, local policy stays manual-review/no-op to avoid unsafe speculative writes."
+        },
+        {
+          "id": "pack_fallout_effects_envmap_glow_singlepass_mixed_guarded_rebuild",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "shader_type": 1,
+          "flags1": 160,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\effects\\energy\\arclight.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "skip_single_pass.fallout.",
+            "shader_state.envmap_glow_missing_slots2_4_5.fallout."
+          ],
+          "expected_remediation_steps": [
+            "set_slot2_glow_for_envmap_glow_mixed_unresolved",
+            "set_slot4_cubemap_for_envmap_glow_mixed_unresolved",
+            "set_slot5_env_mask_for_envmap_glow_mixed_unresolved",
+            "enable_env_mapping_for_envmap_glow_mixed_unresolved",
+            "enable_glow_map_for_envmap_glow_mixed_unresolved"
+          ],
+          "expected_absent_remediation_steps": [
+            "disable_env_mapping_for_envmap_glow_mixed_unresolved",
+            "disable_glow_map_for_envmap_glow_mixed_unresolved"
+          ],
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout mixed-state family: single-pass skip remains explicit while low-risk slot-path rebuilds are preferred over immediate disable-only remediation."
         }
       ],
       "expected_family_allowed_difference_buckets": {

@@ -3993,8 +3993,26 @@ def _extract_block_index(message: str) -> int | None:
 
 def _classify_conflict_code(message: str) -> str:
     lowered = message.lower()
+    if "malformed or truncated nif" in lowered:
+        return "unsupported_header.malformed_or_truncated"
+    if "string read out of range" in lowered:
+        return "unsupported_header.string_read_out_of_range"
+    if "no bslightingshaderproperty blocks found or not a supported skyrim/fallout nif" in lowered:
+        return "unsupported_header.no_patchable_shader_blocks"
     if "unsupported nif header/profile values" in lowered or "unexpected user version values" in lowered:
         return "unsupported_header"
+    if "header prefix is not a skyrim/gamebryo 20.2.0.7 nif" in lowered:
+        return "unsupported_header.header_prefix_mismatch"
+    if "nif version is 0x" in lowered and "not skyrim se 20.2.0.7" in lowered:
+        return "unsupported_header.version_mismatch"
+    if "nif header line is incomplete" in lowered:
+        return "unsupported_header.truncated_header_line"
+    if "could not parse user version fields from header" in lowered:
+        return "unsupported_header.user_version_parse_failure"
+    if "failed to parse bslightingshaderproperty" in lowered:
+        return "unsupported_header.shader_block_parse_error"
+    if "failed to parse bsshadertextureset" in lowered or "texture-set parse error" in lowered:
+        return "unsupported_header.texture_set_parse_error"
     if "fallout profile" in lowered or "experimental_fallout_write" in lowered:
         return "fallout_profile"
     if "incompatible shader type" in lowered:

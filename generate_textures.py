@@ -9477,10 +9477,10 @@ if GUI_AVAILABLE:
                 recommended_profile=recommended_profile,
             )
             safe_descriptions = {
-                "vanilla": "Vanilla safe-default: Diffuse+Normal ON, standard env-mask mode, ENB/PBR-only extras OFF.",
-                "enb": "ENB safe-default: ENB-oriented outputs/modes ON, conflicting Community Shaders/PBR outputs OFF.",
-                "community_shaders": "Community Shaders safe-default: _cm/_c guidance ON, conflicting ENB complex paths avoided.",
-                "truepbr": "TruePBR safe-default: canonical _rmaos guidance ON, non-TruePBR extras kept conservative.",
+                "vanilla": "Vanilla safe defaults: Diffuse+Normal ON, standard env-mask mode, ENB/PBR-only extras OFF.",
+                "enb": "ENB safe defaults: ENB-oriented outputs/modes ON, conflicting Community Shaders/PBR outputs OFF.",
+                "community_shaders": "Community Shaders safe defaults: _cm/_c guidance ON, conflicting ENB complex paths avoided.",
+                "truepbr": "TruePBR safe defaults: canonical _rmaos guidance ON, non-TruePBR extras kept conservative.",
             }
             self.safe_preset_hint_var.set(
                 safe_descriptions.get(normalized, "Safe preset applied.")
@@ -11286,6 +11286,7 @@ if GUI_AVAILABLE:
                         (
                             f"You queued {len(self.selected_inputs)} textures.\n\n"
                             "Resume mode is strongly recommended for 1000+ runs so interruptions do not waste progress.\n"
+                            "It also enables checkpoint-based restart after crashes/reboots.\n\n"
                             "Enable Resume mode now?"
                         ),
                         parent=self.root,
@@ -11300,13 +11301,13 @@ if GUI_AVAILABLE:
                             resume_warning = (
                                 "Resume mode is enabled, but no checkpoint file exists yet for this run.\n\n"
                                 "A new checkpoint will be created as files finish.\n"
-                                "Continue?"
+                                "Continue and create checkpoint history now?"
                             )
                         else:
                             resume_warning = (
                                 "Resume mode is enabled, but no checkpoint file exists yet.\n\n"
                                 "This run will start fresh and create checkpoint history after successful files.\n"
-                                "Continue?"
+                                "Continue and create checkpoint history now?"
                             )
                         proceed_resume_without_history = messagebox.askyesno(
                             "Resume mode: starting new checkpoint",

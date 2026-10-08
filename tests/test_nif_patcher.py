@@ -4227,7 +4227,7 @@ class TestFixturePostMutations(unittest.TestCase):
         self.assertEqual(len(corpus), 1)
         validation = validate_nif_for_parallax(corpus[0])
         self.assertFalse(validation.valid)
-        self.assertTrue(any(group.code.startswith("fallback_or_unknown.") for group in validation.conflict_report))
+        self.assertTrue(any(group.code.startswith("unsupported_header.") for group in validation.conflict_report))
 
 
 # ---------------------------------------------------------------------------
