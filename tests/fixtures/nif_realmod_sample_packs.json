@@ -814,9 +814,9 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 16,
-        "effects": 10,
-        "clutter": 9,
+        "architecture": 17,
+        "effects": 11,
+        "clutter": 11,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -859,7 +859,9 @@
         "shader_state.envmap_glow_missing_slot2.fallout.",
         "incompatible_shader_type.fallout.",
         "skip_alpha_decal_lighting.decal_flag.fallout.",
-        "unsupported_header."
+        "unsupported_header.",
+        "skip_alpha_decal_lighting.subsurface_flags.fallout.",
+        "skip_alpha_decal_lighting.anisotropic_flag.fallout."
       ],
       "cases": [
         {
@@ -2338,6 +2340,118 @@
           "intentional_strategy_difference": true,
           "expected_difference_bucket": "guarded_fallout",
           "safety_difference_note": "Guarded Fallout mode leaves malformed block-index drift as manual review instead of speculative rewrites."
+        },
+        {
+          "id": "pack_fallout_clutter_real_subsurface_skip_guarded_family",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "flags2": 33554432,
+          "expected_prefixes": [
+            "skip_alpha_decal_lighting.subsurface_flags.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout mode keeps subsurface-lighting variants out of automatic parallax writes to avoid unstable lighting/shader interactions."
+        },
+        {
+          "id": "pack_fallout_effects_legacy_anisotropic_skip_guarded_family",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "legacy",
+          "user_version": 11,
+          "user_ver2": 130,
+          "flags2": 2097152,
+          "expected_prefixes": [
+            "skip_alpha_decal_lighting.anisotropic_flag.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout mode keeps anisotropic-lighting variants in skip/manual-review mode instead of forcing parallax writes."
+        },
+        {
+          "id": "pack_fallout_architecture_real_crlf_u16_numblocktypes_plus_blockindex_drift",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 155,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "num_block_types_delta": 2,
+          "block_type_index_overrides": [
+            {
+              "ordinal": 0,
+              "value": 65535
+            },
+            {
+              "ordinal": 1,
+              "value": 65534
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Guarded binary-drift handling keeps malformed block-type-table/index combinations in manual-review mode to avoid speculative parser-table rewrites."
+        },
+        {
+          "id": "pack_fallout_clutter_real_crossblock_texture_ref_plus_numblocks_drift_mixed",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "num_blocks_delta": 1,
+          "texture_paths": [
+            "textures\\clutter\\factory\\relay.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\relay_e.dds",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\clutter\\factory\\relay.dds",
+                "textures\\clutter\\factory\\relay_n.dds",
+                "",
+                "textures\\clutter\\factory\\relay_n.dds",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            99
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Cross-block mixed-state drift with texture-ref/num-block skew stays in guarded manual-review mode when deterministic reconstruction is not guaranteed."
         }
       ],
       "expected_family_allowed_difference_buckets": {
@@ -2353,23 +2467,24 @@
         ],
         "clutter": [
           "guarded_fallout",
-          "partial_recoverability_guarded"
+          "partial_recoverability_guarded",
+          "binary_drift_guarded"
         ]
       },
       "expected_family_min_difference_bucket_counts": {
         "architecture": {
-          "guarded_fallout": 3,
-          "binary_drift_guarded": 1,
+          "guarded_fallout": 4,
+          "binary_drift_guarded": 2,
           "partial_recoverability_guarded": 1
         },
         "effects": {
-          "guarded_fallout": 1,
+          "guarded_fallout": 2,
           "binary_drift_guarded": 1,
           "partial_recoverability_guarded": 1
         },
         "clutter": {
-          "guarded_fallout": 2,
-          "partial_recoverability_guarded": 1
+          "guarded_fallout": 3,
+          "partial_recoverability_guarded": 2
         }
       }
     }
