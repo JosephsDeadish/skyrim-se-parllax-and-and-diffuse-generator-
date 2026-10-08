@@ -359,6 +359,10 @@ Before publishing a release, run at least one real mod-scale verification pass:
 6. Run pre-release validation gate:
    - `python scripts/pre_release_validation.py`
    - This runs the full test suite, conflict-stress checks, compile checks, and a tracked-file secret scan.
+7. Complete manual release-candidate verification:
+   - review uploaded `release-readiness-artifacts` from CI for unexpected parity/family drift,
+   - smoke-test representative mod sets in game (minimum: one Skyrim set and one guarded Fallout set),
+   - confirm no new visual regressions or patch-induced instability before publishing.
 
 ### Known limits and operating guidance
 

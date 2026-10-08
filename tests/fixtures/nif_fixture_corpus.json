@@ -816,6 +816,88 @@
       ]
     },
     {
+      "id": "fallout_real_crlf_u16_shifted_crossblock_env_slot5_missing_parallax_reuse",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\architecture\\factory\\bulkhead.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\bulkhead_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\factory\\bulkhead.dds",
+            "textures\\architecture\\factory\\bulkhead_n.dds",
+            "",
+            "textures\\architecture\\factory\\bulkhead_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fallout_real_crlf_u16_shifted_crossblock_env_glow_slot2_missing_plus_single_pass",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\effects\\reactor\\reactorfx.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\reactorfx_e.dds",
+        "textures\\effects\\reactor\\reactorfx_m.dds",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "flags1": 32,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\effects\\reactor\\reactorfx.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    {
       "id": "unknown_header_signature",
       "profile": "unknown",
       "shader_layout": "legacy",

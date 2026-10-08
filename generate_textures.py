@@ -11746,8 +11746,8 @@ if GUI_AVAILABLE:
                 browse_nif_button = ttk.Button(row1, text="Browse…", command=_browse_nif)
                 browse_nif_button.pack(side="left")
                 self._add_tooltip(path_label, "Select the NIF file/folder to scan or patch.")
-                self._add_tooltip(nif_path_entry, "Enter or paste the full NIF file/folder path.")
-                self._add_tooltip(browse_nif_button, "Open a file/folder picker for the NIF path.")
+                self._add_tooltip(nif_path_entry, "Paste the full path to one .nif file or a mesh folder.")
+                self._add_tooltip(browse_nif_button, "Pick a NIF file or mesh folder with the file/folder dialog.")
 
                 opt_frame = ttk.LabelFrame(basic_tab, text="Patch Options (what to enable)", padding=6)
                 opt_frame.pack(fill="x", pady=4)
@@ -12196,15 +12196,15 @@ if GUI_AVAILABLE:
                     "When enabled, include example conflict lines under each grouped conflict code.",
                 )
                 self._add_tooltip(retry_count_combo, "Retries transient per-file failures during scan/patch operations.")
-                self._add_tooltip(target_game_label, "Set game-header profile handling for NIF patching.")
-                self._add_tooltip(target_game_combo, "auto detects profile from the NIF header; use fallout for Fallout-target patching.")
+                self._add_tooltip(target_game_label, "Choose how headers are interpreted during patch/validation (auto/skyrim/fallout).")
+                self._add_tooltip(target_game_combo, "Use auto for normal use. Choose fallout only for Fallout-target guarded patching.")
                 self._add_tooltip(
                     experimental_fallout_check,
-                    "Required for Fallout-target patch writes. Use only with backups; some Fallout paths are still limited.",
+                    "Required before any Fallout write operation. Keep backups on; Fallout support is guarded/best-effort.",
                 )
                 self._add_tooltip(
                     fallout_gate_label,
-                    "Explicitly opt in to higher-risk Fallout writes per operation.",
+                    "Each gate unlocks one higher-risk Fallout write type. Leave off unless you need that exact write.",
                 )
                 self._add_tooltip(
                     fallout_allow_parallax_scale_check,
@@ -12226,8 +12226,8 @@ if GUI_AVAILABLE:
                     fallout_allow_env_map_scale_check,
                     "Allow env-map-scale writes in Fallout mode (higher risk).",
                 )
-                self._add_tooltip(guide_label, "📘 Fast BSLighting checkbox reference so you can patch without guessing.")
-                self._add_tooltip(option_warning_label, "⚠ Compatibility warnings for current checkbox combinations.")
+                self._add_tooltip(guide_label, "📘 Slot/flag quick reference for safe patch setup and naming checks.")
+                self._add_tooltip(option_warning_label, "⚠ Live compatibility warnings for the currently selected options.")
                 self._add_tooltip(disable_parallax_check, "🚫 Removes parallax and POM flags from BSLightingShaderProperty.")
                 self._add_tooltip(disable_pom_check, "🚫 Removes only ENB POM flag while keeping standard parallax if desired.")
                 self._add_tooltip(disable_env_check, "🚫 Removes environment-mapping flag from BSLightingShaderProperty.")
@@ -12484,7 +12484,7 @@ if GUI_AVAILABLE:
                 auto_fill_button.pack(anchor="w", pady=(4, 0))
                 self._add_tooltip(
                     auto_fill_button,
-                    "🧠 Guesses texture slots from the selected NIF.\nGreat for speed, still worth eyeballing before you hit Patch.",
+                    "🧠 Auto-fills slot paths from detected mesh textures.\nReview before patching, especially when source meshes are mixed.",
                 )
                 self._add_tooltip(
                     tex_frame,
@@ -13600,21 +13600,21 @@ if GUI_AVAILABLE:
                     ]
                 )
                 self._add_tooltip(scan_button, "Read-only analysis pass. No file changes are written.")
-                self._add_tooltip(rerun_conflicts_button, "Incremental rerun: scan only files that previously reported conflicts or failures.")
-                self._add_tooltip(rerun_patch_conflicts_button, "Incremental rerun: patch only files that previously reported conflicts or failures.")
-                self._add_tooltip(patch_button, "Apply selected NIF patch options and write changes to disk.")
-                self._add_tooltip(auto_fix_button, "Run safe best-effort auto-remediation using detected conflict codes.")
+                self._add_tooltip(rerun_conflicts_button, "Incremental scan: run only files that previously had conflicts/failures.")
+                self._add_tooltip(rerun_patch_conflicts_button, "Incremental patch: patch only files that previously had conflicts/failures.")
+                self._add_tooltip(patch_button, "Write selected slot/flag changes to disk.")
+                self._add_tooltip(auto_fix_button, "Apply safe best-effort fixes from detected conflict codes.")
                 self._add_tooltip(
                     rerun_auto_fix_conflicts_button,
-                    "Incremental rerun: auto-remediate only files that previously reported conflicts or failures.",
+                    "Incremental auto-fix: remediate only files that previously had conflicts/failures.",
                 )
-                self._add_tooltip(unpatch_button, "Remove selected flags/slots to undo or simplify prior NIF patching.")
-                self._add_tooltip(restore_button, "Restore .nif files from sibling .nif.bak backups.")
+                self._add_tooltip(unpatch_button, "Remove selected flags/slots to roll back or simplify prior patching.")
+                self._add_tooltip(restore_button, "Restore .nif files from matching .nif.bak backups in the same folder.")
                 self._add_tooltip(clear_button, "Clear result rows from the log.")
                 self._add_tooltip(export_report_button, "Export the currently filtered result rows to a text report.")
                 self._add_tooltip(copy_selected_button, "Copy only the selected result row.")
                 self._add_tooltip(copy_all_button, "Copy all result rows for logs or bug reports.")
-                self._add_tooltip(cancel_ops_button, "Request cancellation for the running scan/patch operation after the current file.")
+                self._add_tooltip(cancel_ops_button, "Request cancellation; the current file finishes first, then the operation stops.")
                 self._add_tooltip(close_button, "Close the NIF Editor window.")
 
                 _NIF_EDITOR_LAYOUT_RETRY_MAX = 6

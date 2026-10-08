@@ -1,9 +1,9 @@
 {
-  "expected_total_cases": 51,
+  "expected_total_cases": 53,
   "expected_profile_counts": {
     "skyrim": 32,
     "fallout": 13,
-    "unknown": 6
+    "unknown": 8
   },
   "required_summary_code_prefixes": [
     "missing_parallax_flag.flag1_not_set.skyrim.",

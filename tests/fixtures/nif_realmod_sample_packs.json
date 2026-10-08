@@ -814,8 +814,8 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 9,
-        "effects": 4,
+        "architecture": 10,
+        "effects": 5,
         "clutter": 5,
         "armor": 1,
         "landscape": 1,
@@ -1623,6 +1623,56 @@
           "safety_difference_note": "Guarded Fallout mode keeps malformed real-layout headers non-destructive and intentionally no-ops instead of speculative rewrites."
         },
         {
+          "id": "pack_fallout_architecture_real_crlf_u16_shifted_crossblock_env_slot5_missing_parallax_reuse",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_paths": [
+            "textures\\architecture\\factory\\bulkhead.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\bulkhead_e.dds",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\architecture\\factory\\bulkhead.dds",
+                "textures\\architecture\\factory\\bulkhead_n.dds",
+                "",
+                "textures\\architecture\\factory\\bulkhead_n.dds",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "guarded_crossblock_rebuild_for_missing_slot5_and_parallax_slot_reuse",
+          "local_strategy": "guarded_noop_for_unsupported_header",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout handling keeps malformed shifted/u16/crlf cross-block variants non-destructive when header support is ambiguous."
+        },
+        {
           "id": "pack_fallout_effects_real_shifted_envmap_glow_slot2_partial_recover",
           "family": "effects",
           "profile": "fallout",
@@ -1656,6 +1706,58 @@
           ],
           "pgpatcher_strategy": "guarded_partial_restore_glow_slot_only",
           "local_strategy": "guarded_partial_restore_glow_slot_only"
+        },
+        {
+          "id": "pack_fallout_effects_real_crlf_u16_shifted_crossblock_env_glow_slot2_missing_plus_single_pass",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\effects\\reactor\\reactorfx.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\reactorfx_e.dds",
+            "textures\\effects\\reactor\\reactorfx_m.dds",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "flags1": 32,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\effects\\reactor\\reactorfx.dds",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "guarded_rebuild_glow_for_envmap_plus_skip_single_pass",
+          "local_strategy": "guarded_noop_for_unsupported_header",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout behavior keeps malformed shifted/u16/crlf mixed blocks non-destructive when header confidence is low."
         },
         {
           "id": "pack_fallout_clutter_real_shifted_guarded_noop_unsupported_header",

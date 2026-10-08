@@ -846,6 +846,12 @@ def _write_release_artifacts(
             "",
             f"- Real-sample parity delta JSON: `{realmod_delta_json_path.name}`",
             f"- Real-sample parity delta markdown: `{realmod_delta_md_path.name}`",
+            "",
+            "## Manual release-candidate verification (post-CI artifact review)",
+            "",
+            "- [ ] Review `release-readiness-artifacts` in CI and confirm no unexpected conflict-family drift.",
+            "- [ ] Review packaged executable artifacts and verify CLI `--help` plus expected files are present.",
+            "- [ ] Run representative in-game smoke checks (at least one Skyrim set and one guarded Fallout set) and confirm no new visual/CTD regressions.",
         ]
     )
     if localization_report is not None and localization_json_path is not None and localization_md_path is not None:
