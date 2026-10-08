@@ -3,12 +3,24 @@
     {
       "id": "skyrim_realmod_family_pack",
       "expected_family_case_counts": {
-        "architecture": 5,
+        "architecture": 6,
         "clutter": 2,
         "armor": 1,
         "landscape": 1,
         "foliage": 1,
-        "effects": 2
+        "effects": 3
+      },
+      "expected_family_min_pass_ratio": {
+        "architecture": 1.0,
+        "clutter": 1.0,
+        "armor": 1.0,
+        "landscape": 1.0,
+        "foliage": 1.0,
+        "effects": 1.0
+      },
+      "expected_family_min_remediation_expectation_coverage": {
+        "architecture": 0.15,
+        "effects": 0.33
       },
       "required_summary_code_prefixes": [
         "path_slot_parallax.matches_diffuse.skyrim.",
@@ -16,6 +28,7 @@
         "shader_state.envmap_missing_slots4_5.skyrim.",
         "shader_state.envmap_missing_slot4.skyrim.",
         "shader_state.envmap_missing_slot5.skyrim.",
+        "shader_state.envmap_glow_missing_slots2_4_5.skyrim.",
         "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim.",
         "path_slot_env_mask.generic_alias_suffix.skyrim.",
         "path_slot_cubemap.wrong_suffix.skyrim.",
@@ -330,14 +343,88 @@
           ],
           "expected_prefixes": [
             "path_slot_parallax.matches_normal.skyrim."
-          ]
+          ],
+          "pgpatcher_strategy": "rebuild_slot3_height",
+          "local_strategy": "rebuild_slot3_when_guessable_else_disable"
+        },
+        {
+          "id": "pack_skyrim_architecture_ae_real_crlf_shifted_envmap_glow_mixed",
+          "family": "architecture",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_layout_shift": 4,
+          "texture_set_count_u16": true,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\architecture\\dwemer\\dwemerwall.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_glow_missing_slots2_4_5.skyrim.real"
+          ],
+          "expected_remediation_steps": [
+            "set_slot2_glow_for_envmap_glow_mixed_unresolved",
+            "set_slot4_cubemap_for_envmap_glow_mixed_unresolved",
+            "set_slot5_env_mask_for_envmap_glow_mixed_unresolved",
+            "enable_env_mapping_for_envmap_glow_mixed_unresolved",
+            "enable_glow_map_for_envmap_glow_mixed_unresolved"
+          ],
+          "expected_absent_remediation_steps": [
+            "disable_env_mapping_for_envmap_glow_mixed_unresolved",
+            "disable_glow_map_for_envmap_glow_mixed_unresolved"
+          ],
+          "pgpatcher_strategy": "rebuild_env_and_glow_slots",
+          "local_strategy": "rebuild_env_and_glow_when_guessable_else_disable"
+        },
+        {
+          "id": "pack_skyrim_effects_vr_parallax_envmap_glow_unresolved_no_diffuse",
+          "family": "effects",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 100,
+          "shader_type": 1,
+          "flags1": 268437632,
+          "flags2": 64,
+          "texture_paths": [
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "disable_parallax_for_parallax_envmap_glow_mixed_unresolved",
+            "disable_pom_for_parallax_envmap_glow_mixed_unresolved",
+            "disable_glow_map_for_parallax_envmap_glow_mixed_unresolved",
+            "disable_env_mapping_for_parallax_envmap_glow_mixed_unresolved"
+          ],
+          "pgpatcher_strategy": "disable_conflicting_flags_when_textures_missing",
+          "local_strategy": "disable_conflicting_flags_when_no_safe_rebuild_source"
         }
       ]
     },
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 1,
+        "architecture": 2,
         "effects": 1,
         "clutter": 2,
         "armor": 1,
@@ -348,12 +435,28 @@
         "fix_lighting_gate": 1,
         "parallax_scale_gate": 1
       },
+      "expected_family_min_pass_ratio": {
+        "architecture": 1.0,
+        "effects": 1.0,
+        "clutter": 1.0,
+        "armor": 1.0,
+        "landscape": 1.0,
+        "spec_gate": 1.0,
+        "spec_color_gate": 1.0,
+        "env_scale_gate": 1.0,
+        "fix_lighting_gate": 1.0,
+        "parallax_scale_gate": 1.0
+      },
+      "expected_family_min_remediation_expectation_coverage": {
+        "architecture": 0.5
+      },
       "required_summary_code_prefixes": [
         "shader_state.envmap_missing_slots4_5.fallout.",
         "flag_env_mapping.slot5_filled_without_flag.fallout.",
         "skip_single_pass.fallout.",
         "shader_state.envmap_missing_slot4.fallout.",
         "shader_state.envmap_missing_slot5.fallout.",
+        "shader_state.envmap_glow_missing_slots2_4_5.fallout.",
         "missing_parallax_flag.flag1_not_set.fallout.",
         "shader_state.parallax_type_missing_slot3.fallout."
       ],
@@ -369,7 +472,49 @@
           "flags1": 128,
           "expected_prefixes": [
             "shader_state.envmap_missing_slots4_5.fallout."
-          ]
+          ],
+          "pgpatcher_strategy": "rebuild_env_slots_or_disable",
+          "local_strategy": "guarded_rebuild_then_disable"
+        },
+        {
+          "id": "pack_fallout_architecture_real_crlf_shifted_envmap_glow_mixed",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\architecture\\vault\\vaultwall.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_glow_missing_slots2_4_5.fallout.real"
+          ],
+          "expected_remediation_steps": [
+            "set_slot2_glow_for_envmap_glow_mixed_unresolved",
+            "set_slot4_cubemap_for_envmap_glow_mixed_unresolved",
+            "set_slot5_env_mask_for_envmap_glow_mixed_unresolved",
+            "enable_env_mapping_for_envmap_glow_mixed_unresolved",
+            "enable_glow_map_for_envmap_glow_mixed_unresolved"
+          ],
+          "expected_absent_remediation_steps": [
+            "disable_env_mapping_for_envmap_glow_mixed_unresolved",
+            "disable_glow_map_for_envmap_glow_mixed_unresolved"
+          ],
+          "pgpatcher_strategy": "guarded_env_glow_rebuild_then_disable",
+          "local_strategy": "guarded_rebuild_when_guessable_else_disable"
         },
         {
           "id": "pack_fallout_effects_env_slot5_without_flag",

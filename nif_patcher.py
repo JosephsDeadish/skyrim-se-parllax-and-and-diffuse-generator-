@@ -4562,10 +4562,32 @@ def build_auto_remediation_patch_options(
         applied_steps.append("disable_env_mapping_for_envmap_pom_mixed_unresolved")
         applied_steps.append("disable_pom_for_envmap_pom_mixed_unresolved")
     if any(code.startswith("shader_state.envmap_glow_missing_slots2_4_5") for code in base_codes):
-        opts.disable_env_mapping = True
-        opts.disable_glow_map = True
-        applied_steps.append("disable_env_mapping_for_envmap_glow_mixed_unresolved")
-        applied_steps.append("disable_glow_map_for_envmap_glow_mixed_unresolved")
+        restored_any_texture = False
+        if guessed_glow:
+            opts.glow_texture_path = guessed_glow
+            applied_steps.append("set_slot2_glow_for_envmap_glow_mixed_unresolved")
+            restored_any_texture = True
+        restored_any_env_slot = False
+        if guessed_cubemap:
+            opts.cubemap_texture_path = guessed_cubemap
+            applied_steps.append("set_slot4_cubemap_for_envmap_glow_mixed_unresolved")
+            restored_any_env_slot = True
+        if guessed_env:
+            opts.env_mask_texture_path = guessed_env
+            applied_steps.append("set_slot5_env_mask_for_envmap_glow_mixed_unresolved")
+            restored_any_env_slot = True
+        if restored_any_env_slot:
+            opts.enable_env_mapping = True
+            applied_steps.append("enable_env_mapping_for_envmap_glow_mixed_unresolved")
+        if restored_any_texture:
+            opts.enable_glow_map = True
+            applied_steps.append("enable_glow_map_for_envmap_glow_mixed_unresolved")
+        if not restored_any_env_slot:
+            opts.disable_env_mapping = True
+            applied_steps.append("disable_env_mapping_for_envmap_glow_mixed_unresolved")
+        if not restored_any_texture:
+            opts.disable_glow_map = True
+            applied_steps.append("disable_glow_map_for_envmap_glow_mixed_unresolved")
     if any(code.startswith("shader_state.parallax_envmap_missing_slots3_4_5") for code in base_codes):
         opts.disable_env_mapping = True
         opts.disable_parallax = True

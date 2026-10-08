@@ -2994,13 +2994,29 @@ class TestRealModSamplePacks(unittest.TestCase):
 
             observed_family_case_counts: dict[str, int] = {}
             family_pass_fail: dict[str, dict[str, int]] = {}
+            family_remediation_expectation_coverage: dict[str, dict[str, int]] = {}
             for nif_path, validation in zip(corpus, validations):
                 case = case_map.get(nif_path.stem, {})
                 family = str(case.get("family", "unknown")).strip() or "unknown"
                 observed_family_case_counts[family] = observed_family_case_counts.get(family, 0) + 1
                 family_pass_fail.setdefault(family, {"pass": 0, "fail": 0})
+                family_remediation_expectation_coverage.setdefault(
+                    family,
+                    {"with_expectation": 0, "total": 0},
+                )
                 expected_prefixes = case.get("expected_prefixes", []) if isinstance(case, dict) else []
                 expected_absent_prefixes = case.get("expected_absent_prefixes", []) if isinstance(case, dict) else []
+                expected_remediation_steps = (
+                    case.get("expected_remediation_steps", []) if isinstance(case, dict) else []
+                )
+                expected_absent_remediation_steps = (
+                    case.get("expected_absent_remediation_steps", []) if isinstance(case, dict) else []
+                )
+                expected_no_auto_remediation = (
+                    bool(case.get("expected_no_auto_remediation", False))
+                    if isinstance(case, dict)
+                    else False
+                )
                 codes = [group.code for group in validation.conflict_report]
                 case_ok = True
                 if isinstance(expected_prefixes, list):
@@ -3013,6 +3029,43 @@ class TestRealModSamplePacks(unittest.TestCase):
                         if any(code.startswith(str(prefix)) for code in codes):
                             case_ok = False
                             break
+                has_remediation_expectation = bool(
+                    (isinstance(expected_remediation_steps, list) and expected_remediation_steps)
+                    or (isinstance(expected_absent_remediation_steps, list) and expected_absent_remediation_steps)
+                    or expected_no_auto_remediation
+                )
+                family_remediation_expectation_coverage[family]["total"] += 1
+                if has_remediation_expectation:
+                    family_remediation_expectation_coverage[family]["with_expectation"] += 1
+                    opts, rem_steps = build_auto_remediation_patch_options(
+                        validation.nif_path,
+                        codes,
+                        backup=False,
+                    )
+                    if expected_no_auto_remediation:
+                        self.assertIsNone(
+                            opts,
+                            f"{pack_id}/{nif_path.stem}: expected no auto-remediation options, got {rem_steps}",
+                        )
+                    else:
+                        self.assertIsNotNone(
+                            opts,
+                            f"{pack_id}/{nif_path.stem}: expected auto-remediation options but got none",
+                        )
+                    if isinstance(expected_remediation_steps, list):
+                        for step in expected_remediation_steps:
+                            self.assertIn(
+                                str(step),
+                                rem_steps,
+                                f"{pack_id}/{nif_path.stem}: missing remediation step {step!r}; got {rem_steps}",
+                            )
+                    if isinstance(expected_absent_remediation_steps, list):
+                        for step in expected_absent_remediation_steps:
+                            self.assertNotIn(
+                                str(step),
+                                rem_steps,
+                                f"{pack_id}/{nif_path.stem}: unexpected remediation step {step!r}; got {rem_steps}",
+                            )
                 if case_ok:
                     family_pass_fail[family]["pass"] += 1
                 else:
@@ -3028,6 +3081,45 @@ class TestRealModSamplePacks(unittest.TestCase):
             for family, stats in family_pass_fail.items():
                 self.assertEqual(stats["fail"], 0, f"{pack_id}: family {family} has failing parity expectations")
                 self.assertGreater(stats["pass"], 0, f"{pack_id}: family {family} has zero passing cases")
+
+            expected_family_min_pass_ratio = pack.get("expected_family_min_pass_ratio", {})
+            self.assertIsInstance(expected_family_min_pass_ratio, dict)
+            for family, min_ratio_raw in expected_family_min_pass_ratio.items():
+                family_name = str(family)
+                min_ratio = float(min_ratio_raw)
+                stats = family_pass_fail.get(family_name)
+                self.assertIsNotNone(stats, f"{pack_id}: threshold references unknown family {family_name!r}")
+                assert stats is not None
+                total = int(stats["pass"]) + int(stats["fail"])
+                observed_ratio = (float(stats["pass"]) / float(total)) if total > 0 else 0.0
+                self.assertGreaterEqual(
+                    observed_ratio,
+                    min_ratio,
+                    f"{pack_id}: family {family_name} pass ratio {observed_ratio:.3f} below threshold {min_ratio:.3f}",
+                )
+
+            expected_family_min_remediation_coverage = pack.get(
+                "expected_family_min_remediation_expectation_coverage",
+                {},
+            )
+            self.assertIsInstance(expected_family_min_remediation_coverage, dict)
+            for family, min_ratio_raw in expected_family_min_remediation_coverage.items():
+                family_name = str(family)
+                min_ratio = float(min_ratio_raw)
+                coverage = family_remediation_expectation_coverage.get(family_name)
+                self.assertIsNotNone(coverage, f"{pack_id}: remediation-coverage threshold references unknown family {family_name!r}")
+                assert coverage is not None
+                total = int(coverage["total"])
+                with_expectation = int(coverage["with_expectation"])
+                observed_ratio = (float(with_expectation) / float(total)) if total > 0 else 0.0
+                self.assertGreaterEqual(
+                    observed_ratio,
+                    min_ratio,
+                    (
+                        f"{pack_id}: family {family_name} remediation expectation coverage {observed_ratio:.3f} "
+                        f"below threshold {min_ratio:.3f}"
+                    ),
+                )
 
             summary = summarize_validation_conflicts(validations)
             summary_codes = [group.code for group in summary]
@@ -3406,8 +3498,33 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertIn("disable_env_mapping_for_envmap_pom_mixed_unresolved", steps)
         self.assertIn("disable_pom_for_envmap_pom_mixed_unresolved", steps)
 
-    def test_auto_remediation_build_options_disables_env_mapping_and_glow_for_mixed_envmap_glow_conflict(self) -> None:
-        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP)
+    def test_auto_remediation_build_options_restores_paths_for_mixed_envmap_glow_conflict_when_guessable(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP, texture_paths=paths)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["shader_state.envmap_glow_missing_slots2_4_5.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(str(opts.glow_texture_path).lower().endswith("_g.dds"))
+        self.assertTrue(str(opts.cubemap_texture_path).lower().endswith("_e.dds"))
+        self.assertTrue(str(opts.env_mask_texture_path).lower().endswith("_m.dds"))
+        self.assertIn("set_slot2_glow_for_envmap_glow_mixed_unresolved", steps)
+        self.assertIn("set_slot4_cubemap_for_envmap_glow_mixed_unresolved", steps)
+        self.assertIn("set_slot5_env_mask_for_envmap_glow_mixed_unresolved", steps)
+        self.assertIn("enable_env_mapping_for_envmap_glow_mixed_unresolved", steps)
+        self.assertIn("enable_glow_map_for_envmap_glow_mixed_unresolved", steps)
+        self.assertNotIn("disable_env_mapping_for_envmap_glow_mixed_unresolved", steps)
+        self.assertNotIn("disable_glow_map_for_envmap_glow_mixed_unresolved", steps)
+
+    def test_auto_remediation_build_options_disables_env_mapping_and_glow_for_mixed_envmap_glow_conflict_without_guesses(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_ENVMAP,
+            texture_paths=[""] * 9,
+        )
         opts, steps = build_auto_remediation_patch_options(
             nif,
             ["shader_state.envmap_glow_missing_slots2_4_5.skyrim.legacy"],
