@@ -359,7 +359,8 @@ Before publishing a release, run at least one real mod-scale verification pass:
    - NIF auto-patching (if enabled) reports accurate success/fail counts.
 6. Run pre-release validation gate:
    - `python scripts/pre_release_validation.py`
-   - This runs the full test suite, conflict-stress checks, compile checks, and a tracked-file secret scan.
+   - This runs the full test suite, conflict-stress checks, large-batch/queue verification checks, compile checks, and a tracked-file secret scan.
+   - By default it also performs a local PyInstaller smoke build and validates packaged CLI `--help` plus a tiny end-to-end sample generation output.
 7. Complete manual release-candidate verification:
    - review uploaded `release-readiness-artifacts` from CI for unexpected parity/family drift,
    - smoke-test representative mod sets in game (minimum: one Skyrim set and one guarded Fallout set),

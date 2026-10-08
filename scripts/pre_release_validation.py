@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import re
 import shutil
@@ -156,6 +157,44 @@ def _run_packaged_executable_smoke(artifact_dir: Path) -> None:
     if "--render-profile" not in output or "--checkpoint-file" not in output:
         raise SystemExit(
             "Packaged executable smoke run did not expose expected CLI options in --help output."
+        )
+
+    smoke_io = artifact_dir / "packaging_smoke" / "io"
+    smoke_out = smoke_io / "out"
+    smoke_io.mkdir(parents=True, exist_ok=True)
+    smoke_out.mkdir(parents=True, exist_ok=True)
+    smoke_input = smoke_io / "sample_input.png"
+    smoke_input.write_bytes(
+        base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP8z8Dwn4GBgYGJAQoAHxcCAr7cGDwAAAAASUVORK5CYII="
+        )
+    )
+
+    run_completed = subprocess.run(
+        [
+            str(binary),
+            str(smoke_input),
+            "--output-dir",
+            str(smoke_out),
+            "--render-profile",
+            "vanilla",
+            "--normal-strength",
+            "1.2",
+            "--parallax-strength",
+            "1.0",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if run_completed.returncode != 0:
+        print(run_completed.stdout)
+        print(run_completed.stderr)
+        raise SystemExit(run_completed.returncode)
+    produced_dds = sorted(smoke_out.glob("*.dds"))
+    if not produced_dds:
+        raise SystemExit(
+            "Packaged executable smoke run completed but did not produce any DDS outputs."
         )
 
 
@@ -1045,9 +1084,27 @@ def main() -> int:
             f"Compile check{suffix}",
             [PYTHON, "-m", "compileall", "generate_textures.py", "nif_patcher.py", "tests"],
         )
+        _run_step(
+            f"Large real-sample batch verification{suffix}",
+            [
+                PYTHON,
+                "-m",
+                "unittest",
+                "-v",
+                "tests.test_generate_textures.GenerateTexturesTests.test_compute_preview_refresh_delay_ms_throttles_for_huge_batches",
+                "tests.test_generate_textures.GenerateTexturesTests.test_compute_deferred_preview_tile_interval_ms_increases_for_huge_batches",
+                "tests.test_generate_textures.GenerateTexturesTests.test_should_update_live_batch_preview_throttles_dense_updates_for_huge_batches",
+                "tests.test_generate_textures.GenerateTexturesTests.test_build_batch_bottleneck_hints_includes_large_run_resume_guidance",
+                "tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_writes_checkpoint_file",
+                "tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_resume_checkpoint_skips_completed_successes",
+                "tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_writes_batch_telemetry_file",
+                "tests.test_generate_textures.GenerateTexturesTests.test_gui_processing_queue_smoke_done_event_reports_outputs_failures_and_autopatch",
+            ],
+        )
     step_status.append((f"Full unittest suite x{loops}", "pass"))
     step_status.append((f"Targeted NIF fixture/parity stress checks x{loops}", "pass"))
     step_status.append((f"Compile check x{loops}", "pass"))
+    step_status.append((f"Large real-sample batch verification x{loops}", "pass"))
     _run_secret_scan()
     step_status.append(("Tracked-file secret scan", "pass"))
     if not args.skip_packaging_smoke:

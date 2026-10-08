@@ -8064,18 +8064,18 @@ if GUI_AVAILABLE:
             self._add_tooltip(_snow_mask_check, "❄ Generate a Community Shaders Dynamic Snow mask (_sm.dds).\nMarks where snow accumulates in supported shader/mod setups; this is workflow-specific, not a universal vanilla slot.")
             _advanced_workflow_toggle = ttk.Checkbutton(
                 _workflow_frame,
-                text="Show advanced workflow outputs (RMAOS/Wetness/Snow/AO/Roughness)",
+                text="Show advanced workflow outputs",
                 variable=self.show_advanced_workflow_outputs_var,
             )
             _advanced_workflow_toggle.grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
             self._add_tooltip(
                 _advanced_workflow_toggle,
-                "Beginner mode keeps only core Vanilla/ENB outputs visible.\n"
-                "Enable this to show advanced Community Shaders/PBR workflow output groups.",
+                "Beginner view keeps only core Vanilla/ENB outputs visible.\n"
+                "Enable this to show advanced Community Shaders/TruePBR workflow groups.",
             )
             _preset_row = ttk.Frame(_workflow_frame)
             _preset_row.grid(row=2, column=0, columnspan=3, sticky=tk.EW, pady=(4, 0))
-            ttk.Label(_preset_row, text="One-click Safe Defaults (recommended)").pack(side=tk.LEFT)
+            ttk.Label(_preset_row, text="One-click safe presets (recommended)").pack(side=tk.LEFT)
             ttk.Button(
                 _preset_row,
                 text="Vanilla (Safe default)",
@@ -8088,12 +8088,12 @@ if GUI_AVAILABLE:
             ).pack(side=tk.LEFT, padx=2)
             ttk.Button(
                 _preset_row,
-                text="CS (Safe default)",
+                text="Community Shaders (Safe)",
                 command=lambda: self._apply_safe_workflow_preset("community_shaders"),
             ).pack(side=tk.LEFT, padx=2)
             ttk.Button(
                 _preset_row,
-                text="TruePBR (Safe default)",
+                text="TruePBR (Safe)",
                 command=lambda: self._apply_safe_workflow_preset("truepbr"),
             ).pack(side=tk.LEFT, padx=2)
             ttk.Button(
@@ -8107,7 +8107,7 @@ if GUI_AVAILABLE:
                 _workflow_frame,
                 text=(
                     "Quick guide: Vanilla = stock Skyrim. ENB = ENB complex materials. "
-                    "CS = Extended Materials. TruePBR = CS TruePBR JSON workflow."
+                    "Community Shaders = Extended Materials. TruePBR = CS TruePBR JSON workflow."
                 ),
                 foreground="gray",
             )
@@ -8139,13 +8139,13 @@ if GUI_AVAILABLE:
             )
             _show_advanced_generation_check = ttk.Checkbutton(
                 options_frame,
-                text="Show advanced controls (renderer/workflow + extended sliders)",
+                text="Show advanced setup controls",
                 variable=self.show_advanced_generation_var,
             )
             _show_advanced_generation_check.grid(row=1, column=3, columnspan=2, sticky=tk.E, pady=(6, 2))
             self._add_tooltip(
                 _show_advanced_generation_check,
-                "Show advanced renderer/workflow selectors and extended sliders.\n"
+                "Show renderer/workflow selectors and extended sliders.\n"
                 "This only changes visible controls; output changes only if you change values.",
             )
 
@@ -8231,16 +8231,16 @@ if GUI_AVAILABLE:
             self.env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
             self.env_mask_mode_combo.bind("<<ComboboxSelected>>", self._on_env_mask_mode_changed)
             self._add_tooltip(self.env_mask_mode_combo, "standard: vanilla/ENB _m greyscale. complex: packed RGBA map. Match this to Target renderer.")
-            self._add_tooltip(
-                _env_mode_hint_label,
-                "Use standard for most vanilla/ENB workflows. Use complex only when your chosen renderer/workflow expects packed slot-5 channels.",
-            )
             _env_mode_hint_label = ttk.Label(
                 options_frame,
                 text="standard = vanilla Skyrim SE  |  complex = packed RGBA (renderer-specific channels)",
                 foreground="gray",
             )
             _env_mode_hint_label.grid(row=3, column=4, sticky=tk.W, padx=(4, 0))
+            self._add_tooltip(
+                _env_mode_hint_label,
+                "Use standard for most vanilla/ENB workflows. Use complex only when your chosen renderer/workflow expects packed slot-5 channels.",
+            )
 
             _normal_label = ttk.Label(options_frame, text="Normal strength")
             _normal_label.grid(row=4, column=0, sticky=tk.W, pady=8)

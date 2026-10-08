@@ -53,10 +53,13 @@ jobs:
       - name: Run large-batch smoke tests
         run: |
           python -m unittest -v \
-            tests.test_generate_textures.TestBatchPreviewCadenceAndHints.test_compute_preview_refresh_delay_ms_throttles_for_huge_batches \
-            tests.test_generate_textures.TestBatchPreviewCadenceAndHints.test_compute_deferred_preview_tile_interval_ms_increases_for_huge_batches \
-            tests.test_generate_textures.TestBatchPreviewCadenceAndHints.test_should_update_live_batch_preview_throttles_dense_updates_for_huge_batches \
-            tests.test_generate_textures.TestBatchPreviewCadenceAndHints.test_build_batch_bottleneck_hints_includes_large_run_resume_guidance
+            tests.test_generate_textures.GenerateTexturesTests.test_compute_preview_refresh_delay_ms_throttles_for_huge_batches \
+            tests.test_generate_textures.GenerateTexturesTests.test_compute_deferred_preview_tile_interval_ms_increases_for_huge_batches \
+            tests.test_generate_textures.GenerateTexturesTests.test_should_update_live_batch_preview_throttles_dense_updates_for_huge_batches \
+            tests.test_generate_textures.GenerateTexturesTests.test_build_batch_bottleneck_hints_includes_large_run_resume_guidance \
+            tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_writes_checkpoint_file \
+            tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_resume_checkpoint_skips_completed_successes \
+            tests.test_generate_textures.GenerateTexturesTests.test_gui_processing_queue_smoke_done_event_reports_outputs_failures_and_autopatch
 
   release-readiness:
     name: Release validation gate artifacts (Ubuntu)
@@ -138,6 +141,38 @@ jobs:
 
       - name: Smoke run packaged executable
         run: .\dist\generate_textures.exe --help
+
+      - name: End-to-end packaged executable smoke generation
+        run: |
+          python - <<'PY'
+          import base64
+          from pathlib import Path
+          import subprocess
+
+          smoke_root = Path("artifacts") / "packaged_smoke"
+          smoke_out = smoke_root / "out"
+          smoke_root.mkdir(parents=True, exist_ok=True)
+          smoke_out.mkdir(parents=True, exist_ok=True)
+          input_png = smoke_root / "sample_input.png"
+          input_png.write_bytes(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP8z8Dwn4GBgYGJAQoAHxcCAr7cGDwAAAAASUVORK5CYII="))
+          cmd = [
+              str(Path("dist") / "generate_textures.exe"),
+              str(input_png),
+              "--output-dir",
+              str(smoke_out),
+              "--render-profile",
+              "vanilla",
+              "--normal-strength",
+              "1.2",
+              "--parallax-strength",
+              "1.0",
+          ]
+          completed = subprocess.run(cmd, capture_output=True, text=True)
+          if completed.returncode != 0:
+              raise SystemExit(completed.returncode)
+          if not list(smoke_out.glob("*.dds")):
+              raise SystemExit("No DDS outputs were produced by packaged executable smoke generation.")
+          PY
 
       - name: Create application zip
         run: |

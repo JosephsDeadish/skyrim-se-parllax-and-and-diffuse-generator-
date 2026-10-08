@@ -815,7 +815,7 @@
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
         "architecture": 19,
-        "effects": 12,
+        "effects": 13,
         "clutter": 12,
         "armor": 1,
         "landscape": 1,
@@ -2543,6 +2543,35 @@
           ],
           "expected_difference_bucket": "guarded_fallout",
           "safety_difference_note": "Guarded Fallout mode keeps anisotropic-lighting blocks out of forced parallax writes but still allows low-risk slot correction in mixed-block files."
+        },
+        {
+          "id": "pack_fallout_effects_real_multidrift_blocksize_index_guarded_noop_growth",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "num_blocks_delta": 1,
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 2,
+              "delta": 14
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            81
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Growth drift family: guarded Fallout mode keeps malformed block-size/index drift combinations in manual-review mode to avoid speculative binary rewrites."
         },
         {
           "id": "pack_fallout_architecture_real_multidrift_blocksize_ref_skew_guarded_noop",
