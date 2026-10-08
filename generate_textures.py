@@ -8012,16 +8012,16 @@ if GUI_AVAILABLE:
             _enb_section.grid(row=0, column=0, sticky=tk.NSEW, padx=(0, 4), pady=2)
             _diffuse_check = ttk.Checkbutton(_enb_section, text="Diffuse", variable=self.include_diffuse_var, command=self._refresh_preview)
             _diffuse_check.grid(row=0, column=0, sticky=tk.W)
-            self._add_tooltip(_diffuse_check, "🎨 Generate the diffuse (colour) texture.\nThis is the one that makes your rock look like a rock and not a void of existential dread.")
+            self._add_tooltip(_diffuse_check, "Generate the base color (diffuse) texture.")
             _normal_check = ttk.Checkbutton(_enb_section, text="Normal / _n", variable=self.include_normal_var, command=self._refresh_preview)
             _normal_check.grid(row=1, column=0, sticky=tk.W)
-            self._add_tooltip(_normal_check, "🗻 Generate a normal map for fake 3D depth.\nSkyrim's favourite optical illusion since 2011.")
+            self._add_tooltip(_normal_check, "Generate a normal map (_n) for lighting/detail depth.")
             _env_mask_check = ttk.Checkbutton(_enb_section, text="Environment Mask / _m", variable=self.include_environment_mask_var, command=self._on_environment_mask_output_toggled)
             _env_mask_check.grid(row=2, column=0, sticky=tk.W)
-            self._add_tooltip(_env_mask_check, "🪞 Generate classic _m environment mask for vanilla/ENB reflection workflows.\nMutually exclusive with Community Shaders PBR _rmaos — these are different material systems, do not combine.")
+            self._add_tooltip(_env_mask_check, "Generate _m environment mask for vanilla/ENB. Do not combine with TruePBR _rmaos.")
             _parallax_check = ttk.Checkbutton(_enb_section, text="Height/Parallax (_p) — optional", variable=self.include_parallax_var, command=self._on_output_selection_changed)
             _parallax_check.grid(row=3, column=0, sticky=tk.W)
-            self._add_tooltip(_parallax_check, "🌊 Generate a height/parallax map (_p).\nFor vanilla Skyrim SE use 'standard' parallax mode; for ENBSeries POM use 'occlusion' mode.\nNot a universal format — match your workflow before enabling.")
+            self._add_tooltip(_parallax_check, "Generate height/parallax (_p). Use standard for vanilla, occlusion for ENB POM.")
             _glow_check = ttk.Checkbutton(_enb_section, text="Glow / _g", variable=self.include_glow_var, command=self._refresh_preview)
             _glow_check.grid(row=4, column=0, sticky=tk.W)
             self._add_tooltip(_glow_check, "Generate a glow map. Brighter pixels emit more light.")
@@ -8029,9 +8029,7 @@ if GUI_AVAILABLE:
             _complex_check.grid(row=5, column=0, sticky=tk.W)
             self._add_tooltip(
                 _complex_check,
-                "🔮 Generate ENB complex material output (typically _msn).\n"
-                "ENB Complex Material ≠ Community Shaders PBR — these are separate renderer workflows.\n"
-                "Community Shaders TruePBR uses _rmaos (in the CS PBR section), not this toggle.",
+                "Generate ENB complex material output (usually _msn). Separate workflow from Community Shaders TruePBR.",
             )
 
             # --- Community Shaders PBR Workflow section ---
@@ -8047,13 +8045,13 @@ if GUI_AVAILABLE:
             self._add_tooltip(_pbr_note, "ℹ Base color and normal map are shared with Vanilla/ENB workflow outputs.\nEnable them in the Vanilla/ENB section above.")
             _rmaos_check = ttk.Checkbutton(_pbr_section, text="RMAOS / _rmaos", variable=self.include_rmaos_var, command=self._on_rmaos_output_toggled)
             _rmaos_check.grid(row=1, column=0, sticky=tk.W)
-            self._add_tooltip(_rmaos_check, "🧩 Generate Community Shaders TruePBR _rmaos/_ramos plus JSON sidecar.\nRMAOS channels: R=roughness, G=metallic, B=AO, A=config-driven spec/height.\nRequires TruePBR-enabled mesh/patch config; _rmaos ≠ _m.\nMutually exclusive with Vanilla/ENB _m environment mask.")
+            self._add_tooltip(_rmaos_check, "Generate TruePBR _rmaos/_ramos + JSON sidecar. Do not combine with vanilla/ENB _m.")
             _roughness_check = ttk.Checkbutton(_pbr_section, text="Roughness / _rough", variable=self.include_roughness_var, command=self._refresh_preview)
             _roughness_check.grid(row=2, column=0, sticky=tk.W)
             self._add_tooltip(_roughness_check, "🪨 Generate a standalone roughness map (_rough.dds).\nControls how rough vs. glossy the surface looks. Material-aware: stone goes rough, glass goes smooth.")
             _ao_check = ttk.Checkbutton(_pbr_section, text="Standalone AO (optional) / _ao", variable=self.include_ao_var, command=self._refresh_preview)
             _ao_check.grid(row=3, column=0, sticky=tk.W)
-            self._add_tooltip(_ao_check, "🌑 Generate an optional standalone AO map (_ao.dds).\nStandalone AO maps are uncommon in traditional Skyrim workflows — AO is usually packed into _rmaos or baked into diffuse.\nTreat this as optional/non-standard.")
+            self._add_tooltip(_ao_check, "Generate optional standalone AO (_ao). Most workflows instead pack AO into _rmaos.")
 
             # --- Community Shaders workflow-specific maps section ---
             _custom_section = ttk.LabelFrame(_workflow_frame, text="Community Shaders / Workflow-Specific Maps", padding=6)
@@ -8222,7 +8220,7 @@ if GUI_AVAILABLE:
             _env_mode_row.grid(row=3, column=2, columnspan=2, sticky=tk.W, padx=(20, 4), pady=8)
             _env_mode_label = ttk.Label(_env_mode_row, text="Env mask mode")
             _env_mode_label.pack(side=tk.LEFT)
-            self._add_tooltip(_env_mode_label, "🌍 How to encode slot 5 data.\n'standard' = vanilla/ENB-style _m greyscale reflection mask.\n'complex' = packed RGBA data map (ENB _m RGBA, or renderer-specific packed workflows).\nCommunity Shaders Extended Materials usually uses _cm/_c, and TruePBR uses _rmaos/_ramos + JSON.\nUse Target renderer + Help for exact channel mapping.")
+            self._add_tooltip(_env_mode_label, "Choose slot-5 encoding: standard (_m greyscale) or complex (packed RGBA, renderer-specific).")
             self.env_mask_mode_combo = ttk.Combobox(
                 _env_mode_row,
                 textvariable=self.env_mask_mode_var,
@@ -8232,7 +8230,7 @@ if GUI_AVAILABLE:
             )
             self.env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
             self.env_mask_mode_combo.bind("<<ComboboxSelected>>", self._on_env_mask_mode_changed)
-            self._add_tooltip(self.env_mask_mode_combo, "🌍 'standard' = greyscale _m for vanilla-style reflection masks.\n'complex' = packed RGBA map data (ENB _m RGBA or renderer-specific packed paths).\nCS Extended Materials usually uses _cm/_c; TruePBR usually uses _rmaos/_ramos (+ JSON), not generic _orm/_mrao aliases.\nAlways match this with your selected Target renderer.")
+            self._add_tooltip(self.env_mask_mode_combo, "standard: vanilla/ENB _m greyscale. complex: packed RGBA map. Match this to Target renderer.")
             _env_mode_hint_label = ttk.Label(
                 options_frame,
                 text="standard = vanilla Skyrim SE  |  complex = packed RGBA (renderer-specific channels)",

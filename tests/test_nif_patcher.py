@@ -345,6 +345,23 @@ def _patch_shader_size_delta(path: Path, shader_ordinal: int, delta: int) -> Non
     path.write_bytes(bytes(raw))
 
 
+def _patch_block_size_delta(path: Path, block_ordinal: int, delta: int) -> None:
+    data = path.read_bytes()
+    header = _read_header(_Buf(data))
+    if header is None:
+        return
+    if block_ordinal < 0 or block_ordinal >= int(header.num_blocks):
+        return
+    offset = int(header.block_sizes_offset) + int(block_ordinal) * 4
+    if offset + 4 > len(data):
+        return
+    current = struct.unpack_from("<I", data, offset)[0]
+    patched = max(1, int(current) + int(delta))
+    raw = bytearray(data)
+    struct.pack_into("<I", raw, offset, patched)
+    path.write_bytes(bytes(raw))
+
+
 def _patch_shader_texture_set_ref(path: Path, shader_ordinal: int, texture_set_ref: int, *, shader_layout: str) -> None:
     data = path.read_bytes()
     header = _read_header(_Buf(data))
@@ -462,6 +479,18 @@ def _apply_fixture_post_mutations(target: Path, entry: dict[str, object], *, sha
     if isinstance(extra_shader_size_deltas, list):
         for idx, delta in enumerate(extra_shader_size_deltas, start=1):
             _patch_shader_size_delta(target, idx, int(delta))
+    block_size_deltas = entry.get("block_size_deltas")
+    if isinstance(block_size_deltas, list):
+        for idx, delta in enumerate(block_size_deltas):
+            _patch_block_size_delta(target, idx, int(delta))
+    block_size_delta_overrides = entry.get("block_size_delta_overrides")
+    if isinstance(block_size_delta_overrides, list):
+        for override in block_size_delta_overrides:
+            if not isinstance(override, dict):
+                continue
+            ordinal = int(override.get("ordinal", -1))
+            delta = int(override.get("delta", 0))
+            _patch_block_size_delta(target, ordinal, delta)
     shader_texture_set_ref = entry.get("shader_texture_set_ref")
     if shader_texture_set_ref is not None:
         _patch_shader_texture_set_ref(

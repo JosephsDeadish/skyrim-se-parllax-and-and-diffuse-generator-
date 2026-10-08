@@ -814,8 +814,8 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 12,
-        "effects": 7,
+        "architecture": 13,
+        "effects": 8,
         "clutter": 6,
         "armor": 1,
         "landscape": 1,
@@ -1929,6 +1929,109 @@
           "local_strategy": "guarded_noop_for_unsupported_header"
         },
         {
+          "id": "pack_fallout_architecture_real_block_size_table_skew_drift",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_layout_shift": 4,
+          "texture_set_count_u16": true,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\architecture\\vault\\vaultpipe.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\vaultpipe_e.dds",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "block_size_deltas": [
+            0,
+            8
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_best_effort_binary_table_repair_before_patch",
+          "local_strategy": "guarded_noop_for_binary_drift_then_manual_review",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Guarded binary-drift bucket: local strategy avoids speculative repairs on malformed block-size tables."
+        },
+        {
+          "id": "pack_fallout_effects_real_multiblock_drift_combo_binary_skew",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_layout_shift": 4,
+          "texture_set_count_u16": true,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\effects\\reactor\\coolant.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "flags1": 32,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\effects\\reactor\\coolant.dds",
+                "textures\\effects\\reactor\\coolant_n.dds",
+                "",
+                "textures\\effects\\reactor\\coolant_n.dds",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            99
+          ],
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 12
+            },
+            {
+              "ordinal": 3,
+              "delta": -6
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_partial_multiblock_binary_repair_then_patch",
+          "local_strategy": "guarded_noop_for_multiblock_binary_drift_then_manual_review",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Guarded binary-drift bucket: local strategy avoids speculative multiblock binary repairs without deterministic offsets."
+        },
+        {
           "id": "pack_fallout_clutter_legacy_crlf_u16_shifted_malformed_single_pass_long_tail",
           "family": "clutter",
           "profile": "fallout",
@@ -1961,10 +2064,12 @@
       ],
       "expected_family_allowed_difference_buckets": {
         "architecture": [
-          "guarded_fallout"
+          "guarded_fallout",
+          "binary_drift_guarded"
         ],
         "effects": [
-          "guarded_fallout"
+          "guarded_fallout",
+          "binary_drift_guarded"
         ],
         "clutter": [
           "guarded_fallout"
@@ -1972,10 +2077,12 @@
       },
       "expected_family_min_difference_bucket_counts": {
         "architecture": {
-          "guarded_fallout": 3
+          "guarded_fallout": 3,
+          "binary_drift_guarded": 1
         },
         "effects": {
-          "guarded_fallout": 1
+          "guarded_fallout": 1,
+          "binary_drift_guarded": 1
         },
         "clutter": {
           "guarded_fallout": 2
