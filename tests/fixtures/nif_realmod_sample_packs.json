@@ -814,9 +814,9 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 17,
-        "effects": 11,
-        "clutter": 11,
+        "architecture": 19,
+        "effects": 12,
+        "clutter": 12,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -2452,6 +2452,172 @@
           "expected_no_auto_remediation": true,
           "expected_difference_bucket": "partial_recoverability_guarded",
           "safety_difference_note": "Cross-block mixed-state drift with texture-ref/num-block skew stays in guarded manual-review mode when deterministic reconstruction is not guaranteed."
+        },
+        {
+          "id": "pack_fallout_clutter_real_subsurface_rim_back_multiflag_crossblock",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "flags2": 100663296,
+          "texture_paths": [
+            "textures\\clutter\\industrial\\panel.dds",
+            "textures\\clutter\\industrial\\panel_n.dds",
+            "",
+            "textures\\clutter\\industrial\\panel_p.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "flags2": 33554432,
+              "texture_paths": [
+                "textures\\clutter\\industrial\\panel.dds",
+                "textures\\clutter\\industrial\\panel_n.dds",
+                "",
+                "textures\\clutter\\industrial\\panel_n.dds",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "skip_alpha_decal_lighting.subsurface_flags.fallout.",
+            "path_slot_parallax.matches_normal.fallout."
+          ],
+          "expected_remediation_steps": [
+            "set_slot3_parallax"
+          ],
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout mode keeps rim/back subsurface-lighting mixes in skip-first mode while only applying low-risk texture-slot corrections."
+        },
+        {
+          "id": "pack_fallout_effects_real_anisotropic_crossblock_mixed_reuse",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "flags2": 2097152,
+          "texture_paths": [
+            "textures\\effects\\factory\\steam.dds",
+            "textures\\effects\\factory\\steam_n.dds",
+            "",
+            "textures\\effects\\factory\\steam_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "texture_paths": [
+                "textures\\effects\\factory\\steam.dds",
+                "textures\\effects\\factory\\steam_n.dds",
+                "",
+                "textures\\effects\\factory\\steam_p.dds",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "skip_alpha_decal_lighting.anisotropic_flag.fallout.",
+            "path_slot_parallax.matches_normal.fallout."
+          ],
+          "expected_remediation_steps": [
+            "set_slot3_parallax"
+          ],
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout mode keeps anisotropic-lighting blocks out of forced parallax writes but still allows low-risk slot correction in mixed-block files."
+        },
+        {
+          "id": "pack_fallout_architecture_real_multidrift_blocksize_ref_skew_guarded_noop",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "num_blocks_delta": 2,
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 18
+            },
+            {
+              "ordinal": 3,
+              "delta": -11
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            77
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "guarded_best_effort_multidrift_repair_then_patch",
+          "local_strategy": "guarded_noop_for_multidrift_header_and_table_skew",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Guarded Fallout mode keeps multi-drift header/table/ref skew combinations in no-op/manual-review mode instead of speculative binary rewrites."
+        },
+        {
+          "id": "pack_fallout_architecture_real_multidrift_ref_skew_partial_recoverability_split",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_paths": [
+            "textures\\architecture\\factory\\coolingtower.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 8
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            99
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Partial-recoverability split case: local strategy keeps multi-drift offset/ref skew combinations guarded-noop when deterministic reconstruction confidence is low."
         }
       ],
       "expected_family_allowed_difference_buckets": {
@@ -2473,17 +2639,17 @@
       },
       "expected_family_min_difference_bucket_counts": {
         "architecture": {
-          "guarded_fallout": 4,
+          "guarded_fallout": 5,
           "binary_drift_guarded": 2,
-          "partial_recoverability_guarded": 1
+          "partial_recoverability_guarded": 2
         },
         "effects": {
-          "guarded_fallout": 2,
+          "guarded_fallout": 3,
           "binary_drift_guarded": 1,
           "partial_recoverability_guarded": 1
         },
         "clutter": {
-          "guarded_fallout": 3,
+          "guarded_fallout": 4,
           "partial_recoverability_guarded": 2
         }
       }

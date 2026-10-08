@@ -763,6 +763,177 @@
       "pgpatcher_strategy": "guarded_best_effort_block_index_repair",
       "local_strategy": "guarded_partial_recovery_when_slots_are_guessable",
       "intentional_strategy_difference": false
+    },
+    {
+      "id": "parity_fallout_real_subsurface_rim_back_multiflag_crossblock",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "flags2": 100663296,
+      "texture_paths": [
+        "textures\\clutter\\industrial\\panel.dds",
+        "textures\\clutter\\industrial\\panel_n.dds",
+        "",
+        "textures\\clutter\\industrial\\panel_n.dds",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "flags2": 33554432,
+          "texture_paths": [
+            "textures\\clutter\\industrial\\panel.dds",
+            "textures\\clutter\\industrial\\panel_n.dds",
+            "",
+            "textures\\clutter\\industrial\\panel_p.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "expected_prefixes": [
+        "skip_alpha_decal_lighting.subsurface_flags.fallout.real",
+        "path_slot_parallax.matches_normal.fallout.real"
+      ],
+      "expected_remediation_steps": [
+        "set_slot3_parallax"
+      ],
+      "pgpatcher_strategy": "allow_subsurface_variants_with_best_effort_patch",
+      "local_strategy": "guarded_skip_subsurface_then_slot_repair_only",
+      "intentional_strategy_difference": true,
+      "expected_difference_bucket": "guarded_fallout",
+      "safety_difference_note": "Safety-first divergence: local strategy avoids forcing parallax writes on subsurface rim/back variants and restricts recovery to lower-risk slot corrections."
+    },
+    {
+      "id": "parity_fallout_real_anisotropic_crossblock_mixed_flags",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "flags2": 2097152,
+      "texture_paths": [
+        "textures\\effects\\factory\\steam.dds",
+        "textures\\effects\\factory\\steam_n.dds",
+        "",
+        "textures\\effects\\factory\\steam_n.dds",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_paths": [
+            "textures\\effects\\factory\\steam.dds",
+            "textures\\effects\\factory\\steam_n.dds",
+            "",
+            "textures\\effects\\factory\\steam_p.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "expected_prefixes": [
+        "skip_alpha_decal_lighting.anisotropic_flag.fallout.real",
+        "path_slot_parallax.matches_normal.fallout.real"
+      ],
+      "expected_remediation_steps": [
+        "set_slot3_parallax"
+      ],
+      "pgpatcher_strategy": "anisotropic_best_effort_force_patch",
+      "local_strategy": "guarded_skip_anisotropic_then_slot_repair_only",
+      "intentional_strategy_difference": true,
+      "expected_difference_bucket": "guarded_fallout",
+      "safety_difference_note": "Safety-first divergence: anisotropic variants stay guarded/no-forced-parallax locally while guessable slot mismatches can still be repaired."
+    },
+    {
+      "id": "parity_fallout_real_multidrift_offset_size_ref_skew_guarded_noop",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "num_blocks_delta": 2,
+      "block_size_delta_overrides": [
+        {
+          "ordinal": 1,
+          "delta": 18
+        },
+        {
+          "ordinal": 3,
+          "delta": -11
+        }
+      ],
+      "extra_shader_texture_set_refs": [
+        77
+      ],
+      "expected_prefixes": [
+        "unsupported_header."
+      ],
+      "expected_no_auto_remediation": true,
+      "pgpatcher_strategy": "guarded_best_effort_multidrift_repair_then_patch",
+      "local_strategy": "guarded_noop_for_multidrift_header_and_table_skew",
+      "intentional_strategy_difference": true,
+      "expected_difference_bucket": "binary_drift_guarded",
+      "safety_difference_note": "Safety-first divergence: local strategy keeps combined offset/size/ref skew in guarded no-op mode instead of speculative binary table/header rewrites."
+    },
+    {
+      "id": "parity_fallout_real_multidrift_partial_recoverability_split_case",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\architecture\\factory\\coolingtower.dds",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "block_size_delta_overrides": [
+        {
+          "ordinal": 1,
+          "delta": 8
+        }
+      ],
+      "extra_shader_texture_set_refs": [
+        99
+      ],
+      "expected_prefixes": [
+        "unsupported_header."
+      ],
+      "expected_no_auto_remediation": true,
+      "pgpatcher_strategy": "partial_recover_multidrift_then_patch",
+      "local_strategy": "guarded_noop_until_deterministic_recovery",
+      "intentional_strategy_difference": true,
+      "expected_difference_bucket": "partial_recoverability_guarded",
+      "safety_difference_note": "Partial-recoverability split: local strategy keeps guarded no-op behavior until deterministic reconstruction confidence is high."
     }
   ]
 }
