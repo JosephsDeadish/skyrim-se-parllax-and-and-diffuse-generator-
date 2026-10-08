@@ -815,8 +815,8 @@
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
         "architecture": 19,
-        "effects": 13,
-        "clutter": 12,
+        "effects": 14,
+        "clutter": 13,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -851,11 +851,22 @@
         "skip_single_pass.fallout.",
         "shader_state.envmap_missing_slot4.fallout.",
         "shader_state.envmap_missing_slot5.fallout.",
+        "shader_state.envmap_pom_missing_env_slots.fallout.",
         "shader_state.envmap_glow_missing_slots2_4_5.fallout.",
+        "shader_state.parallax_envmap_missing_slots3_4_5.fallout.",
         "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.fallout.",
         "missing_parallax_flag.flag1_not_set.fallout.",
         "shader_state.parallax_type_missing_slot3.fallout.",
+        "path_slot_parallax.matches_diffuse.fallout.",
         "path_slot_parallax.matches_normal.fallout.",
+        "path_slot_parallax.wrong_suffix.fallout.",
+        "path_slot_glow.wrong_suffix.fallout.",
+        "missing_parallax_slot3.empty.fallout.",
+        "flag_glow_map.slot2_filled_without_flag.fallout.",
+        "flag_glow_map.flag_set_without_slot2.fallout.",
+        "flag_env_mapping.slot4_filled_without_flag.fallout.",
+        "flag_pom.non_heightmap_shader.fallout.",
+        "flag_pom.without_base_parallax.fallout.",
         "shader_state.envmap_glow_missing_slot2.fallout.",
         "incompatible_shader_type.fallout.",
         "skip_alpha_decal_lighting.decal_flag.fallout.",
@@ -2574,6 +2585,40 @@
           "safety_difference_note": "Growth drift family: guarded Fallout mode keeps malformed block-size/index drift combinations in manual-review mode to avoid speculative binary rewrites."
         },
         {
+          "id": "pack_fallout_effects_real_envmap_pom_glowflag_multidrift_family",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "shader_type": 1,
+          "flags1": 268435584,
+          "texture_paths": [
+            "textures\\effects\\factory\\steamblast.dds",
+            "",
+            "textures\\effects\\factory\\steamblast_n.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_pom_missing_env_slots.fallout.",
+            "flag_pom.non_heightmap_shader.fallout.",
+            "flag_glow_map.slot2_filled_without_flag.fallout.",
+            "path_slot_glow.wrong_suffix.fallout."
+          ],
+          "expected_remediation_steps": [
+            "disable_env_mapping_for_envmap_pom_mixed_unresolved",
+            "disable_pom_for_envmap_pom_mixed_unresolved",
+            "enable_glow_map"
+          ],
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Fresh multi-drift Fallout family: guarded mode handles EnvMap+POM unresolved-slot conflicts conservatively while still allowing low-risk glow-flag correction."
+        },
+        {
           "id": "pack_fallout_architecture_real_multidrift_blocksize_ref_skew_guarded_noop",
           "family": "architecture",
           "profile": "fallout",
@@ -2647,6 +2692,55 @@
           "expected_no_auto_remediation": true,
           "expected_difference_bucket": "partial_recoverability_guarded",
           "safety_difference_note": "Partial-recoverability split case: local strategy keeps multi-drift offset/ref skew combinations guarded-noop when deterministic reconstruction confidence is low."
+        },
+        {
+          "id": "pack_fallout_clutter_real_crossblock_parallax_envmap_multidrift_family",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "shader_type": 1,
+          "flags1": 268437632,
+          "texture_paths": [
+            "textures\\clutter\\industrial\\pipe.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "texture_paths": [
+                "textures\\clutter\\industrial\\pipe.dds",
+                "textures\\clutter\\industrial\\pipe_n.dds",
+                "",
+                "textures\\clutter\\industrial\\pipe.dds",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "shader_state.parallax_envmap_missing_slots3_4_5.fallout.",
+            "path_slot_parallax.matches_diffuse.fallout."
+          ],
+          "expected_remediation_steps": [
+            "set_slot3_parallax",
+            "disable_env_mapping_for_parallax_envmap_mixed_unresolved",
+            "disable_parallax_for_parallax_envmap_mixed_unresolved",
+            "disable_pom_for_parallax_envmap_mixed_unresolved"
+          ],
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Fresh multi-drift Fallout family: cross-block parallax/envmap conflicts keep guarded disable-first remediation while still rebuilding safe slot-3 texture paths."
         }
       ],
       "expected_family_allowed_difference_buckets": {
