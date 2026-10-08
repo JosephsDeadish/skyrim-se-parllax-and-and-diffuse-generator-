@@ -93,6 +93,7 @@ jobs:
       - name: Pre-release validation gate + artifact generation
         run: |
           python scripts/pre_release_validation.py \
+            --repeat-validation-loops 2 \
             --artifact-dir artifacts/release_readiness \
             --history-file artifacts/release_readiness/nif_family_trend_history.json \
             --seed-history-file artifacts/previous_release_readiness/nif_family_trend_history.json \

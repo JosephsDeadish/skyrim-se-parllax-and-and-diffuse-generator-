@@ -132,6 +132,12 @@ This gate runs:
 - targeted NIF fixture/conflict stress checks,
 - Python compile checks,
 - a lightweight tracked-file secret scan.
+- repeated release-like loops when `--repeat-validation-loops <N>` is set (for example `2` for back-to-back stability runs),
+- local PyInstaller packaging smoke build plus packaged executable `--help` smoke execution,
+- localization sweep artifacts for current translation catalogs:
+  - `localization_coverage_report.json`
+  - `localization_coverage_report.md`
+  - optional strict mode via `--strict-localization-completeness` to fail if non-English catalogs are missing `en.json` keys.
   - locked profiles (and `auto` in single-file mode) now auto-correct conflicting `--complex-format`, `--environment-mask-mode`, and `--parallax-mode` values, then print the applied guardrail changes to stderr
 - `--target-game` (`skyrim`, `fallout3`, `falloutnv`, `fallout4`, `fallout76`; default: `skyrim`)
   - controls generated filename conventions (for example, Fallout 4/76 diffuse defaults to `_d.dds` and env-mask defaults to `_s.dds`)

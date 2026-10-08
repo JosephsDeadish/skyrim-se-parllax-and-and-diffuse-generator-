@@ -12,6 +12,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Mapping
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -120,6 +121,156 @@ def _run_packaging_smoke(artifact_dir: Path) -> None:
             "generate_textures.py",
         ],
     )
+
+
+def _resolve_packaged_smoke_binary(artifact_dir: Path) -> Path:
+    smoke_root = artifact_dir / "packaging_smoke" / "dist"
+    candidates = [
+        smoke_root / "generate_textures_smoke",
+        smoke_root / "generate_textures_smoke.exe",
+    ]
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    raise SystemExit("Packaging smoke binary was not produced at expected dist path.")
+
+
+def _run_packaged_executable_smoke(artifact_dir: Path) -> None:
+    print("\n=== Packaged executable smoke run ===")
+    binary = _resolve_packaged_smoke_binary(artifact_dir)
+    completed = subprocess.run(
+        [str(binary), "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        print(completed.stdout)
+        print(completed.stderr)
+        raise SystemExit(completed.returncode)
+    output = (completed.stdout or "") + "\n" + (completed.stderr or "")
+    if "--render-profile" not in output or "--checkpoint-file" not in output:
+        raise SystemExit(
+            "Packaged executable smoke run did not expose expected CLI options in --help output."
+        )
+
+
+def _collect_localization_coverage(
+    translations_dir: Path,
+) -> dict[str, object]:
+    report: dict[str, object] = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "translations_dir": str(translations_dir),
+        "languages": [],
+        "summary": {},
+    }
+    if not translations_dir.exists():
+        raise SystemExit(f"Translations directory does not exist: {translations_dir}")
+    catalogs: dict[str, dict[str, str]] = {}
+    for catalog_path in sorted(translations_dir.glob("*.json")):
+        language = catalog_path.stem.strip().lower()
+        try:
+            payload = json.loads(catalog_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise SystemExit(f"Invalid translation JSON for {catalog_path.name}: {exc}") from exc
+        if not isinstance(payload, Mapping):
+            raise SystemExit(f"Translation catalog {catalog_path.name} must contain an object root.")
+        raw_strings = payload.get("strings", {})
+        if not isinstance(raw_strings, Mapping):
+            raise SystemExit(f"Translation catalog {catalog_path.name} must define an object at 'strings'.")
+        catalogs[language] = {
+            str(key): str(value)
+            for key, value in raw_strings.items()
+            if isinstance(key, str) and isinstance(value, str)
+        }
+    if "en" not in catalogs:
+        raise SystemExit("Missing required base translation catalog: assets/translations/en.json")
+    base_keys = set(catalogs["en"].keys())
+    language_rows: list[dict[str, object]] = []
+    for language, strings in sorted(catalogs.items()):
+        keys = set(strings.keys())
+        missing = sorted(base_keys - keys)
+        extra = sorted(keys - base_keys)
+        coverage = 1.0 if not base_keys else ((len(base_keys) - len(missing)) / len(base_keys))
+        language_rows.append(
+            {
+                "language": language,
+                "string_count": len(keys),
+                "coverage_ratio": round(float(coverage), 4),
+                "missing_count": len(missing),
+                "extra_count": len(extra),
+                "missing_examples": missing[:20],
+                "extra_examples": extra[:20],
+            }
+        )
+    report["languages"] = language_rows
+    report["summary"] = {
+        "base_language": "en",
+        "base_string_count": len(base_keys),
+        "language_count": len(language_rows),
+        "languages_with_missing_strings": sum(
+            1 for row in language_rows if int(row.get("missing_count", 0) or 0) > 0
+        ),
+    }
+    return report
+
+
+def _render_localization_coverage_markdown(report: dict[str, object]) -> str:
+    lines = [
+        "# Localization Coverage Report",
+        "",
+        f"Generated: {report.get('generated_at_utc', '')}",
+        "",
+        "| Language | Strings | Coverage | Missing | Extra |",
+        "| --- | ---: | ---: | ---: | ---: |",
+    ]
+    rows = report.get("languages", [])
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, Mapping):
+                continue
+            coverage_ratio = float(row.get("coverage_ratio", 0.0) or 0.0) * 100.0
+            lines.append(
+                f"| `{row.get('language', '')}` | {int(row.get('string_count', 0) or 0)} | "
+                f"{coverage_ratio:.1f}% | {int(row.get('missing_count', 0) or 0)} | "
+                f"{int(row.get('extra_count', 0) or 0)} |"
+            )
+            missing_examples = row.get("missing_examples", [])
+            if isinstance(missing_examples, list) and missing_examples:
+                lines.append(
+                    f"|  |  |  | missing examples: `{', '.join(str(v) for v in missing_examples[:5])}` |  |"
+                )
+    return "\n".join(lines) + "\n"
+
+
+def _run_localization_sweep(
+    artifact_dir: Path,
+    *,
+    strict_completeness: bool = False,
+) -> tuple[dict[str, object], Path, Path]:
+    print("\n=== Localization sweep ===")
+    report = _collect_localization_coverage(REPO_ROOT / "assets" / "translations")
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    json_path = artifact_dir / "localization_coverage_report.json"
+    md_path = artifact_dir / "localization_coverage_report.md"
+    json_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    md_path.write_text(_render_localization_coverage_markdown(report), encoding="utf-8")
+    if strict_completeness:
+        rows = report.get("languages", [])
+        if isinstance(rows, list):
+            incomplete = [
+                str(row.get("language", ""))
+                for row in rows
+                if isinstance(row, Mapping)
+                and str(row.get("language", "")) != "en"
+                and int(row.get("missing_count", 0) or 0) > 0
+            ]
+            if incomplete:
+                raise SystemExit(
+                    "Strict localization completeness enabled and missing strings remain for: "
+                    + ", ".join(incomplete)
+                )
+    return report, json_path, md_path
 
 
 def _conflict_base_code(conflict_code: str) -> str:
@@ -646,6 +797,9 @@ def _write_release_artifacts(
     trend_snapshot: dict[str, object],
     parity_report: dict[str, object],
     realmod_delta_report: dict[str, object],
+    localization_report: dict[str, object] | None = None,
+    localization_json_path: Path | None = None,
+    localization_md_path: Path | None = None,
 ) -> tuple[Path, Path, Path, Path, Path, Path]:
     artifact_dir.mkdir(parents=True, exist_ok=True)
     trend_path = artifact_dir / "nif_family_trend_snapshot.json"
@@ -690,6 +844,24 @@ def _write_release_artifacts(
             f"- Real-sample parity delta markdown: `{realmod_delta_md_path.name}`",
         ]
     )
+    if localization_report is not None and localization_json_path is not None and localization_md_path is not None:
+        summary = localization_report.get("summary", {})
+        base_count = 0
+        missing_langs = 0
+        if isinstance(summary, Mapping):
+            base_count = int(summary.get("base_string_count", 0) or 0)
+            missing_langs = int(summary.get("languages_with_missing_strings", 0) or 0)
+        lines.extend(
+            [
+                "",
+                "## Localization sweep snapshot",
+                "",
+                f"- Localization JSON: `{localization_json_path.name}`",
+                f"- Localization markdown: `{localization_md_path.name}`",
+                f"- Base (en) strings: {base_count}",
+                f"- Non-en catalogs with missing strings: {missing_langs}",
+            ]
+        )
     for pack in trend_snapshot.get("packs", []):
         if not isinstance(pack, dict):
             continue
@@ -817,39 +989,64 @@ def main() -> int:
         action="store_true",
         help="Skip local PyInstaller packaging smoke build.",
     )
+    parser.add_argument(
+        "--repeat-validation-loops",
+        type=int,
+        default=1,
+        help="Number of consecutive release-like validation loops to run before artifact generation.",
+    )
+    parser.add_argument(
+        "--strict-localization-completeness",
+        action="store_true",
+        help="Fail when non-English translation catalogs are missing keys from en.json.",
+    )
     args = parser.parse_args()
+    loops = max(1, int(args.repeat_validation_loops))
 
     step_status: list[tuple[str, str]] = []
-    _run_step(
-        "Full unittest suite",
-        [PYTHON, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-v"],
-    )
-    step_status.append(("Full unittest suite", "pass"))
-    _run_step(
-        "Targeted NIF fixture and conflict stress checks",
-        [
-            PYTHON,
-            "-m",
-            "unittest",
-            "-v",
-            "tests.test_nif_patcher.TestFixtureCorpusBaselinePack",
-            "tests.test_nif_patcher.TestParitySampleMatrix",
-            "tests.test_nif_patcher.TestRealModSamplePacks",
-            "tests.test_nif_patcher.TestValidateNifForParallax.test_conflict_report_can_emit_multi_conflict_mixed_states",
-            "tests.test_nif_patcher.TestAutoRemediationExecutor.test_auto_remediation_build_options_sets_env_mask_for_missing_envmap_slot5_when_guessable",
-        ],
-    )
-    step_status.append(("Targeted NIF fixture/parity stress checks", "pass"))
-    _run_step(
-        "Compile check",
-        [PYTHON, "-m", "compileall", "generate_textures.py", "nif_patcher.py", "tests"],
-    )
-    step_status.append(("Compile check", "pass"))
+    for loop_index in range(1, loops + 1):
+        suffix = f" (loop {loop_index}/{loops})" if loops > 1 else ""
+        _run_step(
+            f"Full unittest suite{suffix}",
+            [PYTHON, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-v"],
+        )
+        _run_step(
+            f"Targeted NIF fixture and conflict stress checks{suffix}",
+            [
+                PYTHON,
+                "-m",
+                "unittest",
+                "-v",
+                "tests.test_nif_patcher.TestFixtureCorpusBaselinePack",
+                "tests.test_nif_patcher.TestParitySampleMatrix",
+                "tests.test_nif_patcher.TestRealModSamplePacks",
+                "tests.test_nif_patcher.TestValidateNifForParallax.test_conflict_report_can_emit_multi_conflict_mixed_states",
+                "tests.test_nif_patcher.TestAutoRemediationExecutor.test_auto_remediation_build_options_sets_env_mask_for_missing_envmap_slot5_when_guessable",
+            ],
+        )
+        _run_step(
+            f"Compile check{suffix}",
+            [PYTHON, "-m", "compileall", "generate_textures.py", "nif_patcher.py", "tests"],
+        )
+    step_status.append((f"Full unittest suite x{loops}", "pass"))
+    step_status.append((f"Targeted NIF fixture/parity stress checks x{loops}", "pass"))
+    step_status.append((f"Compile check x{loops}", "pass"))
     _run_secret_scan()
     step_status.append(("Tracked-file secret scan", "pass"))
     if not args.skip_packaging_smoke:
         _run_packaging_smoke(args.artifact_dir)
         step_status.append(("Packaging smoke build", "pass"))
+        _run_packaged_executable_smoke(args.artifact_dir)
+        step_status.append(("Packaged executable smoke run", "pass"))
+    (
+        localization_report,
+        localization_json_path,
+        localization_md_path,
+    ) = _run_localization_sweep(
+        args.artifact_dir,
+        strict_completeness=bool(args.strict_localization_completeness),
+    )
+    step_status.append(("Localization sweep", "pass"))
     trend_snapshot = _build_realmod_family_trend_snapshot()
     parity_report = _build_parity_matrix_feature_report()
     realmod_delta_report = _build_realmod_side_by_side_delta_report()
@@ -866,6 +1063,9 @@ def main() -> int:
         trend_snapshot=trend_snapshot,
         parity_report=parity_report,
         realmod_delta_report=realmod_delta_report,
+        localization_report=localization_report,
+        localization_json_path=localization_json_path,
+        localization_md_path=localization_md_path,
     )
     history_path = None
     if args.history_file is not None:
@@ -880,6 +1080,8 @@ def main() -> int:
     print(f"NIF parity feature report markdown artifact: {parity_md_path}")
     print(f"NIF real-sample parity delta JSON artifact: {realmod_delta_json_path}")
     print(f"NIF real-sample parity delta markdown artifact: {realmod_delta_md_path}")
+    print(f"Localization coverage JSON artifact: {localization_json_path}")
+    print(f"Localization coverage markdown artifact: {localization_md_path}")
     if history_path is not None:
         print(f"NIF trend history artifact: {history_path}")
     prior_bucket_distribution = _load_prior_bucket_distribution(

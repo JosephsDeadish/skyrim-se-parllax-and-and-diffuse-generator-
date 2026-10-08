@@ -5,7 +5,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.pre_release_validation import _append_trend_history
+from scripts.pre_release_validation import (
+    _append_trend_history,
+    _collect_localization_coverage,
+    _resolve_packaged_smoke_binary,
+)
 
 
 def _snapshot(stamp: str) -> dict[str, object]:
@@ -64,6 +68,67 @@ class TestPreReleaseValidationHistory(unittest.TestCase):
         history = payload.get("history", [])
         self.assertEqual(len(history), 240)
         self.assertEqual(history[-1].get("generated_at_utc"), "2026-01-01T10:00:00Z")
+
+
+class TestPreReleaseValidationLocalization(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_collect_localization_coverage_reports_missing_and_extra_keys(self) -> None:
+        translations = self.tmp / "translations"
+        translations.mkdir(parents=True, exist_ok=True)
+        (translations / "en.json").write_text(
+            json.dumps({"strings": {"A": "A", "B": "B", "C": "C"}}),
+            encoding="utf-8",
+        )
+        (translations / "es.json").write_text(
+            json.dumps({"strings": {"A": "A_es", "B": "B_es", "EXTRA": "x"}}),
+            encoding="utf-8",
+        )
+        report = _collect_localization_coverage(translations)
+        rows = {str(row.get("language")): row for row in report.get("languages", [])}
+        self.assertIn("en", rows)
+        self.assertIn("es", rows)
+        self.assertEqual(int(rows["es"].get("missing_count", 0)), 1)
+        self.assertEqual(int(rows["es"].get("extra_count", 0)), 1)
+        summary = report.get("summary", {})
+        self.assertEqual(int(summary.get("base_string_count", 0)), 3)
+        self.assertEqual(int(summary.get("languages_with_missing_strings", 0)), 1)
+
+    def test_collect_localization_coverage_requires_en_catalog(self) -> None:
+        translations = self.tmp / "translations"
+        translations.mkdir(parents=True, exist_ok=True)
+        (translations / "es.json").write_text(
+            json.dumps({"strings": {"A": "A_es"}}),
+            encoding="utf-8",
+        )
+        with self.assertRaises(SystemExit):
+            _collect_localization_coverage(translations)
+
+
+class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_resolve_packaged_smoke_binary_prefers_platform_specific_candidate(self) -> None:
+        dist = self.tmp / "packaging_smoke" / "dist"
+        dist.mkdir(parents=True, exist_ok=True)
+        binary = dist / "generate_textures_smoke.exe"
+        binary.write_bytes(b"")
+        resolved = _resolve_packaged_smoke_binary(self.tmp)
+        self.assertEqual(resolved, binary)
+
+    def test_resolve_packaged_smoke_binary_raises_when_missing(self) -> None:
+        with self.assertRaises(SystemExit):
+            _resolve_packaged_smoke_binary(self.tmp)
 
 
 if __name__ == "__main__":
