@@ -701,6 +701,44 @@
       ]
     },
     {
+      "id": "fallout_real_shifted_multiblock_env_slot4_missing_parallax_normal_reuse",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\architecture\\factory\\wallpanel.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\architecture\\factory\\wallpanel_m.dds",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\factory\\wallpanel.dds",
+            "textures\\architecture\\factory\\wallpanel_n.dds",
+            "",
+            "textures\\architecture\\factory\\wallpanel_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    {
       "id": "unknown_header_signature",
       "profile": "unknown",
       "shader_layout": "legacy",

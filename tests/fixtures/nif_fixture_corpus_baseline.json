@@ -1,8 +1,8 @@
 {
-  "expected_total_cases": 48,
+  "expected_total_cases": 49,
   "expected_profile_counts": {
     "skyrim": 31,
-    "fallout": 11,
+    "fallout": 12,
     "unknown": 6
   },
   "required_summary_code_prefixes": [

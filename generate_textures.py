@@ -7940,8 +7940,7 @@ if GUI_AVAILABLE:
             )
             self._add_tooltip(
                 _help_button,
-                "❓ Open the full renderer/channel guide.\n"
-                "Includes ENB vs Community Shaders channel mappings, corrected TruePBR workflow notes, and a link back to the Skyrim modding wiki.",
+                "Open the renderer/channel guide with ENB vs Community Shaders mappings, TruePBR workflow notes, and Skyrim wiki links.",
             )
 
             file_frame = ttk.LabelFrame(wrapper, text="Files", padding=10)
@@ -7949,29 +7948,29 @@ if GUI_AVAILABLE:
 
             _input_label = ttk.Label(file_frame, text="Input DDS or folder")
             _input_label.grid(row=0, column=0, sticky=tk.W, pady=4)
-            self._add_tooltip(_input_label, "📂 Enter a .dds file path or use the file/folder buttons below.")
+            self._add_tooltip(_input_label, "Enter a DDS file path or select a file/folder below.")
             _input_entry = ttk.Entry(file_frame, textvariable=self.input_var, width=80)
             _input_entry.grid(row=0, column=1, padx=6, pady=4, sticky=tk.EW)
-            self._add_tooltip(_input_entry, "📂 Source texture path.\nTip: use File/Folder buttons if drag-and-drop is unavailable.")
+            self._add_tooltip(_input_entry, "Source texture path. Use File/Folder buttons if drag-and-drop is unavailable.")
             self.input_file_button = ttk.Button(file_frame, text="File", command=self._pick_input)
             self.input_file_button.grid(row=0, column=2, padx=4, pady=4)
-            self._add_tooltip(self.input_file_button, "🗂 Open one DDS/PNG/JPG texture file.")
+            self._add_tooltip(self.input_file_button, "Open one DDS/PNG/JPG texture file.")
             self.input_folder_button = ttk.Button(file_frame, text="Folder", command=self._pick_input_folder)
             self.input_folder_button.grid(row=0, column=3, padx=4, pady=4)
-            self._add_tooltip(self.input_folder_button, "📁 Select a folder of textures for batch processing.")
+            self._add_tooltip(self.input_folder_button, "Select a texture folder for batch processing.")
             self.detected_mod_button = ttk.Button(file_frame, text="Loaded Mod", command=self._pick_detected_mod_folder)
             self.detected_mod_button.grid(row=0, column=4, padx=4, pady=4)
-            self._add_tooltip(self.detected_mod_button, "🧙 Use the detected MO2/Vortex mod texture folder when available.")
+            self._add_tooltip(self.detected_mod_button, "Use the detected MO2/Vortex mod texture folder when available.")
 
             _output_label = ttk.Label(file_frame, text="Output folder")
             _output_label.grid(row=1, column=0, sticky=tk.W, pady=4)
-            self._add_tooltip(_output_label, "📤 Where the generated textures will be deposited.\nDefault: same folder as input, so they're never far from home.")
+            self._add_tooltip(_output_label, "Output folder for generated textures. Default: next to the source texture.")
             self.output_entry = ttk.Entry(file_frame, textvariable=self.output_var, width=80)
             self.output_entry.grid(row=1, column=1, padx=6, pady=4, sticky=tk.EW)
-            self._add_tooltip(self.output_entry, "📤 Destination for generated files.\nLeave blank and outputs land right next to the source. Very tidy.")
+            self._add_tooltip(self.output_entry, "Destination folder for generated files. Leave blank to write next to the source.")
             self.output_button = ttk.Button(file_frame, text="Browse", command=self._pick_output)
             self.output_button.grid(row=1, column=2, padx=4, pady=4)
-            self._add_tooltip(self.output_button, "🗺 Browse for an output folder.\nOnly available when 'Use different output folder' is checked.")
+            self._add_tooltip(self.output_button, "Browse for an output folder. Enabled only when custom output is selected.")
             _custom_out_check = ttk.Checkbutton(
                 file_frame,
                 text="Use different output folder",
@@ -7979,7 +7978,7 @@ if GUI_AVAILABLE:
                 command=self._toggle_custom_output_location,
             )
             _custom_out_check.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(2, 0))
-            self._add_tooltip(_custom_out_check, "📦 Write generated outputs to a different folder instead of next to input files.")
+            self._add_tooltip(_custom_out_check, "Write generated outputs to a different folder instead of next to input files.")
             _detected_context_label = ttk.Label(
                 file_frame,
                 textvariable=self.detected_context_var,
@@ -8021,7 +8020,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(_parallax_check, "🌊 Generate a height/parallax map (_p).\nFor vanilla Skyrim SE use 'standard' parallax mode; for ENBSeries POM use 'occlusion' mode.\nNot a universal format — match your workflow before enabling.")
             _glow_check = ttk.Checkbutton(_enb_section, text="Glow / _g", variable=self.include_glow_var, command=self._refresh_preview)
             _glow_check.grid(row=4, column=0, sticky=tk.W)
-            self._add_tooltip(_glow_check, "✨ Generate a glow map. Bright pixels glow in the dark.\nPerfect for making your cave look like a disco.")
+            self._add_tooltip(_glow_check, "Generate a glow map. Brighter pixels emit more light.")
             _complex_check = ttk.Checkbutton(_enb_section, text="ENB Complex Material", variable=self.include_complex_var, command=self._on_output_selection_changed)
             _complex_check.grid(row=5, column=0, sticky=tk.W)
             self._add_tooltip(
@@ -8245,7 +8244,7 @@ if GUI_AVAILABLE:
             )
             self.normal_scale = ttk.Scale(options_frame, from_=0.1, to=12.0, variable=self.normal_strength_var, command=lambda _: self._on_slider_changed())
             self.normal_scale.grid(row=4, column=1, columnspan=2, sticky=tk.EW)
-            self._add_tooltip(self.normal_scale, "💪 Drag right for epic bumps, left for subtle detail.\nLive value is shown next to the slider so you can stop guessing.")
+            self._add_tooltip(self.normal_scale, "Increase for stronger surface detail; decrease for subtler detail.")
             self.normal_strength_display_label = ttk.Label(options_frame, textvariable=self.normal_strength_display_var)
             self.normal_strength_display_label.grid(row=4, column=3, sticky=tk.W, padx=8)
             self.auto_normal_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_normal_suggestion_var, command=self._on_auto_slider_preference_changed)
@@ -8260,7 +8259,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(_parallax_label, "🏔 Controls height-map (parallax/_p) depth contrast.\nSets the height data written to the _p texture.\nFor CS TruePBR the depth of the in-game effect is controlled by 'displacement_scale' in the JSON sidecar — this slider sets the source height strength, not the TruePBR displacement scale directly.")
             self.parallax_scale = ttk.Scale(options_frame, from_=0.1, to=10.0, variable=self.parallax_strength_var, command=lambda _: self._on_slider_changed())
             self.parallax_scale.grid(row=5, column=1, columnspan=2, sticky=tk.EW)
-            self._add_tooltip(self.parallax_scale, "🏔 Slide right for deeper height data in the _p file, left for subtle relief.\nFor TruePBR, tune displacement_scale in the generated JSON sidecar to control in-game POM depth.\nYes, this can absolutely make stones look dramatic.")
+            self._add_tooltip(self.parallax_scale, "Increase for deeper height data in the _p file; decrease for subtler relief.\nFor TruePBR, adjust displacement_scale in the generated JSON sidecar for in-game depth.")
             self.parallax_strength_display_label = ttk.Label(options_frame, textvariable=self.parallax_strength_display_var)
             self.parallax_strength_display_label.grid(row=5, column=3, sticky=tk.W, padx=8)
             self.auto_parallax_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_parallax_suggestion_var, command=self._on_auto_slider_preference_changed)
@@ -8272,7 +8271,7 @@ if GUI_AVAILABLE:
 
             _glow_label = ttk.Label(options_frame, text="Glow threshold")
             _glow_label.grid(row=6, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_glow_label, "💡 Brightness cutoff for glow.\nLower = more glow. Higher = only brightest bits glow like tiny supernovas.")
+            self._add_tooltip(_glow_label, "Brightness cutoff for glow.\nLower = more glow, higher = only brightest pixels glow.")
             self.glow_scale = ttk.Scale(options_frame, from_=0, to=255, variable=self.glow_threshold_var, command=lambda _: self._on_slider_changed())
             self.glow_scale.grid(row=6, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.glow_scale, "Lower values allow more glow; higher values restrict glow to only the brightest areas.\nUse the live value display for precise tuning.")
@@ -8287,7 +8286,7 @@ if GUI_AVAILABLE:
 
             _env_mask_label = ttk.Label(options_frame, text="Environment mask strength")
             _env_mask_label.grid(row=7, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_env_mask_label, "🪞 Controls environment-mask contrast.\nHigher = stronger shiny-vs-matte separation. Great for dramatic materials.")
+            self._add_tooltip(_env_mask_label, "Controls environment-mask contrast.\nHigher = stronger shiny-vs-matte separation.")
             self.environment_mask_scale = ttk.Scale(options_frame, from_=0.1, to=12.0, variable=self.environment_mask_strength_var, command=lambda _: self._on_slider_changed())
             self.environment_mask_scale.grid(row=7, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.environment_mask_scale, "🪞 Slide right for stronger reflection contrast.\nSlide left for subtler material separation.")
@@ -8335,7 +8334,7 @@ if GUI_AVAILABLE:
 
             _ao_label = ttk.Label(options_frame, text="AO strength")
             _ao_label.grid(row=11, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_ao_label, "🌑 Controls ambient occlusion (cavity/self-shadowing) contrast.\nHigher = deeper shadows in crevices.")
+            self._add_tooltip(_ao_label, "Controls ambient-occlusion (cavity/self-shadowing) contrast.\nHigher = deeper crevice shadows.")
             self.ao_scale = ttk.Scale(options_frame, from_=0.1, to=12.0, variable=self.ao_strength_var, command=lambda _: self._on_slider_changed())
             self.ao_scale.grid(row=11, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.ao_scale, "🌑 Right = stronger AO bake, left = subtle cavity hints.")
@@ -8347,7 +8346,7 @@ if GUI_AVAILABLE:
 
             _roughness_label = ttk.Label(options_frame, text="Roughness strength")
             _roughness_label.grid(row=12, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_roughness_label, "🪨 Controls roughness map contrast. Material-aware: stone=rougher, glass=smoother.")
+            self._add_tooltip(_roughness_label, "Controls roughness-map contrast. Typical behavior: stone rougher, glass smoother.")
             self.roughness_scale = ttk.Scale(options_frame, from_=0.1, to=12.0, variable=self.roughness_strength_var, command=lambda _: self._on_slider_changed())
             self.roughness_scale.grid(row=12, column=1, columnspan=2, sticky=tk.EW)
             self._add_tooltip(self.roughness_scale, "🪨 Right = higher contrast roughness, left = uniform surface.")
@@ -8619,16 +8618,14 @@ if GUI_AVAILABLE:
             _jump_label.pack(side=tk.LEFT, padx=(12, 4))
             self._add_tooltip(
                 _jump_label,
-                "🔢 Jump directly to a source preview number (1-based).\n"
-                "Example: type 12 and press Enter to jump to preview #12.",
+                "Jump directly to a source preview number (1-based).",
             )
             self.preview_jump_entry = ttk.Entry(source_controls, textvariable=self.preview_jump_var, width=6)
             self.preview_jump_entry.pack(side=tk.LEFT, padx=(0, 4))
             self.preview_jump_entry.bind("<Return>", self._on_preview_jump_submit)
             self._add_tooltip(
                 self.preview_jump_entry,
-                "🔢 Type a preview index and press Enter.\n"
-                "Valid range is 1 to total loaded previews.",
+                "Type a preview index and press Enter. Valid range is 1 to the number of loaded previews.",
             )
             self.preview_jump_button = ttk.Button(source_controls, text="Go", command=self._jump_to_preview_source)
             self.preview_jump_button.pack(side=tk.LEFT, padx=(0, 4))
@@ -8640,8 +8637,7 @@ if GUI_AVAILABLE:
             _preview_size_label.pack(side=tk.LEFT, padx=(14, 4))
             self._add_tooltip(
                 _preview_size_label,
-                "📐 Controls preview thumbnail scale only (not output resolution).\n"
-                "Large helps inspection; small helps fit more panes. Your exported DDS quality stays the same either way.",
+                "Controls preview thumbnail size only (not output resolution).",
             )
             preview_size_combo = ttk.Combobox(
                 source_controls,
@@ -10131,12 +10127,23 @@ if GUI_AVAILABLE:
                     self.status_var.set(
                         f"Generation cancelled. Finished {total_sources}/{planned_cancelled} source texture(s) and wrote {total_outputs} file(s)."
                     )
+                    checkpoint_status = "Checkpoint health: unavailable"
+                    checkpoint_value = str(telemetry.get("checkpoint_path", "") or "").strip() if telemetry else ""
+                    if checkpoint_value:
+                        resumed = int(telemetry.get("resumed_completed_count", 0) or 0)
+                        self._refresh_checkpoint_health_status(
+                            checkpoint_path=Path(checkpoint_value),
+                            planned_total=max(0, total_sources + resumed),
+                        )
+                        checkpoint_status = f"Checkpoint health: {self.checkpoint_health_var.get() or 'unavailable'}"
                     messagebox.showinfo(
                         "Generation cancelled",
                         (
+                            f"Summary focus: resumed-skipped={resumed_cancelled}, failed={len(self.batch_failures)}.\n"
                             "Processing was cancelled.\n"
                             f"Summary: processed {total_sources}/{planned_cancelled}, wrote {total_outputs} files, "
                             f"resumed-skip {resumed_cancelled}, failed {len(self.batch_failures)}.\n"
+                            f"{checkpoint_status}\n"
                             "Use Revert Process to undo files from this run if needed."
                         ),
                         parent=self.root,
@@ -11275,14 +11282,22 @@ if GUI_AVAILABLE:
                 resumed_completed_count = 0
                 completed_checkpoint_files: set[str] = set()
                 if self.batch_resume_mode_var.get() == "resume":
-                    if is_huge_batch and not checkpoint_path.exists():
-                        proceed_resume_without_history = messagebox.askyesno(
-                            "Resume mode: starting new checkpoint",
-                            (
+                    if not checkpoint_path.exists():
+                        if is_huge_batch:
+                            resume_warning = (
                                 "Resume mode is enabled, but no checkpoint file exists yet for this run.\n\n"
                                 "A new checkpoint will be created as files finish.\n"
                                 "Continue?"
-                            ),
+                            )
+                        else:
+                            resume_warning = (
+                                "Resume mode is enabled, but no checkpoint file exists yet.\n\n"
+                                "This run will start fresh and create checkpoint history after successful files.\n"
+                                "Continue?"
+                            )
+                        proceed_resume_without_history = messagebox.askyesno(
+                            "Resume mode: starting new checkpoint",
+                            resume_warning,
                             parent=self.root,
                         )
                         if not proceed_resume_without_history:
@@ -11290,12 +11305,28 @@ if GUI_AVAILABLE:
                             return
                     if checkpoint_path.exists():
                         checkpoint_payload: dict[str, object] = {}
+                        checkpoint_payload_valid = False
                         try:
                             payload_raw = json.loads(checkpoint_path.read_text(encoding="utf-8"))
                             if isinstance(payload_raw, dict):
                                 checkpoint_payload = payload_raw
+                                checkpoint_payload_valid = True
                         except Exception:
                             checkpoint_payload = {}
+                            checkpoint_payload_valid = False
+                        if not checkpoint_payload_valid:
+                            proceed_invalid_checkpoint = messagebox.askyesno(
+                                "Resume checkpoint read warning",
+                                (
+                                    "Checkpoint file exists but could not be read as valid metadata.\n\n"
+                                    "Continuing may behave like a fresh run with limited resume data.\n"
+                                    "Continue with Resume mode?"
+                                ),
+                                parent=self.root,
+                            )
+                            if not proceed_invalid_checkpoint:
+                                self.status_var.set("Resume canceled due to unreadable checkpoint metadata.")
+                                return
                         current_input_root = str(input_path.resolve())
                         current_output_root = str(output_dir.resolve()) if output_dir is not None else ""
                         mismatch_flags = compute_checkpoint_mismatch_flags(
@@ -11320,6 +11351,19 @@ if GUI_AVAILABLE:
                                 )
                                 return
                     completed_checkpoint_files = self._load_batch_checkpoint_completed_files(checkpoint_path)
+                    if checkpoint_path.exists() and not completed_checkpoint_files:
+                        proceed_empty_resume = messagebox.askyesno(
+                            "Resume checkpoint has no completed entries",
+                            (
+                                "Resume mode is enabled, but this checkpoint has no completed files yet.\n\n"
+                                "Continuing will process all selected files (equivalent to start fresh) while creating resume history.\n"
+                                "Continue?"
+                            ),
+                            parent=self.root,
+                        )
+                        if not proceed_empty_resume:
+                            self.status_var.set("Resume canceled because checkpoint had no completed entries.")
+                            return
                     if completed_checkpoint_files:
                         filtered_inputs = [
                             candidate for candidate in self.selected_inputs
@@ -11683,8 +11727,8 @@ if GUI_AVAILABLE:
                 single_nif_radio.pack(side="left")
                 folder_nif_radio = ttk.Radiobutton(row0, text="Whole mesh folder (recursive)", variable=nif_scan_mode, value="folder")
                 folder_nif_radio.pack(side="left", padx=(8, 0))
-                self._add_tooltip(single_nif_radio, "🎯 Patch one mesh when you already know the troublemaker.")
-                self._add_tooltip(folder_nif_radio, "🧹 Recursive mode for when the whole folder needs a tactical reality check.")
+                self._add_tooltip(single_nif_radio, "Patch one mesh when you already know the target file.")
+                self._add_tooltip(folder_nif_radio, "Scan and patch all NIF files recursively in the selected folder.")
 
                 row1 = ttk.Frame(path_frame)
                 row1.pack(fill="x", pady=(4, 0))
@@ -11706,8 +11750,8 @@ if GUI_AVAILABLE:
 
                 browse_nif_button = ttk.Button(row1, text="Browse…", command=_browse_nif)
                 browse_nif_button.pack(side="left")
-                self._add_tooltip(path_label, "📍 Pick the NIF file/folder you want to scan or patch.")
-                self._add_tooltip(nif_path_entry, "Paste or edit the full NIF file/folder path here.")
+                self._add_tooltip(path_label, "Select the NIF file/folder to scan or patch.")
+                self._add_tooltip(nif_path_entry, "Enter or paste the full NIF file/folder path.")
                 self._add_tooltip(browse_nif_button, "Open a file/folder picker for the NIF path.")
 
                 opt_frame = ttk.LabelFrame(basic_tab, text="Patch Options (what to enable)", padding=6)

@@ -539,7 +539,7 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 5,
+        "architecture": 6,
         "effects": 1,
         "clutter": 2,
         "armor": 1,
@@ -946,6 +946,56 @@
           "expected_no_auto_remediation": true,
           "pgpatcher_strategy": "guarded_slot_restore_then_flag_disable",
           "local_strategy": "guarded_noop_for_unsupported_header"
+        },
+        {
+          "id": "pack_fallout_architecture_real_crlf_u16_shifted_multiblock_guarded_unsupported",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 132,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_paths": [
+            "textures\\architecture\\factory\\walltrim.dds",
+            "",
+            "",
+            "",
+            "textures\\architecture\\factory\\walltrim_n.dds",
+            "textures\\architecture\\factory\\walltrim_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\architecture\\factory\\walltrim.dds",
+                "textures\\architecture\\factory\\walltrim_n.dds",
+                "",
+                "textures\\architecture\\factory\\walltrim.dds",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "guarded_crossblock_alias_repair",
+          "local_strategy": "guarded_noop_for_unsupported_header",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout behavior keeps malformed shifted/u16/crlf exports non-destructive when header support confidence is low."
         }
       ],
       "expected_family_allowed_difference_buckets": {
