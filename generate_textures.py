@@ -461,7 +461,7 @@ def build_batch_bottleneck_hints(
     if high_res_8k_count > 0 and avg_file_seconds > 1.5:
         hints.append("8K-heavy run detected; keep staged/lazy preview on and leave Resume mode enabled for safer restarts.")
     if total_sources >= 1000 and resumed_completed_count == 0:
-        hints.append("Large 1000+ run: switch checkpoint mode to Resume before long runs to protect progress.")
+        hints.append("Large 1000+ run: switch checkpoint mode to Resume and keep live preview paused unless manual spot-checks are needed.")
     if max_source_dimension >= 8192 or max_source_megapixels >= 48.0:
         hints.append("Very large source textures detected; reduce worker count and keep live preview paused unless needed.")
     if high_res_4k_count >= 50:
@@ -508,9 +508,9 @@ def compute_preview_refresh_delay_ms(
     if not show_batch_preview:
         delay = max(delay, 160)
     if total_sources >= 2000:
-        delay = max(delay, 420)
+        delay = max(delay, 480)
     elif total_sources >= 1000:
-        delay = max(delay, 320)
+        delay = max(delay, 360)
     elif total_sources >= 400:
         delay = max(delay, 220)
     elif total_sources >= 150:
@@ -557,11 +557,11 @@ def should_update_live_batch_preview(
     if total_sources < 300:
         return True
     if total_sources >= 2000:
-        min_interval = 0.75
-        min_index_step = 6
+        min_interval = 0.95
+        min_index_step = 8
     elif total_sources >= 1000:
-        min_interval = 0.55
-        min_index_step = 4
+        min_interval = 0.70
+        min_index_step = 5
     else:
         min_interval = 0.30
         min_index_step = 2
@@ -8137,14 +8137,14 @@ if GUI_AVAILABLE:
             )
             _show_advanced_generation_check = ttk.Checkbutton(
                 options_frame,
-                text="Show Advanced generation controls (renderer/modes/extended sliders)",
+                text="Show Advanced controls (renderer/workflow modes + extended sliders)",
                 variable=self.show_advanced_generation_var,
             )
             _show_advanced_generation_check.grid(row=1, column=3, columnspan=2, sticky=tk.E, pady=(6, 2))
             self._add_tooltip(
                 _show_advanced_generation_check,
-                "Enable to show advanced format/mode and extended strength controls.\n"
-                "Leave disabled for a cleaner preset-focused workflow.",
+                "Enable to reveal renderer/workflow mode selectors and extended sliders.\n"
+                "Leave disabled for a cleaner beginner-safe workflow.",
             )
 
             _render_profile_label = ttk.Label(options_frame, text="Target renderer (advanced)")
@@ -8431,7 +8431,6 @@ if GUI_AVAILABLE:
             self._render_profile_mode_widgets = [self.complex_format_combo, self.env_mask_mode_combo, self.parallax_mode_combo]
 
             advanced_generation_widgets: list[tk.Widget] = [
-                _auto_sugg_check,
                 _render_profile_label,
                 _render_profile_combo,
                 self.render_profile_hint_label,
@@ -9515,9 +9514,9 @@ if GUI_AVAILABLE:
         def _update_batch_resume_hint(self, *_args: object) -> None:
             mode = str(self.batch_resume_mode_var.get() or "start_fresh").strip().lower()
             if mode == "resume":
-                self.batch_resume_hint_var.set("Checkpoint mode: Resume — continue safely after interruptions by skipping completed files.")
+                self.batch_resume_hint_var.set("Checkpoint mode: Resume (recommended for long/1000+ runs) — skip files already completed in checkpoint.")
             else:
-                self.batch_resume_hint_var.set("Checkpoint mode: Start fresh — rerun everything and ignore prior checkpoint progress.")
+                self.batch_resume_hint_var.set("Checkpoint mode: Start fresh — rerun all selected files and ignore saved checkpoint progress.")
 
         def _load_batch_checkpoint_completed_files(self, checkpoint_path: Path) -> set[str]:
             if not checkpoint_path.exists():

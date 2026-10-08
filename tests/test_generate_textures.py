@@ -1950,9 +1950,9 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(
             should_update_live_batch_preview(
                 total_sources=1200,
-                current_index=104,
+                current_index=105,
                 last_index=100,
-                seconds_since_last_update=0.40,
+                seconds_since_last_update=0.45,
             )
         )
 
@@ -1968,9 +1968,9 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(
             should_update_live_batch_preview(
                 total_sources=2200,
-                current_index=506,
+                current_index=508,
                 last_index=500,
-                seconds_since_last_update=0.46,
+                seconds_since_last_update=0.60,
             )
         )
 

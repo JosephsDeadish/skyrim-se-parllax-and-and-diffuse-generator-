@@ -5,9 +5,9 @@
       "expected_family_case_counts": {
         "architecture": 8,
         "clutter": 2,
-        "armor": 1,
-        "landscape": 1,
-        "foliage": 1,
+        "armor": 2,
+        "landscape": 2,
+        "foliage": 2,
         "effects": 7
       },
       "expected_family_min_pass_ratio": {
@@ -20,6 +20,9 @@
       },
       "expected_family_min_remediation_expectation_coverage": {
         "architecture": 0.15,
+        "armor": 1.0,
+        "landscape": 1.0,
+        "foliage": 1.0,
         "effects": 0.33
       },
       "expected_family_min_strategy_alignment_ratio": {
@@ -189,6 +192,44 @@
           ],
           "expected_prefixes": [
             "shader_state.envmap_missing_slot5.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot5_env_mask_for_missing_envmap_slot5",
+            "enable_env_mapping_for_missing_envmap_slot5"
+          ],
+          "expected_absent_remediation_steps": [
+            "disable_env_mapping_for_missing_slot5"
+          ]
+        },
+        {
+          "id": "pack_skyrim_armor_envmap_glow_slot2_missing_mixed",
+          "family": "armor",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\armor\\steel\\steelarmor.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\steelarmor_e.dds",
+            "textures\\armor\\steel\\steelarmor_m.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_glow_missing_slot2.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot2_glow_for_envmap_glow_slot2_only",
+            "enable_glow_map_for_envmap_glow_slot2_only"
+          ],
+          "expected_absent_remediation_steps": [
+            "disable_glow_map_for_envmap_glow_slot2_only"
           ]
         },
         {
@@ -210,6 +251,39 @@
           ],
           "expected_prefixes": [
             "path_slot_env_mask.generic_alias_suffix.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot5_env_mask"
+          ],
+          "expected_absent_remediation_steps": [
+            "disable_env_mapping_for_missing_slot5"
+          ]
+        },
+        {
+          "id": "pack_skyrim_landscape_envmap_pom_missing_env_slots_mixed",
+          "family": "landscape",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "shader_type": 1,
+          "flags1": 268435584,
+          "texture_paths": [
+            "textures\\landscape\\rocks\\cliff01.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_pom_missing_env_slots.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "disable_env_mapping_for_envmap_pom_mixed_unresolved",
+            "disable_pom_for_envmap_pom_mixed_unresolved"
           ]
         },
         {
@@ -231,6 +305,49 @@
           ],
           "expected_prefixes": [
             "path_slot_cubemap.wrong_suffix.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot4_cubemap"
+          ],
+          "expected_absent_remediation_steps": [
+            "clear_slot4_cubemap"
+          ]
+        },
+        {
+          "id": "pack_skyrim_foliage_parallax_envmap_glow_mixed_guessable",
+          "family": "foliage",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "shader_type": 1,
+          "flags1": 268437632,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\plants\\ivy\\ivywall.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot3_parallax_for_parallax_envmap_glow_mixed_unresolved",
+            "set_slot2_glow_for_parallax_envmap_glow_mixed_unresolved",
+            "set_slot4_cubemap_for_parallax_envmap_glow_mixed_unresolved",
+            "set_slot5_env_mask_for_parallax_envmap_glow_mixed_unresolved",
+            "enable_env_mapping_for_parallax_envmap_glow_mixed_unresolved"
+          ],
+          "expected_absent_remediation_steps": [
+            "disable_parallax_for_parallax_envmap_glow_mixed_unresolved",
+            "disable_pom_for_parallax_envmap_glow_mixed_unresolved",
+            "disable_glow_map_for_parallax_envmap_glow_mixed_unresolved",
+            "disable_env_mapping_for_parallax_envmap_glow_mixed_unresolved"
           ]
         },
         {
@@ -697,9 +814,9 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 7,
+        "architecture": 8,
         "effects": 3,
-        "clutter": 3,
+        "clutter": 4,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -833,6 +950,63 @@
           "local_strategy": "guarded_disable_parallax_envmap_combo_when_slots_missing"
         },
         {
+          "id": "pack_fallout_architecture_real_crossblock_partial_cubemap_only_recovery",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "shader_type": 1,
+          "flags1": 268437632,
+          "flags2": 64,
+          "texture_paths": [
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "texture_paths": [
+                "",
+                "",
+                "",
+                "",
+                "textures\\cubemaps\\factoryhall_e.dds",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.fallout.real"
+          ],
+          "expected_remediation_steps": [
+            "set_slot4_cubemap_for_parallax_envmap_glow_mixed_unresolved",
+            "enable_env_mapping_for_parallax_envmap_glow_mixed_unresolved",
+            "disable_parallax_for_parallax_envmap_glow_mixed_unresolved",
+            "disable_pom_for_parallax_envmap_glow_mixed_unresolved",
+            "disable_glow_map_for_parallax_envmap_glow_mixed_unresolved"
+          ],
+          "expected_absent_remediation_steps": [
+            "set_slot3_parallax_for_parallax_envmap_glow_mixed_unresolved",
+            "set_slot2_glow_for_parallax_envmap_glow_mixed_unresolved",
+            "set_slot5_env_mask_for_parallax_envmap_glow_mixed_unresolved",
+            "disable_env_mapping_for_parallax_envmap_glow_mixed_unresolved"
+          ],
+          "pgpatcher_strategy": "guarded_crossblock_partial_restore_when_only_cubemap_source_exists",
+          "local_strategy": "guarded_partial_restore_with_cubemap_then_disable_remaining_missing_flags",
+          "intentional_strategy_difference": false
+        },
+        {
           "id": "pack_fallout_effects_env_slot5_without_flag",
           "family": "effects",
           "profile": "fallout",
@@ -961,6 +1135,61 @@
           "expected_prefixes": [
             "skip_single_pass.fallout."
           ]
+        },
+        {
+          "id": "pack_fallout_clutter_real_crossblock_partial_glow_only_recovery",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_paths": [
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "texture_paths": [
+                "",
+                "",
+                "textures\\clutter\\factory\\terminal_glow.dds",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_glow_missing_slots2_4_5.fallout.real"
+          ],
+          "expected_remediation_steps": [
+            "set_slot2_glow_for_envmap_glow_mixed_unresolved",
+            "enable_glow_map_for_envmap_glow_mixed_unresolved",
+            "disable_env_mapping_for_envmap_glow_mixed_unresolved"
+          ],
+          "expected_absent_remediation_steps": [
+            "set_slot4_cubemap_for_envmap_glow_mixed_unresolved",
+            "set_slot5_env_mask_for_envmap_glow_mixed_unresolved",
+            "enable_env_mapping_for_envmap_glow_mixed_unresolved",
+            "disable_glow_map_for_envmap_glow_mixed_unresolved"
+          ],
+          "pgpatcher_strategy": "guarded_partial_restore_when_only_glow_source_exists",
+          "local_strategy": "guarded_restore_glow_then_disable_unresolved_env_family",
+          "intentional_strategy_difference": false
         },
         {
           "id": "pack_fallout_armor_envmap_slot4_missing",
