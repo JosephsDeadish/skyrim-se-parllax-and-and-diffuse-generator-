@@ -814,9 +814,9 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 8,
-        "effects": 3,
-        "clutter": 4,
+        "architecture": 9,
+        "effects": 4,
+        "clutter": 5,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -855,7 +855,9 @@
         "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.fallout.",
         "missing_parallax_flag.flag1_not_set.fallout.",
         "shader_state.parallax_type_missing_slot3.fallout.",
-        "path_slot_parallax.matches_normal.fallout."
+        "path_slot_parallax.matches_normal.fallout.",
+        "shader_state.envmap_glow_missing_slot2.fallout.",
+        "unsupported_header."
       ],
       "cases": [
         {
@@ -1599,6 +1601,81 @@
           "intentional_strategy_difference": true,
           "expected_difference_bucket": "guarded_fallout",
           "safety_difference_note": "Guarded Fallout divergence keeps higher-risk cross-block rebuild writes constrained unless safety gates and deterministic inputs are present."
+        },
+        {
+          "id": "pack_fallout_architecture_real_shifted_guarded_noop_unsupported_header",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 155,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "guarded_best_effort_header_rebuild",
+          "local_strategy": "guarded_noop_for_unsupported_header",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout mode keeps malformed real-layout headers non-destructive and intentionally no-ops instead of speculative rewrites."
+        },
+        {
+          "id": "pack_fallout_effects_real_shifted_envmap_glow_slot2_partial_recover",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\effects\\fxsteam.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\fxsteam_e.dds",
+            "textures\\effects\\fxsteam_m.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_glow_missing_slot2.fallout.real"
+          ],
+          "expected_remediation_steps": [
+            "set_slot2_glow_for_envmap_glow_slot2_only",
+            "enable_glow_map_for_envmap_glow_slot2_only"
+          ],
+          "expected_absent_remediation_steps": [
+            "disable_glow_map_for_envmap_glow_slot2_only"
+          ],
+          "pgpatcher_strategy": "guarded_partial_restore_glow_slot_only",
+          "local_strategy": "guarded_partial_restore_glow_slot_only"
+        },
+        {
+          "id": "pack_fallout_clutter_real_shifted_guarded_noop_unsupported_header",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 155,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "guarded_crossblock_best_effort_header_repair",
+          "local_strategy": "guarded_noop_for_unsupported_header",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout handling preserves no-op behavior for malformed shifted real-layout clutter exports to avoid unsafe writes."
         }
       ],
       "expected_family_allowed_difference_buckets": {
@@ -1614,13 +1691,13 @@
       },
       "expected_family_min_difference_bucket_counts": {
         "architecture": {
-          "guarded_fallout": 2
+          "guarded_fallout": 3
         },
         "effects": {
           "guarded_fallout": 1
         },
         "clutter": {
-          "guarded_fallout": 1
+          "guarded_fallout": 2
         }
       }
     }
