@@ -459,13 +459,13 @@ def build_batch_bottleneck_hints(
 ) -> list[str]:
     hints: list[str] = []
     if high_res_8k_count > 0 and avg_file_seconds > 1.5:
-        hints.append("8K-heavy run detected; keep lazy preview enabled and use resume checkpoints.")
+        hints.append("8K-heavy run detected; keep staged/lazy preview on and leave Resume mode enabled for safer restarts.")
     if total_sources >= 1000 and resumed_completed_count == 0:
-        hints.append("Large 1000+ run: use Resume mode to protect progress from interruptions.")
+        hints.append("Large 1000+ run: switch checkpoint mode to Resume before long runs to protect progress.")
     if max_source_dimension >= 8192 or max_source_megapixels >= 48.0:
-        hints.append("Very large source textures detected; reduce worker count and keep staged/lazy preview enabled.")
+        hints.append("Very large source textures detected; reduce worker count and keep live preview paused unless needed.")
     if high_res_4k_count >= 50:
-        hints.append("Large high-res set detected; split core and niche outputs into separate passes.")
+        hints.append("Large high-res set detected; run core outputs first, then advanced/niche outputs in a second pass.")
     if max_file_seconds >= max(5.0, avg_file_seconds * 2.5):
         hints.append("A few outlier files were much slower; inspect unusually large or noisy source textures first.")
     if total_failed > 0:
@@ -8062,7 +8062,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(_snow_mask_check, "❄ Generate a Community Shaders Dynamic Snow mask (_sm.dds).\nMarks where snow accumulates in supported shader/mod setups; this is workflow-specific, not a universal vanilla slot.")
             _advanced_workflow_toggle = ttk.Checkbutton(
                 _workflow_frame,
-                text="Show advanced workflow outputs (RMAOS/Wetness/Snow/AO/Roughness)",
+                text="Show Advanced workflow outputs (RMAOS/Wetness/Snow/AO/Roughness)",
                 variable=self.show_advanced_workflow_outputs_var,
             )
             _advanced_workflow_toggle.grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
@@ -8137,7 +8137,7 @@ if GUI_AVAILABLE:
             )
             _show_advanced_generation_check = ttk.Checkbutton(
                 options_frame,
-                text="Show advanced generation controls",
+                text="Show Advanced generation controls (renderer/modes/extended sliders)",
                 variable=self.show_advanced_generation_var,
             )
             _show_advanced_generation_check.grid(row=1, column=3, columnspan=2, sticky=tk.E, pady=(6, 2))
@@ -8556,7 +8556,7 @@ if GUI_AVAILABLE:
             self.preview_speed_badge.pack(side=tk.LEFT, padx=(0, 8))
             self.reenable_batch_preview_button = ttk.Button(
                 actions,
-                text="Resume live preview",
+                text="Re-enable live preview",
                 command=self._reenable_batch_preview,
                 state=tk.DISABLED,
             )
@@ -9515,9 +9515,9 @@ if GUI_AVAILABLE:
         def _update_batch_resume_hint(self, *_args: object) -> None:
             mode = str(self.batch_resume_mode_var.get() or "start_fresh").strip().lower()
             if mode == "resume":
-                self.batch_resume_hint_var.set("Checkpoint mode: Resume — skip files already completed in checkpoint.")
+                self.batch_resume_hint_var.set("Checkpoint mode: Resume — continue safely after interruptions by skipping completed files.")
             else:
-                self.batch_resume_hint_var.set("Checkpoint mode: Start fresh — rerun all selected files and ignore checkpoint entries.")
+                self.batch_resume_hint_var.set("Checkpoint mode: Start fresh — rerun everything and ignore prior checkpoint progress.")
 
         def _load_batch_checkpoint_completed_files(self, checkpoint_path: Path) -> set[str]:
             if not checkpoint_path.exists():

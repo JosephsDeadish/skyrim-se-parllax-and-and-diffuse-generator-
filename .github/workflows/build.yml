@@ -94,6 +94,7 @@ jobs:
         run: |
           python scripts/pre_release_validation.py \
             --repeat-validation-loops 2 \
+            --strict-localization-completeness \
             --artifact-dir artifacts/release_readiness \
             --history-file artifacts/release_readiness/nif_family_trend_history.json \
             --seed-history-file artifacts/previous_release_readiness/nif_family_trend_history.json \
@@ -134,6 +135,9 @@ jobs:
 
       - name: Build executable with PyInstaller
         run: pyinstaller --onefile --windowed --collect-all numpy --add-data "nif_patcher.py;." --name generate_textures --icon assets\panda.ico generate_textures.py
+
+      - name: Smoke run packaged executable
+        run: .\dist\generate_textures.exe --help
 
       - name: Create application zip
         run: |

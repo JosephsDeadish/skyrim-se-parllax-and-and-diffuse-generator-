@@ -8,7 +8,7 @@
         "armor": 1,
         "landscape": 1,
         "foliage": 1,
-        "effects": 5
+        "effects": 7
       },
       "expected_family_min_pass_ratio": {
         "architecture": 1.0,
@@ -299,6 +299,84 @@
           "intentional_strategy_difference": false
         },
         {
+          "id": "pack_skyrim_effects_envmap_glow_slots_mixed_guessable",
+          "family": "effects",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\effects\\storm\\storm.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_glow_missing_slots2_4_5.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot2_glow_for_envmap_glow_mixed_unresolved",
+            "set_slot4_cubemap_for_envmap_glow_mixed_unresolved",
+            "set_slot5_env_mask_for_envmap_glow_mixed_unresolved",
+            "enable_env_mapping_for_envmap_glow_mixed_unresolved",
+            "enable_glow_map_for_envmap_glow_mixed_unresolved"
+          ],
+          "expected_absent_remediation_steps": [
+            "disable_env_mapping_for_envmap_glow_mixed_unresolved",
+            "disable_glow_map_for_envmap_glow_mixed_unresolved"
+          ],
+          "pgpatcher_strategy": "rebuild_env_and_glow_slots",
+          "local_strategy": "rebuild_env_and_glow_when_guessable_else_disable",
+          "intentional_strategy_difference": false
+        },
+        {
+          "id": "pack_skyrim_effects_parallax_envmap_glow_slots_mixed_guessable",
+          "family": "effects",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "shader_type": 1,
+          "flags1": 268437632,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\effects\\portal\\portal.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot3_parallax_for_parallax_envmap_glow_mixed_unresolved",
+            "set_slot2_glow_for_parallax_envmap_glow_mixed_unresolved",
+            "set_slot4_cubemap_for_parallax_envmap_glow_mixed_unresolved",
+            "set_slot5_env_mask_for_parallax_envmap_glow_mixed_unresolved",
+            "enable_env_mapping_for_parallax_envmap_glow_mixed_unresolved"
+          ],
+          "expected_absent_remediation_steps": [
+            "disable_parallax_for_parallax_envmap_glow_mixed_unresolved",
+            "disable_pom_for_parallax_envmap_glow_mixed_unresolved",
+            "disable_glow_map_for_parallax_envmap_glow_mixed_unresolved",
+            "disable_env_mapping_for_parallax_envmap_glow_mixed_unresolved"
+          ],
+          "pgpatcher_strategy": "rebuild_parallax_env_glow_slots",
+          "local_strategy": "rebuild_parallax_env_glow_when_guessable_else_disable",
+          "intentional_strategy_difference": false
+        },
+        {
           "id": "pack_skyrim_effects_envmap_pom_and_crossblock_parallax_normal_reuse",
           "family": "effects",
           "profile": "skyrim",
@@ -572,7 +650,7 @@
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
         "architecture": 6,
-        "effects": 1,
+        "effects": 2,
         "clutter": 2,
         "armor": 1,
         "landscape": 1,
@@ -607,6 +685,7 @@
         "shader_state.envmap_missing_slot4.fallout.",
         "shader_state.envmap_missing_slot5.fallout.",
         "shader_state.envmap_glow_missing_slots2_4_5.fallout.",
+        "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.fallout.",
         "missing_parallax_flag.flag1_not_set.fallout.",
         "shader_state.parallax_type_missing_slot3.fallout."
       ],
@@ -723,6 +802,49 @@
           "expected_prefixes": [
             "flag_env_mapping.slot5_filled_without_flag.fallout."
           ]
+        },
+        {
+          "id": "pack_fallout_effects_parallax_envmap_glow_slots_mixed_guessable",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "legacy",
+          "user_version": 11,
+          "user_ver2": 130,
+          "shader_type": 1,
+          "flags1": 268437632,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\effects\\plasma\\plasma.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.fallout."
+          ],
+          "expected_remediation_steps": [
+            "set_slot3_parallax_for_parallax_envmap_glow_mixed_unresolved",
+            "set_slot2_glow_for_parallax_envmap_glow_mixed_unresolved",
+            "set_slot4_cubemap_for_parallax_envmap_glow_mixed_unresolved",
+            "set_slot5_env_mask_for_parallax_envmap_glow_mixed_unresolved",
+            "enable_env_mapping_for_parallax_envmap_glow_mixed_unresolved"
+          ],
+          "expected_absent_remediation_steps": [
+            "disable_parallax_for_parallax_envmap_glow_mixed_unresolved",
+            "disable_pom_for_parallax_envmap_glow_mixed_unresolved",
+            "disable_glow_map_for_parallax_envmap_glow_mixed_unresolved",
+            "disable_env_mapping_for_parallax_envmap_glow_mixed_unresolved"
+          ],
+          "pgpatcher_strategy": "guarded_rebuild_parallax_env_glow_slots",
+          "local_strategy": "guarded_rebuild_when_guessable_else_disable",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout divergence keeps higher-risk writes constrained unless safety gates are explicitly enabled."
         },
         {
           "id": "pack_fallout_clutter_single_pass_skip",
