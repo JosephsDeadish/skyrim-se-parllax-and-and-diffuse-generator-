@@ -36,6 +36,7 @@ from generate_textures import (
     _resolve_batch_workers,
     _summarize_batch_texture_dimensions,
     build_batch_bottleneck_hints,
+    compute_checkpoint_mismatch_flags,
     compute_deferred_preview_tile_interval_ms,
     compute_preview_refresh_delay_ms,
     _save_with_dds_fallback,
@@ -1951,9 +1952,42 @@ class GenerateTexturesTests(unittest.TestCase):
                 total_sources=1200,
                 current_index=104,
                 last_index=100,
-                seconds_since_last_update=0.30,
+                seconds_since_last_update=0.40,
             )
         )
+
+    def test_should_update_live_batch_preview_uses_stricter_throttle_for_extreme_batches(self) -> None:
+        self.assertFalse(
+            should_update_live_batch_preview(
+                total_sources=2200,
+                current_index=506,
+                last_index=500,
+                seconds_since_last_update=0.40,
+            )
+        )
+        self.assertTrue(
+            should_update_live_batch_preview(
+                total_sources=2200,
+                current_index=506,
+                last_index=500,
+                seconds_since_last_update=0.46,
+            )
+        )
+
+    def test_compute_checkpoint_mismatch_flags_detects_input_output_and_selection_drift(self) -> None:
+        mismatch = compute_checkpoint_mismatch_flags(
+            checkpoint_payload={
+                "input_root": "/a/input",
+                "output_root": "/a/output",
+                "total_files_considered": 20,
+            },
+            current_input_root="/b/input",
+            current_output_root="/b/output",
+            planned_total=30,
+        )
+        self.assertIn("input mismatch", mismatch)
+        self.assertIn("output mismatch", mismatch)
+        self.assertIn("selection size changed", mismatch)
 
     def test_build_batch_bottleneck_hints_includes_large_run_resume_guidance(self) -> None:
         hints = build_batch_bottleneck_hints(

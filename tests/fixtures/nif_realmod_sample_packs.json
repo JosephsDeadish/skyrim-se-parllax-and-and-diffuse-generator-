@@ -539,7 +539,7 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 4,
+        "architecture": 5,
         "effects": 1,
         "clutter": 2,
         "armor": 1,
@@ -915,6 +915,37 @@
           "expected_difference_bucket": "guarded_fallout",
           "safety_difference_note": "Guarded Fallout behavior prefers reversible normalization and explicit flag repair before disable fallback.",
           "expected_no_auto_remediation": true
+        },
+        {
+          "id": "pack_fallout_architecture_real_crlf_u16_shifted_envmap_glow_slot5_missing",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 132,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\architecture\\vault\\vaultpanel.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\vaultpanel_e.dds",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "guarded_slot_restore_then_flag_disable",
+          "local_strategy": "guarded_noop_for_unsupported_header"
         }
       ],
       "expected_family_allowed_difference_buckets": {

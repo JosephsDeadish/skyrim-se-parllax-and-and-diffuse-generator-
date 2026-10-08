@@ -473,6 +473,26 @@ def build_batch_bottleneck_hints(
     return hints[:3]
 
 
+def compute_checkpoint_mismatch_flags(
+    *,
+    checkpoint_payload: dict[str, object],
+    current_input_root: str | None,
+    current_output_root: str | None,
+    planned_total: int,
+) -> list[str]:
+    mismatch_flags: list[str] = []
+    checkpoint_input_root = str(checkpoint_payload.get("input_root", "") or "").strip()
+    if checkpoint_input_root and current_input_root and checkpoint_input_root != current_input_root:
+        mismatch_flags.append("input mismatch")
+    checkpoint_output_root = str(checkpoint_payload.get("output_root", "") or "").strip()
+    if checkpoint_output_root and current_output_root and checkpoint_output_root != current_output_root:
+        mismatch_flags.append("output mismatch")
+    checkpoint_total = int(checkpoint_payload.get("total_files_considered", 0) or 0)
+    if planned_total > 0 and checkpoint_total > 0 and checkpoint_total != planned_total:
+        mismatch_flags.append("selection size changed")
+    return mismatch_flags
+
+
 def compute_preview_refresh_delay_ms(
     *,
     is_processing: bool,
@@ -487,21 +507,23 @@ def compute_preview_refresh_delay_ms(
     delay = 120
     if not show_batch_preview:
         delay = max(delay, 160)
-    if total_sources >= 1000:
+    if total_sources >= 2000:
+        delay = max(delay, 420)
+    elif total_sources >= 1000:
         delay = max(delay, 320)
     elif total_sources >= 400:
         delay = max(delay, 220)
     elif total_sources >= 150:
         delay = max(delay, 160)
     if source_pixels >= (8192 * 8192):
-        delay += 80
+        delay += 120
     elif source_pixels >= (4096 * 4096):
-        delay += 40
+        delay += 60
     if lazy_preview_enabled:
-        delay += 20
+        delay += 30
     if staged_preview_enabled:
-        delay += 20
-    return min(delay, 500)
+        delay += 35
+    return min(delay, 700)
 
 
 def compute_deferred_preview_tile_interval_ms(
@@ -510,17 +532,19 @@ def compute_deferred_preview_tile_interval_ms(
     source_pixels: int,
 ) -> int:
     interval = 40
-    if total_sources >= 1000:
+    if total_sources >= 2000:
+        interval = 190
+    elif total_sources >= 1000:
         interval = 140
     elif total_sources >= 400:
         interval = 100
     elif total_sources >= 150:
         interval = 70
     if source_pixels >= (8192 * 8192):
-        interval = max(interval, 160)
+        interval = max(interval, 190)
     elif source_pixels >= (4096 * 4096):
-        interval = max(interval, 110)
-    return min(interval, 220)
+        interval = max(interval, 130)
+    return min(interval, 260)
 
 
 def should_update_live_batch_preview(
@@ -532,8 +556,15 @@ def should_update_live_batch_preview(
 ) -> bool:
     if total_sources < 300:
         return True
-    min_interval = 0.45 if total_sources >= 1000 else 0.30
-    min_index_step = 3 if total_sources >= 1000 else 2
+    if total_sources >= 2000:
+        min_interval = 0.75
+        min_index_step = 6
+    elif total_sources >= 1000:
+        min_interval = 0.55
+        min_index_step = 4
+    else:
+        min_interval = 0.30
+        min_index_step = 2
     if seconds_since_last_update >= min_interval:
         return True
     return (
@@ -7885,14 +7916,14 @@ if GUI_AVAILABLE:
                 variable=self.simplified_main_layout_var,
             )
             _simplified_layout_check.pack(side=tk.LEFT, padx=(8, 8))
-            self._add_tooltip(_theme_top_check, "🌙 Toggle dark/light mode.\nEasy on the eyes during those 3am modding sessions.")
+            self._add_tooltip(_theme_top_check, "Toggle dark/light mode for comfortable long editing sessions.")
             self._add_tooltip(_language_label, "Choose the interface language from available translation files.")
             self._add_tooltip(self.language_combo, "Switch language for labels, buttons, and tooltips.")
             self._add_tooltip(_ui_scale_label, "Manual UI scale multiplier for high-DPI displays.")
             self._add_tooltip(self.ui_scale_combo, "Increase this on 4K/high-DPI displays if controls look too small.")
             self._add_tooltip(
                 _simplified_layout_check,
-                "Keeps the main window cleaner by hiding advanced workflow/generation controls and generated-output preview grid.",
+                "Basic mode hides advanced workflow/generation controls for a cleaner beginner layout.",
             )
             self._add_tooltip(_target_game_label, "Select Skyrim or Fallout naming mode for generated texture filenames.")
             self._add_tooltip(
@@ -7901,13 +7932,11 @@ if GUI_AVAILABLE:
             )
             self._add_tooltip(
                 _patreon_button,
-                "❤ Fuel the project on Patreon.\n"
-                "Your support buys bug-fixing time, feature upgrades, and enough caffeine to keep the texture goblin alive.",
+                "Support the project on Patreon to help fund ongoing fixes and feature improvements.",
             )
             self._add_tooltip(
                 _wiki_button,
-                "📚 Open the Skyrim modding wiki reference.\n"
-                "Handy when you need the authoritative TruePBR workflow, slot, and feature-compatibility notes.",
+                "Open the Skyrim modding wiki reference for workflow, slot, and compatibility guidance.",
             )
             self._add_tooltip(
                 _help_button,
@@ -8246,7 +8275,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(_glow_label, "💡 Brightness cutoff for glow.\nLower = more glow. Higher = only brightest bits glow like tiny supernovas.")
             self.glow_scale = ttk.Scale(options_frame, from_=0, to=255, variable=self.glow_threshold_var, command=lambda _: self._on_slider_changed())
             self.glow_scale.grid(row=6, column=1, columnspan=2, sticky=tk.EW)
-            self._add_tooltip(self.glow_scale, "💡 0 means everything glows like a rave. 255 means almost nothing glows.\nUse the live value display to tune precisely.")
+            self._add_tooltip(self.glow_scale, "Lower values allow more glow; higher values restrict glow to only the brightest areas.\nUse the live value display for precise tuning.")
             self.glow_threshold_display_label = ttk.Label(options_frame, textvariable=self.glow_threshold_display_var)
             self.glow_threshold_display_label.grid(row=6, column=3, sticky=tk.W, padx=8)
             self.auto_glow_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_glow_suggestion_var, command=self._on_auto_slider_preference_changed)
@@ -8261,12 +8290,12 @@ if GUI_AVAILABLE:
             self._add_tooltip(_env_mask_label, "🪞 Controls environment-mask contrast.\nHigher = stronger shiny-vs-matte separation. Great for dramatic materials.")
             self.environment_mask_scale = ttk.Scale(options_frame, from_=0.1, to=12.0, variable=self.environment_mask_strength_var, command=lambda _: self._on_slider_changed())
             self.environment_mask_scale.grid(row=7, column=1, columnspan=2, sticky=tk.EW)
-            self._add_tooltip(self.environment_mask_scale, "🪞 Slide right for stronger reflection contrast.\nSlide left for chill, less dramatic materials.")
+            self._add_tooltip(self.environment_mask_scale, "🪞 Slide right for stronger reflection contrast.\nSlide left for subtler material separation.")
             self.environment_mask_strength_display_label = ttk.Label(options_frame, textvariable=self.environment_mask_strength_display_var)
             self.environment_mask_strength_display_label.grid(row=7, column=3, sticky=tk.W, padx=8)
             self.auto_environment_mask_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_environment_mask_suggestion_var, command=self._on_auto_slider_preference_changed)
             self.auto_environment_mask_check.grid(row=7, column=4, sticky=tk.W)
-            self._add_tooltip(self.auto_environment_mask_check, "🤖 Auto-select environment mask strength.\nThe machine will judge your texture's reflective potential.")
+            self._add_tooltip(self.auto_environment_mask_check, "🤖 Auto-select environment mask strength from image analysis.")
 
             _rmaos_label = ttk.Label(options_frame, text="RMAOS strength")
             _rmaos_label.grid(row=8, column=0, sticky=tk.W, pady=8)
@@ -8297,7 +8326,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(_specular_label, "✨ Controls specular highlight intensity in _msn alpha.\nHigher = shinier. Lower = dusty realism.")
             self.specular_scale = ttk.Scale(options_frame, from_=0.1, to=12.0, variable=self.specular_strength_var, command=lambda _: self._on_slider_changed())
             self.specular_scale.grid(row=10, column=1, columnspan=2, sticky=tk.EW)
-            self._add_tooltip(self.specular_scale, "✨ Turn it up for glorious shine, down for ancient weathered stone.\nLive value shown beside slider.")
+            self._add_tooltip(self.specular_scale, "✨ Increase for stronger specular highlights, decrease for subtler shine.\nLive value shown beside slider.")
             self.specular_strength_display_label = ttk.Label(options_frame, textvariable=self.specular_strength_display_var)
             self.specular_strength_display_label.grid(row=10, column=3, sticky=tk.W, padx=8)
             self.auto_specular_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_specular_suggestion_var, command=self._on_auto_slider_preference_changed)
@@ -8326,7 +8355,7 @@ if GUI_AVAILABLE:
             self.roughness_strength_display_label.grid(row=12, column=3, sticky=tk.W, padx=8)
             self.auto_roughness_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_roughness_suggestion_var, command=self._on_auto_slider_preference_changed)
             self.auto_roughness_check.grid(row=12, column=4, sticky=tk.W)
-            self._add_tooltip(self.auto_roughness_check, "🤖 Auto-recommend roughness strength — material-aware so stone gets gritty and glass gets smooth.")
+            self._add_tooltip(self.auto_roughness_check, "🤖 Auto-recommend roughness strength based on detected surface/material characteristics.")
 
             # --- Emboss depth + relief depth + parallax mode options ---
             _emboss_check = ttk.Checkbutton(
@@ -9542,29 +9571,27 @@ if GUI_AVAILABLE:
             except Exception:
                 payload = {}
 
-            mismatch_flags: list[str] = []
+            current_input_root: str | None = None
             current_input = self.input_var.get().strip()
             if current_input:
                 try:
                     current_input_root = str(Path(current_input).resolve())
-                    checkpoint_input_root = str(payload.get("input_root", "") or "").strip()
-                    if checkpoint_input_root and checkpoint_input_root != current_input_root:
-                        mismatch_flags.append("input mismatch")
                 except Exception:
-                    pass
-            checkpoint_output_root = str(payload.get("output_root", "") or "").strip()
+                    current_input_root = None
+            current_output_root: str | None = None
             current_output_raw = self.output_var.get().strip()
-            if checkpoint_output_root and current_output_raw:
+            if current_output_raw:
                 try:
                     current_output_root = str(Path(current_output_raw).resolve())
-                    if checkpoint_output_root != current_output_root:
-                        mismatch_flags.append("output mismatch")
                 except Exception:
-                    pass
-            if planned_total > 0:
-                checkpoint_total = int(payload.get("total_files_considered", 0) or 0)
-                if checkpoint_total > 0 and checkpoint_total != planned_total:
-                    mismatch_flags.append("selection size changed")
+                    current_output_root = None
+            mismatch_flags = compute_checkpoint_mismatch_flags(
+                checkpoint_payload=payload,
+                current_input_root=current_input_root,
+                current_output_root=current_output_root,
+                planned_total=planned_total,
+            )
+            self._last_checkpoint_mismatch_flags = tuple(mismatch_flags)
 
             stale_flag = age_seconds >= 86400
             status_suffix = ""
@@ -10016,8 +10043,7 @@ if GUI_AVAILABLE:
                         lines = [f"{key.replace('_', ' ').title()}: {value}" for key, value in only_outputs.items()]
                     else:
                         lines = [
-                            f"Processed {total_sources} source textures.",
-                            f"Generated {total_outputs} files.",
+                            f"Run summary: processed {total_sources} source texture(s), generated {total_outputs} file(s).",
                         ]
                         total_nif_patched = sum(patched for _, patched, _ in self.batch_nif_patch_results)
                         total_nif_failed = sum(failed for _, _, failed in self.batch_nif_patch_results)
@@ -10031,6 +10057,7 @@ if GUI_AVAILABLE:
                                 lines.append(f"- {filename}: {error_message}")
                             if total_failed > 5:
                                 lines.append(f"...and {total_failed - 5} more.")
+                    checkpoint_health_available = False
                     if telemetry:
                         elapsed = float(telemetry.get("elapsed_seconds", 0.0) or 0.0)
                         avg_file = float(telemetry.get("avg_file_seconds", 0.0) or 0.0)
@@ -10065,6 +10092,7 @@ if GUI_AVAILABLE:
                         self.batch_perf_hint_var.set(" | ".join(perf_hints[:3]))
                         checkpoint_value = str(telemetry.get("checkpoint_path", "") or "").strip()
                         if checkpoint_value:
+                            checkpoint_health_available = True
                             self._refresh_checkpoint_health_status(
                                 checkpoint_path=Path(checkpoint_value),
                                 planned_total=max(0, total_sources + resumed),
@@ -10076,6 +10104,14 @@ if GUI_AVAILABLE:
                             lines.append("Checkpoint health: unavailable")
                     else:
                         lines.append("Checkpoint health: unavailable")
+                    lines.insert(
+                        0,
+                        (
+                            "Summary focus: "
+                            f"resumed-skipped={resumed_total}, failed={total_failed}, "
+                            f"checkpoint={'available' if checkpoint_health_available else 'unavailable'}."
+                        ),
+                    )
                     messagebox.showinfo("Generation complete", "\n".join(lines), parent=self.root)
                     self._refresh_preview()
                     keep_polling = False
@@ -10090,12 +10126,19 @@ if GUI_AVAILABLE:
                     self._set_processing_state(False)
                     total_sources = len(results)
                     total_outputs = sum(len(output_set) for output_set in results.values())
+                    resumed_cancelled = int(telemetry.get("resumed_completed_count", 0) or 0)
+                    planned_cancelled = max(0, total_sources + resumed_cancelled)
                     self.status_var.set(
-                        f"Generation cancelled. Finished {total_sources} source texture(s) and wrote {total_outputs} file(s)."
+                        f"Generation cancelled. Finished {total_sources}/{planned_cancelled} source texture(s) and wrote {total_outputs} file(s)."
                     )
                     messagebox.showinfo(
                         "Generation cancelled",
-                        "Processing was cancelled.\nUse Revert Process to undo files from this run if needed.",
+                        (
+                            "Processing was cancelled.\n"
+                            f"Summary: processed {total_sources}/{planned_cancelled}, wrote {total_outputs} files, "
+                            f"resumed-skip {resumed_cancelled}, failed {len(self.batch_failures)}.\n"
+                            "Use Revert Process to undo files from this run if needed."
+                        ),
                         parent=self.root,
                     )
                     if telemetry:
@@ -10164,17 +10207,25 @@ if GUI_AVAILABLE:
                 self.status_var.set("Batch live preview disabled for faster processing.")
             if self.show_batch_preview_var.get():
                 self.batch_preview_auto_paused = False
-                self._set_preview_speed_badge("none")
+                if self.preview_paused_var.get():
+                    self._set_preview_speed_badge("manual_pause")
+                else:
+                    self._set_preview_speed_badge("none")
                 self.reenable_batch_preview_button.configure(state=tk.DISABLED)
             elif self.is_processing:
                 self._set_preview_speed_badge("auto_speed_off")
 
         def _reenable_batch_preview(self) -> None:
             self.show_batch_preview_var.set(True)
-            self._set_preview_speed_badge("none")
             self.reenable_batch_preview_button.configure(state=tk.DISABLED)
             self.batch_preview_auto_paused = False
-            self.status_var.set("Live batch preview re-enabled.")
+            if self.preview_paused_var.get():
+                self._set_preview_speed_badge("manual_pause")
+                self.status_var.set("Live batch preview re-enabled, but manual preview pause is still active.")
+            else:
+                self._set_preview_speed_badge("none")
+                self.status_var.set("Live batch preview re-enabled.")
+                self._request_preview_refresh()
 
         def _toggle_preview_pause(self) -> None:
             paused = not bool(self.preview_paused_var.get())
@@ -10190,7 +10241,7 @@ if GUI_AVAILABLE:
                     self._set_preview_speed_badge("auto_speed_off")
                 else:
                     self._set_preview_speed_badge("none")
-                self.status_var.set("Preview resumed.")
+                self.status_var.set("Preview resumed. Batch rendering state remains unchanged.")
                 self._refresh_preview()
 
         def _render_full_preview_now(self) -> None:
@@ -11237,6 +11288,37 @@ if GUI_AVAILABLE:
                         if not proceed_resume_without_history:
                             self.status_var.set("Batch start canceled before creating a new checkpoint.")
                             return
+                    if checkpoint_path.exists():
+                        checkpoint_payload: dict[str, object] = {}
+                        try:
+                            payload_raw = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+                            if isinstance(payload_raw, dict):
+                                checkpoint_payload = payload_raw
+                        except Exception:
+                            checkpoint_payload = {}
+                        current_input_root = str(input_path.resolve())
+                        current_output_root = str(output_dir.resolve()) if output_dir is not None else ""
+                        mismatch_flags = compute_checkpoint_mismatch_flags(
+                            checkpoint_payload=checkpoint_payload,
+                            current_input_root=current_input_root,
+                            current_output_root=current_output_root,
+                            planned_total=len(self.selected_inputs),
+                        )
+                        if mismatch_flags:
+                            proceed_mismatch_resume = messagebox.askyesno(
+                                "Resume checkpoint mismatch warning",
+                                (
+                                    f"Checkpoint metadata does not fully match this run ({', '.join(mismatch_flags)}).\n\n"
+                                    "Resume mode may skip the wrong files in this state.\n"
+                                    "Continue with Resume anyway?"
+                                ),
+                                parent=self.root,
+                            )
+                            if not proceed_mismatch_resume:
+                                self.status_var.set(
+                                    "Resume canceled due to checkpoint mismatch. Switch to Start fresh or load the matching input/output set."
+                                )
+                                return
                     completed_checkpoint_files = self._load_batch_checkpoint_completed_files(checkpoint_path)
                     if completed_checkpoint_files:
                         filtered_inputs = [
