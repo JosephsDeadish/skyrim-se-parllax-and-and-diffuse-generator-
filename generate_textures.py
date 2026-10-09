@@ -10065,7 +10065,16 @@ if GUI_AVAILABLE:
         def _poll_processing_queue(self) -> None:
             keep_polling = self.is_processing
             processed_events = 0
-            max_events_per_poll = 32
+            try:
+                queue_backlog = max(0, int(self.processing_queue.qsize()))
+            except Exception:
+                queue_backlog = 0
+            if queue_backlog >= 512:
+                max_events_per_poll = 128
+            elif queue_backlog >= 128:
+                max_events_per_poll = 64
+            else:
+                max_events_per_poll = 32
             while True:
                 if processed_events >= max_events_per_poll:
                     break

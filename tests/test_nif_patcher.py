@@ -1363,6 +1363,24 @@ class TestValidateNifForParallax(unittest.TestCase):
             any(group.code.startswith("shader_state.envmap_missing_slot4.") for group in v.conflict_report)
         )
 
+    def test_conflict_report_classifies_landscape_skip_reason(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            flags1=SLSF1_LANDSCAPE,
+            texture_paths=["textures\\arch\\stone.dds"] + [""] * 8,
+        )
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(
+            any(group.code.startswith("skip_landscape_flag.") for group in v.conflict_report)
+        )
+
+    def test_classify_conflict_code_for_lod_geometry_warning(self) -> None:
+        code = _classify_conflict_code(
+            "Block 2: LOD geometry ('BSLODTriShape') — parallax works at normal viewing distance "
+            "but disappears at the LOD transition; patcher will still patch it, but this is worth noting"
+        )
+        self.assertEqual(code, "lod_geometry.transition_only")
+
     def test_conflict_report_flags_envmap_shader_with_missing_slot5(self) -> None:
         textures_root = self.tmp / "textures" / "cubemaps"
         textures_root.mkdir(parents=True, exist_ok=True)
@@ -4540,6 +4558,16 @@ class TestFixtureCorpusBaselinePack(unittest.TestCase):
 
         summary = summarize_validation_conflicts(validations)
         summary_codes = tuple(group.code for group in summary)
+        fallback_groups = [code for code in summary_codes if code.startswith("fallback_or_unknown.")]
+        expected_max_fallback_groups = int(baseline.get("expected_max_fallback_groups", 0) or 0)
+        self.assertLessEqual(
+            len(fallback_groups),
+            expected_max_fallback_groups,
+            (
+                f"Fallback conflict groups regressed: observed {len(fallback_groups)} "
+                f"(allowed {expected_max_fallback_groups})."
+            ),
+        )
         required_prefixes = baseline.get("required_summary_code_prefixes", [])
         self.assertIsInstance(required_prefixes, list)
         for prefix in required_prefixes:

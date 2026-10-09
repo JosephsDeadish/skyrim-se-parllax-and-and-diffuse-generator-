@@ -171,6 +171,70 @@ def _resolve_packaged_smoke_binary(artifact_dir: Path) -> Path:
     raise SystemExit("Packaging smoke binary was not produced at expected dist path.")
 
 
+def _packaged_smoke_scenarios() -> list[dict[str, object]]:
+    """Return packaged-smoke scenarios with minimal output assertions."""
+    return [
+        {
+            "name": "vanilla",
+            "args": [
+                "--render-profile",
+                "vanilla",
+                "--normal-strength",
+                "1.2",
+                "--parallax-strength",
+                "1.0",
+            ],
+            "min_outputs": 3,
+            "required_suffixes": ("_n.dds", "_p.dds"),
+        },
+        {
+            "name": "community_shaders",
+            "args": [
+                "--render-profile",
+                "community_shaders",
+                "--complex-material",
+                "--complex-format",
+                "cm",
+                "--environment-mask",
+                "--environment-mask-mode",
+                "complex",
+            ],
+            "min_outputs": 5,
+            "required_suffixes": ("_cm.dds", "_m.dds"),
+        },
+        {
+            "name": "truepbr",
+            "args": [
+                "--render-profile",
+                "truepbr",
+                "--rmaos",
+                "--environment-mask",
+                "--normal-strength",
+                "1.1",
+            ],
+            "min_outputs": 5,
+            "required_suffixes": ("_rmaos.dds", "_m.dds"),
+        },
+        {
+            "name": "enb",
+            "args": [
+                "--render-profile",
+                "enb",
+                "--complex-material",
+                "--complex-format",
+                "msn",
+                "--environment-mask",
+                "--environment-mask-mode",
+                "complex",
+                "--parallax-mode",
+                "occlusion",
+            ],
+            "min_outputs": 5,
+            "required_suffixes": ("_msn.dds", "_m.dds", "_p.dds"),
+        },
+    ]
+
+
 def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> None:
     print("\n=== Packaged executable smoke run ===")
     binary = _resolve_packaged_smoke_binary(artifact_dir)
@@ -199,34 +263,17 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
         )
     )
     loops = max(1, int(loops))
-    scenarios: list[tuple[str, list[str]]] = [
-        (
-            "vanilla",
-            [
-                "--render-profile",
-                "vanilla",
-                "--normal-strength",
-                "1.2",
-                "--parallax-strength",
-                "1.0",
-            ],
-        ),
-        (
-            "community_shaders",
-            [
-                "--render-profile",
-                "community_shaders",
-                "--complex-material",
-                "--complex-format",
-                "cm",
-                "--environment-mask",
-                "--environment-mask-mode",
-                "complex",
-            ],
-        ),
-    ]
+    scenarios = _packaged_smoke_scenarios()
     for loop_index in range(1, loops + 1):
-        for scenario_name, scenario_args in scenarios:
+        for scenario in scenarios:
+            scenario_name = str(scenario.get("name", "scenario")).strip() or "scenario"
+            scenario_args = [str(arg) for arg in (scenario.get("args", []) or [])]
+            min_outputs = max(1, int(scenario.get("min_outputs", 1) or 1))
+            required_suffixes = tuple(
+                str(suffix).strip().lower()
+                for suffix in (scenario.get("required_suffixes", ()) or ())
+                if str(suffix).strip()
+            )
             smoke_out = smoke_io / f"out_loop{loop_index}_{scenario_name}"
             smoke_out.mkdir(parents=True, exist_ok=True)
             run_completed = subprocess.run(
@@ -246,10 +293,18 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                 print(run_completed.stderr)
                 raise SystemExit(run_completed.returncode)
             produced_dds = sorted(smoke_out.glob("*.dds"))
-            if not produced_dds:
+            if len(produced_dds) < min_outputs:
                 raise SystemExit(
-                    "Packaged executable smoke run completed but did not produce any DDS outputs."
+                    f"Packaged executable smoke run for '{scenario_name}' produced "
+                    f"{len(produced_dds)} DDS file(s); expected at least {min_outputs}."
                 )
+            produced_names = [path.name.lower() for path in produced_dds]
+            for suffix in required_suffixes:
+                if not any(name.endswith(suffix) for name in produced_names):
+                    raise SystemExit(
+                        f"Packaged executable smoke run for '{scenario_name}' is missing required output suffix '{suffix}'. "
+                        f"Produced: {produced_names}"
+                    )
 
 
 def _collect_localization_coverage(

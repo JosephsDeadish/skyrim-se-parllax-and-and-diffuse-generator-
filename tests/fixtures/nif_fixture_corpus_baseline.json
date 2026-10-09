@@ -5,6 +5,7 @@
     "fallout": 17,
     "unknown": 23
   },
+  "expected_max_fallback_groups": 0,
   "required_summary_code_prefixes": [
     "missing_parallax_flag.flag1_not_set.skyrim.",
     "missing_parallax_flag.flag1_not_set.fallout.",

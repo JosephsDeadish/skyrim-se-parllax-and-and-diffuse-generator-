@@ -9,6 +9,7 @@ from pathlib import Path
 from scripts.pre_release_validation import (
     _append_trend_history,
     _collect_localization_coverage,
+    _packaged_smoke_scenarios,
     _run_repository_hygiene_scan,
     _resolve_packaged_smoke_binary,
 )
@@ -131,6 +132,27 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
     def test_resolve_packaged_smoke_binary_raises_when_missing(self) -> None:
         with self.assertRaises(SystemExit):
             _resolve_packaged_smoke_binary(self.tmp)
+
+    def test_packaged_smoke_scenarios_define_required_outputs(self) -> None:
+        scenarios = _packaged_smoke_scenarios()
+        scenario_by_name = {
+            str(entry.get("name", "")).strip(): entry
+            for entry in scenarios
+            if isinstance(entry, dict)
+        }
+        for expected in ("vanilla", "community_shaders", "truepbr", "enb"):
+            self.assertIn(expected, scenario_by_name)
+            entry = scenario_by_name[expected]
+            args = entry.get("args", [])
+            self.assertIsInstance(args, list)
+            self.assertGreater(len(args), 0)
+            self.assertGreaterEqual(int(entry.get("min_outputs", 0) or 0), 1)
+            required_suffixes = entry.get("required_suffixes", ())
+            self.assertTrue(required_suffixes)
+        truepbr_suffixes = {
+            str(value).lower() for value in scenario_by_name["truepbr"].get("required_suffixes", ())
+        }
+        self.assertIn("_rmaos.dds", truepbr_suffixes)
 
 
 class TestPreReleaseValidationRepositoryHygiene(unittest.TestCase):

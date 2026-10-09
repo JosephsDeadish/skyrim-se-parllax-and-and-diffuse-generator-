@@ -3925,6 +3925,14 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "skip_single_pass": (
         "Keep skip_single_pass enabled for safety, or disable it only for known-good meshes.",
     ),
+    "skip_landscape_flag": (
+        "Do not force standard parallax on SLSF1_Landscape blocks; they use a separate landscape parallax path.",
+        "Patch non-landscape shader blocks for mesh-level parallax instead of overriding landscape shader behavior.",
+    ),
+    "lod_geometry.transition_only": (
+        "LOD geometry can lose visible parallax at distance transitions; validate the full near/far LOD chain in game.",
+        "Treat LOD-only diagnostics as advisory unless combined with hard slot/flag conflicts on the same block.",
+    ),
     "skip_skinned_or_havok": (
         "Do not enable parallax on skinned/Havok-driven meshes due to CTD/glitch risk.",
     ),
@@ -4154,6 +4162,10 @@ def _classify_conflict_code(message: str) -> str:
         return "skip_alpha_decal_lighting.anisotropic_flag"
     if "slsf1_single_pass is set" in lowered:
         return "skip_single_pass"
+    if "slsf1_landscape is set" in lowered and "separate parallax mechanism" in lowered:
+        return "skip_landscape_flag"
+    if "lod geometry (" in lowered and "disappears at the lod transition" in lowered:
+        return "lod_geometry.transition_only"
     if "havok" in lowered or "skinned/animated mesh" in lowered or "skinned mesh" in lowered:
         return "skip_skinned_or_havok"
     if "alpha" in lowered or "decal" in lowered or "anisotropic" in lowered or "subsurface-scattering" in lowered:
