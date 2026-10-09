@@ -8515,11 +8515,12 @@ if GUI_AVAILABLE:
                 "🏔 'standard' = vanilla/community-shaders-friendly heightmap for the normal Skyrim parallax setup.\n"
                 "'occlusion (ENB/POM)' = ENB-only smooth POM heightmap — use this only when the mesh/material is actually set up for ENB parallax occlusion.",
             )
-            ttk.Label(
+            _parallax_mode_hint_label = ttk.Label(
                 options_frame,
                 text="standard = vanilla  |  occlusion = ENBSeries POM",
                 foreground="gray",
-            ).grid(row=14, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
+            )
+            _parallax_mode_hint_label.grid(row=14, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
             self.mode_controls_hint_label = ttk.Label(
                 options_frame,
                 textvariable=self.mode_controls_hint_var,
@@ -8575,6 +8576,7 @@ if GUI_AVAILABLE:
                 _relief_check,
                 _parallax_mode_label,
                 self.parallax_mode_combo,
+                _parallax_mode_hint_label,
                 self.mode_controls_hint_label,
             ]
             _advanced_generation_layout: dict[tk.Widget, dict[str, object]] = {}

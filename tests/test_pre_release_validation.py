@@ -9,6 +9,7 @@ from pathlib import Path
 from scripts.pre_release_validation import (
     _append_trend_history,
     _collect_localization_coverage,
+    _load_realmod_pack_payload,
     _packaged_smoke_scenarios,
     _run_repository_hygiene_scan,
     _resolve_packaged_smoke_binary,
@@ -98,9 +99,12 @@ class TestPreReleaseValidationLocalization(unittest.TestCase):
         self.assertIn("es", rows)
         self.assertEqual(int(rows["es"].get("missing_count", 0)), 1)
         self.assertEqual(int(rows["es"].get("extra_count", 0)), 1)
+        self.assertGreater(float(rows["en"].get("identical_to_base_ratio", 0.0) or 0.0), 0.99)
+        self.assertLess(float(rows["es"].get("identical_to_base_ratio", 0.0) or 0.0), 1.0)
         summary = report.get("summary", {})
         self.assertEqual(int(summary.get("base_string_count", 0)), 3)
         self.assertEqual(int(summary.get("languages_with_missing_strings", 0)), 1)
+        self.assertEqual(int(summary.get("languages_with_identical_to_base_majority", 0)), 0)
 
     def test_collect_localization_coverage_requires_en_catalog(self) -> None:
         translations = self.tmp / "translations"
@@ -111,6 +115,42 @@ class TestPreReleaseValidationLocalization(unittest.TestCase):
         )
         with self.assertRaises(SystemExit):
             _collect_localization_coverage(translations)
+
+
+class TestPreReleaseValidationRealmodPayload(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_load_realmod_pack_payload_merges_extra_packs(self) -> None:
+        extra = self.tmp / "extra_realmod_pack.json"
+        extra.write_text(
+            json.dumps(
+                {
+                    "packs": [
+                        {
+                            "id": "external_pack",
+                            "cases": [
+                                {
+                                    "id": "external_case",
+                                    "profile": "skyrim",
+                                    "shader_layout": "legacy",
+                                    "user_ver2": 83,
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        payload = _load_realmod_pack_payload([extra])
+        packs = payload.get("packs", [])
+        self.assertIsInstance(packs, list)
+        self.assertTrue(any(str(pack.get("id", "")) == "external_pack" for pack in packs if isinstance(pack, dict)))
 
 
 class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
@@ -140,7 +180,17 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
             for entry in scenarios
             if isinstance(entry, dict)
         }
-        for expected in ("vanilla", "community_shaders", "truepbr", "enb", "performance_core", "custom_glow_env"):
+        for expected in (
+            "vanilla",
+            "terrain",
+            "community_shaders",
+            "truepbr",
+            "pbr_material_shortcut",
+            "enb",
+            "performance_core",
+            "custom_glow_env",
+            "vr_safe_core",
+        ):
             self.assertIn(expected, scenario_by_name)
             entry = scenario_by_name[expected]
             args = entry.get("args", [])
@@ -159,6 +209,11 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
             str(value).lower() for value in scenario_by_name["truepbr"].get("required_sidecar_suffixes", ())
         }
         self.assertIn("_rmaos.json", truepbr_sidecars)
+        truepbr_keys = {
+            str(value) for value in scenario_by_name["truepbr"].get("required_sidecar_json_keys", ())
+        }
+        self.assertIn("parallax", truepbr_keys)
+        self.assertIn("displacement_scale", truepbr_keys)
 
 
 class TestPreReleaseValidationRepositoryHygiene(unittest.TestCase):

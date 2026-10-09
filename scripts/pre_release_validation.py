@@ -172,7 +172,7 @@ def _resolve_packaged_smoke_binary(artifact_dir: Path) -> Path:
 
 
 def _packaged_smoke_scenarios() -> list[dict[str, object]]:
-    """Return packaged-smoke scenarios with minimal output assertions."""
+    """Return packaged-smoke scenarios with output + semantic assertions."""
     return [
         {
             "name": "vanilla",
@@ -186,6 +186,19 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             ],
             "min_outputs": 3,
             "required_suffixes": ("_n.dds", "_p.dds"),
+            "forbidden_suffixes": ("_rmaos.dds", "_cm.dds", "_msn.dds"),
+        },
+        {
+            "name": "terrain",
+            "args": [
+                "--render-profile",
+                "terrain",
+                "--environment-mask",
+                "--environment-mask-mode",
+                "standard",
+            ],
+            "min_outputs": 4,
+            "required_suffixes": ("_n.dds", "_p.dds", "_m.dds"),
             "forbidden_suffixes": ("_rmaos.dds", "_cm.dds", "_msn.dds"),
         },
         {
@@ -217,7 +230,20 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "min_outputs": 5,
             "required_suffixes": ("_rmaos.dds", "_m.dds"),
             "required_sidecar_suffixes": ("_rmaos.json",),
+            "required_sidecar_json_keys": ("parallax", "displacement_scale", "texture"),
             "forbidden_suffixes": ("_cm.dds", "_msn.dds"),
+        },
+        {
+            "name": "pbr_material_shortcut",
+            "args": [
+                "--render-profile",
+                "custom",
+                "--pbr-material",
+                "--environment-mask",
+            ],
+            "min_outputs": 5,
+            "required_suffixes": ("_cm.dds", "_m.dds", "_p.dds"),
+            "forbidden_suffixes": ("_rmaos.dds", "_msn.dds"),
         },
         {
             "name": "enb",
@@ -262,6 +288,17 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "min_outputs": 4,
             "required_suffixes": ("_g.dds", "_m.dds", "_n.dds"),
             "forbidden_suffixes": ("_rmaos.dds", "_cm.dds", "_msn.dds"),
+        },
+        {
+            "name": "vr_safe_core",
+            "args": [
+                "--render-profile",
+                "vr",
+                "--no-parallax",
+            ],
+            "min_outputs": 2,
+            "required_suffixes": ("_n.dds",),
+            "forbidden_suffixes": ("_p.dds", "_rmaos.dds", "_cm.dds", "_msn.dds"),
         },
     ]
 
@@ -315,6 +352,11 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                 for suffix in (scenario.get("required_sidecar_suffixes", ()) or ())
                 if str(suffix).strip()
             )
+            required_sidecar_json_keys = tuple(
+                str(key).strip()
+                for key in (scenario.get("required_sidecar_json_keys", ()) or ())
+                if str(key).strip()
+            )
             smoke_out = smoke_io / f"out_loop{loop_index}_{scenario_name}"
             smoke_out.mkdir(parents=True, exist_ok=True)
             run_completed = subprocess.run(
@@ -339,6 +381,11 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                     f"Packaged executable smoke run for '{scenario_name}' produced "
                     f"{len(produced_dds)} DDS file(s); expected at least {min_outputs}."
                 )
+            for output_path in produced_dds:
+                if output_path.stat().st_size <= 0:
+                    raise SystemExit(
+                        f"Packaged executable smoke run for '{scenario_name}' produced empty output file '{output_path.name}'."
+                    )
             produced_names = [path.name.lower() for path in produced_dds]
             for suffix in required_suffixes:
                 if not any(name.endswith(suffix) for name in produced_names):
@@ -359,6 +406,40 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                         raise SystemExit(
                             f"Packaged executable smoke run for '{scenario_name}' is missing required sidecar suffix '{suffix}'. "
                             f"Produced files: {produced_all}"
+                        )
+            if required_sidecar_json_keys:
+                sidecar_jsons = sorted(smoke_out.glob("*.json"))
+                if not sidecar_jsons:
+                    raise SystemExit(
+                        f"Packaged executable smoke run for '{scenario_name}' expected JSON sidecars with keys "
+                        f"{required_sidecar_json_keys}, but none were produced."
+                    )
+                for sidecar_path in sidecar_jsons:
+                    try:
+                        payload = json.loads(sidecar_path.read_text(encoding="utf-8"))
+                    except Exception as exc:
+                        raise SystemExit(
+                            f"Packaged executable smoke run for '{scenario_name}' produced invalid JSON sidecar "
+                            f"'{sidecar_path.name}': {exc}"
+                        ) from exc
+                    if isinstance(payload, Mapping):
+                        materials = payload.get("materials", [])
+                        if isinstance(materials, list) and materials:
+                            probe = materials[0]
+                        else:
+                            probe = payload
+                    else:
+                        probe = {}
+                    if not isinstance(probe, Mapping):
+                        raise SystemExit(
+                            f"Packaged executable smoke run for '{scenario_name}' sidecar '{sidecar_path.name}' "
+                            "does not contain an object payload."
+                        )
+                    missing_keys = [key for key in required_sidecar_json_keys if key not in probe]
+                    if missing_keys:
+                        raise SystemExit(
+                            f"Packaged executable smoke run for '{scenario_name}' sidecar '{sidecar_path.name}' "
+                            f"is missing keys: {missing_keys}"
                         )
 
 
@@ -399,11 +480,23 @@ def _collect_localization_coverage(
         missing = sorted(base_keys - keys)
         extra = sorted(keys - base_keys)
         coverage = 1.0 if not base_keys else ((len(base_keys) - len(missing)) / len(base_keys))
+        identical_to_base = sum(
+            1
+            for key in keys & base_keys
+            if strings.get(key, "") == catalogs["en"].get(key, "")
+        )
+        identical_ratio = (
+            0.0
+            if not base_keys
+            else float(identical_to_base) / float(len(base_keys))
+        )
         language_rows.append(
             {
                 "language": language,
                 "string_count": len(keys),
                 "coverage_ratio": round(float(coverage), 4),
+                "identical_to_base_count": int(identical_to_base),
+                "identical_to_base_ratio": round(float(identical_ratio), 4),
                 "missing_count": len(missing),
                 "extra_count": len(extra),
                 "missing_examples": missing[:20],
@@ -418,6 +511,12 @@ def _collect_localization_coverage(
         "languages_with_missing_strings": sum(
             1 for row in language_rows if int(row.get("missing_count", 0) or 0) > 0
         ),
+        "languages_with_identical_to_base_majority": sum(
+            1
+            for row in language_rows
+            if str(row.get("language", "")) != "en"
+            and float(row.get("identical_to_base_ratio", 0.0) or 0.0) >= 0.5
+        ),
     }
     return report
 
@@ -428,8 +527,8 @@ def _render_localization_coverage_markdown(report: dict[str, object]) -> str:
         "",
         f"Generated: {report.get('generated_at_utc', '')}",
         "",
-        "| Language | Strings | Coverage | Missing | Extra |",
-        "| --- | ---: | ---: | ---: | ---: |",
+        "| Language | Strings | Coverage | Shared with `en` | Missing | Extra |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     rows = report.get("languages", [])
     if isinstance(rows, list):
@@ -437,15 +536,16 @@ def _render_localization_coverage_markdown(report: dict[str, object]) -> str:
             if not isinstance(row, Mapping):
                 continue
             coverage_ratio = float(row.get("coverage_ratio", 0.0) or 0.0) * 100.0
+            identical_ratio = float(row.get("identical_to_base_ratio", 0.0) or 0.0) * 100.0
             lines.append(
                 f"| `{row.get('language', '')}` | {int(row.get('string_count', 0) or 0)} | "
-                f"{coverage_ratio:.1f}% | {int(row.get('missing_count', 0) or 0)} | "
+                f"{coverage_ratio:.1f}% | {identical_ratio:.1f}% | {int(row.get('missing_count', 0) or 0)} | "
                 f"{int(row.get('extra_count', 0) or 0)} |"
             )
             missing_examples = row.get("missing_examples", [])
             if isinstance(missing_examples, list) and missing_examples:
                 lines.append(
-                    f"|  |  |  | missing examples: `{', '.join(str(v) for v in missing_examples[:5])}` |  |"
+                    f"|  |  |  |  | missing examples: `{', '.join(str(v) for v in missing_examples[:5])}` |  |"
                 )
     return "\n".join(lines) + "\n"
 
@@ -532,15 +632,41 @@ def _classify_intended_difference_bucket(
     return "none"
 
 
-def _build_realmod_family_trend_snapshot() -> dict[str, object]:
-    from nif_patcher import validate_nif_for_parallax
+def _load_realmod_pack_payload(
+    extra_pack_files: list[Path] | None = None,
+) -> dict[str, object]:
     from tests.test_nif_patcher import (
         _FIXTURE_REALMOD_SAMPLE_PACKS,
         _load_fixture_corpus_payload,
-        _materialize_fixture_corpus,
     )
 
     payload = _load_fixture_corpus_payload(_FIXTURE_REALMOD_SAMPLE_PACKS)
+    packs = payload.get("packs", [])
+    merged_packs = [pack for pack in packs if isinstance(pack, dict)] if isinstance(packs, list) else []
+    for pack_file in extra_pack_files or []:
+        if not pack_file.exists():
+            raise SystemExit(f"Extra realmod pack file does not exist: {pack_file}")
+        extra_payload = _load_fixture_corpus_payload(pack_file)
+        extra_packs = extra_payload.get("packs", [])
+        if not isinstance(extra_packs, list):
+            raise SystemExit(f"Extra realmod pack file {pack_file} must define a 'packs' list.")
+        for pack in extra_packs:
+            if not isinstance(pack, dict):
+                continue
+            merged_packs.append(pack)
+    return {"packs": merged_packs}
+
+
+def _build_realmod_family_trend_snapshot(
+    *,
+    extra_pack_files: list[Path] | None = None,
+) -> dict[str, object]:
+    from nif_patcher import validate_nif_for_parallax
+    from tests.test_nif_patcher import (
+        _materialize_fixture_corpus,
+    )
+
+    payload = _load_realmod_pack_payload(extra_pack_files=extra_pack_files)
     packs = payload.get("packs", [])
     pack_rows: list[dict[str, object]] = []
     if not isinstance(packs, list):
@@ -655,18 +781,19 @@ def _build_realmod_family_trend_snapshot() -> dict[str, object]:
     }
 
 
-def _build_realmod_side_by_side_delta_report() -> dict[str, object]:
+def _build_realmod_side_by_side_delta_report(
+    *,
+    extra_pack_files: list[Path] | None = None,
+) -> dict[str, object]:
     from nif_patcher import (
         build_auto_remediation_patch_options,
         validate_nif_for_parallax,
     )
     from tests.test_nif_patcher import (
-        _FIXTURE_REALMOD_SAMPLE_PACKS,
-        _load_fixture_corpus_payload,
         _materialize_fixture_corpus,
     )
 
-    payload = _load_fixture_corpus_payload(_FIXTURE_REALMOD_SAMPLE_PACKS)
+    payload = _load_realmod_pack_payload(extra_pack_files=extra_pack_files)
     packs = payload.get("packs", [])
     if not isinstance(packs, list):
         packs = []
@@ -746,6 +873,7 @@ def _build_realmod_side_by_side_delta_report() -> dict[str, object]:
     return {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "case_count": len(rows),
+        "pack_count": len(packs),
         "intended_difference_bucket_counts": dict(sorted(bucket_counts.items())),
         "cases": rows,
     }
@@ -1197,6 +1325,16 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--extra-realmod-pack-file",
+        action="append",
+        type=Path,
+        default=[],
+        help=(
+            "Optional additional realmod sample-pack JSON file(s) to include in parity trend and "
+            "side-by-side delta reports. Useful for larger external broken-mod sweeps."
+        ),
+    )
+    parser.add_argument(
         "--max-bucket-drift-ratio",
         type=float,
         default=0.25,
@@ -1295,9 +1433,14 @@ def main() -> int:
         strict_completeness=bool(args.strict_localization_completeness),
     )
     step_status.append(("Localization sweep", "pass"))
-    trend_snapshot = _build_realmod_family_trend_snapshot()
+    extra_realmod_pack_files = [path for path in args.extra_realmod_pack_file if path is not None]
+    trend_snapshot = _build_realmod_family_trend_snapshot(
+        extra_pack_files=extra_realmod_pack_files,
+    )
     parity_report = _build_parity_matrix_feature_report()
-    realmod_delta_report = _build_realmod_side_by_side_delta_report()
+    realmod_delta_report = _build_realmod_side_by_side_delta_report(
+        extra_pack_files=extra_realmod_pack_files,
+    )
     (
         checklist_path,
         trend_path,
