@@ -13988,6 +13988,254 @@ def _launch_qt_migration_gui() -> None:
             raise RuntimeError(f"Qt GUI dependencies are unavailable ({QT_GUI_IMPORT_ERROR}). {install_hint}")
         raise RuntimeError(f"Qt GUI dependencies are unavailable. {install_hint}")
 
+    class _QtGenerationWorker(QtCore.QObject):
+        progress = QtCore.Signal(int, int, str, float, float)
+        event = QtCore.Signal(str, object)
+        finished = QtCore.Signal(object)
+        failed = QtCore.Signal(str)
+
+        def __init__(self, options: dict[str, object]) -> None:
+            super().__init__()
+            self._options = dict(options)
+            self._cancel_requested = False
+
+        @QtCore.Slot()
+        def request_cancel(self) -> None:
+            self._cancel_requested = True
+
+        def _resolve_checkpoint_path(self, input_path: Path, output_dir: Path | None, override: str) -> Path:
+            if override.strip():
+                return Path(override.strip())
+            if output_dir is not None:
+                return output_dir / ".skyrim_texture_generator_batch_checkpoint.json"
+            if input_path.is_dir():
+                return input_path / ".skyrim_texture_generator_batch_checkpoint.json"
+            return input_path.parent / ".skyrim_texture_generator_batch_checkpoint.json"
+
+        def _load_completed_set(self, checkpoint_path: Path) -> set[str]:
+            if not checkpoint_path.exists():
+                return set()
+            try:
+                raw = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            except Exception:
+                return set()
+            if not isinstance(raw, dict):
+                return set()
+            completed = raw.get("completed_success_files", [])
+            if not isinstance(completed, list):
+                return set()
+            return {str(value) for value in completed if isinstance(value, str)}
+
+        def _write_checkpoint_state(
+            self,
+            checkpoint_path: Path,
+            *,
+            completed_success_files: set[str],
+            resumed_completed_count: int,
+            input_root: Path,
+            output_dir: Path | None,
+            total_files_considered: int,
+        ) -> None:
+            checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "tool": "generate_textures",
+                "version": APP_VERSION,
+                "input_root": str(input_root.resolve()),
+                "output_root": str(output_dir.resolve()) if output_dir is not None else "",
+                "total_files_considered": int(total_files_considered),
+                "completed_success_count": len(completed_success_files),
+                "resumed_completed_count": int(resumed_completed_count),
+                "completed_success_files": sorted(completed_success_files),
+            }
+            checkpoint_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+        @QtCore.Slot()
+        def run(self) -> None:
+            try:
+                input_path = Path(str(self._options.get("input_path", "") or "")).expanduser()
+                output_text = str(self._options.get("output_dir", "") or "").strip()
+                output_dir = Path(output_text).expanduser() if output_text else None
+                include_diffuse = bool(self._options.get("include_diffuse", True))
+                include_normal = bool(self._options.get("include_normal", True))
+                include_parallax = bool(self._options.get("include_parallax", True))
+                include_glow = bool(self._options.get("include_glow", False))
+                include_environment_mask = bool(self._options.get("include_environment_mask", False))
+                resume_mode = str(self._options.get("resume_mode", "start_fresh") or "start_fresh").strip().lower()
+                continue_on_error = bool(self._options.get("continue_on_error", True))
+                checkpoint_override = str(self._options.get("checkpoint_path", "") or "")
+
+                if not input_path.exists():
+                    raise FileNotFoundError(f"Input path does not exist: {input_path}")
+                if output_dir is not None:
+                    output_dir.mkdir(parents=True, exist_ok=True)
+
+                checkpoint_path = self._resolve_checkpoint_path(input_path, output_dir, checkpoint_override)
+                start_time = time.perf_counter()
+                result_rows: list[dict[str, object]] = []
+                failures: list[tuple[str, str]] = []
+                deferred_keys = set()
+                resumed_completed_count = 0
+
+                if input_path.is_dir():
+                    all_files = collect_source_textures(input_path)
+                    completed_success_files: set[str] = set()
+                    if resume_mode == "resume":
+                        completed_success_files = self._load_completed_set(checkpoint_path)
+                    resumed_completed_count = len(completed_success_files)
+                    pending_files = [
+                        candidate for candidate in all_files
+                        if str(candidate.resolve()) not in completed_success_files
+                    ]
+                    total = len(pending_files)
+                    batch_metrics = _summarize_batch_texture_dimensions(pending_files)
+                    include_flags = {
+                        "diffuse": include_diffuse,
+                        "normal": include_normal,
+                        "parallax": include_parallax,
+                        "glow": include_glow,
+                        "environment_mask": include_environment_mask,
+                    }
+                    max_pixels = int(batch_metrics.get("max_dimension", 0) or 0)
+                    deferred_keys = resolve_lazy_preview_deferred_outputs(
+                        lazy_enabled=bool(self._options.get("lazy_preview", True)),
+                        force_full_once=bool(self._options.get("force_full_preview", False)),
+                        total_sources=total,
+                        source_pixels=max_pixels * max_pixels,
+                        include_flags=include_flags,
+                    )
+                    self.event.emit("deferred_preview", sorted(deferred_keys))
+                    self.event.emit(
+                        "resume_info",
+                        {
+                            "total_found": len(all_files),
+                            "total_pending": total,
+                            "resumed_completed": resumed_completed_count,
+                            "checkpoint_path": str(checkpoint_path),
+                        },
+                    )
+                    if total <= 0:
+                        self.finished.emit(
+                            {
+                                "cancelled": False,
+                                "total": 0,
+                                "success": 0,
+                                "failed": 0,
+                                "resumed_completed": resumed_completed_count,
+                                "checkpoint_path": str(checkpoint_path),
+                                "bottleneck_hints": [],
+                                "results": [],
+                                "failures": [],
+                            }
+                        )
+                        return
+
+                    for index, source_path in enumerate(pending_files, start=1):
+                        if self._cancel_requested:
+                            self.finished.emit(
+                                {
+                                    "cancelled": True,
+                                    "total": total,
+                                    "success": len(result_rows),
+                                    "failed": len(failures),
+                                    "resumed_completed": resumed_completed_count,
+                                    "checkpoint_path": str(checkpoint_path),
+                                    "bottleneck_hints": [],
+                                    "results": result_rows,
+                                    "failures": failures,
+                                }
+                            )
+                            return
+                        elapsed = max(0.0, time.perf_counter() - start_time)
+                        avg = elapsed / max(1, index - 1)
+                        eta = avg * max(0, total - index + 1)
+                        self.progress.emit(index, total, str(source_path), elapsed, eta)
+                        try:
+                            outputs = run_with_options(
+                                input_file=source_path,
+                                output_dir=output_dir,
+                                include_diffuse=include_diffuse,
+                                include_normal=include_normal,
+                                include_parallax=include_parallax,
+                                include_glow=include_glow,
+                                include_environment_mask=include_environment_mask,
+                            )
+                            output_payload = {name: str(path) for name, path in outputs.items()}
+                            result_rows.append({"source": str(source_path), "outputs": output_payload})
+                            completed_success_files.add(str(source_path.resolve()))
+                            self._write_checkpoint_state(
+                                checkpoint_path,
+                                completed_success_files=completed_success_files,
+                                resumed_completed_count=resumed_completed_count,
+                                input_root=input_path,
+                                output_dir=output_dir,
+                                total_files_considered=len(all_files),
+                            )
+                            self.event.emit("file_done", {"source": str(source_path), "outputs": output_payload})
+                        except Exception as exc:
+                            failures.append((str(source_path), str(exc)))
+                            self.event.emit("file_error", {"source": str(source_path), "error": str(exc)})
+                            if not continue_on_error:
+                                raise
+
+                    elapsed_total = max(0.0, time.perf_counter() - start_time)
+                    avg_file_seconds = elapsed_total / max(1, total)
+                    bottleneck_hints = build_batch_bottleneck_hints(
+                        avg_file_seconds=avg_file_seconds,
+                        max_file_seconds=avg_file_seconds,
+                        high_res_4k_count=int(batch_metrics.get("high_res_4k_count", 0) or 0),
+                        high_res_8k_count=int(batch_metrics.get("high_res_8k_count", 0) or 0),
+                        max_source_dimension=int(batch_metrics.get("max_dimension", 0) or 0),
+                        max_source_megapixels=float(batch_metrics.get("max_megapixels", 0.0) or 0.0),
+                        resumed_completed_count=resumed_completed_count,
+                        total_failed=len(failures),
+                        total_sources=total,
+                    )
+                    self.finished.emit(
+                        {
+                            "cancelled": False,
+                            "total": total,
+                            "success": len(result_rows),
+                            "failed": len(failures),
+                            "resumed_completed": resumed_completed_count,
+                            "checkpoint_path": str(checkpoint_path),
+                            "deferred_preview": sorted(deferred_keys),
+                            "bottleneck_hints": bottleneck_hints,
+                            "results": result_rows,
+                            "failures": failures,
+                        }
+                    )
+                    return
+
+                self.progress.emit(1, 1, str(input_path), 0.0, 0.0)
+                outputs = run_with_options(
+                    input_file=input_path,
+                    output_dir=output_dir,
+                    include_diffuse=include_diffuse,
+                    include_normal=include_normal,
+                    include_parallax=include_parallax,
+                    include_glow=include_glow,
+                    include_environment_mask=include_environment_mask,
+                )
+                output_payload = {name: str(path) for name, path in outputs.items()}
+                result_rows.append({"source": str(input_path), "outputs": output_payload})
+                self.event.emit("file_done", {"source": str(input_path), "outputs": output_payload})
+                self.finished.emit(
+                    {
+                        "cancelled": False,
+                        "total": 1,
+                        "success": 1,
+                        "failed": 0,
+                        "resumed_completed": 0,
+                        "checkpoint_path": str(checkpoint_path),
+                        "deferred_preview": [],
+                        "bottleneck_hints": [],
+                        "results": result_rows,
+                        "failures": [],
+                    }
+                )
+            except Exception as exc:
+                self.failed.emit(str(exc))
+
     app = QtWidgets.QApplication.instance()
     if app is None:
         app = QtWidgets.QApplication(sys.argv)
@@ -14015,14 +14263,14 @@ def _launch_qt_migration_gui() -> None:
     overview_layout = QtWidgets.QVBoxLayout(overview)
     overview_layout.setSpacing(8)
     overview_text = QtWidgets.QLabel(
-        "Current Qt bootstrap scope:\n"
-        "• validates Qt startup and desktop integration\n"
-        "• keeps migration status visible\n"
-        "• can open the full legacy Tk interface for complete feature access"
+        "Qt migration scope in this build:\n"
+        "• generation control row set #1 is now native Qt\n"
+        "• queue/progress/events use Qt worker-thread signals\n"
+        "• preview lazy/staged state controls + batch resume controls are now in Qt tabs\n"
+        "• legacy Tkinter UI remains available for complete parity while migration continues"
     )
     overview_text.setWordWrap(True)
     overview_layout.addWidget(overview_text)
-
     button_row = QtWidgets.QHBoxLayout()
     launch_tk_button = QtWidgets.QPushButton("Open full legacy UI (Tkinter)")
     launch_tk_button.setEnabled(GUI_AVAILABLE)
@@ -14033,6 +14281,145 @@ def _launch_qt_migration_gui() -> None:
     overview_layout.addLayout(button_row)
     overview_layout.addStretch(1)
     tabs.addTab(overview, "Overview")
+
+    generation_tab = QtWidgets.QWidget()
+    generation_layout = QtWidgets.QVBoxLayout(generation_tab)
+    generation_layout.setSpacing(10)
+
+    input_row = QtWidgets.QHBoxLayout()
+    input_row.addWidget(QtWidgets.QLabel("Input file/folder"))
+    input_path_edit = QtWidgets.QLineEdit()
+    input_row.addWidget(input_path_edit, 1)
+    browse_input_button = QtWidgets.QPushButton("Browse…")
+    input_row.addWidget(browse_input_button)
+    generation_layout.addLayout(input_row)
+
+    output_row = QtWidgets.QHBoxLayout()
+    output_row.addWidget(QtWidgets.QLabel("Output folder (optional)"))
+    output_dir_edit = QtWidgets.QLineEdit()
+    output_row.addWidget(output_dir_edit, 1)
+    browse_output_button = QtWidgets.QPushButton("Browse…")
+    output_row.addWidget(browse_output_button)
+    generation_layout.addLayout(output_row)
+
+    controls_group = QtWidgets.QGroupBox("Generation controls — row set #1 (ported from Tk)")
+    controls_layout = QtWidgets.QHBoxLayout(controls_group)
+    include_diffuse_check = QtWidgets.QCheckBox("Diffuse")
+    include_diffuse_check.setChecked(True)
+    include_normal_check = QtWidgets.QCheckBox("Normal")
+    include_normal_check.setChecked(True)
+    include_parallax_check = QtWidgets.QCheckBox("Parallax")
+    include_parallax_check.setChecked(True)
+    include_glow_check = QtWidgets.QCheckBox("Glow")
+    include_environment_mask_check = QtWidgets.QCheckBox("Environment mask")
+    for control in (
+        include_diffuse_check,
+        include_normal_check,
+        include_parallax_check,
+        include_glow_check,
+        include_environment_mask_check,
+    ):
+        controls_layout.addWidget(control)
+    controls_layout.addStretch(1)
+    generation_layout.addWidget(controls_group)
+
+    action_row = QtWidgets.QHBoxLayout()
+    generate_button = QtWidgets.QPushButton("Generate")
+    cancel_button = QtWidgets.QPushButton("Cancel")
+    cancel_button.setEnabled(False)
+    action_row.addWidget(generate_button)
+    action_row.addWidget(cancel_button)
+    action_row.addStretch(1)
+    generation_layout.addLayout(action_row)
+
+    progress_bar = QtWidgets.QProgressBar()
+    progress_bar.setRange(0, 100)
+    progress_bar.setValue(0)
+    generation_layout.addWidget(progress_bar)
+
+    status_label = QtWidgets.QLabel("Ready.")
+    status_label.setWordWrap(True)
+    generation_layout.addWidget(status_label)
+
+    event_log = QtWidgets.QPlainTextEdit()
+    event_log.setReadOnly(True)
+    generation_layout.addWidget(event_log, 1)
+    tabs.addTab(generation_tab, "Generation")
+
+    preview_tab = QtWidgets.QWidget()
+    preview_layout = QtWidgets.QVBoxLayout(preview_tab)
+    preview_layout.setSpacing(8)
+
+    preview_controls_row = QtWidgets.QHBoxLayout()
+    lazy_preview_check = QtWidgets.QCheckBox("Lazy preview for large sets")
+    lazy_preview_check.setChecked(True)
+    staged_preview_check = QtWidgets.QCheckBox("Staged background preview")
+    staged_preview_check.setChecked(True)
+    preview_controls_row.addWidget(lazy_preview_check)
+    preview_controls_row.addWidget(staged_preview_check)
+    preview_controls_row.addStretch(1)
+    preview_layout.addLayout(preview_controls_row)
+
+    preview_state_row = QtWidgets.QHBoxLayout()
+    preview_mode_badge = QtWidgets.QLabel("Preview state: active")
+    preview_deferred_badge = QtWidgets.QLabel("Deferred tiles: none")
+    preview_state_row.addWidget(preview_mode_badge)
+    preview_state_row.addWidget(preview_deferred_badge)
+    preview_state_row.addStretch(1)
+    preview_layout.addLayout(preview_state_row)
+
+    preview_action_row = QtWidgets.QHBoxLayout()
+    pause_preview_button = QtWidgets.QPushButton("Pause preview")
+    resume_preview_button = QtWidgets.QPushButton("Resume preview")
+    render_deferred_button = QtWidgets.QPushButton("Render deferred tiles now")
+    preview_action_row.addWidget(pause_preview_button)
+    preview_action_row.addWidget(resume_preview_button)
+    preview_action_row.addWidget(render_deferred_button)
+    preview_action_row.addStretch(1)
+    preview_layout.addLayout(preview_action_row)
+
+    preview_results_label = QtWidgets.QLabel("Latest generated outputs")
+    preview_layout.addWidget(preview_results_label)
+    preview_results_list = QtWidgets.QListWidget()
+    preview_layout.addWidget(preview_results_list, 1)
+    tabs.addTab(preview_tab, "Preview")
+
+    batch_tab = QtWidgets.QWidget()
+    batch_layout = QtWidgets.QVBoxLayout(batch_tab)
+    batch_layout.setSpacing(8)
+
+    resume_row = QtWidgets.QHBoxLayout()
+    resume_row.addWidget(QtWidgets.QLabel("Resume mode"))
+    resume_mode_combo = QtWidgets.QComboBox()
+    resume_mode_combo.addItems(["start_fresh", "resume"])
+    resume_row.addWidget(resume_mode_combo)
+    resume_mode_hint = QtWidgets.QLabel("Start fresh ignores prior checkpoint entries.")
+    resume_row.addWidget(resume_mode_hint, 1)
+    batch_layout.addLayout(resume_row)
+
+    checkpoint_row = QtWidgets.QHBoxLayout()
+    checkpoint_row.addWidget(QtWidgets.QLabel("Checkpoint path"))
+    checkpoint_path_edit = QtWidgets.QLineEdit()
+    checkpoint_row.addWidget(checkpoint_path_edit, 1)
+    browse_checkpoint_button = QtWidgets.QPushButton("Browse…")
+    clear_checkpoint_button = QtWidgets.QPushButton("Clear")
+    checkpoint_row.addWidget(browse_checkpoint_button)
+    checkpoint_row.addWidget(clear_checkpoint_button)
+    batch_layout.addLayout(checkpoint_row)
+
+    continue_on_error_check = QtWidgets.QCheckBox("Continue batch on per-file errors")
+    continue_on_error_check.setChecked(True)
+    batch_layout.addWidget(continue_on_error_check)
+    checkpoint_health_label = QtWidgets.QLabel("Checkpoint: pending")
+    batch_layout.addWidget(checkpoint_health_label)
+    queue_hint_label = QtWidgets.QLabel("Queue behavior: Qt signal-driven progress updates.")
+    queue_hint_label.setWordWrap(True)
+    batch_layout.addWidget(queue_hint_label)
+    batch_bottleneck_label = QtWidgets.QLabel("Post-run bottleneck hints appear here.")
+    batch_bottleneck_label.setWordWrap(True)
+    batch_layout.addWidget(batch_bottleneck_label)
+    batch_layout.addStretch(1)
+    tabs.addTab(batch_tab, "Batch/Resume")
 
     status_tab = QtWidgets.QWidget()
     status_layout = QtWidgets.QVBoxLayout(status_tab)
@@ -14054,6 +14441,284 @@ def _launch_qt_migration_gui() -> None:
     status_layout.addWidget(status_box, 1)
     tabs.addTab(status_tab, "Status")
 
+    qt_worker_thread: QtCore.QThread | None = None
+    qt_worker: _QtGenerationWorker | None = None
+    preview_manual_paused = False
+    preview_auto_speed_off = False
+
+    def _append_event_log(message: str) -> None:
+        if not message.strip():
+            return
+        event_log.appendPlainText(message.rstrip())
+
+    def _update_resume_hint() -> None:
+        mode = resume_mode_combo.currentText().strip().lower()
+        if mode == "resume":
+            resume_mode_hint.setText("Resume skips files already recorded in checkpoint.")
+        else:
+            resume_mode_hint.setText("Start fresh ignores prior checkpoint entries.")
+
+    def _effective_checkpoint_path() -> Path:
+        text = checkpoint_path_edit.text().strip()
+        if text:
+            return Path(text)
+        input_text = input_path_edit.text().strip()
+        output_text = output_dir_edit.text().strip()
+        if output_text:
+            return Path(output_text) / ".skyrim_texture_generator_batch_checkpoint.json"
+        if input_text:
+            input_path = Path(input_text)
+            if input_path.is_dir():
+                return input_path / ".skyrim_texture_generator_batch_checkpoint.json"
+            return input_path.parent / ".skyrim_texture_generator_batch_checkpoint.json"
+        return Path.cwd() / ".skyrim_texture_generator_batch_checkpoint.json"
+
+    def _refresh_checkpoint_health() -> None:
+        checkpoint_path = _effective_checkpoint_path()
+        if not checkpoint_path.exists():
+            checkpoint_health_label.setText(f"Checkpoint: new ({checkpoint_path.name})")
+            return
+        try:
+            payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        except Exception:
+            checkpoint_health_label.setText(f"Checkpoint: {checkpoint_path.name} (invalid JSON)")
+            return
+        if not isinstance(payload, dict):
+            checkpoint_health_label.setText(f"Checkpoint: {checkpoint_path.name} (unexpected format)")
+            return
+        completed = payload.get("completed_success_files", [])
+        completed_count = len(completed) if isinstance(completed, list) else 0
+        age_seconds = max(0.0, time.time() - checkpoint_path.stat().st_mtime)
+        age_label = f"{int(age_seconds // 60)}m ago" if age_seconds >= 60 else "just now"
+        checkpoint_health_label.setText(
+            f"Checkpoint: {checkpoint_path.name} ({completed_count} complete, updated {age_label})"
+        )
+
+    def _refresh_preview_state_badge() -> None:
+        if preview_manual_paused:
+            preview_mode_badge.setText("Preview state: paused manually")
+            return
+        if preview_auto_speed_off:
+            preview_mode_badge.setText("Preview state: paused for speed")
+            return
+        preview_mode_badge.setText("Preview state: active")
+
+    def _browse_input() -> None:
+        chosen_file, _ = QtWidgets.QFileDialog.getOpenFileName(
+            window,
+            "Select input texture",
+            str(Path.home()),
+            "DDS and images (*.dds *.png *.jpg *.jpeg *.tga *.bmp *.webp);;All files (*)",
+        )
+        if chosen_file:
+            input_path_edit.setText(chosen_file)
+            _refresh_checkpoint_health()
+            return
+        chosen_dir = QtWidgets.QFileDialog.getExistingDirectory(window, "Select input folder", str(Path.home()))
+        if chosen_dir:
+            input_path_edit.setText(chosen_dir)
+            _refresh_checkpoint_health()
+
+    def _browse_output() -> None:
+        chosen_dir = QtWidgets.QFileDialog.getExistingDirectory(window, "Select output folder", str(Path.home()))
+        if chosen_dir:
+            output_dir_edit.setText(chosen_dir)
+            _refresh_checkpoint_health()
+
+    def _browse_checkpoint() -> None:
+        chosen_file, _ = QtWidgets.QFileDialog.getSaveFileName(
+            window,
+            "Choose checkpoint JSON",
+            str(_effective_checkpoint_path()),
+            "JSON files (*.json);;All files (*)",
+        )
+        if chosen_file:
+            checkpoint_path_edit.setText(chosen_file)
+            _refresh_checkpoint_health()
+
+    def _clear_checkpoint() -> None:
+        checkpoint_path = _effective_checkpoint_path()
+        try:
+            checkpoint_path.unlink(missing_ok=True)
+            _append_event_log(f"[checkpoint] cleared: {checkpoint_path}")
+        except Exception as exc:
+            QtWidgets.QMessageBox.warning(window, "Clear checkpoint failed", str(exc))
+        _refresh_checkpoint_health()
+
+    def _set_running_state(running: bool) -> None:
+        generate_button.setEnabled(not running)
+        cancel_button.setEnabled(running)
+        browse_input_button.setEnabled(not running)
+        browse_output_button.setEnabled(not running)
+        browse_checkpoint_button.setEnabled(not running)
+        clear_checkpoint_button.setEnabled(not running)
+        resume_mode_combo.setEnabled(not running)
+        checkpoint_path_edit.setEnabled(not running)
+
+    def _start_generation() -> None:
+        nonlocal qt_worker_thread, qt_worker, preview_manual_paused, preview_auto_speed_off
+        if qt_worker_thread is not None:
+            return
+        input_text = input_path_edit.text().strip()
+        if not input_text:
+            QtWidgets.QMessageBox.warning(window, "Input required", "Select an input file or folder first.")
+            return
+        include_flags = [
+            include_diffuse_check.isChecked(),
+            include_normal_check.isChecked(),
+            include_parallax_check.isChecked(),
+            include_glow_check.isChecked(),
+            include_environment_mask_check.isChecked(),
+        ]
+        if not any(include_flags):
+            QtWidgets.QMessageBox.warning(window, "No outputs selected", "Enable at least one generation output.")
+            return
+        options = {
+            "input_path": input_text,
+            "output_dir": output_dir_edit.text().strip(),
+            "include_diffuse": include_diffuse_check.isChecked(),
+            "include_normal": include_normal_check.isChecked(),
+            "include_parallax": include_parallax_check.isChecked(),
+            "include_glow": include_glow_check.isChecked(),
+            "include_environment_mask": include_environment_mask_check.isChecked(),
+            "resume_mode": resume_mode_combo.currentText().strip(),
+            "checkpoint_path": checkpoint_path_edit.text().strip(),
+            "continue_on_error": continue_on_error_check.isChecked(),
+            "lazy_preview": lazy_preview_check.isChecked(),
+            "force_full_preview": False,
+        }
+        qt_worker = _QtGenerationWorker(options)
+        qt_worker_thread = QtCore.QThread(window)
+        qt_worker.moveToThread(qt_worker_thread)
+
+        def _on_progress(index: int, total: int, current_path: str, elapsed: float, eta: float) -> None:
+            if total > 0:
+                progress_bar.setValue(min(100, int((index / max(1, total)) * 100)))
+            status_label.setText(
+                f"Processing {index}/{total}: {Path(current_path).name} (elapsed {elapsed:.1f}s, eta {eta:.1f}s)"
+            )
+
+        def _on_event(event_name: str, payload: object) -> None:
+            nonlocal preview_auto_speed_off
+            if event_name == "deferred_preview" and isinstance(payload, list):
+                deferred = [str(item) for item in payload]
+                if deferred:
+                    preview_deferred_badge.setText("Deferred tiles: " + ", ".join(deferred))
+                    preview_auto_speed_off = True
+                else:
+                    preview_deferred_badge.setText("Deferred tiles: none")
+                    preview_auto_speed_off = False
+                _refresh_preview_state_badge()
+            elif event_name == "resume_info" and isinstance(payload, dict):
+                total_found = int(payload.get("total_found", 0) or 0)
+                total_pending = int(payload.get("total_pending", 0) or 0)
+                resumed = int(payload.get("resumed_completed", 0) or 0)
+                checkpoint_path = str(payload.get("checkpoint_path", "") or "")
+                _append_event_log(
+                    f"[resume] found={total_found}, pending={total_pending}, skipped={resumed}, checkpoint={checkpoint_path}"
+                )
+            elif event_name == "file_done" and isinstance(payload, dict):
+                source = str(payload.get("source", "") or "")
+                outputs = payload.get("outputs", {})
+                if isinstance(outputs, dict):
+                    preview_results_list.clear()
+                    for key, path in sorted(outputs.items()):
+                        preview_results_list.addItem(f"{key}: {path}")
+                    _append_event_log(f"[done] {Path(source).name}: wrote {len(outputs)} output(s)")
+            elif event_name == "file_error" and isinstance(payload, dict):
+                source = str(payload.get("source", "") or "")
+                error = str(payload.get("error", "") or "")
+                _append_event_log(f"[error] {Path(source).name}: {error}")
+
+        def _cleanup_worker() -> None:
+            nonlocal qt_worker_thread, qt_worker
+            if qt_worker is not None:
+                try:
+                    qt_worker.deleteLater()
+                except Exception:
+                    pass
+            if qt_worker_thread is not None:
+                try:
+                    qt_worker_thread.deleteLater()
+                except Exception:
+                    pass
+            qt_worker = None
+            qt_worker_thread = None
+            _set_running_state(False)
+            _refresh_checkpoint_health()
+
+        def _on_finished(summary: object) -> None:
+            nonlocal preview_auto_speed_off
+            _set_running_state(False)
+            progress_bar.setValue(100)
+            payload = summary if isinstance(summary, dict) else {}
+            cancelled = bool(payload.get("cancelled", False))
+            total = int(payload.get("total", 0) or 0)
+            success = int(payload.get("success", 0) or 0)
+            failed = int(payload.get("failed", 0) or 0)
+            resumed = int(payload.get("resumed_completed", 0) or 0)
+            hints = payload.get("bottleneck_hints", [])
+            hint_lines = [str(value) for value in hints] if isinstance(hints, list) else []
+            if hint_lines:
+                batch_bottleneck_label.setText("Post-run hints: " + " | ".join(hint_lines))
+            else:
+                batch_bottleneck_label.setText("Post-run hints: none")
+            preview_auto_speed_off = False
+            _refresh_preview_state_badge()
+            status_label.setText(
+                (
+                    f"Cancelled after {success}/{total} processed."
+                    if cancelled
+                    else f"Completed: success={success}, failed={failed}, resumed-skip={resumed}."
+                )
+            )
+            _append_event_log(status_label.text())
+            if failed > 0:
+                _append_event_log("[summary] review event log entries tagged [error] for failed files.")
+            _cleanup_worker()
+
+        def _on_failed(message: str) -> None:
+            QtWidgets.QMessageBox.critical(window, "Generation failed", message)
+            _append_event_log(f"[fatal] {message}")
+            _cleanup_worker()
+
+        qt_worker.progress.connect(_on_progress)
+        qt_worker.event.connect(_on_event)
+        qt_worker.finished.connect(_on_finished)
+        qt_worker.failed.connect(_on_failed)
+        qt_worker_thread.started.connect(qt_worker.run)
+        qt_worker_thread.start()
+        _set_running_state(True)
+        progress_bar.setValue(0)
+        status_label.setText("Generation running…")
+        _append_event_log("[run] started Qt-native worker thread.")
+
+    def _cancel_generation() -> None:
+        if qt_worker is None:
+            return
+        qt_worker.request_cancel()
+        status_label.setText("Cancel requested. Waiting for current file to finish…")
+        _append_event_log("[run] cancel requested")
+
+    def _pause_preview() -> None:
+        nonlocal preview_manual_paused
+        preview_manual_paused = True
+        _refresh_preview_state_badge()
+
+    def _resume_preview() -> None:
+        nonlocal preview_manual_paused, preview_auto_speed_off
+        preview_manual_paused = False
+        preview_auto_speed_off = False
+        preview_deferred_badge.setText("Deferred tiles: none")
+        _refresh_preview_state_badge()
+
+    def _render_deferred_now() -> None:
+        nonlocal preview_auto_speed_off
+        preview_auto_speed_off = False
+        preview_deferred_badge.setText("Deferred tiles: force-render requested")
+        _refresh_preview_state_badge()
+        _append_event_log("[preview] force-render requested for deferred tiles")
+
     def _open_legacy_tk() -> None:
         if not GUI_AVAILABLE:
             QtWidgets.QMessageBox.warning(window, "Tkinter unavailable", "Tkinter GUI dependencies are unavailable.")
@@ -14069,6 +14734,23 @@ def _launch_qt_migration_gui() -> None:
             window.activateWindow()
 
     launch_tk_button.clicked.connect(_open_legacy_tk)
+    browse_input_button.clicked.connect(_browse_input)
+    browse_output_button.clicked.connect(_browse_output)
+    browse_checkpoint_button.clicked.connect(_browse_checkpoint)
+    clear_checkpoint_button.clicked.connect(_clear_checkpoint)
+    generate_button.clicked.connect(_start_generation)
+    cancel_button.clicked.connect(_cancel_generation)
+    pause_preview_button.clicked.connect(_pause_preview)
+    resume_preview_button.clicked.connect(_resume_preview)
+    render_deferred_button.clicked.connect(_render_deferred_now)
+    resume_mode_combo.currentIndexChanged.connect(_update_resume_hint)
+    input_path_edit.textChanged.connect(_refresh_checkpoint_health)
+    output_dir_edit.textChanged.connect(_refresh_checkpoint_health)
+    checkpoint_path_edit.textChanged.connect(_refresh_checkpoint_health)
+
+    _update_resume_hint()
+    _refresh_preview_state_badge()
+    _refresh_checkpoint_health()
     window.setCentralWidget(root)
     window.show()
     app.exec()
