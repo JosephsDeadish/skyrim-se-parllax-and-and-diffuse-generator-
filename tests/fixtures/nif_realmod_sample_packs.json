@@ -3,7 +3,7 @@
     {
       "id": "skyrim_realmod_family_pack",
       "expected_family_case_counts": {
-        "architecture": 9,
+        "architecture": 10,
         "clutter": 3,
         "armor": 2,
         "landscape": 2,
@@ -30,6 +30,20 @@
         "clutter": 0.5,
         "effects": 0.5
       },
+      "expected_family_min_layout_variant_count": {
+        "architecture": 6,
+        "clutter": 2,
+        "effects": 1
+      },
+      "expected_family_min_noop_cases": {
+        "architecture": 0,
+        "effects": 0
+      },
+      "expected_family_min_auto_cases": {
+        "architecture": 2,
+        "effects": 3,
+        "clutter": 1
+      },
       "required_summary_code_prefixes": [
         "path_slot_parallax.matches_diffuse.skyrim.",
         "path_slot_parallax.matches_normal.skyrim.",
@@ -42,6 +56,7 @@
         "shader_state.parallax_envmap_missing_slots3_4_5.skyrim.",
         "shader_state.parallax_envmap_missing_slot3.skyrim.",
         "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim.",
+        "shader_state.crossblock_texture_ref_drift_mixed_slots.skyrim.",
         "path_slot_env_mask.generic_alias_suffix.skyrim.",
         "path_slot_cubemap.wrong_suffix.skyrim.",
         "path_slot_glow.wrong_suffix.skyrim."
@@ -875,6 +890,62 @@
           ],
           "pgpatcher_strategy": "restore_missing_glow_slot_from_mesh_family_path",
           "local_strategy": "restore_missing_glow_slot_from_mesh_family_path"
+        },
+        {
+          "id": "pack_skyrim_architecture_legacy_crlf_u16_shifted_crossblock_refdrift_mixed_slots",
+          "family": "architecture",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 268437632,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\architecture\\dwemer\\dweplate.dds",
+            "textures\\architecture\\dwemer\\dweplate_n.dds",
+            "",
+            "textures\\architecture\\dwemer\\dweplate.dds",
+            "textures\\cubemaps\\dweplate_e.dds",
+            "textures\\architecture\\dwemer\\dweplate_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "texture_set_layout_shift": 4,
+              "texture_set_count_u16": true,
+              "flags2": 64,
+              "texture_paths": [
+                "textures\\architecture\\dwemer\\dweplate.dds",
+                "textures\\architecture\\dwemer\\dweplate_n.dds",
+                "",
+                "textures\\architecture\\dwemer\\dweplate_n.dds",
+                "",
+                "textures\\architecture\\dwemer\\dweplate_orm.dds",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "shader_texture_set_ref": 2,
+          "extra_shader_texture_set_refs": [
+            2
+          ],
+          "expected_prefixes": [
+            "shader_state.crossblock_texture_ref_drift_mixed_slots.skyrim.",
+            "path_slot_parallax.matches_normal.skyrim."
+          ],
+          "pgpatcher_strategy": "aggressive_crossblock_rebuild_for_refdrift_mixed_slots",
+          "local_strategy": "classify_crossblock_refdrift_then_guarded_targeted_remediation",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "safety_first",
+          "safety_difference_note": "Cross-layout legacy/u16/crlf/shifted family intentionally keeps remediation conservative when shared texture-set refs drift across conflicting slots."
         }
       ],
       "expected_family_allowed_difference_buckets": {
@@ -900,9 +971,9 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 28,
-        "effects": 24,
-        "clutter": 21,
+        "architecture": 29,
+        "effects": 25,
+        "clutter": 22,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -929,9 +1000,24 @@
         "clutter": 0.15
       },
       "expected_family_min_strategy_alignment_ratio": {
-        "architecture": 0.19,
-        "effects": 0.38,
+        "architecture": 0.18,
+        "effects": 0.35,
         "clutter": 0.375
+      },
+      "expected_family_min_layout_variant_count": {
+        "architecture": 7,
+        "effects": 5,
+        "clutter": 5
+      },
+      "expected_family_min_noop_cases": {
+        "architecture": 10,
+        "effects": 8,
+        "clutter": 8
+      },
+      "expected_family_min_auto_cases": {
+        "architecture": 3,
+        "effects": 3,
+        "clutter": 2
       },
       "required_summary_code_prefixes": [
         "shader_state.envmap_missing_slots4_5.fallout.",
@@ -4063,6 +4149,164 @@
           "intentional_strategy_difference": true,
           "expected_difference_bucket": "partial_recoverability_guarded",
           "safety_difference_note": "Additional malformed Fallout multiblock ref-skew family remains deterministic manual-review/no-op until reconstruction confidence can be proven."
+        },
+        {
+          "id": "pack_fallout_architecture_legacy_crlf_u16_shifted_crosslayout_refdrift_noop_v6",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "legacy",
+          "user_version": 11,
+          "user_ver2": 155,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 268437632,
+          "flags2": 64,
+          "extra_shader_texture_set_refs": [
+            81
+          ],
+          "num_block_types_delta": -1,
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 10
+            },
+            {
+              "ordinal": 3,
+              "delta": -7
+            }
+          ],
+          "texture_paths": [
+            "textures\\architecture\\vault\\machineryplate.dds",
+            "textures\\architecture\\vault\\machineryplate_n.dds",
+            "",
+            "textures\\architecture\\vault\\machineryplate.dds",
+            "textures\\cubemaps\\machineryplate_e.dds",
+            "textures\\architecture\\vault\\machineryplate_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_absent_remediation_steps": [
+            "set_slot3_parallax",
+            "set_slot5_env_mask",
+            "enable_glow_map"
+          ],
+          "pgpatcher_strategy": "attempt_crosslayout_refdrift_rebuild_then_patch",
+          "local_strategy": "guarded_manual_review_for_crosslayout_refdrift_noop",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Additional cross-layout legacy/u16/crlf/shifted drift family remains deterministic guarded no-op/manual-review."
+        },
+        {
+          "id": "pack_fallout_effects_legacy_crlf_u16_shifted_partial_recoverability_split_v6",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "legacy",
+          "user_version": 11,
+          "user_ver2": 155,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 2176,
+          "flags2": 64,
+          "extra_shader_texture_set_refs": [
+            65
+          ],
+          "num_blocks_delta": 1,
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 8
+            },
+            {
+              "ordinal": 3,
+              "delta": -6
+            }
+          ],
+          "texture_paths": [
+            "textures\\effects\\reactor\\valvepanel.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\valvepanel_e.dds",
+            "textures\\effects\\reactor\\valvepanel_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_absent_remediation_steps": [
+            "set_slot3_parallax",
+            "set_slot2_glow_for_envmap_glow_slot2_only",
+            "set_slot5_env_mask_for_missing_envmap_slot5"
+          ],
+          "pgpatcher_strategy": "attempt_partial_texture_set_reconstruction_for_legacy_shifted_family",
+          "local_strategy": "guarded_manual_review_for_partial_recoverability_split",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Additional partial-recoverability split family: local strategy keeps deterministic manual-review/no-op until malformed legacy-shifted reconstruction confidence improves."
+        },
+        {
+          "id": "pack_fallout_clutter_real_crlf_u16_shifted_guarded_edge_longtail_v6",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 155,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 0,
+          "flags1": 32,
+          "flags2": 64,
+          "num_block_types_delta": -1,
+          "extra_shader_texture_set_refs": [
+            57
+          ],
+          "texture_paths": [
+            "textures\\clutter\\industrial\\junctionbox.dds",
+            "textures\\clutter\\industrial\\junctionbox_n.dds",
+            "",
+            "textures\\clutter\\industrial\\junctionbox_n.dds",
+            "",
+            "textures\\clutter\\industrial\\junctionbox_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_absent_remediation_steps": [
+            "set_slot3_parallax",
+            "enable_parallax",
+            "disable_pom_for_non_heightmap_shader"
+          ],
+          "pgpatcher_strategy": "attempt_singlepass_crosslayout_recovery",
+          "local_strategy": "guarded_manual_review_noop_for_singlepass_longtail_drift",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Additional guarded Fallout single-pass long-tail case remains deterministic no-op/manual-review in local strategy."
         }
       ],
       "expected_family_allowed_difference_buckets": {
@@ -4085,17 +4329,17 @@
       "expected_family_min_difference_bucket_counts": {
         "architecture": {
           "guarded_fallout": 5,
-          "binary_drift_guarded": 2,
+          "binary_drift_guarded": 3,
           "partial_recoverability_guarded": 2
         },
         "effects": {
           "guarded_fallout": 3,
           "binary_drift_guarded": 1,
-          "partial_recoverability_guarded": 1
+          "partial_recoverability_guarded": 2
         },
         "clutter": {
           "guarded_fallout": 4,
-          "partial_recoverability_guarded": 2
+          "partial_recoverability_guarded": 3
         }
       }
     }

@@ -2013,9 +2013,9 @@ class GenerateTexturesTests(unittest.TestCase):
             current_output_root="/b/output",
             planned_total=30,
         )
-        self.assertIn("input mismatch", mismatch)
-        self.assertIn("output mismatch", mismatch)
-        self.assertIn("selection size changed", mismatch)
+        self.assertIn("checkpoint input path differs", mismatch)
+        self.assertIn("checkpoint output path differs", mismatch)
+        self.assertIn("checkpoint file count differs", mismatch)
 
     def test_build_batch_bottleneck_hints_includes_large_run_resume_guidance(self) -> None:
         hints = build_batch_bottleneck_hints(

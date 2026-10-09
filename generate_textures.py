@@ -487,13 +487,13 @@ def compute_checkpoint_mismatch_flags(
     mismatch_flags: list[str] = []
     checkpoint_input_root = str(checkpoint_payload.get("input_root", "") or "").strip()
     if checkpoint_input_root and current_input_root and checkpoint_input_root != current_input_root:
-        mismatch_flags.append("input mismatch")
+        mismatch_flags.append("checkpoint input path differs")
     checkpoint_output_root = str(checkpoint_payload.get("output_root", "") or "").strip()
     if checkpoint_output_root and current_output_root and checkpoint_output_root != current_output_root:
-        mismatch_flags.append("output mismatch")
+        mismatch_flags.append("checkpoint output path differs")
     checkpoint_total = int(checkpoint_payload.get("total_files_considered", 0) or 0)
     if planned_total > 0 and checkpoint_total > 0 and checkpoint_total != planned_total:
-        mismatch_flags.append("selection size changed")
+        mismatch_flags.append("checkpoint file count differs")
     return mismatch_flags
 
 
@@ -11362,8 +11362,8 @@ if GUI_AVAILABLE:
                                 "Resume checkpoint mismatch warning",
                                 (
                                     self._tr(
-                                        "Checkpoint metadata does not fully match this run ({mismatch_flags}).\n\n"
-                                        "Resume mode could skip the wrong files in this state.\n"
+                                        "Checkpoint metadata differs from this run ({mismatch_flags}).\n\n"
+                                        "Action: use Start fresh for safest behavior, or continue Resume only if this mismatch is intentional.\n"
                                         "Continue with Resume anyway?"
                                     ).format(mismatch_flags=", ".join(mismatch_flags))
                                 ),
@@ -12230,7 +12230,7 @@ if GUI_AVAILABLE:
                 )
                 self._add_tooltip(
                     conflict_report_check,
-                    "Include grouped conflict categories with suggested auto-fix actions in scan result details.",
+                    "Show grouped conflict families with short next-action guidance in scan results.",
                 )
                 self._add_tooltip(
                     conflict_examples_check,
@@ -12240,15 +12240,15 @@ if GUI_AVAILABLE:
                 self._add_tooltip(target_game_label, "Choose header policy for scan/patch behavior (auto/skyrim/fallout).")
                 self._add_tooltip(
                     target_game_combo,
-                    "Choose the safest profile first: auto/skyrim for normal runs.\nUse fallout only for guarded best-effort writes; malformed meshes may be left unchanged for manual review.",
+                    "Start with auto/skyrim for normal patch runs.\nSwitch to fallout only for guarded best-effort writes; malformed meshes can remain no-op for manual review.",
                 )
                 self._add_tooltip(
                     experimental_fallout_check,
-                    "Turn on only when you intentionally patch Fallout profiles.\nUnsupported or malformed combinations stay no-op and are reported for manual review.",
+                    "Enable only when you intentionally patch Fallout profiles.\nGuarded mode keeps unsupported or malformed cases as no-op and reports them for manual review.",
                 )
                 self._add_tooltip(
                     fallout_gate_label,
-                    "Enable one gate at a time for higher-risk Fallout writes.\nPatch a small sample first, then verify in game before broad batch use.",
+                    "Turn on higher-risk Fallout gates one at a time.\nPatch a small sample first, verify in game, then scale to larger batches.",
                 )
                 self._add_tooltip(
                     fallout_allow_parallax_scale_check,
@@ -13647,7 +13647,10 @@ if GUI_AVAILABLE:
                 self._add_tooltip(rerun_conflicts_button, "Incremental scan: run only files that previously had conflicts/failures.")
                 self._add_tooltip(rerun_patch_conflicts_button, "Incremental patch: patch only files that previously had conflicts/failures.")
                 self._add_tooltip(patch_button, "Apply selected slot/flag edits to disk.\nUse Scan first to confirm conflicts and expected actions.")
-                self._add_tooltip(auto_fix_button, "Apply safe best-effort fixes from conflict codes.\nRisky cross-block drift families stay manual-review no-op by design.")
+                self._add_tooltip(
+                    auto_fix_button,
+                    "Apply safe best-effort fixes from detected conflict families.\nCross-block drift and other high-risk families stay manual-review no-op by design.",
+                )
                 self._add_tooltip(
                     rerun_auto_fix_conflicts_button,
                     "Incremental auto-fix: remediate only files that previously had conflicts/failures.",

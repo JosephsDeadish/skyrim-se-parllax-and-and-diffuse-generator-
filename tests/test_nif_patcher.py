@@ -3414,6 +3414,9 @@ class TestRealModSamplePacks(unittest.TestCase):
             family_remediation_expectation_coverage: dict[str, dict[str, int]] = {}
             family_strategy_alignment: dict[str, dict[str, int]] = {}
             family_difference_buckets: dict[str, dict[str, int]] = {}
+            family_layout_variants: dict[str, set[str]] = {}
+            family_expected_noop_cases: dict[str, int] = {}
+            family_expected_auto_cases: dict[str, int] = {}
             fallback_conflict_groups = 0
             total_conflict_groups = 0
             generic_unsupported_header_groups = 0
@@ -3431,6 +3434,9 @@ class TestRealModSamplePacks(unittest.TestCase):
                     {"aligned": 0, "annotated": 0},
                 )
                 family_difference_buckets.setdefault(family, {})
+                family_layout_variants.setdefault(family, set())
+                family_expected_noop_cases.setdefault(family, 0)
+                family_expected_auto_cases.setdefault(family, 0)
                 expected_prefixes = case.get("expected_prefixes", []) if isinstance(case, dict) else []
                 expected_absent_prefixes = case.get("expected_absent_prefixes", []) if isinstance(case, dict) else []
                 expected_remediation_steps = (
@@ -3469,6 +3475,25 @@ class TestRealModSamplePacks(unittest.TestCase):
                     if isinstance(case, dict)
                     else ""
                 )
+                shader_layout = (
+                    str(case.get("shader_layout", "legacy")).strip().lower()
+                    if isinstance(case, dict)
+                    else "legacy"
+                )
+                header_line_ending = (
+                    str(case.get("header_line_ending", "lf")).strip().lower()
+                    if isinstance(case, dict)
+                    else "lf"
+                )
+                uses_u16 = bool(case.get("texture_set_count_u16", False)) if isinstance(case, dict) else False
+                layout_shift = int(case.get("texture_set_layout_shift", 0)) if isinstance(case, dict) else 0
+                layout_variant = "|".join((
+                    shader_layout or "legacy",
+                    "u16" if uses_u16 else "u32",
+                    "crlf" if header_line_ending == "crlf" else "lf",
+                    "shifted" if layout_shift == 4 else "base",
+                ))
+                family_layout_variants[family].add(layout_variant)
                 codes = [group.code for group in validation.conflict_report]
                 total_conflict_groups += len(codes)
                 fallback_conflict_groups += sum(
@@ -3517,6 +3542,10 @@ class TestRealModSamplePacks(unittest.TestCase):
                     or (isinstance(expected_absent_remediation_steps, list) and expected_absent_remediation_steps)
                     or expected_no_auto_remediation
                 )
+                if expected_no_auto_remediation:
+                    family_expected_noop_cases[family] += 1
+                elif has_remediation_expectation:
+                    family_expected_auto_cases[family] += 1
                 family_remediation_expectation_coverage[family]["total"] += 1
                 if pgpatcher_strategy and local_strategy:
                     family_strategy_alignment[family]["annotated"] += 1
@@ -3709,6 +3738,65 @@ class TestRealModSamplePacks(unittest.TestCase):
                             f"count {observed_count} below threshold {min_count}"
                         ),
                     )
+
+            expected_family_min_layout_variant_count = pack.get(
+                "expected_family_min_layout_variant_count",
+                {},
+            )
+            self.assertIsInstance(expected_family_min_layout_variant_count, dict)
+            for family, min_count_raw in expected_family_min_layout_variant_count.items():
+                family_name = str(family)
+                min_count = int(min_count_raw)
+                observed_variants = family_layout_variants.get(family_name)
+                self.assertIsNotNone(
+                    observed_variants,
+                    f"{pack_id}: layout-variant threshold references unknown family {family_name!r}",
+                )
+                assert observed_variants is not None
+                self.assertGreaterEqual(
+                    len(observed_variants),
+                    min_count,
+                    (
+                        f"{pack_id}: family {family_name} layout-variant coverage "
+                        f"{len(observed_variants)} below threshold {min_count}"
+                    ),
+                )
+
+            expected_family_min_noop_cases = pack.get(
+                "expected_family_min_noop_cases",
+                {},
+            )
+            self.assertIsInstance(expected_family_min_noop_cases, dict)
+            for family, min_count_raw in expected_family_min_noop_cases.items():
+                family_name = str(family)
+                min_count = int(min_count_raw)
+                observed = int(family_expected_noop_cases.get(family_name, 0))
+                self.assertGreaterEqual(
+                    observed,
+                    min_count,
+                    (
+                        f"{pack_id}: family {family_name} deterministic no-op/manual-review case count "
+                        f"{observed} below threshold {min_count}"
+                    ),
+                )
+
+            expected_family_min_auto_cases = pack.get(
+                "expected_family_min_auto_cases",
+                {},
+            )
+            self.assertIsInstance(expected_family_min_auto_cases, dict)
+            for family, min_count_raw in expected_family_min_auto_cases.items():
+                family_name = str(family)
+                min_count = int(min_count_raw)
+                observed = int(family_expected_auto_cases.get(family_name, 0))
+                self.assertGreaterEqual(
+                    observed,
+                    min_count,
+                    (
+                        f"{pack_id}: family {family_name} deterministic auto-remediation expectation case count "
+                        f"{observed} below threshold {min_count}"
+                    ),
+                )
 
             summary = summarize_validation_conflicts(validations)
             summary_codes = [group.code for group in summary]
