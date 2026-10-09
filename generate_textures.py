@@ -8743,14 +8743,14 @@ if GUI_AVAILABLE:
             _resume_combo.pack(side=tk.LEFT)
             self._add_tooltip(
                 _resume_combo,
-                "start_fresh: process everything and ignore prior checkpoint entries.\n"
-                "resume: skip files already recorded as completed in the checkpoint.",
+                "start_fresh: reprocess all selected files and ignore existing checkpoint entries.\n"
+                "resume: process only remaining files not already marked complete in the checkpoint.",
             )
             _resume_hint_label = ttk.Label(source_controls, textvariable=self.batch_resume_hint_var, foreground="gray")
             _resume_hint_label.pack(side=tk.LEFT, padx=(6, 4))
             self._add_tooltip(
                 _resume_hint_label,
-                "Clear wording for the active checkpoint mode to reduce accidental reruns.",
+                "Shows the active checkpoint mode so you can confirm resume vs full rerun before starting.",
             )
             self.batch_resume_mode_var.trace_add("write", self._update_batch_resume_hint)
             self._update_batch_resume_hint()
@@ -8769,7 +8769,7 @@ if GUI_AVAILABLE:
             self.checkpoint_health_label.pack(side=tk.LEFT, padx=(10, 4))
             self._add_tooltip(
                 self.checkpoint_health_label,
-                "Checkpoint status for next run: file, freshness, and resumable count.",
+                "Checkpoint health summary: file name, update age, and how many files are resumable.",
             )
             _auto_patch_nifs_check = ttk.Checkbutton(
                 source_controls,

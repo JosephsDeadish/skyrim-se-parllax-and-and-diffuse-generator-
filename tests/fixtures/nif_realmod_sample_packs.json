@@ -543,7 +543,7 @@
           ],
           "pgpatcher_strategy": "disable_envmap_and_pom_when_env_slots_unresolved",
           "local_strategy": "disable_envmap_and_pom_safely_then_rebuild_slot3_when_guessable",
-          "intentional_strategy_difference": true,
+          "intentional_strategy_difference": false,
           "expected_difference_bucket": "safety_first",
           "safety_difference_note": "Safety-first divergence: local strategy prefers guarded disable fallback when deterministic rebuild confidence is limited."
         },
@@ -673,7 +673,7 @@
           ],
           "pgpatcher_strategy": "rebuild_env_and_glow_slots",
           "local_strategy": "rebuild_env_and_glow_when_guessable_else_disable",
-          "intentional_strategy_difference": true,
+          "intentional_strategy_difference": false,
           "expected_difference_bucket": "safety_first",
           "safety_difference_note": "Safety-first divergence: local strategy prefers guarded disable fallback when deterministic rebuild confidence is limited."
         },
@@ -814,9 +814,9 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 21,
-        "effects": 16,
-        "clutter": 14,
+        "architecture": 22,
+        "effects": 17,
+        "clutter": 15,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -2948,6 +2948,139 @@
           "expected_no_auto_remediation": true,
           "expected_difference_bucket": "partial_recoverability_guarded",
           "safety_difference_note": "Fresh clutter drift edge: cross-block single-pass + envmap mismatch under multidrift remains manual-review/no-op until deterministic recovery confidence improves."
+        },
+        {
+          "id": "pack_fallout_architecture_real_crossblock_envmap_glow_multidrift_manual_review_tail2",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\architecture\\industrial\\catwalk.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\catwalk_e.dds",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 1,
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 12
+            },
+            {
+              "ordinal": 3,
+              "delta": -7
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            91
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_crossblock_envmap_glow_repair_under_binary_drift",
+          "local_strategy": "guarded_noop_for_crossblock_envmap_glow_binary_drift",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Additional architecture drift edge: guarded Fallout policy keeps cross-block EnvMap+glow table/ref skew in manual-review/no-op mode rather than speculative rewrites."
+        },
+        {
+          "id": "pack_fallout_effects_real_alias_envmap_pom_multidrift_manual_review_tail2",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 268435584,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\effects\\reactor\\haze.dds",
+            "",
+            "textures\\effects\\reactor\\haze_n.dds",
+            "",
+            "",
+            "textures\\effects\\reactor\\haze_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 2,
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 14
+            },
+            {
+              "ordinal": 2,
+              "delta": -9
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_envmap_pom_alias_recovery_under_multidrift",
+          "local_strategy": "guarded_noop_for_envmap_pom_alias_multidrift",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Additional effects drift edge: alias-heavy EnvMap+POM mixed-state corruption remains guarded manual-review/no-op to avoid unsafe speculative repairs."
+        },
+        {
+          "id": "pack_fallout_clutter_real_singlepass_decal_multidrift_manual_review_tail2",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 0,
+          "flags1": 67108896,
+          "texture_paths": [
+            "textures\\clutter\\industrial\\console.dds",
+            "",
+            "",
+            "textures\\clutter\\industrial\\console_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 1,
+          "block_type_index_overrides": [
+            {
+              "ordinal": 0,
+              "value": 65535
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_singlepass_decal_binary_table_recovery",
+          "local_strategy": "guarded_noop_for_singlepass_decal_multidrift",
+          "intentional_strategy_difference": false,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Additional clutter drift edge: single-pass + decal corruption under table drift stays guarded no-op/manual-review first for stability."
         }
       ],
       "expected_family_allowed_difference_buckets": {

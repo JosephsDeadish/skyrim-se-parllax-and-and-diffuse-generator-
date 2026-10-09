@@ -1064,6 +1064,12 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "unsupported_header.reexport_resolution")
 
+    def test_conflict_classifier_maps_short_header_corruption_notice(self) -> None:
+        code = _classify_conflict_code(
+            "The file is shorter than a normal Skyrim NIF header. It is probably truncated, corrupt, or not really a NIF."
+        )
+        self.assertEqual(code, "unsupported_header.malformed_or_truncated")
+
     def test_conflict_classifier_maps_semantic_shader_resolution_notes(self) -> None:
         code = _classify_conflict_code(
             "Block 1: raw shader_type 0x00000080 resolved to Environment Map via semantic_flag_envmap (RESOLVED, confidence=0.95, method=semantic)."
