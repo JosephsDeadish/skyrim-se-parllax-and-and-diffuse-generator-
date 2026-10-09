@@ -2115,6 +2115,21 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(any("8K-heavy" in hint for hint in hints))
         self.assertTrue(any("Very large source textures" in hint for hint in hints))
 
+    def test_build_batch_bottleneck_hints_includes_queue_backlog_guidance(self) -> None:
+        hints = build_batch_bottleneck_hints(
+            avg_file_seconds=1.3,
+            max_file_seconds=3.2,
+            high_res_4k_count=8,
+            high_res_8k_count=0,
+            max_source_dimension=4096,
+            max_source_megapixels=16.0,
+            resumed_completed_count=200,
+            total_failed=0,
+            total_sources=1200,
+            peak_queue_backlog=420,
+        )
+        self.assertTrue(any("Queue backlog spiked" in hint for hint in hints))
+
     def test_get_generation_warnings_glow_on_stone_triggers_warning(self) -> None:
         warnings = get_generation_warnings(
             "stone",

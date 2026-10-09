@@ -192,6 +192,8 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
             "community_shaders_wet_snow",
             "truepbr_plus_aux_maps",
             "vr_safe_core",
+            "enb_glow_combo",
+            "truepbr_wet_snow_combo",
         ):
             self.assertIn(expected, scenario_by_name)
             entry = scenario_by_name[expected]

@@ -334,6 +334,43 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "required_suffixes": ("_n.dds",),
             "forbidden_suffixes": ("_p.dds", "_rmaos.dds", "_cm.dds", "_msn.dds"),
         },
+        {
+            "name": "enb_glow_combo",
+            "args": [
+                "--render-profile",
+                "enb",
+                "--complex-material",
+                "--complex-format",
+                "msn",
+                "--environment-mask",
+                "--environment-mask-mode",
+                "complex",
+                "--glow-map",
+                "--parallax-mode",
+                "occlusion",
+            ],
+            "min_outputs": 6,
+            "required_suffixes": ("_msn.dds", "_m.dds", "_g.dds", "_p.dds"),
+            "forbidden_suffixes": ("_rmaos.dds", "_cm.dds"),
+        },
+        {
+            "name": "truepbr_wet_snow_combo",
+            "args": [
+                "--render-profile",
+                "truepbr",
+                "--rmaos",
+                "--environment-mask",
+                "--wetness-mask",
+                "--snow-mask",
+                "--ao-map",
+                "--roughness-map",
+            ],
+            "min_outputs": 8,
+            "required_suffixes": ("_rmaos.dds", "_wt.dds", "_sm.dds", "_ao.dds", "_rough.dds"),
+            "required_sidecar_suffixes": ("_rmaos.json",),
+            "required_sidecar_json_keys": ("parallax", "displacement_scale", "texture"),
+            "forbidden_suffixes": ("_cm.dds", "_msn.dds"),
+        },
     ]
 
 

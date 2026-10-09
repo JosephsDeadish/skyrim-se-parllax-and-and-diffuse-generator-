@@ -456,6 +456,7 @@ def build_batch_bottleneck_hints(
     resumed_completed_count: int,
     total_failed: int,
     total_sources: int,
+    peak_queue_backlog: int = 0,
 ) -> list[str]:
     hints: list[str] = []
     if total_sources >= 1000 and resumed_completed_count > 0:
@@ -470,6 +471,10 @@ def build_batch_bottleneck_hints(
         hints.append("Very large source textures detected; reduce worker count and keep live preview paused unless needed.")
     if total_sources >= 1000 and avg_file_seconds > 0.9:
         hints.append("Queue pacing is active for UI responsiveness on this huge run; brief status-update delays are expected.")
+    if peak_queue_backlog >= 256:
+        hints.append(
+            "Queue backlog spiked during this run; keep live preview off and use Resume mode to reduce UI churn on the next pass."
+        )
     if high_res_4k_count >= 50:
         hints.append("Large high-res set detected; run core outputs first, then advanced/niche outputs in a second pass.")
     if max_file_seconds >= max(5.0, avg_file_seconds * 2.5):
@@ -8560,6 +8565,7 @@ if GUI_AVAILABLE:
             self._render_profile_mode_widgets = [self.complex_format_combo, self.env_mask_mode_combo, self.parallax_mode_combo]
 
             advanced_generation_widgets: list[tk.Widget] = [
+                _auto_sugg_check,
                 _render_profile_label,
                 _render_profile_combo,
                 self.render_profile_hint_label,
@@ -10296,6 +10302,7 @@ if GUI_AVAILABLE:
                             resumed_completed_count=resumed,
                             total_failed=total_failed,
                             total_sources=total_sources,
+                            peak_queue_backlog=max_queue_backlog,
                         )
                         self.batch_perf_hint_var.set(" | ".join(perf_hints[:3]))
                         checkpoint_value = str(telemetry.get("checkpoint_path", "") or "").strip()

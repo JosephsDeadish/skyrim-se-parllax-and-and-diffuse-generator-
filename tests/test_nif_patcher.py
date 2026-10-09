@@ -1309,6 +1309,46 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "unsupported_header.convert_to_bslighting_required")
 
+    def test_conflict_classifier_maps_long_tail_enable_parallax_hint(self) -> None:
+        code = _classify_conflict_code("Run patch_nif with enable_parallax=True.")
+        self.assertEqual(code, "missing_parallax_flag.enable_option")
+
+    def test_conflict_classifier_maps_long_tail_supply_parallax_path_hint(self) -> None:
+        code = _classify_conflict_code(
+            "Supply parallax_texture_path pointing to a _p.dds height map (for example textures\\architecture\\dwemer\\dwemerwall_p.dds)."
+        )
+        self.assertEqual(code, "missing_parallax_slot3.empty.hint_path")
+
+    def test_conflict_classifier_maps_long_tail_force_type3_parallax_scale_hint(self) -> None:
+        code = _classify_conflict_code(
+            "Block 1: shader type is 1 (not Heightmap/3). Use force_shader_type_3=True to enable the parallax_scale field for stronger in-game depth."
+        )
+        self.assertEqual(code, "incompatible_shader_type.parallax_scale_requires_type3")
+
+    def test_conflict_classifier_maps_long_tail_envmap_restore_hint(self) -> None:
+        code = _classify_conflict_code(
+            "Restore valid slot 4/5 textures for EnvMap or disable environment mapping for this block."
+        )
+        self.assertEqual(code, "shader_state.envmap_missing_slots4_5.hint_restore_or_disable")
+
+    def test_conflict_classifier_maps_long_tail_envmap_glow_restore_hint(self) -> None:
+        code = _classify_conflict_code(
+            "Restore valid slot 2/4/5 textures, or disable both glow and environment mapping for this mixed block."
+        )
+        self.assertEqual(code, "shader_state.envmap_glow_missing_slots2_4_5.hint_restore_or_disable")
+
+    def test_conflict_classifier_maps_long_tail_parallax_envmap_restore_hint(self) -> None:
+        code = _classify_conflict_code(
+            "Restore valid slot 3/4/5 textures, or disable both parallax/POM and environment mapping for this mixed block."
+        )
+        self.assertEqual(code, "shader_state.parallax_envmap_missing_slots3_4_5.hint_restore_or_disable")
+
+    def test_conflict_classifier_maps_long_tail_disable_parallax_restore_slot3_hint(self) -> None:
+        code = _classify_conflict_code(
+            "Disable parallax/POM for this block or restore a valid slot-3 _p.dds texture before patching."
+        )
+        self.assertEqual(code, "shader_state.parallax_type_missing_slot3.hint_restore_or_disable")
+
     def test_conflict_report_classifies_slot_specific_paths(self) -> None:
         paths = ["textures\\arch\\stone_n.dds"] + [""] * 8
         nif = _write_nif(self.tmp, texture_paths=paths)
@@ -4056,6 +4096,47 @@ class TestRealModSamplePacks(unittest.TestCase):
                             f"but saw {manual_codes[index]!r}"
                         ),
                     )
+
+    def test_long_tail_external_pack_style_cases_reduce_fallback_unknown_usage(self) -> None:
+        payload = _load_fixture_corpus_payload(_FIXTURE_REALMOD_SAMPLE_PACKS)
+        packs = payload.get("packs", [])
+        self.assertIsInstance(packs, list)
+        target_case_ids = {
+            "pack_skyrim_architecture_ae_real_crlf_shifted_envmap_glow_mixed",
+            "pack_skyrim_architecture_aevr_real_crlf_u16_shifted_parallax_envmap_mixed",
+            "pack_fallout_architecture_real_shifted_envmap_glow_mixed",
+            "pack_fallout_architecture_aevr_real_crlf_u16_shifted_parallax_envmap_mixed",
+            "pack_fallout_parallax_scale_gate_profile",
+        }
+        observed = 0
+        for pack in packs:
+            if not isinstance(pack, dict):
+                continue
+            pack_id = str(pack.get("id", "pack")).strip() or "pack"
+            cases = pack.get("cases", [])
+            self.assertIsInstance(cases, list)
+            pack_root = self.tmp / pack_id
+            pack_root.mkdir(parents=True, exist_ok=True)
+            corpus = _materialize_fixture_corpus(pack_root, {"cases": cases})
+            for nif_path in corpus:
+                if nif_path.stem not in target_case_ids:
+                    continue
+                observed += 1
+                validation = validate_nif_for_parallax(nif_path)
+                fallback_codes = [
+                    group.code
+                    for group in validation.conflict_report
+                    if str(group.code).startswith("fallback_or_unknown.")
+                ]
+                self.assertFalse(
+                    fallback_codes,
+                    f"{pack_id}/{nif_path.stem}: expected no fallback_or_unknown conflicts, got {fallback_codes}",
+                )
+        self.assertEqual(
+            observed,
+            len(target_case_ids),
+            "Did not observe all targeted long-tail parity case IDs in sample packs.",
+        )
 
 
 class TestBatchConflictSummaries(unittest.TestCase):

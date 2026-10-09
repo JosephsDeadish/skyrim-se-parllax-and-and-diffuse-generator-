@@ -3951,6 +3951,9 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
         "Patch only Default(0), Heightmap(3), or EnvMap(1) shader blocks.",
         "Use unknown_shader_type_map for explicit raw shader-type overrides when safe.",
     ),
+    "incompatible_shader_type.parallax_scale_requires_type3": (
+        "Parallax scale writes require Heightmap shader type (3); use force_shader_type_3 only for known-safe meshes.",
+    ),
     "skip_skinned_or_havok.havok_graph": (
         "Do not enable parallax on Havok-driven meshes due to CTD/glitch risk.",
     ),
@@ -4222,6 +4225,8 @@ def _classify_conflict_code(message: str) -> str:
         return "unknown_shader_type.semantic_resolved"
     if "incompatible shader type" in lowered:
         return "incompatible_shader_type"
+    if "shader type is " in lowered and "not heightmap/3" in lowered and "force_shader_type_3=true" in lowered:
+        return "incompatible_shader_type.parallax_scale_requires_type3"
     if "bsbehaviorgraphextradata" in lowered or "havok animation graph" in lowered:
         return "skip_skinned_or_havok.havok_graph"
     if "decal flag" in lowered:
@@ -4256,8 +4261,12 @@ def _classify_conflict_code(message: str) -> str:
         return "skip_alpha_decal_lighting"
     if "parallax flag not set" in lowered:
         return "missing_parallax_flag.flag1_not_set"
+    if "run patch_nif with enable_parallax=true" in lowered:
+        return "missing_parallax_flag.enable_option"
     if "texture slot 3 (parallax) is empty" in lowered:
         return "missing_parallax_slot3.empty"
+    if "supply parallax_texture_path pointing to a _p.dds height map" in lowered:
+        return "missing_parallax_slot3.empty.hint_path"
     if "slot 0 diffuse path" in lowered and "not a .dds texture path" in lowered:
         return "path_slot_diffuse.non_dds"
     if "slot 0 diffuse path" in lowered and "authoring suffix naming" in lowered:
@@ -4316,6 +4325,8 @@ def _classify_conflict_code(message: str) -> str:
         return "shader_state.parallax_type_missing_slot3"
     if "shader type is envmap" in lowered and "both slot 4 cubemap and slot 5 env-mask are unresolved" in lowered:
         return "shader_state.envmap_missing_slots4_5"
+    if "restore valid slot 4/5 textures for envmap or disable environment mapping for this block" in lowered:
+        return "shader_state.envmap_missing_slots4_5.hint_restore_or_disable"
     if "shader type is envmap" in lowered and "slot 4 cubemap is unresolved" in lowered:
         return "shader_state.envmap_missing_slot4"
     if "shader type is envmap" in lowered and "slot 5 env-mask is unresolved" in lowered:
@@ -4324,10 +4335,16 @@ def _classify_conflict_code(message: str) -> str:
         return "shader_state.envmap_pom_missing_env_slots"
     if "envmap and glow are enabled" in lowered and "required slot 2 and envmap textures are unresolved" in lowered:
         return "shader_state.envmap_glow_missing_slots2_4_5"
+    if "restore valid slot 2/4/5 textures, or disable both glow and environment mapping for this mixed block" in lowered:
+        return "shader_state.envmap_glow_missing_slots2_4_5.hint_restore_or_disable"
     if "envmap and glow are enabled" in lowered and "slot 2 is unresolved while envmap slots are present" in lowered:
         return "shader_state.envmap_glow_missing_slot2"
     if "parallax/pom and env mapping are enabled" in lowered and "required slot 3 and envmap textures are unresolved" in lowered:
         return "shader_state.parallax_envmap_missing_slots3_4_5"
+    if "restore valid slot 3/4/5 textures, or disable both parallax/pom and environment mapping for this mixed block" in lowered:
+        return "shader_state.parallax_envmap_missing_slots3_4_5.hint_restore_or_disable"
+    if "disable parallax/pom for this block or restore a valid slot-3 _p.dds texture before patching" in lowered:
+        return "shader_state.parallax_type_missing_slot3.hint_restore_or_disable"
     if (
         "parallax/pom and env mapping are enabled" in lowered
         and "slot 3 parallax is unresolved while slot 4 and slot 5 are present" in lowered
