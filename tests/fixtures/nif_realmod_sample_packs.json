@@ -4,7 +4,7 @@
       "id": "skyrim_realmod_family_pack",
       "expected_family_case_counts": {
         "architecture": 9,
-        "clutter": 2,
+        "clutter": 3,
         "armor": 2,
         "landscape": 2,
         "foliage": 2,
@@ -824,6 +824,57 @@
           "intentional_strategy_difference": true,
           "expected_difference_bucket": "safety_first",
           "safety_difference_note": "Safety-first divergence: local strategy prefers guarded disable fallback when a full cross-block rebuild source is ambiguous."
+        },
+        {
+          "id": "pack_skyrim_clutter_real_crlf_u16_shifted_crossblock_envmap_glow_slot2_missing",
+          "family": "clutter",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\clutter\\dwemer\\pipecluster.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\pipecluster_e.dds",
+            "textures\\clutter\\dwemer\\pipecluster_m.dds",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "texture_set_layout_shift": 4,
+              "texture_set_count_u16": true,
+              "texture_paths": [
+                "textures\\clutter\\dwemer\\pipecluster.dds",
+                "textures\\clutter\\dwemer\\pipecluster_n.dds",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_glow_missing_slot2.skyrim.real"
+          ],
+          "expected_remediation_steps": [
+            "set_slot2_glow_for_envmap_glow_slot2_only",
+            "enable_glow_map_for_envmap_glow_slot2_only"
+          ],
+          "pgpatcher_strategy": "restore_missing_glow_slot_from_mesh_family_path",
+          "local_strategy": "restore_missing_glow_slot_from_mesh_family_path"
         }
       ],
       "expected_family_allowed_difference_buckets": {
@@ -850,7 +901,7 @@
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
         "architecture": 28,
-        "effects": 23,
+        "effects": 24,
         "clutter": 21,
         "armor": 1,
         "landscape": 1,
@@ -879,7 +930,7 @@
       },
       "expected_family_min_strategy_alignment_ratio": {
         "architecture": 0.19,
-        "effects": 0.4,
+        "effects": 0.38,
         "clutter": 0.375
       },
       "required_summary_code_prefixes": [
@@ -3956,6 +4007,62 @@
           ],
           "expected_difference_bucket": "partial_recoverability_guarded",
           "safety_difference_note": "Additional malformed Fallout long-tail family: legacy single-pass + table-drift combinations remain deterministic manual-review/no-op."
+        },
+        {
+          "id": "pack_fallout_effects_real_crlf_u16_multiblock_refskew_partial_recoverability_extension_v5",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 155,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 268437632,
+          "flags2": 64,
+          "extra_shader_texture_set_refs": [
+            73
+          ],
+          "num_blocks_delta": 1,
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 9
+            },
+            {
+              "ordinal": 3,
+              "delta": -6
+            }
+          ],
+          "texture_paths": [
+            "textures\\effects\\reactor\\arcgrid.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\arcgrid_e.dds",
+            "textures\\effects\\reactor\\arcgrid_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_absent_remediation_steps": [
+            "set_slot2_glow_for_envmap_glow_slot2_only",
+            "set_slot5_env_mask_for_missing_envmap_slot5",
+            "disable_env_mapping_for_missing_slots4_5"
+          ],
+          "pgpatcher_strategy": "attempt_crossblock_rebuild_for_multiblock_refskew_env_glow",
+          "local_strategy": "guarded_noop_for_malformed_multiblock_refskew_env_glow",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Additional malformed Fallout multiblock ref-skew family remains deterministic manual-review/no-op until reconstruction confidence can be proven."
         }
       ],
       "expected_family_allowed_difference_buckets": {
