@@ -299,6 +299,25 @@
       "flags1": 2176
     },
     {
+      "id": "skyrim_parallax_envmap_slot5_missing_with_slot3_4_present",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 2176,
+      "texture_paths": [
+        "textures\\effects\\aura.dds",
+        "",
+        "",
+        "textures\\effects\\aura_p.dds",
+        "textures\\cubemaps\\aura_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
       "id": "skyrim_parallax_envmap_glow_mixed_unresolved",
       "profile": "skyrim",
       "shader_layout": "legacy",

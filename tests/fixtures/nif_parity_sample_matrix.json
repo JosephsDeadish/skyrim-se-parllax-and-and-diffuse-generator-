@@ -62,6 +62,35 @@
       "safety_difference_note": "If no reliable slot-5 guess exists, local strategy disables env mapping to avoid invalid reflective states."
     },
     {
+      "id": "parity_skyrim_parallax_envmap_slot5_missing",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 2176,
+      "texture_paths": [
+        "textures\\effects\\aura.dds",
+        "",
+        "",
+        "textures\\effects\\aura_p.dds",
+        "textures\\cubemaps\\aura_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "expected_prefixes": [
+        "shader_state.parallax_envmap_missing_slot5.skyrim."
+      ],
+      "expected_remediation_steps": [
+        "set_slot5_env_mask_for_parallax_envmap_slot5",
+        "enable_env_mapping_for_parallax_envmap_slot5"
+      ],
+      "pgpatcher_strategy": "rebuild_slot5_and_keep_parallax_when_slot3_4_valid",
+      "local_strategy": "rebuild_slot5_and_keep_parallax_when_guessable",
+      "intentional_strategy_difference": false
+    },
+    {
       "id": "parity_skyrim_parallax_envmap_glow_unresolved",
       "profile": "skyrim",
       "shader_layout": "legacy",
