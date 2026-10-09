@@ -1094,6 +1094,24 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "unsupported_header.shader_block_size_mismatch")
 
+    def test_conflict_classifier_maps_shader_block_too_small_parse_error(self) -> None:
+        code = _classify_conflict_code(
+            "Block 0: failed to parse BSLightingShaderProperty (strict): block too small for BSLightingShaderProperty: size=16 < 100 (block_start=0x1337)"
+        )
+        self.assertEqual(code, "unsupported_header.shader_block_too_small")
+
+    def test_conflict_classifier_maps_shader_block_past_eof_parse_error(self) -> None:
+        code = _classify_conflict_code(
+            "Block 0: failed to parse BSLightingShaderProperty: block extends past end of file: block_end=0x12FF > file_size=768 (block_start=0x1000, block_size=767)"
+        )
+        self.assertEqual(code, "unsupported_header.shader_block_past_eof")
+
+    def test_conflict_classifier_maps_texture_set_u16_count_out_of_range(self) -> None:
+        code = _classify_conflict_code(
+            "Block 1: texture-set parse error: u16 read out of range at offset 804 (need 2 byte(s), buffer size 805)"
+        )
+        self.assertEqual(code, "unsupported_header.texture_set_u16_count_out_of_range")
+
     def test_conflict_classifier_maps_tolerant_num_extra_recovery_notes(self) -> None:
         code = _classify_conflict_code(
             "Recovered shader-block scan using tolerant num_extra parsing for malformed NiObjectNET extra-data counts."

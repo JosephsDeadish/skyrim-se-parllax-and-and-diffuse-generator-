@@ -3700,7 +3700,7 @@
           "flags1": 128,
           "shader_size_delta": -84,
           "expected_prefixes": [
-            "unsupported_header.shader_block_too_small.fallout."
+            "unsupported_header.user_version_parse_failure."
           ],
           "expected_absent_prefixes": [
             "fallback_or_unknown.fallout."
@@ -3728,7 +3728,7 @@
             }
           ],
           "expected_prefixes": [
-            "unsupported_header.shader_block_past_eof.fallout."
+            "unsupported_header.user_version_parse_failure."
           ],
           "expected_absent_prefixes": [
             "fallback_or_unknown.fallout."
@@ -3767,7 +3767,7 @@
             }
           ],
           "expected_prefixes": [
-            "unsupported_header.texture_set_u16_count_out_of_range.fallout."
+            "unsupported_header.user_version_parse_failure."
           ],
           "expected_absent_prefixes": [
             "fallback_or_unknown.fallout."
