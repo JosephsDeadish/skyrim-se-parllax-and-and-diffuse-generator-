@@ -72,6 +72,7 @@ _FIXTURE_CORPUS_MANIFEST = _FIXTURE_DIR / "nif_fixture_corpus.json"
 _FIXTURE_CORPUS_BASELINE = _FIXTURE_DIR / "nif_fixture_corpus_baseline.json"
 _FIXTURE_PARITY_SAMPLE_MATRIX = _FIXTURE_DIR / "nif_parity_sample_matrix.json"
 _FIXTURE_REALMOD_SAMPLE_PACKS = _FIXTURE_DIR / "nif_realmod_sample_packs.json"
+_FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP = _FIXTURE_DIR / "nif_external_broken_pack_delta_sweep.json"
 
 
 # ---------------------------------------------------------------------------
@@ -1178,6 +1179,18 @@ class TestValidateNifForParallax(unittest.TestCase):
             "Block 1: raw shader_type 0x00000880 resolved to Default via real_payload_default (RESOLVED, confidence=0.92, method=payload)."
         )
         self.assertEqual(code, "unknown_shader_type.payload_resolved")
+
+    def test_conflict_classifier_maps_default_fallback_unresolved_shader_resolution_notes(self) -> None:
+        code = _classify_conflict_code(
+            "Block 3: raw shader_type 0x00000880 resolved to Default via default_fallback (UNRESOLVED, confidence=0.00, method=fallback)."
+        )
+        self.assertEqual(code, "unknown_shader_type.default_fallback_unresolved")
+
+    def test_unknown_shader_type_subcodes_inherit_unknown_shader_type_actions(self) -> None:
+        actions = _actions_for_conflict_code("unknown_shader_type.default_fallback_unresolved")
+        joined = " ".join(actions).lower()
+        self.assertIn("unknown raw shader type", joined)
+        self.assertIn("unknown_shader_type_map", joined)
 
     def test_conflict_classifier_maps_real_layout_semantic_slot3_drift_combo(self) -> None:
         code = _classify_conflict_code(
@@ -3821,6 +3834,53 @@ class TestParitySampleMatrix(unittest.TestCase):
         self.assertIn("NIF parity delta report", report)
         self.assertIn("| Conflict code | Count | Files | Auto-remediation | Suggested action |", report)
         self.assertIn("Top manual parity priorities (frequency-first):", report)
+
+
+class TestExternalBrokenPackDeltaSweep(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_crossblock_ref_drift_case_avoids_fallback_conflict_codes(self) -> None:
+        payload = _load_fixture_corpus_payload(_FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP)
+        packs = payload.get("packs", [])
+        self.assertIsInstance(packs, list)
+        self.assertGreater(len(packs), 0)
+        pack = next(
+            (
+                entry
+                for entry in packs
+                if isinstance(entry, dict)
+                and str(entry.get("id", "")).strip() == "external_broken_longtail_pack"
+            ),
+            None,
+        )
+        self.assertIsNotNone(pack)
+        assert isinstance(pack, dict)
+        cases = pack.get("cases", [])
+        self.assertIsInstance(cases, list)
+        target_case = next(
+            (
+                case
+                for case in cases
+                if isinstance(case, dict)
+                and str(case.get("id", "")).strip() == "ext_skyrim_real_crossblock_ref_drift_mixed"
+            ),
+            None,
+        )
+        self.assertIsNotNone(target_case)
+        assert isinstance(target_case, dict)
+        corpus = _materialize_fixture_corpus(self.tmp, {"cases": [target_case]})
+        self.assertEqual(len(corpus), 1)
+        validation = validate_nif_for_parallax(corpus[0])
+        codes = [group.code for group in validation.conflict_report]
+        self.assertTrue(
+            any(code.startswith("unknown_shader_type.default_fallback_unresolved.skyrim.") for code in codes)
+        )
+        self.assertFalse(any(code.startswith("fallback_or_unknown.") for code in codes), codes)
 
 
 class TestRealModSamplePacks(unittest.TestCase):

@@ -3962,6 +3962,9 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "unsupported_header.convert_to_bslighting_required": (
         "Convert/re-export the mesh so it uses BSLightingShaderProperty before running auto-patch/remediation.",
     ),
+    "unknown_shader_type": (
+        "Unknown raw shader type could not be confidently resolved; use unknown_shader_type_map for explicit overrides or keep this mesh in manual-review/no-op mode.",
+    ),
     "unknown_shader_type.semantic_resolved": (
         "Unknown raw shader type was semantically inferred from flags/slots; verify block intent manually when processing malformed long-tail meshes.",
     ),
@@ -4283,6 +4286,10 @@ def _classify_conflict_code(message: str) -> str:
         return "unknown_shader_type.semantic_resolved"
     if "raw shader_type 0x" in lowered and "resolved to" in lowered and "method=payload" in lowered:
         return "unknown_shader_type.payload_resolved"
+    if "raw shader_type 0x" in lowered and "resolved to" in lowered and "method=fallback" in lowered:
+        if "unresolved" in lowered:
+            return "unknown_shader_type.default_fallback_unresolved"
+        return "unknown_shader_type.default_fallback"
     if "incompatible shader type" in lowered:
         return "incompatible_shader_type"
     if "shader type is " in lowered and "not heightmap/3" in lowered and "force_shader_type_3=true" in lowered:
