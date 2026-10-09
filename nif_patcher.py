@@ -4002,6 +4002,12 @@ def _extract_block_index(message: str) -> int | None:
 
 def _classify_conflict_code(message: str) -> str:
     lowered = message.lower()
+    if "recorded block size" in lowered and "expected type-0 size" in lowered:
+        return "unsupported_header.shader_block_size_mismatch"
+    if "recovered shader-block scan using tolerant num_extra parsing" in lowered:
+        return "unsupported_header.num_extra_recovery"
+    if "strict unknown-shader check failed" in lowered:
+        return "unknown_shader_type.strict_violation"
     if "shorter than a normal skyrim nif header" in lowered:
         return "unsupported_header.malformed_or_truncated"
     if "probably truncated, corrupt, or not really a nif" in lowered:

@@ -1082,6 +1082,22 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "unknown_shader_type.semantic_resolved")
 
+    def test_conflict_classifier_maps_shader_block_size_mismatch_notes(self) -> None:
+        code = _classify_conflict_code(
+            "Block 2: recorded block size 152 does not match expected type-0 size 128 before force_shader_type_3 expansion."
+        )
+        self.assertEqual(code, "unsupported_header.shader_block_size_mismatch")
+
+    def test_conflict_classifier_maps_tolerant_num_extra_recovery_notes(self) -> None:
+        code = _classify_conflict_code(
+            "Recovered shader-block scan using tolerant num_extra parsing for malformed NiObjectNET extra-data counts."
+        )
+        self.assertEqual(code, "unsupported_header.num_extra_recovery")
+
+    def test_conflict_classifier_maps_strict_unknown_shader_failure(self) -> None:
+        code = _classify_conflict_code("Strict unknown-shader check failed.")
+        self.assertEqual(code, "unknown_shader_type.strict_violation")
+
     def test_conflict_report_classifies_slot_specific_paths(self) -> None:
         paths = ["textures\\arch\\stone_n.dds"] + [""] * 8
         nif = _write_nif(self.tmp, texture_paths=paths)
