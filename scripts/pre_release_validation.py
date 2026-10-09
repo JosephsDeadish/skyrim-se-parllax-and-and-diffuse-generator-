@@ -1138,6 +1138,243 @@ def _build_realmod_side_by_side_delta_report(
     }
 
 
+def _build_realmod_delta_mismatch_summary(
+    realmod_delta_report: dict[str, object],
+) -> dict[str, object]:
+    rows = realmod_delta_report.get("cases", [])
+    pack_counts: dict[str, int] = {}
+    family_counts: dict[str, int] = {}
+    remediation_mode_counts: dict[str, int] = {}
+    base_conflict_counts: dict[str, int] = {}
+    bucket_counts: dict[str, int] = {}
+    fallback_case_count = 0
+    strategy_diff_count = 0
+    case_count = 0
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            case_count += 1
+            pack_id = str(row.get("pack_id", "pack") or "pack")
+            family = str(row.get("family", "unknown") or "unknown")
+            remediation_mode = str(row.get("remediation_mode", "manual_or_noop") or "manual_or_noop")
+            bucket = str(row.get("intended_difference_bucket", "none") or "none")
+            pack_counts[pack_id] = int(pack_counts.get(pack_id, 0)) + 1
+            family_counts[family] = int(family_counts.get(family, 0)) + 1
+            remediation_mode_counts[remediation_mode] = int(remediation_mode_counts.get(remediation_mode, 0)) + 1
+            bucket_counts[bucket] = int(bucket_counts.get(bucket, 0)) + 1
+            if bool(row.get("fallback_used", False)):
+                fallback_case_count += 1
+            if bool(row.get("intentional_strategy_difference", False)):
+                strategy_diff_count += 1
+            codes = row.get("detected_conflict_codes", [])
+            if isinstance(codes, list):
+                for code in codes:
+                    base = _conflict_base_code(str(code))
+                    base_conflict_counts[base] = int(base_conflict_counts.get(base, 0)) + 1
+    return {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "case_count": case_count,
+        "fallback_case_count": fallback_case_count,
+        "intentional_strategy_difference_count": strategy_diff_count,
+        "pack_case_counts": dict(sorted(pack_counts.items(), key=lambda item: (-int(item[1]), item[0]))),
+        "family_case_counts": dict(sorted(family_counts.items(), key=lambda item: (-int(item[1]), item[0]))),
+        "remediation_mode_counts": dict(
+            sorted(remediation_mode_counts.items(), key=lambda item: (-int(item[1]), item[0]))
+        ),
+        "difference_bucket_counts": dict(sorted(bucket_counts.items(), key=lambda item: (-int(item[1]), item[0]))),
+        "top_conflict_families": [
+            {"base_code": code, "count": int(count)}
+            for code, count in sorted(base_conflict_counts.items(), key=lambda item: (-int(item[1]), item[0]))[:20]
+        ],
+    }
+
+
+def _render_realmod_delta_mismatch_summary_markdown(summary: dict[str, object]) -> str:
+    top_conflicts = summary.get("top_conflict_families", [])
+    remediation_mode_counts = summary.get("remediation_mode_counts", {})
+    bucket_counts = summary.get("difference_bucket_counts", {})
+    lines = [
+        "# NIF real-sample parity mismatch summary",
+        "",
+        f"- Generated: {summary.get('generated_at_utc', '')}",
+        f"- Cases: {summary.get('case_count', 0)}",
+        f"- Cases using fallback remediation modes: {summary.get('fallback_case_count', 0)}",
+        f"- Intentional strategy-difference cases: {summary.get('intentional_strategy_difference_count', 0)}",
+        "",
+        "## Remediation modes",
+        "",
+        "| Mode | Cases |",
+        "| --- | ---: |",
+    ]
+    if isinstance(remediation_mode_counts, dict):
+        for mode, count in remediation_mode_counts.items():
+            lines.append(f"| `{str(mode).replace('|', '\\|')}` | {int(count)} |")
+    lines.extend(
+        [
+            "",
+            "## Difference buckets",
+            "",
+            "| Bucket | Cases |",
+            "| --- | ---: |",
+        ]
+    )
+    if isinstance(bucket_counts, dict):
+        for bucket, count in bucket_counts.items():
+            lines.append(f"| `{str(bucket).replace('|', '\\|')}` | {int(count)} |")
+    lines.extend(
+        [
+            "",
+            "## Top conflict families",
+            "",
+            "| Conflict family | Count |",
+            "| --- | ---: |",
+        ]
+    )
+    if isinstance(top_conflicts, list):
+        for row in top_conflicts:
+            if not isinstance(row, dict):
+                continue
+            code = str(row.get("base_code", "")).replace("|", "\\|")
+            count = int(row.get("count", 0) or 0)
+            lines.append(f"| `{code}` | {count} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _build_realmod_fallback_guard_report(
+    *,
+    realmod_delta_report: dict[str, object],
+    extra_pack_files: list[Path] | None = None,
+) -> dict[str, object]:
+    payload = _load_realmod_pack_payload(extra_pack_files=extra_pack_files)
+    packs = payload.get("packs", [])
+    pack_thresholds: dict[str, dict[str, object]] = {}
+    if isinstance(packs, list):
+        for pack in packs:
+            if not isinstance(pack, dict):
+                continue
+            pack_id = str(pack.get("id", "pack")).strip() or "pack"
+            pack_thresholds[pack_id] = {
+                "expected_max_fallback_ratio": float(pack.get("expected_max_fallback_ratio", 0.02)),
+                "expected_max_fallback_groups": pack.get("expected_max_fallback_groups"),
+            }
+    per_pack: dict[str, dict[str, object]] = {}
+    cases = realmod_delta_report.get("cases", [])
+    if isinstance(cases, list):
+        for row in cases:
+            if not isinstance(row, dict):
+                continue
+            pack_id = str(row.get("pack_id", "pack")).strip() or "pack"
+            payload_row = per_pack.setdefault(
+                pack_id,
+                {
+                    "pack_id": pack_id,
+                    "case_count": 0,
+                    "total_conflict_groups": 0,
+                    "fallback_or_unknown_groups": 0,
+                    "generic_unsupported_header_groups": 0,
+                },
+            )
+            payload_row["case_count"] = int(payload_row["case_count"]) + 1
+            codes = row.get("detected_conflict_codes", [])
+            if isinstance(codes, list):
+                payload_row["total_conflict_groups"] = int(payload_row["total_conflict_groups"]) + len(codes)
+                payload_row["fallback_or_unknown_groups"] = int(payload_row["fallback_or_unknown_groups"]) + sum(
+                    1 for code in codes if str(code).startswith("fallback_or_unknown.")
+                )
+                payload_row["generic_unsupported_header_groups"] = int(
+                    payload_row["generic_unsupported_header_groups"]
+                ) + sum(
+                    1
+                    for code in codes
+                    if str(code).startswith("unsupported_header.")
+                    and len(str(code).split(".")) == 3
+                )
+    rows: list[dict[str, object]] = []
+    violations: list[dict[str, object]] = []
+    for pack_id, observed in sorted(per_pack.items(), key=lambda item: item[0]):
+        thresholds = pack_thresholds.get(pack_id, {})
+        ratio = float(thresholds.get("expected_max_fallback_ratio", 0.02))
+        explicit_max = thresholds.get("expected_max_fallback_groups")
+        total_conflict_groups = int(observed.get("total_conflict_groups", 0) or 0)
+        fallback_groups = int(observed.get("fallback_or_unknown_groups", 0) or 0)
+        generic_unsupported = int(observed.get("generic_unsupported_header_groups", 0) or 0)
+        if explicit_max is None:
+            allowed_fallback_groups = int(total_conflict_groups * ratio)
+        else:
+            allowed_fallback_groups = int(explicit_max)
+        pass_guard = fallback_groups <= allowed_fallback_groups and generic_unsupported == 0
+        row = {
+            **observed,
+            "expected_max_fallback_ratio": ratio,
+            "expected_max_fallback_groups": explicit_max,
+            "allowed_fallback_groups": allowed_fallback_groups,
+            "pass": pass_guard,
+        }
+        rows.append(row)
+        if not pass_guard:
+            violations.append(
+                {
+                    "pack_id": pack_id,
+                    "fallback_or_unknown_groups": fallback_groups,
+                    "allowed_fallback_groups": allowed_fallback_groups,
+                    "generic_unsupported_header_groups": generic_unsupported,
+                }
+            )
+    return {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "pack_count": len(rows),
+        "packs": rows,
+        "violations": violations,
+    }
+
+
+def _render_realmod_fallback_guard_markdown(report: dict[str, object]) -> str:
+    rows = report.get("packs", [])
+    lines = [
+        "# NIF real-sample fallback regression guard",
+        "",
+        f"- Generated: {report.get('generated_at_utc', '')}",
+        f"- Pack count: {report.get('pack_count', 0)}",
+        f"- Violations: {len(report.get('violations', [])) if isinstance(report.get('violations'), list) else 0}",
+        "",
+        "| Pack | Cases | Conflict groups | Fallback groups | Allowed fallback groups | Generic unsupported groups | Pass |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | --- |",
+    ]
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            pack_id = str(row.get("pack_id", "pack")).replace("|", "\\|")
+            lines.append(
+                f"| `{pack_id}` | {int(row.get('case_count', 0) or 0)} | "
+                f"{int(row.get('total_conflict_groups', 0) or 0)} | "
+                f"{int(row.get('fallback_or_unknown_groups', 0) or 0)} | "
+                f"{int(row.get('allowed_fallback_groups', 0) or 0)} | "
+                f"{int(row.get('generic_unsupported_header_groups', 0) or 0)} | "
+                f"{'yes' if bool(row.get('pass', False)) else 'no'} |"
+            )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _assert_realmod_fallback_guard(report: dict[str, object]) -> None:
+    violations = report.get("violations", [])
+    if not isinstance(violations, list) or not violations:
+        return
+    first = violations[0]
+    if not isinstance(first, dict):
+        raise SystemExit("Realmod fallback guard failed with malformed violation payload.")
+    raise SystemExit(
+        "Realmod fallback guard failed: "
+        f"{len(violations)} pack(s) exceeded fallback thresholds or emitted generic unsupported_header groups. "
+        f"First violation: pack={first.get('pack_id')}, "
+        f"fallback={first.get('fallback_or_unknown_groups')}/{first.get('allowed_fallback_groups')}, "
+        f"generic_unsupported={first.get('generic_unsupported_header_groups')}."
+    )
+
+
 def _normalize_bucket_distribution(
     bucket_counts: dict[str, int] | None,
 ) -> dict[str, float]:
@@ -1398,10 +1635,12 @@ def _write_release_artifacts(
     trend_snapshot: dict[str, object],
     parity_report: dict[str, object],
     realmod_delta_report: dict[str, object],
+    realmod_delta_mismatch_summary: dict[str, object],
+    realmod_fallback_guard_report: dict[str, object],
     localization_report: dict[str, object] | None = None,
     localization_json_path: Path | None = None,
     localization_md_path: Path | None = None,
-) -> tuple[Path, Path, Path, Path, Path, Path]:
+) -> tuple[Path, Path, Path, Path, Path, Path, Path, Path, Path, Path]:
     artifact_dir.mkdir(parents=True, exist_ok=True)
     trend_path = artifact_dir / "nif_family_trend_snapshot.json"
     trend_path.write_text(json.dumps(trend_snapshot, indent=2, sort_keys=True), encoding="utf-8")
@@ -1414,6 +1653,26 @@ def _write_release_artifacts(
     realmod_delta_md_path = artifact_dir / "nif_realmod_parity_delta_report.md"
     realmod_delta_md_path.write_text(
         _render_realmod_side_by_side_delta_markdown(realmod_delta_report),
+        encoding="utf-8",
+    )
+    realmod_delta_mismatch_json_path = artifact_dir / "nif_realmod_parity_mismatch_summary.json"
+    realmod_delta_mismatch_json_path.write_text(
+        json.dumps(realmod_delta_mismatch_summary, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    realmod_delta_mismatch_md_path = artifact_dir / "nif_realmod_parity_mismatch_summary.md"
+    realmod_delta_mismatch_md_path.write_text(
+        _render_realmod_delta_mismatch_summary_markdown(realmod_delta_mismatch_summary),
+        encoding="utf-8",
+    )
+    realmod_fallback_guard_json_path = artifact_dir / "nif_realmod_fallback_guard_report.json"
+    realmod_fallback_guard_json_path.write_text(
+        json.dumps(realmod_fallback_guard_report, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    realmod_fallback_guard_md_path = artifact_dir / "nif_realmod_fallback_guard_report.md"
+    realmod_fallback_guard_md_path.write_text(
+        _render_realmod_fallback_guard_markdown(realmod_fallback_guard_report),
         encoding="utf-8",
     )
 
@@ -1443,6 +1702,10 @@ def _write_release_artifacts(
             "",
             f"- Real-sample parity delta JSON: `{realmod_delta_json_path.name}`",
             f"- Real-sample parity delta markdown: `{realmod_delta_md_path.name}`",
+            f"- Real-sample parity mismatch summary JSON: `{realmod_delta_mismatch_json_path.name}`",
+            f"- Real-sample parity mismatch summary markdown: `{realmod_delta_mismatch_md_path.name}`",
+            f"- Real-sample fallback guard JSON: `{realmod_fallback_guard_json_path.name}`",
+            f"- Real-sample fallback guard markdown: `{realmod_fallback_guard_md_path.name}`",
             "",
             "## Manual release-candidate verification (post-CI artifact review)",
             "",
@@ -1496,6 +1759,10 @@ def _write_release_artifacts(
         parity_md_path,
         realmod_delta_json_path,
         realmod_delta_md_path,
+        realmod_delta_mismatch_json_path,
+        realmod_delta_mismatch_md_path,
+        realmod_fallback_guard_json_path,
+        realmod_fallback_guard_md_path,
     )
 
 
@@ -1704,6 +1971,13 @@ def main() -> int:
     realmod_delta_report = _build_realmod_side_by_side_delta_report(
         extra_pack_files=extra_realmod_pack_files,
     )
+    realmod_delta_mismatch_summary = _build_realmod_delta_mismatch_summary(realmod_delta_report)
+    realmod_fallback_guard_report = _build_realmod_fallback_guard_report(
+        realmod_delta_report=realmod_delta_report,
+        extra_pack_files=extra_realmod_pack_files,
+    )
+    _assert_realmod_fallback_guard(realmod_fallback_guard_report)
+    step_status.append(("Realmod fallback/generic-subcode regression guard", "pass"))
     (
         checklist_path,
         trend_path,
@@ -1711,12 +1985,18 @@ def main() -> int:
         parity_md_path,
         realmod_delta_json_path,
         realmod_delta_md_path,
+        realmod_delta_mismatch_json_path,
+        realmod_delta_mismatch_md_path,
+        realmod_fallback_guard_json_path,
+        realmod_fallback_guard_md_path,
     ) = _write_release_artifacts(
         artifact_dir=args.artifact_dir,
         step_status=step_status,
         trend_snapshot=trend_snapshot,
         parity_report=parity_report,
         realmod_delta_report=realmod_delta_report,
+        realmod_delta_mismatch_summary=realmod_delta_mismatch_summary,
+        realmod_fallback_guard_report=realmod_fallback_guard_report,
         localization_report=localization_report,
         localization_json_path=localization_json_path,
         localization_md_path=localization_md_path,
@@ -1742,6 +2022,10 @@ def main() -> int:
     print(f"NIF parity feature report markdown artifact: {parity_md_path}")
     print(f"NIF real-sample parity delta JSON artifact: {realmod_delta_json_path}")
     print(f"NIF real-sample parity delta markdown artifact: {realmod_delta_md_path}")
+    print(f"NIF real-sample parity mismatch summary JSON artifact: {realmod_delta_mismatch_json_path}")
+    print(f"NIF real-sample parity mismatch summary markdown artifact: {realmod_delta_mismatch_md_path}")
+    print(f"NIF real-sample fallback guard JSON artifact: {realmod_fallback_guard_json_path}")
+    print(f"NIF real-sample fallback guard markdown artifact: {realmod_fallback_guard_md_path}")
     print(f"Localization coverage JSON artifact: {localization_json_path}")
     print(f"Localization coverage markdown artifact: {localization_md_path}")
     print(f"Packaged accessibility acceptance JSON artifact: {packaged_accessibility_json_path}")
