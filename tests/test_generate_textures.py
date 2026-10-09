@@ -104,6 +104,7 @@ from generate_textures import (
     resolve_lazy_preview_deferred_outputs,
     save_gui_state,
     should_apply_preview_recommendations,
+    should_update_batch_status_line,
     should_update_live_batch_preview,
     select_generation_context_source,
     translate_ui_text,
@@ -2021,6 +2022,46 @@ class GenerateTexturesTests(unittest.TestCase):
                 seconds_since_last_update=0.90,
                 source_pixels=8192 * 8192,
                 high_res_8k_count=10,
+            )
+        )
+
+    def test_should_update_batch_status_line_throttles_dense_updates_for_huge_batches(self) -> None:
+        self.assertFalse(
+            should_update_batch_status_line(
+                total_sources=1500,
+                current_index=204,
+                last_index=200,
+                seconds_since_last_update=0.15,
+                source_pixels=8192 * 8192,
+                high_res_8k_count=12,
+            )
+        )
+        self.assertTrue(
+            should_update_batch_status_line(
+                total_sources=1500,
+                current_index=212,
+                last_index=200,
+                seconds_since_last_update=0.70,
+                source_pixels=8192 * 8192,
+                high_res_8k_count=12,
+            )
+        )
+
+    def test_should_update_batch_status_line_always_allows_first_and_last_updates(self) -> None:
+        self.assertTrue(
+            should_update_batch_status_line(
+                total_sources=2200,
+                current_index=1,
+                last_index=0,
+                seconds_since_last_update=0.01,
+            )
+        )
+        self.assertTrue(
+            should_update_batch_status_line(
+                total_sources=2200,
+                current_index=2200,
+                last_index=2190,
+                seconds_since_last_update=0.01,
             )
         )
 

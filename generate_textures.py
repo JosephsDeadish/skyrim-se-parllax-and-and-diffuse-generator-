@@ -582,6 +582,44 @@ def should_update_live_batch_preview(
     )
 
 
+def should_update_batch_status_line(
+    *,
+    total_sources: int,
+    current_index: int,
+    last_index: int,
+    seconds_since_last_update: float,
+    source_pixels: int = 0,
+    high_res_8k_count: int = 0,
+) -> bool:
+    if total_sources <= 0:
+        return True
+    if current_index <= 2 or current_index >= total_sources:
+        return True
+    if total_sources < 300:
+        return True
+    if total_sources >= 2000 or source_pixels >= (8192 * 8192):
+        min_interval = 0.80
+        min_index_step = 10
+    elif total_sources >= 1000 or source_pixels >= (4096 * 4096):
+        min_interval = 0.55
+        min_index_step = 6
+    elif total_sources >= 400:
+        min_interval = 0.35
+        min_index_step = 3
+    else:
+        min_interval = 0.22
+        min_index_step = 2
+    if high_res_8k_count >= 8:
+        min_interval += 0.25
+        min_index_step += 2
+    if seconds_since_last_update >= min_interval:
+        return True
+    return (
+        (current_index - last_index) >= min_index_step
+        and seconds_since_last_update >= (min_interval * 0.5)
+    )
+
+
 def _compute_tooltip_position(
     *,
     pointer_x: int,
@@ -7934,7 +7972,8 @@ if GUI_AVAILABLE:
             self._add_tooltip(self.ui_scale_combo, "Increase this on 4K/high-DPI displays if controls look too small.")
             self._add_tooltip(
                 _simplified_layout_check,
-                "Basic mode hides advanced workflow/generation controls for a cleaner beginner layout.",
+                "Basic mode hides advanced output/setup sections for a cleaner beginner layout.\n"
+                "Disable this to expose full Advanced controls.",
             )
             self._add_tooltip(_target_game_label, "Select Skyrim or Fallout naming mode for generated texture filenames.")
             self._add_tooltip(
@@ -8077,37 +8116,68 @@ if GUI_AVAILABLE:
             _advanced_workflow_toggle.grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
             self._add_tooltip(
                 _advanced_workflow_toggle,
-                "Beginner view keeps only core Vanilla/ENB outputs visible.\n"
-                "Enable this to show advanced Community Shaders/TruePBR workflow groups.",
+                "Advanced output groups are hidden while Basic layout is on.\n"
+                "Enable Simplified layout OFF + this toggle ON to show Community Shaders/TruePBR extras.",
             )
             _preset_row = ttk.Frame(_workflow_frame)
             _preset_row.grid(row=2, column=0, columnspan=3, sticky=tk.EW, pady=(4, 0))
-            ttk.Label(_preset_row, text="One-click safe presets (recommended)").pack(side=tk.LEFT)
-            ttk.Button(
+            _preset_label = ttk.Label(_preset_row, text="One-click safe presets (recommended)")
+            _preset_label.pack(side=tk.LEFT)
+            self._add_tooltip(
+                _preset_label,
+                "Presets apply conservative, workflow-safe defaults.\n"
+                "Good starting points before manual tweaks.",
+            )
+            _preset_vanilla_button = ttk.Button(
                 _preset_row,
                 text="Vanilla (Safe default)",
                 command=lambda: self._apply_safe_workflow_preset("vanilla"),
-            ).pack(side=tk.LEFT, padx=(8, 2))
-            ttk.Button(
+            )
+            _preset_vanilla_button.pack(side=tk.LEFT, padx=(8, 2))
+            self._add_tooltip(
+                _preset_vanilla_button,
+                "Safe baseline for stock Skyrim-style outputs (core files only).",
+            )
+            _preset_enb_button = ttk.Button(
                 _preset_row,
                 text="ENB (Safe default)",
                 command=lambda: self._apply_safe_workflow_preset("enb"),
-            ).pack(side=tk.LEFT, padx=2)
-            ttk.Button(
+            )
+            _preset_enb_button.pack(side=tk.LEFT, padx=2)
+            self._add_tooltip(
+                _preset_enb_button,
+                "Safe ENB baseline with conservative complex-material alignment.",
+            )
+            _preset_cs_button = ttk.Button(
                 _preset_row,
                 text="Community Shaders (Safe)",
                 command=lambda: self._apply_safe_workflow_preset("community_shaders"),
-            ).pack(side=tk.LEFT, padx=2)
-            ttk.Button(
+            )
+            _preset_cs_button.pack(side=tk.LEFT, padx=2)
+            self._add_tooltip(
+                _preset_cs_button,
+                "Safe Community Shaders Extended Materials baseline (_cm/_c workflow).",
+            )
+            _preset_truepbr_button = ttk.Button(
                 _preset_row,
                 text="TruePBR (Safe)",
                 command=lambda: self._apply_safe_workflow_preset("truepbr"),
-            ).pack(side=tk.LEFT, padx=2)
-            ttk.Button(
+            )
+            _preset_truepbr_button.pack(side=tk.LEFT, padx=2)
+            self._add_tooltip(
+                _preset_truepbr_button,
+                "Safe TruePBR baseline. Community Shaders TruePBR consumes RMAOS on slot 5; keep canonical _rmaos/_ramos naming.",
+            )
+            _preset_custom_button = ttk.Button(
                 _preset_row,
                 text="Custom",
                 command=lambda: self._apply_safe_workflow_preset("custom"),
-            ).pack(side=tk.LEFT, padx=2)
+            )
+            _preset_custom_button.pack(side=tk.LEFT, padx=2)
+            self._add_tooltip(
+                _preset_custom_button,
+                "Start from conservative defaults but leave workflow choices manual.",
+            )
             _preset_hint = ttk.Label(_workflow_frame, textvariable=self.safe_preset_hint_var, foreground="gray")
             _preset_hint.grid(row=3, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
             _preset_usage_hint = ttk.Label(
@@ -8152,8 +8222,8 @@ if GUI_AVAILABLE:
             _show_advanced_generation_check.grid(row=1, column=3, columnspan=2, sticky=tk.E, pady=(6, 2))
             self._add_tooltip(
                 _show_advanced_generation_check,
-                "Show renderer/workflow selectors and extended sliders.\n"
-                "This only changes visible controls; output changes only if you change values.",
+                "Advanced setup rows are hidden while Basic layout is on.\n"
+                "Disable Simplified layout first, then enable this to expose renderer/workflow setup controls.",
             )
 
             _render_profile_label = ttk.Label(options_frame, text="Target renderer (advanced)")
@@ -10014,12 +10084,25 @@ if GUI_AVAILABLE:
                         index, total, current_path = 0, 0, Path("unknown")
                         elapsed_seconds = 0.0
                         eta_seconds = 0.0
-                    self.status_var.set(
-                        f"Processing {index}/{total}: {current_path.name} "
-                        f"(elapsed {elapsed_seconds:.1f}s, eta {eta_seconds:.1f}s)"
+                    now = time.monotonic()
+                    last_status_at = float(getattr(self, "_last_batch_status_update_at", 0.0) or 0.0)
+                    last_status_index = int(getattr(self, "_last_batch_status_update_index", 0) or 0)
+                    should_update_status = should_update_batch_status_line(
+                        total_sources=max(0, int(total)),
+                        current_index=max(0, int(index)),
+                        last_index=last_status_index,
+                        seconds_since_last_update=max(0.0, now - last_status_at),
+                        source_pixels=max(0, int(getattr(self, "_active_batch_max_source_pixels", 0) or 0)),
+                        high_res_8k_count=max(0, int(getattr(self, "_active_batch_high_res_8k_count", 0) or 0)),
                     )
+                    if should_update_status:
+                        self.status_var.set(
+                            f"Processing {index}/{total}: {current_path.name} "
+                            f"(elapsed {elapsed_seconds:.1f}s, eta {eta_seconds:.1f}s)"
+                        )
+                        self._last_batch_status_update_at = now
+                        self._last_batch_status_update_index = max(0, int(index))
                     if self.show_batch_preview_var.get():
-                        now = time.monotonic()
                         last_at = float(getattr(self, "_last_live_batch_preview_update_at", 0.0) or 0.0)
                         last_index = int(getattr(self, "_last_live_batch_preview_index", 0) or 0)
                         should_update = should_update_live_batch_preview(

@@ -96,8 +96,8 @@ jobs:
       - name: Pre-release validation gate + artifact generation
         run: |
           python scripts/pre_release_validation.py \
-            --repeat-validation-loops 3 \
-            --packaged-smoke-loops 2 \
+            --repeat-validation-loops 4 \
+            --packaged-smoke-loops 3 \
             --strict-localization-completeness \
             --artifact-dir artifacts/release_readiness \
             --history-file artifacts/release_readiness/nif_family_trend_history.json \
@@ -158,8 +158,10 @@ jobs:
           scenarios = [
               ("vanilla", ["--render-profile", "vanilla", "--normal-strength", "1.2", "--parallax-strength", "1.0"]),
               ("community_shaders", ["--render-profile", "community_shaders", "--complex-material", "--complex-format", "cm", "--environment-mask", "--environment-mask-mode", "complex"]),
+              ("truepbr", ["--render-profile", "truepbr", "--rmaos", "--normal-strength", "1.1"]),
+              ("enb", ["--render-profile", "enb", "--complex-material", "--complex-format", "msn", "--parallax-mode", "occlusion"]),
           ]
-          for loop_index in range(1, 3):
+          for loop_index in range(1, 4):
               for scenario_name, scenario_args in scenarios:
                   smoke_out = smoke_root / f"out_loop{loop_index}_{scenario_name}"
                   smoke_out.mkdir(parents=True, exist_ok=True)

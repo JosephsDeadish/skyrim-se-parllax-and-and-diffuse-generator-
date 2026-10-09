@@ -3887,6 +3887,10 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "unsupported_header.read_failure": (
         "Verify the NIF path is readable and not locked, then re-export or replace corrupt files before patching.",
     ),
+    "unsupported_header.no_patchable_shader_blocks": (
+        "This mesh has no patchable BSLightingShaderProperty blocks; keep as no-op or convert/re-export to a compatible Skyrim/Fallout layout before patching.",
+        "Use validate mode to confirm whether the mesh is legacy, unsupported, or intentionally non-patchable.",
+    ),
     "unknown_shader_type.semantic_resolved": (
         "Unknown raw shader type was semantically inferred from flags/slots; verify block intent manually when processing malformed long-tail meshes.",
     ),
@@ -4068,6 +4072,8 @@ def _classify_conflict_code(message: str) -> str:
     if "string read out of range" in lowered:
         return "unsupported_header.string_read_out_of_range"
     if "no bslightingshaderproperty blocks found or not a supported skyrim/fallout nif" in lowered:
+        return "unsupported_header.no_patchable_shader_blocks"
+    if "no bslightingshaderproperty blocks found — nothing to patch" in lowered:
         return "unsupported_header.no_patchable_shader_blocks"
     unexpected_user_versions = _UNEXPECTED_USER_VERSION_VALUES_RE.search(message)
     if unexpected_user_versions:
