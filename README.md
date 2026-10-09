@@ -148,6 +148,8 @@ This gate runs:
 
 This app supports the **Community Shaders Extended Materials** packed workflow via `_cm` output.
 
+Release-aligned note: Community Shaders `v1.9.1` release metadata lists **Extended Materials `1-4-0`** and **TruePBR `1-0-0`** in its compatibility table. Keep your installed CS plugin stack close to that baseline (or newer) when validating generated `_cm/_c/_C` and `_rmaos/_ramos` outputs.
+
 - In GUI:
   1. Set **Target renderer** to `community_shaders`
   2. Enable **Complex/PBR material**
@@ -166,6 +168,9 @@ Some packs use `_c.dds` (or `_C.dds` on Windows) for the same role — set `--co
 ### Community Shaders TruePBR quick start (`_rmaos` / `_ramos` + JSON)
 
 This app now has a dedicated **TruePBR** renderer profile path for Community Shaders TruePBR workflows.
+
+For latest runtime compatibility checks, compare your installed CS plugin versions against the current release page:  
+https://github.com/community-shaders/skyrim-community-shaders/releases
 
 - In GUI:
   1. Set **Target renderer** to `truepbr`
