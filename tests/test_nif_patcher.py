@@ -1090,7 +1090,7 @@ class TestValidateNifForParallax(unittest.TestCase):
         code = _classify_conflict_code(
             "Malformed or truncated NIF: Unsupported NIF header/profile values (user_version=11, user_version_2=155)."
         )
-        self.assertEqual(code, "unsupported_header.profile_value_drift.u11_u2155")
+        self.assertEqual(code, "unsupported_header.profile_value_drift.u11_u2155.fallout_signature_drift")
 
     def test_conflict_classifier_maps_wrapped_unsupported_profile_drift_header_table_variant(self) -> None:
         code = _classify_conflict_code(
@@ -1100,6 +1100,26 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertEqual(
             code,
             "unsupported_header.profile_value_drift.u11_u2130.header_table_drift",
+        )
+
+    def test_conflict_classifier_maps_fallout_signature_header_table_drift_variant(self) -> None:
+        code = _classify_conflict_code(
+            "Malformed or truncated NIF: Unsupported NIF header/profile values (user_version=11, user_version_2=140). "
+            "Could not parse full header tables for this mesh; malformed export/header-table drift is likely."
+        )
+        self.assertEqual(
+            code,
+            "unsupported_header.profile_value_drift.u11_u2140.header_table_drift.fallout_signature_drift",
+        )
+
+    def test_conflict_classifier_maps_unparsed_header_table_drift_signature_variant(self) -> None:
+        code = _classify_conflict_code(
+            "Malformed or truncated NIF: Unsupported NIF header/profile values. "
+            "Could not parse full header tables for this mesh; malformed export/header-table drift is likely."
+        )
+        self.assertEqual(
+            code,
+            "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift",
         )
 
     def test_conflict_classifier_maps_wrapped_header_prefix_notice(self) -> None:
@@ -1255,6 +1275,14 @@ class TestValidateNifForParallax(unittest.TestCase):
             "No supported shader layouts are available for profile 'fallout'; skipping all shader blocks."
         )
         self.assertEqual(code, "fallout_profile.guarded_noop_layout_policy_exhausted")
+
+    def test_fallout_profile_value_drift_subcodes_keep_guarded_manual_review_actions(self) -> None:
+        actions = _actions_for_conflict_code(
+            "unsupported_header.profile_value_drift.u11_u2155.fallout_signature_drift"
+        )
+        joined = " ".join(actions).lower()
+        self.assertIn("no-op", joined)
+        self.assertIn("manual-review", joined)
 
     def test_conflict_classifier_maps_cs_slot5_cm_vs_enb_workflow_mix_notice(self) -> None:
         code = _classify_conflict_code(

@@ -3928,6 +3928,12 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "unsupported_header.profile_value_drift": (
         "The header/profile values drifted into an unsupported combination; re-save/export the mesh to rebuild header tables before patching.",
     ),
+    "unsupported_header.profile_value_drift.fallout_signature_drift": (
+        "Fallout-signature header/profile drift detected; keep this mesh in guarded no-op/manual-review and re-save/export before patching.",
+    ),
+    "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift": (
+        "Malformed header-table drift signature detected without stable profile values; keep manual-review/no-op and re-export before patching.",
+    ),
     "unsupported_header.read_failure": (
         "Verify the NIF path is readable and not locked, then re-export or replace corrupt files before patching.",
     ),
@@ -4126,6 +4132,13 @@ _UNSUPPORTED_PROFILE_VALUES_RE = re.compile(
 )
 
 
+def _is_fallout_signature_drift(user_version: int, user_version_2: int) -> bool:
+    fallout_user_versions = {signature[0] for signature in _KNOWN_FALLOUT_USER_VERSION_SIGNATURES}
+    if user_version not in fallout_user_versions:
+        return False
+    return (user_version, user_version_2) not in _KNOWN_FALLOUT_USER_VERSION_SIGNATURES
+
+
 def _extract_block_index(message: str) -> int | None:
     match = _BLOCK_INDEX_RE.search(message)
     if not match:
@@ -4142,13 +4155,15 @@ def _classify_conflict_code(message: str) -> str:
     if unsupported_profile_values:
         user_version = int(unsupported_profile_values.group(1))
         user_version_2 = int(unsupported_profile_values.group(2))
+        base_code = f"unsupported_header.profile_value_drift.u{user_version}_u2{user_version_2}"
         if "could not parse full header tables" in lowered:
-            return (
-                f"unsupported_header.profile_value_drift.u{user_version}_u2{user_version_2}."
-                "header_table_drift"
-            )
-        return f"unsupported_header.profile_value_drift.u{user_version}_u2{user_version_2}"
+            base_code += ".header_table_drift"
+        if _is_fallout_signature_drift(user_version, user_version_2):
+            base_code += ".fallout_signature_drift"
+        return base_code
     if lowered.startswith("malformed or truncated nif: unsupported nif header/profile values"):
+        if "could not parse full header tables" in lowered:
+            return "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift"
         return "unsupported_header.profile_value_drift.unparsed.signature_only"
     if lowered.startswith("malformed or truncated nif: header prefix is not"):
         return "unsupported_header.header_prefix_mismatch"
