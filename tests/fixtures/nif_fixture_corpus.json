@@ -367,6 +367,26 @@
       ]
     },
     {
+      "id": "skyrim_real_semantic_slot3_drift_combo",
+      "profile": "skyrim",
+      "shader_layout": "real",
+      "user_ver2": 130,
+      "shader_type": 305419896,
+      "flags1": 2176,
+      "texture_set_layout_shift": 4,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
       "id": "skyrim_real_crossblock_parallax_envmap_glow_no_source",
       "profile": "skyrim",
       "shader_layout": "real",

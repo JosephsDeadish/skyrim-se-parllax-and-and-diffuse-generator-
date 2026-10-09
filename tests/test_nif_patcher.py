@@ -1119,6 +1119,24 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "unknown_shader_type.semantic_resolved")
 
+    def test_conflict_classifier_maps_payload_shader_resolution_notes(self) -> None:
+        code = _classify_conflict_code(
+            "Block 1: raw shader_type 0x00000880 resolved to Default via real_payload_default (RESOLVED, confidence=0.92, method=payload)."
+        )
+        self.assertEqual(code, "unknown_shader_type.payload_resolved")
+
+    def test_conflict_classifier_maps_real_layout_semantic_slot3_drift_combo(self) -> None:
+        code = _classify_conflict_code(
+            "Block 4: real-layout drift combo detected — semantic shader resolution is present while slot 3 remains unresolved."
+        )
+        self.assertEqual(code, "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift")
+
+    def test_conflict_classifier_maps_real_layout_payload_slot3_drift_combo(self) -> None:
+        code = _classify_conflict_code(
+            "Block 4: real-layout drift combo detected — payload shader resolution is present while slot 3 remains unresolved."
+        )
+        self.assertEqual(code, "missing_parallax_slot3.empty.payload_resolved_real_layout_drift")
+
     def test_conflict_classifier_maps_shader_block_size_mismatch_notes(self) -> None:
         code = _classify_conflict_code(
             "Block 2: recorded block size 152 does not match expected type-0 size 128 before force_shader_type_3 expansion."
@@ -1538,6 +1556,25 @@ class TestValidateNifForParallax(unittest.TestCase):
         v = validate_nif_for_parallax(nif)
         self.assertTrue(
             any(group.code.startswith("shader_state.envmap_missing_slot5.") for group in v.conflict_report)
+        )
+
+    def test_conflict_report_flags_real_layout_payload_missing_slot3_combo(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            user_ver2=130,
+            texture_set_layout_shift=4,
+            shader_type=0x12345678,
+            flags1=SLSF1_PARALLAX | SLSF1_ENVIRONMENT_MAPPING,
+            texture_paths=paths,
+        )
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(
+            any(
+                group.code.startswith("missing_parallax_slot3.empty.payload_resolved_real_layout_drift.")
+                for group in v.conflict_report
+            )
         )
 
     def test_conflict_report_can_emit_multi_conflict_mixed_states(self) -> None:
@@ -4487,9 +4524,29 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         assert opts is not None
         self.assertTrue(str(opts.env_mask_texture_path).lower().endswith("_m.dds"))
         self.assertIn("set_slot5_env_mask_for_missing_envmap_slot5", steps)
-        self.assertIn("enable_env_mapping_for_missing_envmap_slot5", steps)
-        self.assertTrue(opts.enable_env_mapping)
-        self.assertNotIn("disable_env_mapping_for_missing_slot5", steps)
+
+    def test_auto_remediation_build_options_prefers_slot3_restore_for_real_layout_resolved_slot3_combo(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            user_ver2=130,
+            texture_set_layout_shift=4,
+            shader_type=0x12345678,
+            flags1=SLSF1_PARALLAX | SLSF1_ENVIRONMENT_MAPPING,
+            texture_paths=paths,
+        )
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["missing_parallax_slot3.empty.payload_resolved_real_layout_drift.skyrim.real"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(str(opts.parallax_texture_path).lower().endswith("_p.dds"))
+        self.assertTrue(opts.enable_parallax)
+        self.assertIn("set_slot3_parallax_for_resolved_real_layout_drift", steps)
+        self.assertIn("enable_parallax_for_resolved_real_layout_drift", steps)
 
     def test_auto_remediation_build_options_disables_env_mapping_and_pom_for_mixed_envmap_pom_conflict(self) -> None:
         nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP)

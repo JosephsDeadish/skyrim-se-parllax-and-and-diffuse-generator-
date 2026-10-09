@@ -3947,6 +3947,9 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "unknown_shader_type.semantic_resolved": (
         "Unknown raw shader type was semantically inferred from flags/slots; verify block intent manually when processing malformed long-tail meshes.",
     ),
+    "unknown_shader_type.payload_resolved": (
+        "Unknown raw shader type was resolved from real-layout payload cues; verify block intent manually when processing malformed long-tail meshes.",
+    ),
     "incompatible_shader_type": (
         "Patch only Default(0), Heightmap(3), or EnvMap(1) shader blocks.",
         "Use unknown_shader_type_map for explicit raw shader-type overrides when safe.",
@@ -3998,6 +4001,14 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "missing_parallax_slot3.empty": (
         "Set texture slot 3 to a valid _p.dds height map path.",
         "Verify slot 3 is not blank after exports/conversions from DCC tools.",
+    ),
+    "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift": (
+        "Real-layout drift detected: unknown raw shader type was semantically resolved while slot 3 is unresolved.",
+        "Prefer restoring a deterministic slot-3 _p.dds path first; disable parallax/POM only when no safe slot-3 reconstruction is available.",
+    ),
+    "missing_parallax_slot3.empty.payload_resolved_real_layout_drift": (
+        "Real-layout drift detected: unknown raw shader type was payload-resolved while slot 3 is unresolved.",
+        "Prefer restoring a deterministic slot-3 _p.dds path first; disable parallax/POM only when no safe slot-3 reconstruction is available.",
     ),
     "missing_parallax_slot3": (
         "Set texture slot 3 to a valid _p.dds height map path.",
@@ -4223,6 +4234,8 @@ def _classify_conflict_code(message: str) -> str:
         return "fallout_profile.guarded_noop_layout_policy_exhausted"
     if "raw shader_type 0x" in lowered and "resolved to" in lowered and "method=semantic" in lowered:
         return "unknown_shader_type.semantic_resolved"
+    if "raw shader_type 0x" in lowered and "resolved to" in lowered and "method=payload" in lowered:
+        return "unknown_shader_type.payload_resolved"
     if "incompatible shader type" in lowered:
         return "incompatible_shader_type"
     if "shader type is " in lowered and "not heightmap/3" in lowered and "force_shader_type_3=true" in lowered:
@@ -4267,6 +4280,18 @@ def _classify_conflict_code(message: str) -> str:
         return "missing_parallax_slot3.empty"
     if "supply parallax_texture_path pointing to a _p.dds height map" in lowered:
         return "missing_parallax_slot3.empty.hint_path"
+    if (
+        "real-layout drift combo" in lowered
+        and "semantic shader resolution is present" in lowered
+        and "slot 3 remains unresolved" in lowered
+    ):
+        return "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift"
+    if (
+        "real-layout drift combo" in lowered
+        and "payload shader resolution is present" in lowered
+        and "slot 3 remains unresolved" in lowered
+    ):
+        return "missing_parallax_slot3.empty.payload_resolved_real_layout_drift"
     if "slot 0 diffuse path" in lowered and "not a .dds texture path" in lowered:
         return "path_slot_diffuse.non_dds"
     if "slot 0 diffuse path" in lowered and "authoring suffix naming" in lowered:
@@ -4421,6 +4446,7 @@ def _build_conflict_report(
 ) -> list[NifConflictSummary]:
     info_by_block = {info.block_index: info for info in (infos or [])}
     grouped: dict[tuple[str, str, str], list[str]] = {}
+    block_code_sets: dict[tuple[str, str, int], set[str]] = {}
     for message in [*result.skip_reasons, *result.issues]:
         base_code = _classify_conflict_code(message)
         block_idx = _extract_block_index(message)
@@ -4433,6 +4459,33 @@ def _build_conflict_report(
                 layout = "unknown"
         profile = result.detected_game_profile or _GAME_PROFILE_UNKNOWN
         grouped.setdefault((base_code, profile, layout), []).append(message)
+        if block_idx is not None:
+            bucket_key = (profile, layout, block_idx)
+            block_code_sets.setdefault(bucket_key, set()).add(base_code)
+
+    for (profile, layout, block_idx), block_codes in block_code_sets.items():
+        if layout != "real":
+            continue
+        if (
+            "missing_parallax_slot3.empty" in block_codes
+            and "unknown_shader_type.semantic_resolved" in block_codes
+        ):
+            grouped.setdefault(
+                ("missing_parallax_slot3.empty.semantic_resolved_real_layout_drift", profile, layout),
+                [],
+            ).append(
+                f"Block {block_idx}: real-layout drift combo detected — semantic shader resolution is present while slot 3 remains unresolved."
+            )
+        if (
+            "missing_parallax_slot3.empty" in block_codes
+            and "unknown_shader_type.payload_resolved" in block_codes
+        ):
+            grouped.setdefault(
+                ("missing_parallax_slot3.empty.payload_resolved_real_layout_drift", profile, layout),
+                [],
+            ).append(
+                f"Block {block_idx}: real-layout drift combo detected — payload shader resolution is present while slot 3 remains unresolved."
+            )
     summaries: list[NifConflictSummary] = []
     for (base_code, profile, layout), messages in sorted(
         grouped.items(),
@@ -4796,6 +4849,21 @@ def build_auto_remediation_patch_options(
         if guessed_parallax:
             opts.parallax_texture_path = guessed_parallax
             applied_steps.append("set_slot3_parallax")
+    if any(
+        code.startswith("missing_parallax_slot3.empty.semantic_resolved_real_layout_drift")
+        or code.startswith("missing_parallax_slot3.empty.payload_resolved_real_layout_drift")
+        for code in base_codes
+    ):
+        if guessed_parallax:
+            opts.parallax_texture_path = guessed_parallax
+            opts.enable_parallax = True
+            applied_steps.append("set_slot3_parallax_for_resolved_real_layout_drift")
+            applied_steps.append("enable_parallax_for_resolved_real_layout_drift")
+        else:
+            opts.disable_parallax = True
+            opts.disable_pom = True
+            applied_steps.append("disable_parallax_for_resolved_real_layout_drift")
+            applied_steps.append("disable_pom_for_resolved_real_layout_drift")
     if any(code.startswith("path_slot_normal") for code in base_codes):
         if guessed_normal:
             opts.normal_texture_path = guessed_normal
