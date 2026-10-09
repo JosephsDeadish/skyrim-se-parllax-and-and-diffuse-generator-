@@ -3891,6 +3891,18 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
         "This mesh has no patchable BSLightingShaderProperty blocks; keep as no-op or convert/re-export to a compatible Skyrim/Fallout layout before patching.",
         "Use validate mode to confirm whether the mesh is legacy, unsupported, or intentionally non-patchable.",
     ),
+    "unsupported_header.non_patchable_shader_family_detected": (
+        "Detected legacy/non-patchable shader/material families; convert/re-export the mesh to BSLightingShaderProperty before patching.",
+    ),
+    "unsupported_header.legacy_pp_lighting_shader": (
+        "This mesh uses BSShaderPPLightingProperty; convert it to BSLightingShaderProperty before patching.",
+    ),
+    "unsupported_header.legacy_ni_texturing_property": (
+        "This mesh uses NiTexturingProperty; modernize/re-export to Skyrim-era BSLightingShaderProperty before patching.",
+    ),
+    "unsupported_header.convert_to_bslighting_required": (
+        "Convert/re-export the mesh so it uses BSLightingShaderProperty before running auto-patch/remediation.",
+    ),
     "unknown_shader_type.semantic_resolved": (
         "Unknown raw shader type was semantically inferred from flags/slots; verify block intent manually when processing malformed long-tail meshes.",
     ),
@@ -4110,6 +4122,16 @@ def _classify_conflict_code(message: str) -> str:
         return "unsupported_header.reexport_resolution"
     if "resolution: open the mesh in nifskope or the creation kit and re-save/export it as a clean skyrim se nif" in lowered:
         return "unsupported_header.reexport_resolution"
+    if lowered.startswith("detected shader/material blocks:"):
+        return "unsupported_header.non_patchable_shader_family_detected"
+    if "this mesh uses bsshaderpplightingproperty instead of bslightingshaderproperty" in lowered:
+        return "unsupported_header.legacy_pp_lighting_shader"
+    if "this mesh uses legacy nitexturingproperty blocks instead of skyrim shader properties" in lowered:
+        return "unsupported_header.legacy_ni_texturing_property"
+    if "resolution: convert the mesh to use bslightingshaderproperty in nifskope/ck, then patch it again" in lowered:
+        return "unsupported_header.convert_to_bslighting_required"
+    if "resolution: re-export or modernize the mesh so it uses bslightingshaderproperty before patching" in lowered:
+        return "unsupported_header.convert_to_bslighting_required"
     if "fallout profile" in lowered or "experimental_fallout_write" in lowered:
         return "fallout_profile"
     if "detected fallout-era profile" in lowered:

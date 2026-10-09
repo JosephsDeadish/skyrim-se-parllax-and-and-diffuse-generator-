@@ -1178,6 +1178,36 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "workflow_mix.cs_slot5_generic_alias")
 
+    def test_conflict_classifier_maps_non_patchable_shader_family_summary(self) -> None:
+        code = _classify_conflict_code(
+            "Detected shader/material blocks: BSShaderPPLightingProperty, NiTexturingProperty."
+        )
+        self.assertEqual(code, "unsupported_header.non_patchable_shader_family_detected")
+
+    def test_conflict_classifier_maps_legacy_pp_lighting_notice(self) -> None:
+        code = _classify_conflict_code(
+            "This mesh uses BSShaderPPLightingProperty instead of BSLightingShaderProperty, so this app cannot patch parallax automatically."
+        )
+        self.assertEqual(code, "unsupported_header.legacy_pp_lighting_shader")
+
+    def test_conflict_classifier_maps_legacy_ni_texturing_notice(self) -> None:
+        code = _classify_conflict_code(
+            "This mesh uses legacy NiTexturingProperty blocks instead of Skyrim shader properties, so Skyrim SE parallax cannot be auto-patched here."
+        )
+        self.assertEqual(code, "unsupported_header.legacy_ni_texturing_property")
+
+    def test_conflict_classifier_maps_convert_to_bslighting_resolution(self) -> None:
+        code = _classify_conflict_code(
+            "Resolution: convert the mesh to use BSLightingShaderProperty in NifSkope/CK, then patch it again."
+        )
+        self.assertEqual(code, "unsupported_header.convert_to_bslighting_required")
+
+    def test_conflict_classifier_maps_modernize_to_bslighting_resolution(self) -> None:
+        code = _classify_conflict_code(
+            "Resolution: re-export or modernize the mesh so it uses BSLightingShaderProperty before patching."
+        )
+        self.assertEqual(code, "unsupported_header.convert_to_bslighting_required")
+
     def test_conflict_report_classifies_slot_specific_paths(self) -> None:
         paths = ["textures\\arch\\stone_n.dds"] + [""] * 8
         nif = _write_nif(self.tmp, texture_paths=paths)
@@ -3618,13 +3648,19 @@ class TestRealModSamplePacks(unittest.TestCase):
                 {str(k): int(v) for k, v in expected_family_case_counts.items()},
                 f"{pack_id}: family case counts changed",
             )
-            allowed_fallback_groups = max(2, int(total_conflict_groups * 0.08))
+            expected_max_fallback_ratio = float(pack.get("expected_max_fallback_ratio", 0.02))
+            expected_max_fallback_groups = pack.get("expected_max_fallback_groups")
+            if expected_max_fallback_groups is None:
+                allowed_fallback_groups = int(total_conflict_groups * expected_max_fallback_ratio)
+            else:
+                allowed_fallback_groups = int(expected_max_fallback_groups)
             self.assertLessEqual(
                 fallback_conflict_groups,
                 allowed_fallback_groups,
                 (
                     f"{pack_id}: fallback_or_unknown groups {fallback_conflict_groups} exceed threshold "
-                    f"{allowed_fallback_groups} out of {total_conflict_groups} grouped conflicts"
+                    f"{allowed_fallback_groups} out of {total_conflict_groups} grouped conflicts "
+                    f"(max_ratio={expected_max_fallback_ratio:.3f})"
                 ),
             )
             self.assertEqual(

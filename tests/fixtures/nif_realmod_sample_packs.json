@@ -2,6 +2,7 @@
   "packs": [
     {
       "id": "skyrim_realmod_family_pack",
+      "expected_max_fallback_ratio": 0.0,
       "expected_family_case_counts": {
         "architecture": 12,
         "clutter": 3,
@@ -1041,6 +1042,7 @@
     },
     {
       "id": "fallout_guarded_family_pack",
+      "expected_max_fallback_ratio": 0.0,
       "expected_family_case_counts": {
         "architecture": 29,
         "effects": 27,
