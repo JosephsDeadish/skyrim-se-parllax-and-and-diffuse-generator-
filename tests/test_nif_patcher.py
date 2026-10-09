@@ -1077,7 +1077,13 @@ class TestValidateNifForParallax(unittest.TestCase):
         code = _classify_conflict_code(
             "Malformed or truncated NIF: Unsupported NIF header/profile values"
         )
-        self.assertEqual(code, "unsupported_header.profile_value_drift")
+        self.assertEqual(code, "unsupported_header.profile_value_drift.unparsed")
+
+    def test_conflict_classifier_maps_wrapped_unsupported_profile_drift_with_values(self) -> None:
+        code = _classify_conflict_code(
+            "Malformed or truncated NIF: Unsupported NIF header/profile values (user_version=11, user_version_2=155)."
+        )
+        self.assertEqual(code, "unsupported_header.profile_value_drift.u11_u2155")
 
     def test_conflict_classifier_maps_wrapped_header_prefix_notice(self) -> None:
         code = _classify_conflict_code(
@@ -3512,6 +3518,7 @@ class TestParitySampleMatrix(unittest.TestCase):
         report = build_parity_delta_report_text(summarize_validation_conflicts(validations), max_rows=12)
         self.assertIn("NIF parity delta report", report)
         self.assertIn("| Conflict code | Count | Files | Auto-remediation | Suggested action |", report)
+        self.assertIn("Top manual parity priorities (frequency-first):", report)
 
 
 class TestRealModSamplePacks(unittest.TestCase):
@@ -4539,6 +4546,7 @@ class TestCompatibilityReport(unittest.TestCase):
         report = build_parity_delta_report_text(summary, max_rows=5)
         self.assertIn("NIF parity delta report", report)
         self.assertIn("| Conflict code | Count | Files | Auto-remediation | Suggested action |", report)
+        self.assertNotIn("Top manual parity priorities (frequency-first):", report)
         self.assertIn("`missing_parallax_flag.flag1_not_set.", report)
 
     def test_parity_delta_report_handles_empty_summary(self) -> None:

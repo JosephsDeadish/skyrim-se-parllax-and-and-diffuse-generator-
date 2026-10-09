@@ -468,6 +468,8 @@ def build_batch_bottleneck_hints(
         hints.append("Large 1000+ run: switch checkpoint mode to Resume and keep live preview paused unless manual spot-checks are needed.")
     if max_source_dimension >= 8192 or max_source_megapixels >= 48.0:
         hints.append("Very large source textures detected; reduce worker count and keep live preview paused unless needed.")
+    if total_sources >= 1000 and avg_file_seconds > 0.9:
+        hints.append("Queue pacing is active for UI responsiveness on this huge run; brief status-update delays are expected.")
     if high_res_4k_count >= 50:
         hints.append("Large high-res set detected; run core outputs first, then advanced/niche outputs in a second pass.")
     if max_file_seconds >= max(5.0, avg_file_seconds * 2.5):
@@ -8137,6 +8139,7 @@ if GUI_AVAILABLE:
                 variable=self.show_advanced_workflow_outputs_var,
             )
             _advanced_workflow_toggle.grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
+            _advanced_workflow_toggle_layout = _advanced_workflow_toggle.grid_info()
             self._add_tooltip(
                 _advanced_workflow_toggle,
                 "Advanced output groups are hidden while Basic layout is on.\n"
@@ -8243,6 +8246,7 @@ if GUI_AVAILABLE:
                 variable=self.show_advanced_generation_var,
             )
             _show_advanced_generation_check.grid(row=1, column=3, columnspan=2, sticky=tk.E, pady=(6, 2))
+            _show_advanced_generation_check_layout = _show_advanced_generation_check.grid_info()
             self._add_tooltip(
                 _show_advanced_generation_check,
                 "Advanced setup rows are hidden while Basic layout is on.\n"
@@ -8982,6 +8986,14 @@ if GUI_AVAILABLE:
                 _advanced_workflow_toggle.configure(
                     state=(tk.DISABLED if simplified else tk.NORMAL)
                 )
+                if simplified:
+                    _show_advanced_generation_check.grid_remove()
+                    _advanced_workflow_toggle.grid_remove()
+                else:
+                    if not _show_advanced_generation_check.winfo_manager():
+                        _show_advanced_generation_check.grid(**_show_advanced_generation_check_layout)
+                    if not _advanced_workflow_toggle.winfo_manager():
+                        _advanced_workflow_toggle.grid(**_advanced_workflow_toggle_layout)
                 for widget in advanced_batch_widgets:
                     if show_advanced:
                         if not widget.winfo_manager():
@@ -11425,7 +11437,8 @@ if GUI_AVAILABLE:
                         self._tr(
                             "You queued {count} textures.\n\n"
                             "Resume mode is strongly recommended for 1000+ runs.\n"
-                            "It saves progress so crashes/restarts do not force a full rerun.\n\n"
+                            "It saves progress so crashes/restarts do not force a full rerun,\n"
+                            "and keeps queue behavior safer for long unattended processing.\n\n"
                             "Enable Resume mode now?"
                         ).format(count=len(self.selected_inputs)),
                         parent=self.root,
@@ -11709,6 +11722,8 @@ if GUI_AVAILABLE:
                     perf_note += f" Resume mode skipped {resumed_completed_count} file(s) from checkpoint."
                 if checkpoint_path.exists():
                     perf_note += f" Checkpoint file: {checkpoint_path.name}."
+                if is_huge_batch:
+                    perf_note += " Huge-run queue pacing is active to keep the UI responsive."
                 if self.show_batch_preview_var.get():
                     self.status_var.set(
                         f"Queued {len(self.selected_inputs)} source texture(s). "

@@ -1044,8 +1044,8 @@
       "id": "fallout_guarded_family_pack",
       "expected_max_fallback_ratio": 0.0,
       "expected_family_case_counts": {
-        "architecture": 29,
-        "effects": 27,
+        "architecture": 30,
+        "effects": 28,
         "clutter": 22,
         "armor": 1,
         "landscape": 1,
@@ -4451,6 +4451,63 @@
           "intentional_strategy_difference": true,
           "expected_difference_bucket": "partial_recoverability_guarded",
           "safety_difference_note": "When slot-5 rebuild provenance is missing, local guarded mode intentionally disables env mapping instead of speculative cross-material reconstruction."
+        },
+        {
+          "id": "pack_fallout_architecture_real_crlf_u16_profile_drift_u11_u2140_v7",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 140,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "num_block_types_delta": -1,
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift.unparsed."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_absent_remediation_steps": [
+            "enable_env_mapping",
+            "set_slot5_env_mask"
+          ],
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Larger-pack drift variant: explicit unsupported fallout-adjacent profile values remain deterministic no-op/manual-review."
+        },
+        {
+          "id": "pack_fallout_effects_real_crlf_u16_profile_drift_u12_u2142_v7",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 12,
+          "user_ver2": 142,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "num_block_types_delta": -1,
+          "extra_shader_texture_set_refs": [
+            77
+          ],
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift.unparsed."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_absent_remediation_steps": [
+            "enable_env_mapping",
+            "disable_env_mapping_for_missing_slots4_5"
+          ],
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Larger-pack drift variant: explicit unsupported profile values with table drift remain guarded manual-review/no-op."
         }
       ],
       "expected_family_allowed_difference_buckets": {

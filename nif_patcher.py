@@ -1199,6 +1199,10 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
         user_version_2 = header.user_version_2
         profile = _detect_game_profile(user_version, user_version_2)
         if profile == _GAME_PROFILE_FALLOUT:
+            diagnostics[0] = (
+                "Malformed or truncated NIF: Unsupported NIF header/profile values "
+                f"(user_version={user_version}, user_version_2={user_version_2})."
+            )
             diagnostics.append(
                 f"Detected Fallout-era NIF header (user_version={user_version}, user_version_2={user_version_2}). "
                 "Fallout patching is available in guarded experimental mode."
@@ -1210,6 +1214,10 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
             )
             return diagnostics
         if profile != _GAME_PROFILE_SKYRIM:
+            diagnostics[0] = (
+                "Malformed or truncated NIF: Unsupported NIF header/profile values "
+                f"(user_version={user_version}, user_version_2={user_version_2})."
+            )
             diagnostics.append(
                 f"Unexpected user version values ({user_version}, {user_version_2}). The file may use a different game/export format."
             )
@@ -4053,6 +4061,10 @@ _UNEXPECTED_USER_VERSION_VALUES_RE = re.compile(
     r"unexpected user version values\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)",
     re.IGNORECASE,
 )
+_UNSUPPORTED_PROFILE_VALUES_RE = re.compile(
+    r"unsupported nif header/profile values\s*\(\s*user_version\s*=\s*(\d+)\s*,\s*user_version_2\s*=\s*(\d+)\s*\)",
+    re.IGNORECASE,
+)
 
 
 def _extract_block_index(message: str) -> int | None:
@@ -4067,8 +4079,13 @@ def _extract_block_index(message: str) -> int | None:
 
 def _classify_conflict_code(message: str) -> str:
     lowered = message.lower()
+    unsupported_profile_values = _UNSUPPORTED_PROFILE_VALUES_RE.search(message)
+    if unsupported_profile_values:
+        user_version = int(unsupported_profile_values.group(1))
+        user_version_2 = int(unsupported_profile_values.group(2))
+        return f"unsupported_header.profile_value_drift.u{user_version}_u2{user_version_2}"
     if lowered.startswith("malformed or truncated nif: unsupported nif header/profile values"):
-        return "unsupported_header.profile_value_drift"
+        return "unsupported_header.profile_value_drift.unparsed"
     if lowered.startswith("malformed or truncated nif: header prefix is not"):
         return "unsupported_header.header_prefix_mismatch"
     if lowered.startswith("malformed or truncated nif: nif version is 0x"):
@@ -4483,6 +4500,21 @@ def build_parity_delta_report_text(
             f"| `{group.code}` | {group.count} | {group.file_count} | {support} | {action} |"
         )
     lines.append("")
+    manual_priority = [
+        group for group in summaries
+        if _auto_remediation_support_level(group.code) == "manual"
+    ]
+    if manual_priority:
+        lines.append("Top manual parity priorities (frequency-first):")
+        lines.append("")
+        lines.append("| Priority | Conflict code | Count | Files |")
+        lines.append("| --- | --- | ---: | ---: |")
+        for index, group in enumerate(manual_priority[:5], start=1):
+            priority = "P0" if index <= 2 else "P1"
+            lines.append(
+                f"| {priority} | `{group.code}` | {group.count} | {group.file_count} |"
+            )
+        lines.append("")
     lines.append(
         "Interpretation: prioritize high-count `manual` rows first when closing parity gaps against external patchers."
     )
