@@ -546,6 +546,162 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                         )
 
 
+def _run_packaged_runtime_env_stress(artifact_dir: Path) -> list[dict[str, object]]:
+    """Run packaged CLI smoke probes across runtime environment variants."""
+    print("\n=== Packaged runtime environment stress probes ===")
+    binary = _resolve_packaged_smoke_binary(artifact_dir)
+    smoke_io = artifact_dir / "packaging_smoke" / "runtime_env_stress"
+    smoke_io.mkdir(parents=True, exist_ok=True)
+    smoke_input = smoke_io / "sample_input.png"
+    smoke_input.write_bytes(
+        base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP8z8Dwn4GBgYGJAQoAHxcCAr7cGDwAAAAASUVORK5CYII="
+        )
+    )
+    probes: tuple[tuple[str, dict[str, str]], ...] = (
+        ("default", {}),
+        ("utf8_mode", {"PYTHONUTF8": "1"}),
+        ("c_locale", {"LC_ALL": "C"}),
+    )
+    scenario = next(
+        (entry for entry in _packaged_smoke_scenarios() if str(entry.get("name", "")) == "vanilla"),
+        _packaged_smoke_scenarios()[0],
+    )
+    scenario_args = [str(arg) for arg in (scenario.get("args", []) or [])]
+    results: list[dict[str, object]] = []
+    for name, env_overrides in probes:
+        env = dict(subprocess.os.environ)
+        env.update(env_overrides)
+        help_run = subprocess.run(
+            [str(binary), "--help"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if help_run.returncode != 0:
+            print(help_run.stdout)
+            print(help_run.stderr)
+            raise SystemExit(help_run.returncode)
+        help_output = (help_run.stdout or "") + "\n" + (help_run.stderr or "")
+        if "--render-profile" not in help_output:
+            raise SystemExit(
+                f"Packaged runtime env probe '{name}' did not expose expected --help options."
+            )
+        out_dir = smoke_io / f"out_{name}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        run = subprocess.run(
+            [
+                str(binary),
+                str(smoke_input),
+                "--output-dir",
+                str(out_dir),
+                *scenario_args,
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        if run.returncode != 0:
+            print(run.stdout)
+            print(run.stderr)
+            raise SystemExit(run.returncode)
+        produced = sorted(out_dir.glob("*.dds"))
+        if not produced:
+            raise SystemExit(
+                f"Packaged runtime env probe '{name}' produced no DDS outputs for scenario '{scenario.get('name', 'scenario')}'."
+            )
+        results.append(
+            {
+                "probe": name,
+                "env_overrides": env_overrides,
+                "scenario": str(scenario.get("name", "scenario")),
+                "dds_count": len(produced),
+                "status": "pass",
+            }
+        )
+    return results
+
+
+def _write_packaged_accessibility_acceptance_artifacts(
+    *,
+    artifact_dir: Path,
+    step_status: list[tuple[str, str]],
+    runtime_env_probes: list[dict[str, object]],
+) -> tuple[Path, Path]:
+    generated_at = datetime.now(timezone.utc).isoformat()
+    manual_checks: list[dict[str, object]] = [
+        {
+            "id": "keyboard_focus_order",
+            "platform": "windows_packaged",
+            "status": "pending_manual",
+            "acceptance": "Keyboard-only traversal reaches all primary controls in logical order with visible focus.",
+        },
+        {
+            "id": "screen_reader_control_naming",
+            "platform": "windows_packaged",
+            "status": "pending_manual",
+            "acceptance": "Screen reader announces main controls, toggles, and status labels with understandable names.",
+        },
+        {
+            "id": "status_announcement_clarity",
+            "platform": "windows_packaged",
+            "status": "pending_manual",
+            "acceptance": "Progress/status updates are understandable and non-ambiguous during long batch runs.",
+        },
+        {
+            "id": "high_dpi_scaling",
+            "platform": "windows_packaged",
+            "status": "pending_manual",
+            "acceptance": "UI remains readable and usable at common high-DPI scales (125/150/200%).",
+        },
+    ]
+    automated = [dict(row) for row in runtime_env_probes]
+    step_rows = [
+        {"name": name, "status": status}
+        for name, status in step_status
+        if name.startswith("Packaging smoke build")
+        or name.startswith("Packaged executable smoke run")
+        or name.startswith("Packaged runtime environment stress")
+    ]
+    payload: dict[str, object] = {
+        "generated_at_utc": generated_at,
+        "automated_checks": automated,
+        "related_release_steps": step_rows,
+        "manual_checks": manual_checks,
+    }
+    json_path = artifact_dir / "packaged_accessibility_acceptance.json"
+    json_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    lines = [
+        "# Packaged Accessibility & Native Display Acceptance",
+        "",
+        f"Generated: {generated_at}",
+        "",
+        "## Automated qualification probes",
+        "",
+        "| Probe | Scenario | DDS outputs | Status |",
+        "| --- | --- | ---: | --- |",
+    ]
+    for row in automated:
+        lines.append(
+            f"| `{row.get('probe', '')}` | `{row.get('scenario', '')}` | {int(row.get('dds_count', 0) or 0)} | {row.get('status', 'unknown')} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Manual acceptance checklist (Windows packaged app first)",
+            "",
+        ]
+    )
+    for row in manual_checks:
+        lines.append(f"- [ ] **{row['id']}** — {row['acceptance']}")
+    md_path = artifact_dir / "packaged_accessibility_acceptance.md"
+    md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return json_path, md_path
+
+
 def _collect_localization_coverage(
     translations_dir: Path,
 ) -> dict[str, object]:
@@ -1527,6 +1683,10 @@ def main() -> int:
         packaged_smoke_loops = max(1, int(args.packaged_smoke_loops))
         _run_packaged_executable_smoke(args.artifact_dir, loops=packaged_smoke_loops)
         step_status.append((f"Packaged executable smoke run x{packaged_smoke_loops}", "pass"))
+        runtime_env_probes = _run_packaged_runtime_env_stress(args.artifact_dir)
+        step_status.append(("Packaged runtime environment stress probes", "pass"))
+    else:
+        runtime_env_probes = []
     (
         localization_report,
         localization_json_path,
@@ -1561,6 +1721,14 @@ def main() -> int:
         localization_json_path=localization_json_path,
         localization_md_path=localization_md_path,
     )
+    (
+        packaged_accessibility_json_path,
+        packaged_accessibility_md_path,
+    ) = _write_packaged_accessibility_acceptance_artifacts(
+        artifact_dir=args.artifact_dir,
+        step_status=step_status,
+        runtime_env_probes=runtime_env_probes,
+    )
     history_path = None
     if args.history_file is not None:
         history_path = _append_trend_history(
@@ -1576,6 +1744,8 @@ def main() -> int:
     print(f"NIF real-sample parity delta markdown artifact: {realmod_delta_md_path}")
     print(f"Localization coverage JSON artifact: {localization_json_path}")
     print(f"Localization coverage markdown artifact: {localization_md_path}")
+    print(f"Packaged accessibility acceptance JSON artifact: {packaged_accessibility_json_path}")
+    print(f"Packaged accessibility acceptance markdown artifact: {packaged_accessibility_md_path}")
     if history_path is not None:
         print(f"NIF trend history artifact: {history_path}")
     prior_bucket_distribution = _load_prior_bucket_distribution(
