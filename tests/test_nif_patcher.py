@@ -1130,6 +1130,12 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "unsupported_header.num_extra_recovery")
 
+    def test_conflict_classifier_maps_unexpected_user_version_values_to_deterministic_subcode(self) -> None:
+        code = _classify_conflict_code(
+            "Unexpected user version values (11, 155). The file may use a different game/export format."
+        )
+        self.assertEqual(code, "unsupported_header.user_version_value_drift.u11_u2155")
+
     def test_conflict_classifier_maps_strict_unknown_shader_failure(self) -> None:
         code = _classify_conflict_code("Strict unknown-shader check failed.")
         self.assertEqual(code, "unknown_shader_type.strict_violation")
@@ -3365,6 +3371,7 @@ class TestRealModSamplePacks(unittest.TestCase):
             family_difference_buckets: dict[str, dict[str, int]] = {}
             fallback_conflict_groups = 0
             total_conflict_groups = 0
+            generic_unsupported_header_groups = 0
             for nif_path, validation in zip(corpus, validations):
                 case = case_map.get(nif_path.stem, {})
                 family = str(case.get("family", "unknown")).strip() or "unknown"
@@ -3421,6 +3428,13 @@ class TestRealModSamplePacks(unittest.TestCase):
                 total_conflict_groups += len(codes)
                 fallback_conflict_groups += sum(
                     1 for code in codes if str(code).startswith("fallback_or_unknown.")
+                )
+                generic_unsupported_header_groups += sum(
+                    1
+                    for code in codes
+                    if str(code).startswith("unsupported_header.")
+                    and str(code).split(".")[0] == "unsupported_header"
+                    and len(str(code).split(".")) == 3
                 )
                 if intentional_strategy_difference:
                     self.assertTrue(
@@ -3514,6 +3528,11 @@ class TestRealModSamplePacks(unittest.TestCase):
                     f"{pack_id}: fallback_or_unknown groups {fallback_conflict_groups} exceed threshold "
                     f"{allowed_fallback_groups} out of {total_conflict_groups} grouped conflicts"
                 ),
+            )
+            self.assertEqual(
+                generic_unsupported_header_groups,
+                0,
+                f"{pack_id}: found {generic_unsupported_header_groups} generic unsupported_header groups; promote to deterministic subcodes",
             )
             for family, stats in family_pass_fail.items():
                 self.assertEqual(stats["fail"], 0, f"{pack_id}: family {family} has failing parity expectations")

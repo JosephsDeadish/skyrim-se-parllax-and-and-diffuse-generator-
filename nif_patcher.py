@@ -4002,6 +4002,10 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
 
 
 _BLOCK_INDEX_RE = re.compile(r"block\s+(\d+)", re.IGNORECASE)
+_UNEXPECTED_USER_VERSION_VALUES_RE = re.compile(
+    r"unexpected user version values\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)",
+    re.IGNORECASE,
+)
 
 
 def _extract_block_index(message: str) -> int | None:
@@ -4042,6 +4046,11 @@ def _classify_conflict_code(message: str) -> str:
         return "unsupported_header.string_read_out_of_range"
     if "no bslightingshaderproperty blocks found or not a supported skyrim/fallout nif" in lowered:
         return "unsupported_header.no_patchable_shader_blocks"
+    unexpected_user_versions = _UNEXPECTED_USER_VERSION_VALUES_RE.search(message)
+    if unexpected_user_versions:
+        user_version = int(unexpected_user_versions.group(1))
+        user_version_2 = int(unexpected_user_versions.group(2))
+        return f"unsupported_header.user_version_value_drift.u{user_version}_u2{user_version_2}"
     if "unsupported nif header/profile values" in lowered or "unexpected user version values" in lowered:
         return "unsupported_header"
     if "header prefix is not a skyrim/gamebryo 20.2.0.7 nif" in lowered:
