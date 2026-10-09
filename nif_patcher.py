@@ -3879,6 +3879,9 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "unsupported_header.reexport_resolution": (
         "Re-open and re-export/re-save the mesh in NifSkope or the Creation Kit to rebuild malformed header/block tables before patching.",
     ),
+    "unsupported_header.profile_value_drift": (
+        "The header/profile values drifted into an unsupported combination; re-save/export the mesh to rebuild header tables before patching.",
+    ),
     "unsupported_header.read_failure": (
         "Verify the NIF path is readable and not locked, then re-export or replace corrupt files before patching.",
     ),
@@ -4013,6 +4016,14 @@ def _extract_block_index(message: str) -> int | None:
 
 def _classify_conflict_code(message: str) -> str:
     lowered = message.lower()
+    if lowered.startswith("malformed or truncated nif: unsupported nif header/profile values"):
+        return "unsupported_header.profile_value_drift"
+    if lowered.startswith("malformed or truncated nif: header prefix is not"):
+        return "unsupported_header.header_prefix_mismatch"
+    if lowered.startswith("malformed or truncated nif: nif version is 0x"):
+        return "unsupported_header.version_mismatch"
+    if lowered.startswith("malformed or truncated nif: the nif header line is incomplete"):
+        return "unsupported_header.truncated_header_line"
     if "recorded block size" in lowered and "expected type-0 size" in lowered:
         return "unsupported_header.shader_block_size_mismatch"
     if lowered.startswith("cannot read nif:"):

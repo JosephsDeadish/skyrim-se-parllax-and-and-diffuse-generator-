@@ -814,9 +814,9 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 27,
-        "effects": 22,
-        "clutter": 20,
+        "architecture": 28,
+        "effects": 23,
+        "clutter": 21,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -874,7 +874,8 @@
         "skip_alpha_decal_lighting.decal_flag.fallout.",
         "unsupported_header.",
         "skip_alpha_decal_lighting.subsurface_flags.fallout.",
-        "skip_alpha_decal_lighting.anisotropic_flag.fallout."
+        "skip_alpha_decal_lighting.anisotropic_flag.fallout.",
+        "unsupported_header.profile_value_drift."
       ],
       "cases": [
         {
@@ -3775,6 +3776,151 @@
           "expected_no_auto_remediation": true,
           "expected_difference_bucket": "partial_recoverability_guarded",
           "safety_difference_note": "Additional malformed Fallout family: u16 texture-set count drift under cross-block clutter patterns remains deterministic manual-review/no-op."
+        },
+        {
+          "id": "pack_fallout_architecture_real_crlf_u16_numblocktypes_refskew_malformed_long_tail_v4",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 155,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "num_block_types_delta": -1,
+          "extra_shader_texture_set_refs": [
+            101
+          ],
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 14
+            },
+            {
+              "ordinal": 3,
+              "delta": -9
+            }
+          ],
+          "texture_paths": [
+            "textures\\architecture\\vault\\vaultcolumn.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\vaultcolumn_e.dds",
+            "textures\\architecture\\vault\\vaultcolumn_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_absent_remediation_steps": [
+            "set_slot3_parallax",
+            "enable_env_mapping",
+            "set_slot5_env_mask"
+          ],
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Additional malformed Fallout long-tail family: mixed num-block-type/ref-skew drift is classified deterministically and kept manual-review/no-op."
+        },
+        {
+          "id": "pack_fallout_effects_real_crlf_u16_numblocks_refskew_malformed_long_tail_v4",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 155,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "num_blocks_delta": 2,
+          "extra_shader_texture_set_refs": [
+            88
+          ],
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 11
+            },
+            {
+              "ordinal": 3,
+              "delta": -7
+            }
+          ],
+          "texture_paths": [
+            "textures\\effects\\reactor\\steamcoil.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\steamcoil_e.dds",
+            "textures\\effects\\reactor\\steamcoil_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_absent_remediation_steps": [
+            "set_slot3_parallax",
+            "disable_env_mapping_for_missing_slots4_5"
+          ],
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Additional malformed Fallout long-tail family: cross-block num-block drift with ref-skew is classified deterministically and stays guarded no-op."
+        },
+        {
+          "id": "pack_fallout_clutter_legacy_crlf_u16_numblocktypes_singlepass_malformed_long_tail_v4",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "legacy",
+          "user_version": 11,
+          "user_ver2": 155,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 0,
+          "flags1": 32,
+          "num_block_types_delta": -1,
+          "extra_shader_texture_set_refs": [
+            42
+          ],
+          "texture_paths": [
+            "textures\\clutter\\industrial\\relaybox.dds",
+            "",
+            "",
+            "textures\\clutter\\industrial\\relaybox_n.dds",
+            "",
+            "textures\\clutter\\industrial\\relaybox_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_absent_remediation_steps": [
+            "set_slot3_parallax",
+            "enable_parallax"
+          ],
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Additional malformed Fallout long-tail family: legacy single-pass + table-drift combinations remain deterministic manual-review/no-op."
         }
       ],
       "expected_family_allowed_difference_buckets": {

@@ -12224,14 +12224,17 @@ if GUI_AVAILABLE:
                 )
                 self._add_tooltip(retry_count_combo, "Retry transient file-read or lock failures before marking a mesh as failed.")
                 self._add_tooltip(target_game_label, "Choose header policy for scan/patch behavior (auto/skyrim/fallout).")
-                self._add_tooltip(target_game_combo, "Use auto for normal use. Choose fallout only for guarded Fallout patching where some malformed meshes may remain safe no-op.")
+                self._add_tooltip(
+                    target_game_combo,
+                    "Default: auto. Choose fallout only for guarded best-effort Fallout patching; malformed meshes may be reported and left unchanged.",
+                )
                 self._add_tooltip(
                     experimental_fallout_check,
-                    "Required before any Fallout write operation.\nGuarded mode is best-effort: unsupported/malformed combinations may be reported and left unchanged.",
+                    "Required before any Fallout write operation.\nGuarded mode is best-effort: unsupported or malformed combinations are reported and left unchanged.",
                 )
                 self._add_tooltip(
                     fallout_gate_label,
-                    "Each gate unlocks one higher-risk Fallout write type.\nEnable only the exact gate you need, then verify in game before broader batch use.",
+                    "Each gate enables one higher-risk Fallout write type.\nEnable only what you need, then verify in game before broader batch use.",
                 )
                 self._add_tooltip(
                     fallout_allow_parallax_scale_check,
@@ -12511,7 +12514,7 @@ if GUI_AVAILABLE:
                 auto_fill_button.pack(anchor="w", pady=(4, 0))
                 self._add_tooltip(
                     auto_fill_button,
-                    "🧠 Auto-fills slot paths from detected mesh textures.\nReview before patching, especially when source meshes are mixed.",
+                    "🧠 Auto-fills slot paths from the selected mesh.\nReview results before patching, especially with mixed-mod meshes.",
                 )
                 self._add_tooltip(
                     tex_frame,
@@ -12522,7 +12525,7 @@ if GUI_AVAILABLE:
                 footer_frame.pack(fill="x", padx=10, pady=(6, 8))
                 btn_frame = ttk.Frame(footer_frame)
                 btn_frame.pack(fill="x", pady=(0, 2))
-                status_var = tk.StringVar(value="Ready. Pick a NIF file/folder, then Scan or Patch.")
+                status_var = tk.StringVar(value="Ready. Select a NIF file or folder, then run Scan or Patch.")
                 status_label = ttk.Label(footer_frame, textvariable=status_var, wraplength=860, justify=tk.LEFT)
                 status_label.pack(fill="x", pady=(0, 4))
                 progress_var = tk.DoubleVar(value=0.0)

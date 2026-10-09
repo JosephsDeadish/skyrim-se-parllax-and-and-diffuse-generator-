@@ -1076,6 +1076,18 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "unsupported_header.malformed_or_truncated")
 
+    def test_conflict_classifier_maps_wrapped_unsupported_profile_drift_notice(self) -> None:
+        code = _classify_conflict_code(
+            "Malformed or truncated NIF: Unsupported NIF header/profile values"
+        )
+        self.assertEqual(code, "unsupported_header.profile_value_drift")
+
+    def test_conflict_classifier_maps_wrapped_header_prefix_notice(self) -> None:
+        code = _classify_conflict_code(
+            "Malformed or truncated NIF: Header prefix is not a Skyrim/Gamebryo 20.2.0.7 NIF. This file is unsupported for auto-patching."
+        )
+        self.assertEqual(code, "unsupported_header.header_prefix_mismatch")
+
     def test_conflict_classifier_maps_cannot_read_nif_notice(self) -> None:
         code = _classify_conflict_code(
             "Cannot read NIF: [Errno 13] Permission denied: '/mods/meshes/bad.nif'"
