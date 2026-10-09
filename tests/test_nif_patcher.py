@@ -1121,11 +1121,41 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "unsupported_header.shader_block_past_eof")
 
+    def test_conflict_classifier_maps_string_read_out_of_range_parse_error(self) -> None:
+        code = _classify_conflict_code(
+            "Block 7: failed to parse BSLightingShaderProperty: string read out of range at offset 1040 (need 16 byte(s), buffer size 1048)"
+        )
+        self.assertEqual(code, "unsupported_header.string_read_out_of_range")
+
+    def test_conflict_classifier_prefers_specific_subcode_for_wrapped_string_read_out_of_range(self) -> None:
+        code = _classify_conflict_code(
+            "Malformed or truncated NIF: string read out of range at offset 154 (need 1954047348 byte(s), buffer size 305)"
+        )
+        self.assertEqual(code, "unsupported_header.string_read_out_of_range")
+
     def test_conflict_classifier_maps_texture_set_u16_count_out_of_range(self) -> None:
         code = _classify_conflict_code(
             "Block 1: texture-set parse error: u16 read out of range at offset 804 (need 2 byte(s), buffer size 805)"
         )
         self.assertEqual(code, "unsupported_header.texture_set_u16_count_out_of_range")
+
+    def test_conflict_classifier_prefers_specific_subcode_for_wrapped_texture_set_parse_error(self) -> None:
+        code = _classify_conflict_code(
+            "Malformed or truncated NIF: Failed to parse BSShaderTextureSet at block 2: texture-set parse error: u16 read out of range at offset 804 (need 2 byte(s), buffer size 805)"
+        )
+        self.assertEqual(code, "unsupported_header.texture_set_u16_count_out_of_range")
+
+    def test_conflict_classifier_maps_user_version_parse_failure_notice(self) -> None:
+        code = _classify_conflict_code(
+            "Could not parse user version fields from header; the file may be truncated or malformed."
+        )
+        self.assertEqual(code, "unsupported_header.user_version_parse_failure")
+
+    def test_conflict_classifier_prefers_specific_subcode_for_wrapped_user_version_parse_failure(self) -> None:
+        code = _classify_conflict_code(
+            "Malformed or truncated NIF: Could not parse user version fields from header; the file may be truncated or malformed."
+        )
+        self.assertEqual(code, "unsupported_header.user_version_parse_failure")
 
     def test_conflict_classifier_maps_tolerant_num_extra_recovery_notes(self) -> None:
         code = _classify_conflict_code(

@@ -689,7 +689,7 @@
       "flags1": 128,
       "num_blocks_delta": 2,
       "expected_prefixes": [
-        "unsupported_header.malformed_or_truncated.",
+        "unsupported_header.string_read_out_of_range.",
         "unsupported_header.reexport_resolution."
       ],
       "expected_no_auto_remediation": true,

@@ -4083,12 +4083,6 @@ def _classify_conflict_code(message: str) -> str:
         return "unsupported_header.num_extra_recovery"
     if "strict unknown-shader check failed" in lowered:
         return "unknown_shader_type.strict_violation"
-    if "shorter than a normal skyrim nif header" in lowered:
-        return "unsupported_header.malformed_or_truncated"
-    if "probably truncated, corrupt, or not really a nif" in lowered:
-        return "unsupported_header.malformed_or_truncated"
-    if "malformed or truncated nif" in lowered:
-        return "unsupported_header.malformed_or_truncated"
     if "string read out of range" in lowered:
         return "unsupported_header.string_read_out_of_range"
     if "no bslightingshaderproperty blocks found or not a supported skyrim/fallout nif" in lowered:
@@ -4130,6 +4124,12 @@ def _classify_conflict_code(message: str) -> str:
         return "unsupported_header.reexport_resolution"
     if "resolution: open the mesh in nifskope or the creation kit and re-save/export it as a clean skyrim se nif" in lowered:
         return "unsupported_header.reexport_resolution"
+    if "shorter than a normal skyrim nif header" in lowered:
+        return "unsupported_header.malformed_or_truncated"
+    if "probably truncated, corrupt, or not really a nif" in lowered:
+        return "unsupported_header.malformed_or_truncated"
+    if "malformed or truncated nif" in lowered:
+        return "unsupported_header.malformed_or_truncated"
     if lowered.startswith("detected shader/material blocks:"):
         return "unsupported_header.non_patchable_shader_family_detected"
     if "this mesh uses bsshaderpplightingproperty instead of bslightingshaderproperty" in lowered:
