@@ -3,7 +3,7 @@
     {
       "id": "skyrim_realmod_family_pack",
       "expected_family_case_counts": {
-        "architecture": 8,
+        "architecture": 9,
         "clutter": 2,
         "armor": 2,
         "landscape": 2,
@@ -40,6 +40,7 @@
         "shader_state.envmap_glow_missing_slots2_4_5.skyrim.",
         "shader_state.envmap_glow_missing_slot2.skyrim.",
         "shader_state.parallax_envmap_missing_slots3_4_5.skyrim.",
+        "shader_state.parallax_envmap_missing_slot3.skyrim.",
         "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim.",
         "path_slot_env_mask.generic_alias_suffix.skyrim.",
         "path_slot_cubemap.wrong_suffix.skyrim.",
@@ -147,6 +148,40 @@
             "shader_state.envmap_missing_slot5.skyrim.",
             "path_slot_parallax.matches_normal.skyrim."
           ]
+        },
+        {
+          "id": "pack_skyrim_architecture_parallax_envmap_slot3_missing_crosslayout",
+          "family": "architecture",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "shader_type": 1,
+          "flags1": 2176,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\ruins\\ruinwall01.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\ruinwall01_e.dds",
+            "textures\\architecture\\ruins\\ruinwall01_m.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.parallax_envmap_missing_slot3.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot3_parallax_for_parallax_envmap_slot3"
+          ],
+          "expected_absent_remediation_steps": [
+            "disable_parallax_for_parallax_envmap_slot3",
+            "disable_pom_for_parallax_envmap_slot3"
+          ],
+          "pgpatcher_strategy": "restore_missing_slot3_height_while_preserving_envmap",
+          "local_strategy": "restore_slot3_when_guessable_else_disable_parallax_only",
+          "intentional_strategy_difference": false
         },
         {
           "id": "pack_skyrim_clutter_envmap_slot4_missing",

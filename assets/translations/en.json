@@ -41,6 +41,14 @@
     "Move right for stronger material definition.\nMove left for subtler output.": "Move right for stronger material definition; left for subtler output.",
     "✨ Turn it up for glorious shine, down for ancient weathered stone.\nLive value shown beside slider.": "Increase for stronger specular shine; decrease for subtler highlights.",
     "🌑 Right = stronger AO bake, left = subtle cavity hints.": "Right increases AO contrast; left keeps AO subtler.",
-    "🪨 Right = higher contrast roughness, left = uniform surface.": "Right increases roughness contrast; left makes surfaces more uniform."
+    "🪨 Right = higher contrast roughness, left = uniform surface.": "Right increases roughness contrast; left makes surfaces more uniform.",
+    "You queued {count} textures.\n\nResume mode is strongly recommended for 1000+ runs.\nIt saves progress so crashes/restarts do not force a full rerun.\n\nEnable Resume mode now?": "You queued {count} textures.\n\nResume mode is strongly recommended for 1000+ runs.\nIt saves progress so crashes/restarts do not force a full rerun.\n\nEnable Resume mode now?",
+    "Resume mode is strongly recommended for 1000+ runs.\nIt saves progress so crashes/restarts do not force a full rerun.\n\nEnable Resume mode now?": "Resume mode is strongly recommended for 1000+ runs.\nIt saves progress so crashes/restarts do not force a full rerun.\n\nEnable Resume mode now?",
+    "This run will start fresh and create a checkpoint as files finish.\nContinue?": "This run will start fresh and create a checkpoint as files finish.\nContinue?",
+    "This run will start fresh and create a checkpoint after successful files.\nContinue?": "This run will start fresh and create a checkpoint after successful files.\nContinue?",
+    "Resume data may be incomplete, and this may behave like start-fresh.\nContinue with Resume mode?": "Resume data may be incomplete, and this may behave like start-fresh.\nContinue with Resume mode?",
+    "Checkpoint metadata does not fully match this run ({mismatch_flags}).\n\nResume mode could skip the wrong files in this state.\nContinue with Resume anyway?": "Checkpoint metadata does not fully match this run ({mismatch_flags}).\n\nResume mode could skip the wrong files in this state.\nContinue with Resume anyway?",
+    "Resume mode could skip the wrong files in this state.\nContinue with Resume anyway?": "Resume mode could skip the wrong files in this state.\nContinue with Resume anyway?",
+    "Continuing will process all selected files (same as start fresh) while creating checkpoint history.\nContinue?": "Continuing will process all selected files (same as start fresh) while creating checkpoint history.\nContinue?"
   }
 }

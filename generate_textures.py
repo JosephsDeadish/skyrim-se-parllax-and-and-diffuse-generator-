@@ -11291,12 +11291,12 @@ if GUI_AVAILABLE:
                 ):
                     enable_resume = messagebox.askyesno(
                         "Large batch resume recommendation",
-                        (
-                            f"You queued {len(self.selected_inputs)} textures.\n\n"
-                            "Resume mode is strongly recommended for 1000+ runs so interruptions do not waste progress.\n"
-                            "It also enables checkpoint-based restart after crashes/reboots.\n\n"
+                        self._tr(
+                            "You queued {count} textures.\n\n"
+                            "Resume mode is strongly recommended for 1000+ runs.\n"
+                            "It saves progress so crashes/restarts do not force a full rerun.\n\n"
                             "Enable Resume mode now?"
-                        ),
+                        ).format(count=len(self.selected_inputs)),
                         parent=self.root,
                     )
                     if enable_resume:
@@ -11306,16 +11306,16 @@ if GUI_AVAILABLE:
                 if self.batch_resume_mode_var.get() == "resume":
                     if not checkpoint_path.exists():
                         if is_huge_batch:
-                            resume_warning = (
-                                "Resume mode is enabled, but no checkpoint file exists yet for this run.\n\n"
-                                "A new checkpoint will be created as files finish.\n"
-                                "Continue and create checkpoint history now?"
+                            resume_warning = self._tr(
+                                "Resume mode is enabled, but no checkpoint file exists yet.\n\n"
+                                "This run will start fresh and create a checkpoint as files finish.\n"
+                                "Continue?"
                             )
                         else:
-                            resume_warning = (
+                            resume_warning = self._tr(
                                 "Resume mode is enabled, but no checkpoint file exists yet.\n\n"
-                                "This run will start fresh and create checkpoint history after successful files.\n"
-                                "Continue and create checkpoint history now?"
+                                "This run will start fresh and create a checkpoint after successful files.\n"
+                                "Continue?"
                             )
                         proceed_resume_without_history = messagebox.askyesno(
                             "Resume mode: starting new checkpoint",
@@ -11339,9 +11339,9 @@ if GUI_AVAILABLE:
                         if not checkpoint_payload_valid:
                             proceed_invalid_checkpoint = messagebox.askyesno(
                                 "Resume checkpoint read warning",
-                                (
+                                self._tr(
                                     "Checkpoint file exists but could not be read as valid metadata.\n\n"
-                                    "Continuing may behave like a fresh run with limited resume data.\n"
+                                    "Resume data may be incomplete, and this may behave like start-fresh.\n"
                                     "Continue with Resume mode?"
                                 ),
                                 parent=self.root,
@@ -11361,9 +11361,11 @@ if GUI_AVAILABLE:
                             proceed_mismatch_resume = messagebox.askyesno(
                                 "Resume checkpoint mismatch warning",
                                 (
-                                    f"Checkpoint metadata does not fully match this run ({', '.join(mismatch_flags)}).\n\n"
-                                    "Resume mode may skip the wrong files in this state.\n"
-                                    "Continue with Resume anyway?"
+                                    self._tr(
+                                        "Checkpoint metadata does not fully match this run ({mismatch_flags}).\n\n"
+                                        "Resume mode could skip the wrong files in this state.\n"
+                                        "Continue with Resume anyway?"
+                                    ).format(mismatch_flags=", ".join(mismatch_flags))
                                 ),
                                 parent=self.root,
                             )
@@ -11376,9 +11378,9 @@ if GUI_AVAILABLE:
                     if checkpoint_path.exists() and not completed_checkpoint_files:
                         proceed_empty_resume = messagebox.askyesno(
                             "Resume checkpoint has no completed entries",
-                            (
+                            self._tr(
                                 "Resume mode is enabled, but this checkpoint has no completed files yet.\n\n"
-                                "Continuing will process all selected files (equivalent to start fresh) while creating resume history.\n"
+                                "Continuing will process all selected files (same as start fresh) while creating checkpoint history.\n"
                                 "Continue?"
                             ),
                             parent=self.root,
@@ -11420,7 +11422,7 @@ if GUI_AVAILABLE:
                                 f"A checkpoint already exists at:\n{checkpoint_path}\n\n"
                                 f"It currently tracks {completed_in_checkpoint} completed file(s).\n"
                                 f"Start-fresh mode will clear it. {caution_detail}"
-                                "Continue with start-fresh and clear checkpoint?"
+                                "Continue with start-fresh and clear this checkpoint?"
                             ),
                             parent=self.root,
                         )

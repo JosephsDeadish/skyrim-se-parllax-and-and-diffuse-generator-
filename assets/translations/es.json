@@ -50,6 +50,14 @@
     "Help": "Ayuda",
     "Generate": "Generar",
     "Cancel Process": "Cancelar proceso",
-    "Revert Process": "Revertir proceso"
+    "Revert Process": "Revertir proceso",
+    "You queued {count} textures.\n\nResume mode is strongly recommended for 1000+ runs.\nIt saves progress so crashes/restarts do not force a full rerun.\n\nEnable Resume mode now?": "You queued {count} textures.\n\nResume mode is strongly recommended for 1000+ runs.\nIt saves progress so crashes/restarts do not force a full rerun.\n\nEnable Resume mode now?",
+    "Resume mode is strongly recommended for 1000+ runs.\nIt saves progress so crashes/restarts do not force a full rerun.\n\nEnable Resume mode now?": "Resume mode is strongly recommended for 1000+ runs.\nIt saves progress so crashes/restarts do not force a full rerun.\n\nEnable Resume mode now?",
+    "This run will start fresh and create a checkpoint as files finish.\nContinue?": "This run will start fresh and create a checkpoint as files finish.\nContinue?",
+    "This run will start fresh and create a checkpoint after successful files.\nContinue?": "This run will start fresh and create a checkpoint after successful files.\nContinue?",
+    "Resume data may be incomplete, and this may behave like start-fresh.\nContinue with Resume mode?": "Resume data may be incomplete, and this may behave like start-fresh.\nContinue with Resume mode?",
+    "Checkpoint metadata does not fully match this run ({mismatch_flags}).\n\nResume mode could skip the wrong files in this state.\nContinue with Resume anyway?": "Checkpoint metadata does not fully match this run ({mismatch_flags}).\n\nResume mode could skip the wrong files in this state.\nContinue with Resume anyway?",
+    "Resume mode could skip the wrong files in this state.\nContinue with Resume anyway?": "Resume mode could skip the wrong files in this state.\nContinue with Resume anyway?",
+    "Continuing will process all selected files (same as start fresh) while creating checkpoint history.\nContinue?": "Continuing will process all selected files (same as start fresh) while creating checkpoint history.\nContinue?"
   }
 }

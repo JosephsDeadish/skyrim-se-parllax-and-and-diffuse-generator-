@@ -1429,6 +1429,25 @@ class TestValidateNifForParallax(unittest.TestCase):
             any(group.code.startswith("shader_state.parallax_envmap_missing_slot5.") for group in v.conflict_report)
         )
 
+    def test_conflict_report_flags_parallax_envmap_with_slot3_unresolved_and_slot4_5_present(self) -> None:
+        (self.tmp / "textures" / "effects").mkdir(parents=True, exist_ok=True)
+        (self.tmp / "textures" / "cubemaps").mkdir(parents=True, exist_ok=True)
+        (self.tmp / "textures" / "effects" / "aura_m.dds").write_bytes(b"dds")
+        (self.tmp / "textures" / "cubemaps" / "aura_e.dds").write_bytes(b"dds")
+        paths = ["textures\\effects\\aura.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_CUBEMAP] = "textures\\cubemaps\\aura_e.dds"
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\effects\\aura_m.dds"
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=SLSF1_ENVIRONMENT_MAPPING | SLSF1_PARALLAX,
+            texture_paths=paths,
+        )
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(
+            any(group.code.startswith("shader_state.parallax_envmap_missing_slot3.") for group in v.conflict_report)
+        )
+
     def test_conflict_report_flags_parallax_envmap_glow_with_unresolved_slots(self) -> None:
         nif = _write_nif(
             self.tmp,
@@ -2840,6 +2859,11 @@ class TestHelpers(unittest.TestCase):
         self.assertTrue(any("diffuse/albedo" in action.lower() for action in diffuse_actions))
         self.assertTrue(any("slot-1 normal" in action.lower() for action in normal_actions))
 
+    def test_actions_for_parallax_envmap_slot3_conflict_have_specific_guidance(self) -> None:
+        actions = _actions_for_conflict_code("shader_state.parallax_envmap_missing_slot3")
+        self.assertTrue(any("slot 3" in action.lower() for action in actions))
+        self.assertTrue(any("parallax" in action.lower() for action in actions))
+
     def test_find_nif_files_recursive(self) -> None:
         sub = self.tmp / "sub"
         sub.mkdir()
@@ -4177,6 +4201,39 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertTrue(opts.disable_env_mapping)
         self.assertFalse(opts.disable_parallax)
         self.assertIn("disable_env_mapping_for_parallax_envmap_slot5", steps)
+
+    def test_auto_remediation_build_options_restores_slot3_for_parallax_envmap_slot3_conflict(self) -> None:
+        paths = ["textures\\effects\\aura.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_CUBEMAP] = "textures\\cubemaps\\aura_e.dds"
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\effects\\aura_m.dds"
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP, texture_paths=paths)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["shader_state.parallax_envmap_missing_slot3.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(str(opts.parallax_texture_path).lower().endswith("_p.dds"))
+        self.assertIn("set_slot3_parallax_for_parallax_envmap_slot3", steps)
+        self.assertNotIn("disable_parallax_for_parallax_envmap_slot3", steps)
+
+    def test_auto_remediation_build_options_disables_parallax_for_parallax_envmap_slot3_when_not_guessable(self) -> None:
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_CUBEMAP] = "textures\\cubemaps\\aura_e.dds"
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\effects\\aura_m.dds"
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP, texture_paths=paths)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["shader_state.parallax_envmap_missing_slot3.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(opts.disable_parallax)
+        self.assertTrue(opts.disable_pom)
+        self.assertIn("disable_parallax_for_parallax_envmap_slot3", steps)
+        self.assertIn("disable_pom_for_parallax_envmap_slot3", steps)
 
     def test_auto_remediation_build_options_restores_paths_for_mixed_parallax_envmap_glow_conflict(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8
