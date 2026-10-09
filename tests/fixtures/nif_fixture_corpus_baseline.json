@@ -1,9 +1,12 @@
 {
-  "expected_total_cases": 76,
+  "expected_total_cases": 77,
   "expected_profile_counts": {
     "skyrim": 36,
-    "fallout": 17,
+    "fallout": 18,
     "unknown": 23
+  },
+  "expected_family_case_counts": {
+    "core_drift_semantic_slot3_repeated": 1
   },
   "expected_max_fallback_groups": 0,
   "required_summary_code_prefixes": [
@@ -27,6 +30,7 @@
     "shader_state.parallax_envmap_missing_slot3.skyrim.",
     "shader_state.parallax_envmap_missing_slot5.skyrim.",
     "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.skyrim.",
+    "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks.fallout.",
     "missing_parallax_slot3.empty.payload_resolved_real_layout_drift.skyrim.",
     "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim.",
     "shader_state.envmap_missing_slots4_5.fallout.",

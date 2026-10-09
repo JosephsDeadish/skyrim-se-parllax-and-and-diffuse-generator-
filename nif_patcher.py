@@ -3931,6 +3931,9 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "unsupported_header.profile_value_drift.fallout_signature_drift": (
         "Fallout-signature header/profile drift detected; keep this mesh in guarded no-op/manual-review and re-save/export before patching.",
     ),
+    "unsupported_header.profile_value_drift.unparsed.header_table_drift": (
+        "Malformed header-table drift detected without recoverable profile values; keep this mesh in guarded/manual-review and re-export before patching.",
+    ),
     "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift": (
         "Malformed header-table drift signature detected without stable profile values; keep manual-review/no-op and re-export before patching.",
     ),
@@ -4014,6 +4017,10 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift": (
         "Real-layout drift detected: unknown raw shader type was semantically resolved while slot 3 is unresolved.",
         "Prefer restoring a deterministic slot-3 _p.dds path first; disable parallax/POM only when no safe slot-3 reconstruction is available.",
+    ),
+    "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks": (
+        "Repeated real-layout drift detected: multiple blocks resolve unknown shader types semantically while slot 3 remains unresolved.",
+        "Prefer restoring a deterministic shared slot-3 _p.dds path and enabling parallax in one controlled pass; disable parallax/POM only when no safe slot-3 reconstruction path exists.",
     ),
     "missing_parallax_slot3.empty.payload_resolved_real_layout_drift": (
         "Real-layout drift detected: unknown raw shader type was payload-resolved while slot 3 is unresolved.",
@@ -4190,6 +4197,8 @@ def _classify_conflict_code(message: str) -> str:
         user_version = int(unexpected_user_versions.group(1))
         user_version_2 = int(unexpected_user_versions.group(2))
         return f"unsupported_header.user_version_value_drift.u{user_version}_u2{user_version_2}"
+    if "could not parse full header tables for this mesh" in lowered and "header-table drift" in lowered:
+        return "unsupported_header.profile_value_drift.unparsed.header_table_drift"
     if "unsupported nif header/profile values" in lowered or "unexpected user version values" in lowered:
         return "unsupported_header"
     if "header prefix is not a skyrim/gamebryo 20.2.0.7 nif" in lowered:
@@ -4303,6 +4312,13 @@ def _classify_conflict_code(message: str) -> str:
         return "missing_parallax_slot3.empty"
     if "supply parallax_texture_path pointing to a _p.dds height map" in lowered:
         return "missing_parallax_slot3.empty.hint_path"
+    if (
+        "real-layout drift combo repeats across" in lowered
+        and "semantic shader resolution" in lowered
+        and "slot 3" in lowered
+        and "unresolved" in lowered
+    ):
+        return "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks"
     if (
         "real-layout drift combo" in lowered
         and "semantic shader resolution" in lowered
@@ -4472,6 +4488,7 @@ def _build_conflict_report(
     info_by_block = {info.block_index: info for info in (infos or [])}
     grouped: dict[tuple[str, str, str], list[str]] = {}
     block_code_sets: dict[tuple[str, str, int], set[str]] = {}
+    semantic_slot3_real_layout_combo_counts: dict[tuple[str, str], int] = {}
     for message in [*result.skip_reasons, *result.issues]:
         base_code = _classify_conflict_code(message)
         block_idx = _extract_block_index(message)
@@ -4495,6 +4512,9 @@ def _build_conflict_report(
             "missing_parallax_slot3.empty" in block_codes
             and "unknown_shader_type.semantic_resolved" in block_codes
         ):
+            semantic_slot3_real_layout_combo_counts[(profile, layout)] = (
+                semantic_slot3_real_layout_combo_counts.get((profile, layout), 0) + 1
+            )
             grouped.setdefault(
                 ("missing_parallax_slot3.empty.semantic_resolved_real_layout_drift", profile, layout),
                 [],
@@ -4511,6 +4531,16 @@ def _build_conflict_report(
             ).append(
                 f"Block {block_idx}: real-layout drift combo detected — payload shader resolution is present while slot 3 remains unresolved."
             )
+    for (profile, layout), combo_count in semantic_slot3_real_layout_combo_counts.items():
+        if combo_count < 2:
+            continue
+        grouped.setdefault(
+            ("missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks", profile, layout),
+            [],
+        ).append(
+            "Real-layout drift combo repeats across "
+            f"{combo_count} blocks: semantic shader resolution is present while slot 3 remains unresolved."
+        )
     summaries: list[NifConflictSummary] = []
     for (base_code, profile, layout), messages in sorted(
         grouped.items(),
@@ -4853,6 +4883,10 @@ def build_auto_remediation_patch_options(
             and "unknown_shader_type.semantic_resolved" in base_codes
         )
     )
+    has_repeated_semantic_slot3_real_layout_combo = any(
+        code.startswith("missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks")
+        for code in base_codes
+    )
     has_payload_slot3_real_layout_combo = (
         any(code.startswith("missing_parallax_slot3.empty.payload_resolved_real_layout_drift") for code in base_codes)
         or (
@@ -4902,6 +4936,17 @@ def build_auto_remediation_patch_options(
             opts.disable_pom = True
             applied_steps.append("disable_parallax_for_resolved_real_layout_drift")
             applied_steps.append("disable_pom_for_resolved_real_layout_drift")
+    if has_repeated_semantic_slot3_real_layout_combo:
+        if guessed_parallax:
+            opts.parallax_texture_path = guessed_parallax
+            opts.enable_parallax = True
+            applied_steps.append("set_slot3_parallax_for_repeated_real_layout_drift")
+            applied_steps.append("enable_parallax_for_repeated_real_layout_drift")
+        else:
+            opts.disable_parallax = True
+            opts.disable_pom = True
+            applied_steps.append("disable_parallax_for_repeated_real_layout_drift")
+            applied_steps.append("disable_pom_for_repeated_real_layout_drift")
     if any(code.startswith("path_slot_normal") for code in base_codes):
         if guessed_normal:
             opts.normal_texture_path = guessed_normal

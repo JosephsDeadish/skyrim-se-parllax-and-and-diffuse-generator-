@@ -1122,6 +1122,15 @@ class TestValidateNifForParallax(unittest.TestCase):
             "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift",
         )
 
+    def test_conflict_classifier_maps_header_table_drift_notice_without_wrapped_signature(self) -> None:
+        code = _classify_conflict_code(
+            "Could not parse full header tables for this mesh; malformed export/header-table drift is likely."
+        )
+        self.assertEqual(
+            code,
+            "unsupported_header.profile_value_drift.unparsed.header_table_drift",
+        )
+
     def test_conflict_classifier_maps_wrapped_header_prefix_notice(self) -> None:
         code = _classify_conflict_code(
             "Malformed or truncated NIF: Header prefix is not a Skyrim/Gamebryo 20.2.0.7 NIF. This file is unsupported for auto-patching."
@@ -1169,6 +1178,15 @@ class TestValidateNifForParallax(unittest.TestCase):
             "Block 4: real-layout drift combo detected — payload shader resolution is present while slot 3 remains unresolved."
         )
         self.assertEqual(code, "missing_parallax_slot3.empty.payload_resolved_real_layout_drift")
+
+    def test_conflict_classifier_maps_repeated_real_layout_semantic_slot3_drift_combo(self) -> None:
+        code = _classify_conflict_code(
+            "Real-layout drift combo repeats across 2 blocks: semantic shader resolution is present while slot 3 remains unresolved."
+        )
+        self.assertEqual(
+            code,
+            "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks",
+        )
 
     def test_conflict_classifier_maps_shader_block_size_mismatch_notes(self) -> None:
         code = _classify_conflict_code(
@@ -1614,6 +1632,43 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertTrue(
             any(
                 group.code.startswith("missing_parallax_slot3.empty.payload_resolved_real_layout_drift.")
+                for group in v.conflict_report
+            )
+        )
+
+    def test_conflict_report_flags_repeated_real_layout_semantic_missing_slot3_combo(self) -> None:
+        payload = {
+            "cases": [
+                {
+                    "id": "repeated_real_layout_semantic_slot3",
+                    "profile": "fallout",
+                    "shader_layout": "real",
+                    "user_version": 11,
+                    "user_ver2": 131,
+                    "shader_type": SHADER_TYPE_ENVMAP,
+                    "flags1": SLSF1_ENVIRONMENT_MAPPING,
+                    "texture_set_layout_shift": 4,
+                    "texture_paths": ["textures\\arch\\stone.dds"] + [""] * 8,
+                    "block_type_index_overrides": [{"ordinal": 0, "value": 65535}],
+                    "extra_shader_texture_set_refs": [0],
+                    "extra_shader_blocks": [
+                        {
+                            "shader_type": SHADER_TYPE_ENVMAP,
+                            "flags1": SLSF1_ENVIRONMENT_MAPPING,
+                            "texture_set_layout_shift": 4,
+                            "texture_paths": ["textures\\arch\\stone.dds"] + [""] * 8,
+                        }
+                    ],
+                }
+            ]
+        }
+        nif = _materialize_fixture_corpus(self.tmp, payload)[0]
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(
+            any(
+                group.code.startswith(
+                    "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks."
+                )
                 for group in v.conflict_report
             )
         )
@@ -4615,6 +4670,29 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertIn("set_slot3_parallax_for_resolved_real_layout_drift", steps)
         self.assertIn("enable_parallax_for_resolved_real_layout_drift", steps)
 
+    def test_auto_remediation_build_options_adds_repeated_real_layout_slot3_semantic_combo_steps(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            user_ver2=130,
+            texture_set_layout_shift=4,
+            shader_type=0,
+            flags1=SLSF1_PARALLAX | SLSF1_ENVIRONMENT_MAPPING,
+            texture_paths=paths,
+        )
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks.skyrim.real"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(str(opts.parallax_texture_path).lower().endswith("_p.dds"))
+        self.assertTrue(opts.enable_parallax)
+        self.assertIn("set_slot3_parallax_for_repeated_real_layout_drift", steps)
+        self.assertIn("enable_parallax_for_repeated_real_layout_drift", steps)
+
     def test_auto_remediation_build_options_disables_env_mapping_and_pom_for_mixed_envmap_pom_conflict(self) -> None:
         nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP)
         opts, steps = build_auto_remediation_patch_options(
@@ -4917,6 +4995,8 @@ class TestFixtureCorpusBaselinePack(unittest.TestCase):
     def test_fixture_pack_matches_baseline_conflict_matrix(self) -> None:
         payload = _load_fixture_corpus_payload(_FIXTURE_CORPUS_MANIFEST)
         baseline = _load_fixture_corpus_payload(_FIXTURE_CORPUS_BASELINE)
+        cases = payload.get("cases", [])
+        self.assertIsInstance(cases, list)
         corpus = _materialize_fixture_corpus(self.tmp, payload)
         validations = [validate_nif_for_parallax(path) for path in corpus]
         self.assertEqual(len(validations), int(baseline.get("expected_total_cases", 0)))
@@ -4932,6 +5012,23 @@ class TestFixtureCorpusBaselinePack(unittest.TestCase):
             any("unexpected user version values" in "\n".join(v.issues).lower() for v in validations),
             "Fixture corpus should include at least one unknown-header signature case.",
         )
+        expected_family_case_counts = baseline.get("expected_family_case_counts", {})
+        self.assertIsInstance(expected_family_case_counts, dict)
+        if expected_family_case_counts:
+            observed_family_case_counts: dict[str, int] = {}
+            for case in cases:
+                if not isinstance(case, dict):
+                    continue
+                family = str(case.get("family", "")).strip()
+                if not family:
+                    continue
+                observed_family_case_counts[family] = observed_family_case_counts.get(family, 0) + 1
+            for family, expected_count in expected_family_case_counts.items():
+                self.assertEqual(
+                    observed_family_case_counts.get(str(family), 0),
+                    int(expected_count),
+                    f"Unexpected core family count for {family!r}.",
+                )
 
         summary = summarize_validation_conflicts(validations)
         summary_codes = tuple(group.code for group in summary)
