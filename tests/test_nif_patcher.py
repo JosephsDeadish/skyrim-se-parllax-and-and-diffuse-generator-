@@ -1104,6 +1104,18 @@ class TestValidateNifForParallax(unittest.TestCase):
         code = _classify_conflict_code("Strict unknown-shader check failed.")
         self.assertEqual(code, "unknown_shader_type.strict_violation")
 
+    def test_conflict_classifier_maps_fallout_guarded_noop_when_no_compatible_blocks(self) -> None:
+        code = _classify_conflict_code(
+            "No Fallout-compatible BSLightingShaderProperty blocks found for experimental patch mode."
+        )
+        self.assertEqual(code, "fallout_profile.guarded_noop_no_compatible_blocks")
+
+    def test_conflict_classifier_maps_fallout_guarded_noop_when_layout_policy_skips_all_blocks(self) -> None:
+        code = _classify_conflict_code(
+            "No supported shader layouts are available for profile 'fallout'; skipping all shader blocks."
+        )
+        self.assertEqual(code, "fallout_profile.guarded_noop_layout_policy_exhausted")
+
     def test_conflict_report_classifies_slot_specific_paths(self) -> None:
         paths = ["textures\\arch\\stone_n.dds"] + [""] * 8
         nif = _write_nif(self.tmp, texture_paths=paths)

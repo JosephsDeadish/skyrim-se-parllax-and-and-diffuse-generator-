@@ -3868,6 +3868,14 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "fallout_profile.experimental_notice": (
         "Detected Fallout-era profile notice: keep guarded mode enabled, keep backups, and verify in-game after patching.",
     ),
+    "fallout_profile.guarded_noop_no_compatible_blocks": (
+        "Guarded Fallout mode found no compatible shader blocks for safe writes; keep this mesh as no-op/manual-review.",
+        "Re-export/re-save the mesh to normalize block tables before attempting guarded Fallout patching again.",
+    ),
+    "fallout_profile.guarded_noop_layout_policy_exhausted": (
+        "All shader blocks were skipped by the active Fallout layout policy; keep no-op/manual-review for this mesh.",
+        "Use --validate --conflict-report to inspect block layouts before enabling any higher-risk Fallout gates.",
+    ),
     "unsupported_header.reexport_resolution": (
         "Re-open and re-export/re-save the mesh in NifSkope or the Creation Kit to rebuild malformed header/block tables before patching.",
     ),
@@ -4045,6 +4053,10 @@ def _classify_conflict_code(message: str) -> str:
         return "fallout_profile"
     if "detected fallout-era profile" in lowered:
         return "fallout_profile.experimental_notice"
+    if "no fallout-compatible bslightingshaderproperty blocks found for experimental patch mode" in lowered:
+        return "fallout_profile.guarded_noop_no_compatible_blocks"
+    if "no supported shader layouts are available for profile" in lowered and "skipping all shader blocks" in lowered:
+        return "fallout_profile.guarded_noop_layout_policy_exhausted"
     if "raw shader_type 0x" in lowered and "resolved to" in lowered and "method=semantic" in lowered:
         return "unknown_shader_type.semantic_resolved"
     if "incompatible shader type" in lowered:

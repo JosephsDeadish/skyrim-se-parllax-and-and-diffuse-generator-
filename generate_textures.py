@@ -12222,16 +12222,16 @@ if GUI_AVAILABLE:
                     conflict_examples_check,
                     "When enabled, include example conflict lines under each grouped conflict code.",
                 )
-                self._add_tooltip(retry_count_combo, "Retries transient per-file failures during scan/patch operations.")
-                self._add_tooltip(target_game_label, "Choose how headers are interpreted during patch/validation (auto/skyrim/fallout).")
-                self._add_tooltip(target_game_combo, "Use auto for normal use. Choose fallout only for Fallout-target guarded patching.")
+                self._add_tooltip(retry_count_combo, "Retry transient file-read or lock failures before marking a mesh as failed.")
+                self._add_tooltip(target_game_label, "Choose header policy for scan/patch behavior (auto/skyrim/fallout).")
+                self._add_tooltip(target_game_combo, "Use auto for normal use. Choose fallout only for guarded Fallout patching where some malformed meshes may remain safe no-op.")
                 self._add_tooltip(
                     experimental_fallout_check,
-                    "Required before any Fallout write operation.\nKeep backups enabled; Fallout support is guarded and best-effort.",
+                    "Required before any Fallout write operation.\nGuarded mode is best-effort: unsupported/malformed combinations may be reported and left unchanged.",
                 )
                 self._add_tooltip(
                     fallout_gate_label,
-                    "Each gate unlocks one higher-risk Fallout write type.\nLeave gates off unless that exact write is required.",
+                    "Each gate unlocks one higher-risk Fallout write type.\nEnable only the exact gate you need, then verify in game before broader batch use.",
                 )
                 self._add_tooltip(
                     fallout_allow_parallax_scale_check,

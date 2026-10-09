@@ -814,9 +814,9 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 25,
-        "effects": 20,
-        "clutter": 18,
+        "architecture": 26,
+        "effects": 21,
+        "clutter": 19,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -838,10 +838,12 @@
         "parallax_scale_gate": 1.0
       },
       "expected_family_min_remediation_expectation_coverage": {
-        "architecture": 0.55
+        "architecture": 0.55,
+        "effects": 0.15,
+        "clutter": 0.15
       },
       "expected_family_min_strategy_alignment_ratio": {
-        "architecture": 0.2,
+        "architecture": 0.19,
         "effects": 0.4,
         "clutter": 0.375
       },
@@ -3507,6 +3509,182 @@
           "expected_no_auto_remediation": true,
           "expected_difference_bucket": "partial_recoverability_guarded",
           "safety_difference_note": "Extended clutter drift family: single-pass env-alias reference-skew tails remain guarded no-op until deterministic reconstruction is possible."
+        },
+        {
+          "id": "pack_fallout_architecture_real_crlf_u16_crossblock_env_glow_refskew_multidrift_noop_extension_v2",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 160,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\architecture\\vault\\airlock.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\airlock_e.dds",
+            "textures\\architecture\\vault\\airlock_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "flags1": 32,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\architecture\\vault\\airlock.dds",
+                "textures\\architecture\\vault\\airlock_n.dds",
+                "",
+                "textures\\architecture\\vault\\airlock_n.dds",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "num_blocks_delta": 1,
+          "extra_shader_texture_set_refs": [
+            133
+          ],
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 18
+            },
+            {
+              "ordinal": 3,
+              "delta": -10
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_crossblock_env_glow_repair_under_reference_skew",
+          "local_strategy": "guarded_noop_for_crossblock_env_glow_refskew_multidrift",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Rarer architecture cross-block env+glow ref-skew with size drift remains deterministic guarded no-op to avoid speculative Fallout rewrites."
+        },
+        {
+          "id": "pack_fallout_effects_real_crlf_u16_crossblock_env_parallax_multidrift_guarded_noop_extension_v2",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 268435584,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\effects\\plant\\coolingtowermist.dds",
+            "textures\\effects\\plant\\coolingtowermist_n.dds",
+            "",
+            "textures\\effects\\plant\\coolingtowermist_n.dds",
+            "",
+            "textures\\effects\\plant\\coolingtowermist_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 2,
+          "extra_shader_texture_set_refs": [
+            121
+          ],
+          "block_type_index_overrides": [
+            {
+              "ordinal": 0,
+              "value": 65535
+            }
+          ],
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 17
+            },
+            {
+              "ordinal": 2,
+              "delta": -11
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_partial_env_parallax_repair_on_multidrift_effects",
+          "local_strategy": "guarded_noop_for_crossblock_env_parallax_multidrift",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Rarer effects cross-block env+parallax multidrift remains guarded no-op where deterministic block-table recovery is not guaranteed."
+        },
+        {
+          "id": "pack_fallout_clutter_real_crlf_u16_crossblock_singlepass_envalias_refskew_noop_extension_v2",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 0,
+          "flags1": 32,
+          "texture_paths": [
+            "textures\\clutter\\industrial\\controlrack.dds",
+            "",
+            "",
+            "textures\\clutter\\industrial\\controlrack_n.dds",
+            "",
+            "textures\\clutter\\industrial\\controlrack_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 1,
+          "extra_shader_texture_set_refs": [
+            139
+          ],
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 15
+            },
+            {
+              "ordinal": 3,
+              "delta": -9
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_singlepass_envalias_ref_repair_under_crossblock_skew",
+          "local_strategy": "guarded_noop_for_singlepass_envalias_crossblock_refskew",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Rarer clutter cross-block single-pass env-alias ref-skew remains deterministic no-op until deterministic reconstruction paths are validated."
         }
       ],
       "expected_family_allowed_difference_buckets": {
