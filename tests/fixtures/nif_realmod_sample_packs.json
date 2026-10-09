@@ -3,7 +3,7 @@
     {
       "id": "skyrim_realmod_family_pack",
       "expected_family_case_counts": {
-        "architecture": 10,
+        "architecture": 12,
         "clutter": 3,
         "armor": 2,
         "landscape": 2,
@@ -55,6 +55,7 @@
         "shader_state.envmap_glow_missing_slot2.skyrim.",
         "shader_state.parallax_envmap_missing_slots3_4_5.skyrim.",
         "shader_state.parallax_envmap_missing_slot3.skyrim.",
+        "shader_state.parallax_envmap_missing_slot5.skyrim.",
         "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim.",
         "shader_state.crossblock_texture_ref_drift_mixed_slots.skyrim.",
         "path_slot_env_mask.generic_alias_suffix.skyrim.",
@@ -946,11 +947,80 @@
           "intentional_strategy_difference": true,
           "expected_difference_bucket": "safety_first",
           "safety_difference_note": "Cross-layout legacy/u16/crlf/shifted family intentionally keeps remediation conservative when shared texture-set refs drift across conflicting slots."
+        },
+        {
+          "id": "pack_skyrim_architecture_real_crlf_u16_shifted_parallax_envmap_slot5_missing_guessable",
+          "family": "architecture",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_layout_shift": 4,
+          "texture_set_count_u16": true,
+          "shader_type": 1,
+          "flags1": 2176,
+          "texture_paths": [
+            "textures\\architecture\\solitude\\solitudewall.dds",
+            "",
+            "",
+            "textures\\architecture\\solitude\\solitudewall_p.dds",
+            "textures\\cubemaps\\solitudewall_e.dds",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_missing_slot5.skyrim.real",
+            "shader_state.parallax_envmap_missing_slot5.skyrim.real"
+          ],
+          "expected_remediation_steps": [
+            "set_slot5_env_mask_for_missing_envmap_slot5",
+            "enable_env_mapping_for_missing_envmap_slot5",
+            "set_slot5_env_mask_for_parallax_envmap_slot5",
+            "enable_env_mapping_for_parallax_envmap_slot5"
+          ],
+          "pgpatcher_strategy": "rebuild_missing_envmask_while_preserving_parallax_envmap",
+          "local_strategy": "rebuild_slot5_when_guessable_then_keep_parallax_envmap",
+          "intentional_strategy_difference": false
+        },
+        {
+          "id": "pack_skyrim_architecture_singlepass_guarded_manual_review_destructive_disabled",
+          "family": "architecture",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "flags1": 2080,
+          "texture_paths": [
+            "textures\\architecture\\markarth\\markarthstone.dds",
+            "",
+            "",
+            "textures\\architecture\\markarth\\markarthstone_p.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "skip_single_pass.skyrim."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_absent_remediation_steps": [
+            "set_slot3_parallax",
+            "enable_parallax"
+          ],
+          "pgpatcher_strategy": "force_patch_singlepass_block_for_visual_parity",
+          "local_strategy": "manual_review_noop_when_destructive_singlepass_override_is_not_explicitly_allowed",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "destructive_disabled",
+          "safety_difference_note": "Single-pass meshes are intentionally kept as no-op/manual-review unless users explicitly disable the safety guard."
         }
       ],
       "expected_family_allowed_difference_buckets": {
         "architecture": [
-          "safety_first"
+          "safety_first",
+          "destructive_disabled"
         ],
         "effects": [
           "safety_first"
@@ -961,7 +1031,8 @@
       },
       "expected_family_min_difference_bucket_counts": {
         "architecture": {
-          "safety_first": 2
+          "safety_first": 2,
+          "destructive_disabled": 1
         },
         "effects": {
           "safety_first": 1
@@ -972,7 +1043,7 @@
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
         "architecture": 29,
-        "effects": 25,
+        "effects": 27,
         "clutter": 22,
         "armor": 1,
         "landscape": 1,
@@ -1028,6 +1099,7 @@
         "shader_state.envmap_pom_missing_env_slots.fallout.",
         "shader_state.envmap_glow_missing_slots2_4_5.fallout.",
         "shader_state.parallax_envmap_missing_slots3_4_5.fallout.",
+        "shader_state.parallax_envmap_missing_slot5.fallout.",
         "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.fallout.",
         "missing_parallax_flag.flag1_not_set.fallout.",
         "shader_state.parallax_type_missing_slot3.fallout.",
@@ -4307,6 +4379,76 @@
           "intentional_strategy_difference": true,
           "expected_difference_bucket": "partial_recoverability_guarded",
           "safety_difference_note": "Additional guarded Fallout single-pass long-tail case remains deterministic no-op/manual-review in local strategy."
+        },
+        {
+          "id": "pack_fallout_effects_legacy_parallax_envmap_slot5_missing_guessable_v7",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "legacy",
+          "user_version": 11,
+          "user_ver2": 130,
+          "shader_type": 1,
+          "flags1": 2176,
+          "texture_paths": [
+            "textures\\effects\\machinery\\coilpanel.dds",
+            "",
+            "",
+            "textures\\effects\\machinery\\coilpanel_p.dds",
+            "textures\\cubemaps\\coilpanel_e.dds",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_missing_slot5.fallout.",
+            "shader_state.parallax_envmap_missing_slot5.fallout."
+          ],
+          "expected_remediation_steps": [
+            "set_slot5_env_mask_for_missing_envmap_slot5",
+            "enable_env_mapping_for_missing_envmap_slot5",
+            "set_slot5_env_mask_for_parallax_envmap_slot5",
+            "enable_env_mapping_for_parallax_envmap_slot5"
+          ],
+          "pgpatcher_strategy": "restore_slot5_envmask_and_keep_parallax_envmap",
+          "local_strategy": "restore_slot5_when_guessable_and_keep_parallax_envmap",
+          "intentional_strategy_difference": false,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Guarded Fallout parity case confirms deterministic slot-5 recovery path before any destructive fallback."
+        },
+        {
+          "id": "pack_fallout_effects_legacy_parallax_envmap_slot5_missing_noguess_v7",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "legacy",
+          "user_version": 11,
+          "user_ver2": 130,
+          "shader_type": 1,
+          "flags1": 2176,
+          "texture_paths": [
+            "",
+            "",
+            "",
+            "textures\\effects\\machinery\\coilpanel_p.dds",
+            "textures\\cubemaps\\coilpanel_e.dds",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_missing_slot5.fallout.",
+            "shader_state.parallax_envmap_missing_slot5.fallout."
+          ],
+          "expected_remediation_steps": [
+            "disable_env_mapping_for_missing_slot5",
+            "disable_env_mapping_for_parallax_envmap_slot5"
+          ],
+          "pgpatcher_strategy": "attempt_cross-material_envmask_rebuild",
+          "local_strategy": "deterministic_disable_envmap_when_slot5_rebuild_source_is_missing",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "When slot-5 rebuild provenance is missing, local guarded mode intentionally disables env mapping instead of speculative cross-material reconstruction."
         }
       ],
       "expected_family_allowed_difference_buckets": {
