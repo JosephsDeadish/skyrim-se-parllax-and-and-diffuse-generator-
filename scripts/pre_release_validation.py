@@ -43,6 +43,9 @@ SECRET_SCAN_EXCLUDES = {
 }
 
 
+_SUSPICIOUS_TRACKED_FILENAME = re.compile(r"^=\d")
+
+
 def _run_step(step_name: str, command: list[str]) -> None:
     print(f"\n=== {step_name} ===")
     print("$", " ".join(command))
@@ -89,6 +92,34 @@ def _run_secret_scan() -> None:
         print("Resolve secret-scan findings before release.")
         raise SystemExit(1)
     print("No obvious secrets detected.")
+
+
+def _run_repository_hygiene_scan() -> None:
+    print("\n=== Repository hygiene scan ===")
+    suspicious_files: list[str] = []
+    for file_path in _iter_repo_files():
+        relative = file_path.relative_to(REPO_ROOT)
+        if _SUSPICIOUS_TRACKED_FILENAME.match(relative.name):
+            suspicious_files.append(str(relative))
+            continue
+        if relative.suffix.lower() in SECRET_SCAN_EXCLUDES:
+            continue
+        if relative.parent != Path("."):
+            continue
+        try:
+            content = file_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        lowered = content.lower()
+        if "defaulting to user installation because normal site-packages is not writeable" in lowered and "collecting " in lowered:
+            suspicious_files.append(str(relative))
+    if suspicious_files:
+        print("Repository hygiene scan found suspicious tracked artifact file(s):")
+        for item in suspicious_files:
+            print(f"- {item}")
+        print("Remove local pip/tool output artifacts from tracked files before release.")
+        raise SystemExit(1)
+    print("No suspicious tracked artifact files detected.")
 
 
 def _run_packaging_smoke(artifact_dir: Path) -> None:
@@ -1106,6 +1137,8 @@ def main() -> int:
     step_status.append((f"Targeted NIF fixture/parity stress checks x{loops}", "pass"))
     step_status.append((f"Compile check x{loops}", "pass"))
     step_status.append((f"Large real-sample batch verification x{loops}", "pass"))
+    _run_repository_hygiene_scan()
+    step_status.append(("Repository hygiene scan", "pass"))
     _run_secret_scan()
     step_status.append(("Tracked-file secret scan", "pass"))
     if not args.skip_packaging_smoke:

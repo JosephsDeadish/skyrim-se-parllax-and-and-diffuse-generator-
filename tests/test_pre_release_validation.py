@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 from scripts.pre_release_validation import (
     _append_trend_history,
     _collect_localization_coverage,
+    _run_repository_hygiene_scan,
     _resolve_packaged_smoke_binary,
 )
 
@@ -129,6 +131,40 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
     def test_resolve_packaged_smoke_binary_raises_when_missing(self) -> None:
         with self.assertRaises(SystemExit):
             _resolve_packaged_smoke_binary(self.tmp)
+
+
+class TestPreReleaseValidationRepositoryHygiene(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._td.name)
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir(parents=True, exist_ok=True)
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def test_repository_hygiene_scan_flags_suspicious_root_artifact_filename(self) -> None:
+        tracked = self.repo / "=1.26.0"
+        tracked.write_text("placeholder", encoding="utf-8")
+
+        with unittest.mock.patch("scripts.pre_release_validation.REPO_ROOT", self.repo):
+            with unittest.mock.patch(
+                "scripts.pre_release_validation._iter_repo_files",
+                return_value=[tracked],
+            ):
+                with self.assertRaises(SystemExit):
+                    _run_repository_hygiene_scan()
+
+    def test_repository_hygiene_scan_allows_normal_root_files(self) -> None:
+        tracked = self.repo / "README.md"
+        tracked.write_text("# ok\n", encoding="utf-8")
+
+        with unittest.mock.patch("scripts.pre_release_validation.REPO_ROOT", self.repo):
+            with unittest.mock.patch(
+                "scripts.pre_release_validation._iter_repo_files",
+                return_value=[tracked],
+            ):
+                _run_repository_hygiene_scan()
 
 
 if __name__ == "__main__":
