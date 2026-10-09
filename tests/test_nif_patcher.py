@@ -1154,6 +1154,24 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "fallout_profile.guarded_noop_layout_policy_exhausted")
 
+    def test_conflict_classifier_maps_cs_slot5_cm_vs_enb_workflow_mix_notice(self) -> None:
+        code = _classify_conflict_code(
+            "Block 0: slot 5 uses Community Shaders Extended Materials naming ('textures\\\\arch\\\\stone_cm.dds'); ENB expects _m.dds."
+        )
+        self.assertEqual(code, "workflow_mix.enb_slot5_cm_suffix")
+
+    def test_conflict_classifier_maps_cs_slot5_m_vs_cs_workflow_mix_notice(self) -> None:
+        code = _classify_conflict_code(
+            "Block 0: slot 5 uses ENB/vanilla-style _m naming ('textures\\\\arch\\\\stone_m.dds'); CS Extended Materials expects _cm/_c."
+        )
+        self.assertEqual(code, "workflow_mix.cs_slot5_m_suffix")
+
+    def test_conflict_classifier_maps_cs_slot5_generic_alias_workflow_mix_notice(self) -> None:
+        code = _classify_conflict_code(
+            "Block 0: slot 5 uses generic packed alias naming ('textures\\\\arch\\\\stone_orm.dds'); rename/repack to explicit _cm/_c for CS Extended Materials or _rmaos for TruePBR."
+        )
+        self.assertEqual(code, "workflow_mix.cs_slot5_generic_alias")
+
     def test_conflict_report_classifies_slot_specific_paths(self) -> None:
         paths = ["textures\\arch\\stone_n.dds"] + [""] * 8
         nif = _write_nif(self.tmp, texture_paths=paths)

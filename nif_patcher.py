@@ -3952,6 +3952,17 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "path_slot_env_mask.generic_alias_suffix": (
         "Replace generic packed aliases (_orm/_mrao) with explicit workflow suffixes such as _m, _cm/_c, or _rmaos/_ramos.",
     ),
+    "workflow_mix.enb_slot5_cm_suffix": (
+        "Slot 5 uses Community Shaders _cm/_c naming while ENB-style expectations are active; repack/rename to ENB-style _m for ENB workflows.",
+        "If this mesh is intended for Community Shaders Extended Materials instead, keep _cm/_c and avoid ENB-specific _msn/_EnvMap assumptions.",
+    ),
+    "workflow_mix.cs_slot5_m_suffix": (
+        "Slot 5 uses ENB/vanilla _m naming while Community Shaders Extended Materials expectations are active; repack/rename to _cm/_c for CS workflows.",
+        "If this mesh is intended for ENB instead, keep _m and avoid CS Extended Materials expectations on the same material.",
+    ),
+    "workflow_mix.cs_slot5_generic_alias": (
+        "Slot 5 uses generic packed alias naming for a Community Shaders path; repack to explicit _cm/_c for CS Extended Materials or _rmaos for TruePBR.",
+    ),
     "flag_glow_map.slot2_filled_without_flag": (
         "Enable SLSF2_Glow_Map when slot 2 emissive is present, or clear slot 2.",
     ),
@@ -4155,6 +4166,12 @@ def _classify_conflict_code(message: str) -> str:
         return "path_slot_env_mask.wrong_suffix"
     if "slot 5 environment-mask path" in lowered and "generic packed alias suffix" in lowered:
         return "path_slot_env_mask.generic_alias_suffix"
+    if "slot 5 uses community shaders extended materials naming" in lowered and "enb expects _m.dds" in lowered:
+        return "workflow_mix.enb_slot5_cm_suffix"
+    if "slot 5 uses enb/vanilla-style _m naming" in lowered and "cs extended materials expects _cm/_c" in lowered:
+        return "workflow_mix.cs_slot5_m_suffix"
+    if "slot 5 uses generic packed alias naming" in lowered and "for cs extended materials" in lowered:
+        return "workflow_mix.cs_slot5_generic_alias"
     if "slot 4 cubemap path" in lowered and "not a .dds texture path" in lowered:
         return "path_slot_cubemap.non_dds"
     if "slot 4 cubemap path" in lowered and "looks like a non-cubemap texture" in lowered:

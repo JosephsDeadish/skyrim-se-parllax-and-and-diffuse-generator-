@@ -97,6 +97,7 @@ jobs:
         run: |
           python scripts/pre_release_validation.py \
             --repeat-validation-loops 3 \
+            --packaged-smoke-loops 2 \
             --strict-localization-completeness \
             --artifact-dir artifacts/release_readiness \
             --history-file artifacts/release_readiness/nif_family_trend_history.json \
@@ -150,28 +151,24 @@ jobs:
           import subprocess
 
           smoke_root = Path("artifacts") / "packaged_smoke"
-          smoke_out = smoke_root / "out"
           smoke_root.mkdir(parents=True, exist_ok=True)
-          smoke_out.mkdir(parents=True, exist_ok=True)
           input_png = smoke_root / "sample_input.png"
           input_png.write_bytes(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP8z8Dwn4GBgYGJAQoAHxcCAr7cGDwAAAAASUVORK5CYII="))
-          cmd = [
-              str(Path("dist") / "generate_textures.exe"),
-              str(input_png),
-              "--output-dir",
-              str(smoke_out),
-              "--render-profile",
-              "vanilla",
-              "--normal-strength",
-              "1.2",
-              "--parallax-strength",
-              "1.0",
+          binary = str(Path("dist") / "generate_textures.exe")
+          scenarios = [
+              ("vanilla", ["--render-profile", "vanilla", "--normal-strength", "1.2", "--parallax-strength", "1.0"]),
+              ("community_shaders", ["--render-profile", "community_shaders", "--complex-material", "--complex-format", "cm", "--environment-mask", "--environment-mask-mode", "complex"]),
           ]
-          completed = subprocess.run(cmd, capture_output=True, text=True)
-          if completed.returncode != 0:
-              raise SystemExit(completed.returncode)
-          if not list(smoke_out.glob("*.dds")):
-              raise SystemExit("No DDS outputs were produced by packaged executable smoke generation.")
+          for loop_index in range(1, 3):
+              for scenario_name, scenario_args in scenarios:
+                  smoke_out = smoke_root / f"out_loop{loop_index}_{scenario_name}"
+                  smoke_out.mkdir(parents=True, exist_ok=True)
+                  cmd = [binary, str(input_png), "--output-dir", str(smoke_out), *scenario_args]
+                  completed = subprocess.run(cmd, capture_output=True, text=True)
+                  if completed.returncode != 0:
+                      raise SystemExit(completed.returncode)
+                  if not list(smoke_out.glob("*.dds")):
+                      raise SystemExit("No DDS outputs were produced by packaged executable smoke generation.")
           PY
 
       - name: Upload packaged smoke artifacts

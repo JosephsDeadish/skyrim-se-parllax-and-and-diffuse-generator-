@@ -1978,9 +1978,9 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(
             should_update_live_batch_preview(
                 total_sources=1200,
-                current_index=105,
+                current_index=107,
                 last_index=100,
-                seconds_since_last_update=0.45,
+                seconds_since_last_update=0.60,
             )
         )
 
@@ -1996,9 +1996,31 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(
             should_update_live_batch_preview(
                 total_sources=2200,
-                current_index=508,
+                current_index=510,
                 last_index=500,
-                seconds_since_last_update=0.60,
+                seconds_since_last_update=0.80,
+            )
+        )
+
+    def test_should_update_live_batch_preview_uses_stricter_throttle_for_8k_heavy_batches(self) -> None:
+        self.assertFalse(
+            should_update_live_batch_preview(
+                total_sources=1100,
+                current_index=507,
+                last_index=500,
+                seconds_since_last_update=0.50,
+                source_pixels=8192 * 8192,
+                high_res_8k_count=10,
+            )
+        )
+        self.assertTrue(
+            should_update_live_batch_preview(
+                total_sources=1100,
+                current_index=512,
+                last_index=500,
+                seconds_since_last_update=0.90,
+                source_pixels=8192 * 8192,
+                high_res_8k_count=10,
             )
         )
 

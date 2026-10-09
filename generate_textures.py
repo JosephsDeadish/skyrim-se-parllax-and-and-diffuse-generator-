@@ -557,18 +557,23 @@ def should_update_live_batch_preview(
     current_index: int,
     last_index: int,
     seconds_since_last_update: float,
+    source_pixels: int = 0,
+    high_res_8k_count: int = 0,
 ) -> bool:
     if total_sources < 300:
         return True
-    if total_sources >= 2000:
-        min_interval = 0.95
-        min_index_step = 8
-    elif total_sources >= 1000:
-        min_interval = 0.70
-        min_index_step = 5
+    if total_sources >= 2000 or source_pixels >= (8192 * 8192):
+        min_interval = 1.15
+        min_index_step = 10
+    elif total_sources >= 1000 or source_pixels >= (4096 * 4096):
+        min_interval = 0.85
+        min_index_step = 6
     else:
-        min_interval = 0.30
-        min_index_step = 2
+        min_interval = 0.40
+        min_index_step = 3
+    if high_res_8k_count >= 8:
+        min_interval += 0.20
+        min_index_step += 2
     if seconds_since_last_update >= min_interval:
         return True
     return (
@@ -7752,6 +7757,8 @@ if GUI_AVAILABLE:
             self.preview_deferred_queue: list[str] = []
             self._last_live_batch_preview_update_at = 0.0
             self._last_live_batch_preview_index = 0
+            self._active_batch_max_source_pixels = 0
+            self._active_batch_high_res_8k_count = 0
             self.normal_strength_var = tk.DoubleVar(value=2.0)
             self.parallax_strength_var = tk.DoubleVar(value=1.35)
             self.complex_strength_var = tk.DoubleVar(value=1.15)
@@ -8064,7 +8071,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(_snow_mask_check, "❄ Generate a Community Shaders Dynamic Snow mask (_sm.dds).\nMarks where snow accumulates in supported shader/mod setups; this is workflow-specific, not a universal vanilla slot.")
             _advanced_workflow_toggle = ttk.Checkbutton(
                 _workflow_frame,
-                text="Show advanced workflow outputs",
+                text="Show Advanced outputs (Basic view keeps core outputs)",
                 variable=self.show_advanced_workflow_outputs_var,
             )
             _advanced_workflow_toggle.grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
@@ -8139,7 +8146,7 @@ if GUI_AVAILABLE:
             )
             _show_advanced_generation_check = ttk.Checkbutton(
                 options_frame,
-                text="Show advanced setup controls",
+                text="Show Advanced setup controls (Basic view keeps core controls)",
                 variable=self.show_advanced_generation_var,
             )
             _show_advanced_generation_check.grid(row=1, column=3, columnspan=2, sticky=tk.E, pady=(6, 2))
@@ -9752,6 +9759,8 @@ if GUI_AVAILABLE:
             if not processing:
                 self.reenable_batch_preview_button.configure(state=tk.DISABLED)
                 self.batch_preview_auto_paused = False
+                self._active_batch_max_source_pixels = 0
+                self._active_batch_high_res_8k_count = 0
                 self._cancel_deferred_preview_staging(clear_queue=False)
                 if not self.preview_paused_var.get():
                     self._set_preview_speed_badge("none")
@@ -10018,6 +10027,8 @@ if GUI_AVAILABLE:
                             current_index=max(0, int(index)),
                             last_index=last_index,
                             seconds_since_last_update=max(0.0, now - last_at),
+                            source_pixels=max(0, int(getattr(self, "_active_batch_max_source_pixels", 0) or 0)),
+                            high_res_8k_count=max(0, int(getattr(self, "_active_batch_high_res_8k_count", 0) or 0)),
                         )
                         if should_update:
                             self._set_preview_source_by_path(current_path)
@@ -11254,6 +11265,9 @@ if GUI_AVAILABLE:
                 high_4k_count = int(batch_metrics.get("high_res_4k_count", 0) or 0)
                 high_8k_count = int(batch_metrics.get("high_res_8k_count", 0) or 0)
                 max_dim = int(batch_metrics.get("max_dimension", 0) or 0)
+                max_megapixels = float(batch_metrics.get("max_megapixels", 0.0) or 0.0)
+                self._active_batch_max_source_pixels = int(max_megapixels * 1_000_000.0)
+                self._active_batch_high_res_8k_count = max(0, high_8k_count)
                 preview_auto_disabled = False
                 if (
                     self.auto_optimize_large_batches_var.get()

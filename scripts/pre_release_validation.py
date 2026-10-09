@@ -171,7 +171,7 @@ def _resolve_packaged_smoke_binary(artifact_dir: Path) -> Path:
     raise SystemExit("Packaging smoke binary was not produced at expected dist path.")
 
 
-def _run_packaged_executable_smoke(artifact_dir: Path) -> None:
+def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> None:
     print("\n=== Packaged executable smoke run ===")
     binary = _resolve_packaged_smoke_binary(artifact_dir)
     completed = subprocess.run(
@@ -191,42 +191,65 @@ def _run_packaged_executable_smoke(artifact_dir: Path) -> None:
         )
 
     smoke_io = artifact_dir / "packaging_smoke" / "io"
-    smoke_out = smoke_io / "out"
     smoke_io.mkdir(parents=True, exist_ok=True)
-    smoke_out.mkdir(parents=True, exist_ok=True)
     smoke_input = smoke_io / "sample_input.png"
     smoke_input.write_bytes(
         base64.b64decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP8z8Dwn4GBgYGJAQoAHxcCAr7cGDwAAAAASUVORK5CYII="
         )
     )
-
-    run_completed = subprocess.run(
-        [
-            str(binary),
-            str(smoke_input),
-            "--output-dir",
-            str(smoke_out),
-            "--render-profile",
+    loops = max(1, int(loops))
+    scenarios: list[tuple[str, list[str]]] = [
+        (
             "vanilla",
-            "--normal-strength",
-            "1.2",
-            "--parallax-strength",
-            "1.0",
-        ],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    if run_completed.returncode != 0:
-        print(run_completed.stdout)
-        print(run_completed.stderr)
-        raise SystemExit(run_completed.returncode)
-    produced_dds = sorted(smoke_out.glob("*.dds"))
-    if not produced_dds:
-        raise SystemExit(
-            "Packaged executable smoke run completed but did not produce any DDS outputs."
-        )
+            [
+                "--render-profile",
+                "vanilla",
+                "--normal-strength",
+                "1.2",
+                "--parallax-strength",
+                "1.0",
+            ],
+        ),
+        (
+            "community_shaders",
+            [
+                "--render-profile",
+                "community_shaders",
+                "--complex-material",
+                "--complex-format",
+                "cm",
+                "--environment-mask",
+                "--environment-mask-mode",
+                "complex",
+            ],
+        ),
+    ]
+    for loop_index in range(1, loops + 1):
+        for scenario_name, scenario_args in scenarios:
+            smoke_out = smoke_io / f"out_loop{loop_index}_{scenario_name}"
+            smoke_out.mkdir(parents=True, exist_ok=True)
+            run_completed = subprocess.run(
+                [
+                    str(binary),
+                    str(smoke_input),
+                    "--output-dir",
+                    str(smoke_out),
+                    *scenario_args,
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+            )
+            if run_completed.returncode != 0:
+                print(run_completed.stdout)
+                print(run_completed.stderr)
+                raise SystemExit(run_completed.returncode)
+            produced_dds = sorted(smoke_out.glob("*.dds"))
+            if not produced_dds:
+                raise SystemExit(
+                    "Packaged executable smoke run completed but did not produce any DDS outputs."
+                )
 
 
 def _collect_localization_coverage(
@@ -1088,6 +1111,12 @@ def main() -> int:
         action="store_true",
         help="Fail when non-English translation catalogs are missing keys from en.json.",
     )
+    parser.add_argument(
+        "--packaged-smoke-loops",
+        type=int,
+        default=2,
+        help="Number of consecutive packaged executable smoke loops per workflow scenario.",
+    )
     args = parser.parse_args()
     loops = max(1, int(args.repeat_validation_loops))
 
@@ -1144,8 +1173,9 @@ def main() -> int:
     if not args.skip_packaging_smoke:
         _run_packaging_smoke(args.artifact_dir)
         step_status.append(("Packaging smoke build", "pass"))
-        _run_packaged_executable_smoke(args.artifact_dir)
-        step_status.append(("Packaged executable smoke run", "pass"))
+        packaged_smoke_loops = max(1, int(args.packaged_smoke_loops))
+        _run_packaged_executable_smoke(args.artifact_dir, loops=packaged_smoke_loops)
+        step_status.append((f"Packaged executable smoke run x{packaged_smoke_loops}", "pass"))
     (
         localization_report,
         localization_json_path,
