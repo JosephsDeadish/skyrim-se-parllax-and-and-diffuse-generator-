@@ -368,15 +368,11 @@ def _patch_shader_texture_set_ref(path: Path, shader_ordinal: int, texture_set_r
     header = _read_header(_Buf(data))
     if header is None:
         return
-    shader_blocks = _shader_block_indices_for_fixture(path)
-    if shader_ordinal < 0 or shader_ordinal >= len(shader_blocks):
+    shader_props, _texture_sets, _errors = _build_block_map(data, header)
+    if shader_ordinal < 0 or shader_ordinal >= len(shader_props):
         return
-    block_starts = [header.blocks_start]
-    for size in header.block_sizes[:-1]:
-        block_starts.append(block_starts[-1] + size)
-    block_index = shader_blocks[shader_ordinal]
-    block_start = block_starts[block_index]
-    ref_offset = block_start + (40 if shader_layout == "legacy" else 36)
+    sp = shader_props[shader_ordinal]
+    ref_offset = int(sp.texture_set_ref_offset)
     raw = bytearray(data)
     if ref_offset + 4 > len(raw):
         return
@@ -1145,6 +1141,12 @@ class TestValidateNifForParallax(unittest.TestCase):
             "No Fallout-compatible BSLightingShaderProperty blocks found for experimental patch mode."
         )
         self.assertEqual(code, "fallout_profile.guarded_noop_no_compatible_blocks")
+
+    def test_conflict_classifier_maps_crossblock_texture_ref_drift_notice(self) -> None:
+        code = _classify_conflict_code(
+            "Linked blocks [1, 2] share texture set ref 0; cross-block reference drift is present with mixed parallax/env/glow slot conflicts."
+        )
+        self.assertEqual(code, "shader_state.crossblock_texture_ref_drift_mixed_slots")
 
     def test_conflict_classifier_maps_fallout_guarded_noop_when_layout_policy_skips_all_blocks(self) -> None:
         code = _classify_conflict_code(
@@ -4444,6 +4446,56 @@ class TestFixturePostMutations(unittest.TestCase):
         validation = validate_nif_for_parallax(corpus[0])
         codes = [group.code for group in validation.conflict_report]
         self.assertTrue(any(code.startswith("path_slot_parallax.matches_normal.") for code in codes))
+
+    def test_materialize_emits_crossblock_texture_ref_drift_conflict_family(self) -> None:
+        payload = {
+            "cases": [
+                {
+                    "id": "cross_block_ref_mixed_drift",
+                    "profile": "skyrim",
+                    "shader_layout": "legacy",
+                    "user_ver2": 83,
+                    "shader_type": SHADER_TYPE_ENVMAP,
+                    "flags1": SLSF1_ENVIRONMENT_MAPPING | SLSF1_PARALLAX,
+                    "flags2": SLSF2_GLOW_MAP,
+                    "texture_paths": [
+                        "textures\\arch\\stone.dds",
+                        "textures\\arch\\stone_n.dds",
+                        "",
+                        "textures\\arch\\stone_n.dds",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                    ],
+                    "extra_shader_blocks": [
+                        {
+                            "shader_type": SHADER_TYPE_DEFAULT,
+                            "flags1": SLSF1_PARALLAX,
+                            "flags2": SLSF2_GLOW_MAP,
+                            "texture_paths": [
+                                "textures\\arch\\stone.dds",
+                                "textures\\arch\\stone_n.dds",
+                                "textures\\arch\\stone_n.dds",
+                                "textures\\arch\\stone.dds",
+                                "",
+                                "",
+                                "",
+                                "",
+                                "",
+                            ],
+                        }
+                    ],
+                }
+            ]
+        }
+        corpus = _materialize_fixture_corpus(self.tmp, payload)
+        self.assertEqual(len(corpus), 1)
+        _patch_shader_texture_set_ref(corpus[0], shader_ordinal=1, texture_set_ref=0, shader_layout="legacy")
+        validation = validate_nif_for_parallax(corpus[0])
+        codes = [group.code for group in validation.conflict_report]
+        self.assertTrue(any(code.startswith("shader_state.crossblock_texture_ref_drift_mixed_slots.") for code in codes))
 
     def test_materialize_supports_header_num_block_corruption_delta(self) -> None:
         payload = {

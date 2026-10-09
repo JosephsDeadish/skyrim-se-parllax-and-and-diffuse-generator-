@@ -760,6 +760,7 @@ class NifShaderInfo:
     raw_shader_type: int | None = None
     shader_type_resolution: str = "exact"
     layout_name: str = ""
+    texture_set_ref: int | None = None
 
     # Shape-context fields — populated by scan_nif_diagnostics when a parent
     # BSTriShape-family block can be matched to this shader property.
@@ -3648,6 +3649,7 @@ def scan_nif_diagnostics(
             raw_shader_type=sp.raw_shader_type,
             shader_type_resolution=sp.shader_type_resolution,
             layout_name=sp.layout_name,
+            texture_set_ref=sp.texture_set_ref,
         )
         if shape is not None:
             info.parent_block_type = shape.block_type
@@ -4001,6 +4003,10 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "shader_state.parallax_envmap_glow_missing_slots2_3_4_5": (
         "Parallax/POM + env mapping + glow are active while slots 2/3/4/5 are unresolved; restore valid textures or disable all conflicting shader flags for the block.",
     ),
+    "shader_state.crossblock_texture_ref_drift_mixed_slots": (
+        "Cross-block texture-set reference drift detected with mixed slot conflicts; keep auto-fix conservative and review linked blocks manually before patching.",
+        "Split or correct shared texture-set references first, then re-run scan/auto-remediation for deterministic per-block fixes.",
+    ),
     "fallback_or_unknown": (
         "Review the listed block diagnostics and apply targeted fixes before repatching.",
     ),
@@ -4196,6 +4202,11 @@ def _classify_conflict_code(message: str) -> str:
         and "required slot 2/3 and envmap textures are unresolved" in lowered
     ):
         return "shader_state.parallax_envmap_glow_missing_slots2_3_4_5"
+    if (
+        ("share texture set ref" in lowered or "shares texture set ref" in lowered)
+        and "cross-block reference drift" in lowered
+    ):
+        return "shader_state.crossblock_texture_ref_drift_mixed_slots"
     if "slot 0 " in lowered:
         return "path_slot_diffuse"
     if "slot 1 " in lowered:
@@ -5526,6 +5537,72 @@ def validate_nif_for_parallax(
         block_renderer_notes = _renderer_compatibility(info)
         for renderer, notes in block_renderer_notes.items():
             agg_renderer_notes[renderer].extend(notes)
+
+    shared_texture_set_blocks: dict[int, list[NifShaderInfo]] = {}
+    for info in infos:
+        ref = info.texture_set_ref
+        if ref is None or ref < 0:
+            continue
+        shared_texture_set_blocks.setdefault(ref, []).append(info)
+    for texture_set_ref, linked_blocks in shared_texture_set_blocks.items():
+        if len(linked_blocks) < 2:
+            continue
+        has_parallax_family = any(block.has_parallax_flag or block.has_pom_flag for block in linked_blocks)
+        has_env_family = any(
+            block.has_env_mapping_flag or block.shader_type == SHADER_TYPE_ENVMAP
+            for block in linked_blocks
+        )
+        has_glow_family = any(block.has_glow_map_flag for block in linked_blocks)
+        if sum((has_parallax_family, has_env_family, has_glow_family)) < 2:
+            continue
+
+        has_mixed_slot_drift = False
+        for block in linked_blocks:
+            slot0 = _normalise_slot_path(block.texture_paths.get(TEXTURE_SLOT_DIFFUSE, ""))
+            slot1 = _normalise_slot_path(block.texture_paths.get(TEXTURE_SLOT_NORMAL, ""))
+            slot2 = block.texture_paths.get(TEXTURE_SLOT_GLOW, "").strip()
+            slot3 = _normalise_slot_path(block.texture_paths.get(TEXTURE_SLOT_PARALLAX, ""))
+            slot4 = block.texture_paths.get(TEXTURE_SLOT_CUBEMAP, "").strip()
+            slot5 = block.texture_paths.get(TEXTURE_SLOT_ENV_MASK, "").strip()
+
+            if slot3 and (slot3 == slot0 or slot3 == slot1):
+                has_mixed_slot_drift = True
+
+            if block.has_glow_map_flag and (
+                not slot2
+                or _texture_slot_path_missing_near_nif(nif_path, slot2, texture_roots)
+            ):
+                has_mixed_slot_drift = True
+
+            if block.has_env_mapping_flag or block.shader_type == SHADER_TYPE_ENVMAP:
+                slot4_missing = (
+                    not slot4
+                    or _texture_slot_path_missing_near_nif(nif_path, slot4, texture_roots)
+                )
+                slot5_missing = (
+                    not slot5
+                    or _texture_slot_path_missing_near_nif(nif_path, slot5, texture_roots)
+                )
+                if slot4_missing or slot5_missing:
+                    has_mixed_slot_drift = True
+            if has_mixed_slot_drift:
+                break
+
+        if has_mixed_slot_drift:
+            block_list = ", ".join(str(block.block_index) for block in linked_blocks)
+            _append_unique(
+                result.issues,
+                (
+                    f"Linked blocks [{block_list}] share texture set ref {texture_set_ref}; "
+                    "cross-block reference drift is present with mixed parallax/env/glow slot conflicts."
+                ),
+            )
+            _append_unique(
+                result.suggestions,
+                (
+                    "Cross-block texture-set drift detected: prefer manual review/no-op first, then apply targeted per-block fixes before broad auto-remediation."
+                ),
+            )
 
     result.renderer_notes = agg_renderer_notes
     result.renderer_verdicts = _build_renderer_verdicts(infos, has_havok=result.has_havok)

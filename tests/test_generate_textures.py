@@ -519,6 +519,34 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("de", languages)
         self.assertIn("es", languages)
 
+    def test_non_english_translation_catalogs_match_en_keyset(self) -> None:
+        translations_dir = Path(__file__).resolve().parents[1] / "assets" / "translations"
+        en_payload = json.loads((translations_dir / "en.json").read_text(encoding="utf-8"))
+        en_strings = en_payload.get("strings", {})
+        self.assertIsInstance(en_strings, dict)
+        en_keys = set(en_strings.keys())
+        self.assertGreater(len(en_keys), 0)
+
+        for catalog_path in sorted(translations_dir.glob("*.json")):
+            if catalog_path.name == "en.json":
+                continue
+            payload = json.loads(catalog_path.read_text(encoding="utf-8"))
+            strings = payload.get("strings", {})
+            self.assertIsInstance(strings, dict, f"{catalog_path.name}: strings must be an object")
+            keys = set(strings.keys())
+            missing = sorted(en_keys - keys)
+            extras = sorted(keys - en_keys)
+            self.assertEqual(
+                missing,
+                [],
+                f"{catalog_path.name}: missing translation keys: {missing[:10]}",
+            )
+            self.assertEqual(
+                extras,
+                [],
+                f"{catalog_path.name}: stale/unknown translation keys: {extras[:10]}",
+            )
+
     def test_translate_ui_text_formats_tokens(self) -> None:
         self.assertEqual(
             translate_ui_text("Ready {value}", {"Ready {value}": "Done {value}"}),

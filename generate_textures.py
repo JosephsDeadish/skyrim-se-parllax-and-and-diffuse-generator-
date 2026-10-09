@@ -11840,7 +11840,7 @@ if GUI_AVAILABLE:
                     width=14,
                 )
                 target_game_combo.pack(side="left", padx=(6, 10))
-                game_hint_label = ttk.Label(game_row, text="(Switch to fallout here)")
+                game_hint_label = ttk.Label(game_row, text="(Use fallout only for guarded best-effort writes)")
                 game_hint_label.pack(side="left")
                 fallout_mode_row = ttk.Frame(opt_frame)
                 experimental_fallout_check = ttk.Checkbutton(
@@ -11850,7 +11850,7 @@ if GUI_AVAILABLE:
                 )
                 experimental_fallout_check.pack(side="left")
                 fallout_gate_frame = ttk.LabelFrame(opt_frame, text="Fallout safety gates", padding=6)
-                fallout_gate_label = ttk.Label(fallout_gate_frame, text="Opt in per operation (higher risk):")
+                fallout_gate_label = ttk.Label(fallout_gate_frame, text="Opt in per operation (higher-risk writes):")
                 fallout_gate_label.pack(anchor=tk.W, pady=(0, 4))
                 fallout_gate_row1 = ttk.Frame(fallout_gate_frame)
                 fallout_gate_row1.pack(fill="x")
@@ -11998,6 +11998,18 @@ if GUI_AVAILABLE:
                 )
                 option_warning_label.pack(fill="x", pady=(2, 0))
                 self._bind_responsive_wrap(opt_frame, option_warning_label, horizontal_padding=40, min_wrap=220)
+                guarded_mode_note = ttk.Label(
+                    opt_frame,
+                    text=(
+                        "Guarded mode (safer): use Scan + Apply patch for conservative edits.\n"
+                        "Destructive actions (Disable / clear) remove flags or slot paths; keep backups and verify results before large batch runs."
+                    ),
+                    justify=tk.LEFT,
+                    wraplength=860,
+                    foreground="gray",
+                )
+                guarded_mode_note.pack(fill="x", pady=(2, 0))
+                self._bind_responsive_wrap(opt_frame, guarded_mode_note, horizontal_padding=40, min_wrap=220)
 
                 unpatch_frame = ttk.LabelFrame(disable_tab, text="Remove Features (what to disable)", padding=6)
                 unpatch_frame.pack(fill="x", pady=(2, 4))
@@ -12228,15 +12240,15 @@ if GUI_AVAILABLE:
                 self._add_tooltip(target_game_label, "Choose header policy for scan/patch behavior (auto/skyrim/fallout).")
                 self._add_tooltip(
                     target_game_combo,
-                    "Default: auto. Choose fallout only for guarded best-effort Fallout patching; malformed meshes may be reported and left unchanged.",
+                    "Choose the safest profile first: auto/skyrim for normal runs.\nUse fallout only for guarded best-effort writes; malformed meshes may be left unchanged for manual review.",
                 )
                 self._add_tooltip(
                     experimental_fallout_check,
-                    "Required before any Fallout write operation.\nGuarded mode is best-effort: unsupported or malformed combinations are reported and left unchanged.",
+                    "Turn on only when you intentionally patch Fallout profiles.\nUnsupported or malformed combinations stay no-op and are reported for manual review.",
                 )
                 self._add_tooltip(
                     fallout_gate_label,
-                    "Each gate enables one higher-risk Fallout write type.\nEnable only what you need, then verify in game before broader batch use.",
+                    "Enable one gate at a time for higher-risk Fallout writes.\nPatch a small sample first, then verify in game before broad batch use.",
                 )
                 self._add_tooltip(
                     fallout_allow_parallax_scale_check,
@@ -13634,13 +13646,13 @@ if GUI_AVAILABLE:
                 self._add_tooltip(scan_button, "Read-only analysis pass. No file changes are written.")
                 self._add_tooltip(rerun_conflicts_button, "Incremental scan: run only files that previously had conflicts/failures.")
                 self._add_tooltip(rerun_patch_conflicts_button, "Incremental patch: patch only files that previously had conflicts/failures.")
-                self._add_tooltip(patch_button, "Write selected slot/flag changes to disk.")
-                self._add_tooltip(auto_fix_button, "Apply safe best-effort fixes from detected conflict codes.")
+                self._add_tooltip(patch_button, "Apply selected slot/flag edits to disk.\nUse Scan first to confirm conflicts and expected actions.")
+                self._add_tooltip(auto_fix_button, "Apply safe best-effort fixes from conflict codes.\nRisky cross-block drift families stay manual-review no-op by design.")
                 self._add_tooltip(
                     rerun_auto_fix_conflicts_button,
                     "Incremental auto-fix: remediate only files that previously had conflicts/failures.",
                 )
-                self._add_tooltip(unpatch_button, "Remove selected flags/slots to roll back or simplify prior patching.")
+                self._add_tooltip(unpatch_button, "Remove selected flags/slots (destructive).\nUse backups or Restore from .bak if you need rollback safety.")
                 self._add_tooltip(restore_button, "Restore .nif files from matching .nif.bak backups in the same folder.")
                 self._add_tooltip(clear_button, "Clear result rows from the log.")
                 self._add_tooltip(export_report_button, "Export the currently filtered result rows to a text report.")
