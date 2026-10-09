@@ -371,6 +371,38 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "required_sidecar_json_keys": ("parallax", "displacement_scale", "texture"),
             "forbidden_suffixes": ("_cm.dds", "_msn.dds"),
         },
+        {
+            "name": "terrain_no_parallax_env",
+            "args": [
+                "--render-profile",
+                "terrain",
+                "--no-parallax",
+                "--environment-mask",
+                "--environment-mask-mode",
+                "standard",
+            ],
+            "min_outputs": 3,
+            "required_suffixes": ("_n.dds", "_m.dds"),
+            "forbidden_suffixes": ("_p.dds", "_rmaos.dds", "_cm.dds", "_msn.dds"),
+        },
+        {
+            "name": "enb_no_parallax_glow",
+            "args": [
+                "--render-profile",
+                "enb",
+                "--complex-material",
+                "--complex-format",
+                "msn",
+                "--environment-mask",
+                "--environment-mask-mode",
+                "complex",
+                "--glow-map",
+                "--no-parallax",
+            ],
+            "min_outputs": 5,
+            "required_suffixes": ("_msn.dds", "_m.dds", "_g.dds"),
+            "forbidden_suffixes": ("_p.dds", "_rmaos.dds", "_cm.dds"),
+        },
     ]
 
 

@@ -2130,6 +2130,22 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         self.assertTrue(any("Queue backlog spiked" in hint for hint in hints))
 
+    def test_build_batch_bottleneck_hints_prioritizes_queue_backlog_in_dense_huge_run(self) -> None:
+        hints = build_batch_bottleneck_hints(
+            avg_file_seconds=2.1,
+            max_file_seconds=9.1,
+            high_res_4k_count=120,
+            high_res_8k_count=6,
+            max_source_dimension=8192,
+            max_source_megapixels=67.1,
+            resumed_completed_count=30,
+            total_failed=4,
+            total_sources=1800,
+            peak_queue_backlog=384,
+        )
+        self.assertTrue(hints)
+        self.assertIn("Queue backlog spiked", hints[0])
+
     def test_get_generation_warnings_glow_on_stone_triggers_warning(self) -> None:
         warnings = get_generation_warnings(
             "stone",

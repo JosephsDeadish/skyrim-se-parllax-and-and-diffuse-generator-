@@ -472,7 +472,8 @@ def build_batch_bottleneck_hints(
     if total_sources >= 1000 and avg_file_seconds > 0.9:
         hints.append("Queue pacing is active for UI responsiveness on this huge run; brief status-update delays are expected.")
     if peak_queue_backlog >= 256:
-        hints.append(
+        hints.insert(
+            0,
             "Queue backlog spiked during this run; keep live preview off and use Resume mode to reduce UI churn on the next pass."
         )
     if high_res_4k_count >= 50:

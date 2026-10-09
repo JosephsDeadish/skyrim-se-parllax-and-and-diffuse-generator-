@@ -194,6 +194,8 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
             "vr_safe_core",
             "enb_glow_combo",
             "truepbr_wet_snow_combo",
+            "terrain_no_parallax_env",
+            "enb_no_parallax_glow",
         ):
             self.assertIn(expected, scenario_by_name)
             entry = scenario_by_name[expected]
