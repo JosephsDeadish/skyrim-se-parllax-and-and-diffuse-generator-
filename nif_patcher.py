@@ -3871,6 +3871,9 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "unsupported_header.reexport_resolution": (
         "Re-open and re-export/re-save the mesh in NifSkope or the Creation Kit to rebuild malformed header/block tables before patching.",
     ),
+    "unsupported_header.read_failure": (
+        "Verify the NIF path is readable and not locked, then re-export or replace corrupt files before patching.",
+    ),
     "unknown_shader_type.semantic_resolved": (
         "Unknown raw shader type was semantically inferred from flags/slots; verify block intent manually when processing malformed long-tail meshes.",
     ),
@@ -4004,6 +4007,8 @@ def _classify_conflict_code(message: str) -> str:
     lowered = message.lower()
     if "recorded block size" in lowered and "expected type-0 size" in lowered:
         return "unsupported_header.shader_block_size_mismatch"
+    if lowered.startswith("cannot read nif:"):
+        return "unsupported_header.read_failure"
     if "recovered shader-block scan using tolerant num_extra parsing" in lowered:
         return "unsupported_header.num_extra_recovery"
     if "strict unknown-shader check failed" in lowered:

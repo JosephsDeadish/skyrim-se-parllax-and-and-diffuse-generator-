@@ -814,9 +814,9 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 24,
-        "effects": 19,
-        "clutter": 17,
+        "architecture": 25,
+        "effects": 20,
+        "clutter": 18,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -3358,6 +3358,155 @@
           "expected_no_auto_remediation": true,
           "expected_difference_bucket": "guarded_fallout",
           "safety_difference_note": "Extended clutter drift family: guarded single-pass env-alias/header skew remains deterministic no-op instead of speculative repair."
+        },
+        {
+          "id": "pack_fallout_architecture_real_crlf_u16_envmap_glow_singlepass_refskew_extension",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 160,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\architecture\\vault\\bulkhead.dds",
+            "textures\\architecture\\vault\\bulkhead_n.dds",
+            "",
+            "",
+            "textures\\cubemaps\\bulkhead_e.dds",
+            "textures\\architecture\\vault\\bulkhead_m.dds",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 1,
+          "extra_shader_texture_set_refs": [
+            91
+          ],
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 12
+            },
+            {
+              "ordinal": 3,
+              "delta": -7
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Extended architecture drift family: envmap+glow+single-pass reference-skew combinations stay in deterministic guarded no-op mode."
+        },
+        {
+          "id": "pack_fallout_effects_real_crlf_u16_envmap_parallax_glow_multidrift_refskew_extension",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 268435584,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\effects\\reactor\\coolantmist.dds",
+            "textures\\effects\\reactor\\coolantmist_n.dds",
+            "",
+            "textures\\effects\\reactor\\coolantmist_n.dds",
+            "",
+            "textures\\effects\\reactor\\coolantmist_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 2,
+          "extra_shader_texture_set_refs": [
+            77
+          ],
+          "block_type_index_overrides": [
+            {
+              "ordinal": 0,
+              "value": 65535
+            }
+          ],
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 16
+            },
+            {
+              "ordinal": 2,
+              "delta": -9
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Extended effects drift family: parallax+envmap+glow alias/reference-skew combos remain guarded no-op instead of speculative mixed-table rewrites."
+        },
+        {
+          "id": "pack_fallout_clutter_real_crlf_u16_env_alias_singlepass_multidrift_refskew_extension",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 0,
+          "flags1": 32,
+          "texture_paths": [
+            "textures\\clutter\\industrial\\breakerpanel.dds",
+            "",
+            "",
+            "textures\\clutter\\industrial\\breakerpanel_n.dds",
+            "",
+            "textures\\clutter\\industrial\\breakerpanel_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 1,
+          "extra_shader_texture_set_refs": [
+            88
+          ],
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 14
+            },
+            {
+              "ordinal": 3,
+              "delta": -8
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Extended clutter drift family: single-pass env-alias reference-skew tails remain guarded no-op until deterministic reconstruction is possible."
         }
       ],
       "expected_family_allowed_difference_buckets": {

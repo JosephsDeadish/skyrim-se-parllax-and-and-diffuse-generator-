@@ -1076,6 +1076,12 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "unsupported_header.malformed_or_truncated")
 
+    def test_conflict_classifier_maps_cannot_read_nif_notice(self) -> None:
+        code = _classify_conflict_code(
+            "Cannot read NIF: [Errno 13] Permission denied: '/mods/meshes/bad.nif'"
+        )
+        self.assertEqual(code, "unsupported_header.read_failure")
+
     def test_conflict_classifier_maps_semantic_shader_resolution_notes(self) -> None:
         code = _classify_conflict_code(
             "Block 1: raw shader_type 0x00000080 resolved to Environment Map via semantic_flag_envmap (RESOLVED, confidence=0.95, method=semantic)."
