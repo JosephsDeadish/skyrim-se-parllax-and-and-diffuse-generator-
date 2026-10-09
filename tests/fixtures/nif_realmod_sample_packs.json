@@ -1044,8 +1044,8 @@
       "id": "fallout_guarded_family_pack",
       "expected_max_fallback_ratio": 0.0,
       "expected_family_case_counts": {
-        "architecture": 31,
-        "effects": 29,
+        "architecture": 32,
+        "effects": 30,
         "clutter": 22,
         "armor": 1,
         "landscape": 1,
@@ -1110,6 +1110,8 @@
         "path_slot_parallax.wrong_suffix.fallout.",
         "path_slot_glow.wrong_suffix.fallout.",
         "missing_parallax_slot3.empty.fallout.",
+        "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks.fallout.",
+        "missing_parallax_slot3.empty.payload_resolved_real_layout_drift.repeated_blocks.fallout.",
         "flag_glow_map.slot2_filled_without_flag.fallout.",
         "flag_glow_map.flag_set_without_slot2.fallout.",
         "flag_env_mapping.slot4_filled_without_flag.fallout.",
@@ -4566,6 +4568,109 @@
           ],
           "expected_difference_bucket": "partial_recoverability_guarded",
           "safety_difference_note": "Larger-pack malformed export drift variant: real-layout table drift remains guarded no-op/manual-review."
+        },
+        {
+          "id": "pack_fallout_architecture_real_repeated_semantic_slot3_drift_combo_v9",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\vault\\vaultpanel.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "block_type_index_overrides": [
+            {
+              "ordinal": 0,
+              "value": 65535
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            0
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 1,
+              "flags1": 128,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\architecture\\vault\\vaultpanel.dds",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks.fallout.real"
+          ],
+          "expected_remediation_steps": [
+            "set_slot3_parallax_for_repeated_real_layout_drift",
+            "enable_parallax_for_repeated_real_layout_drift"
+          ]
+        },
+        {
+          "id": "pack_fallout_effects_real_repeated_payload_slot3_drift_combo_v9",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "shader_type": 305419896,
+          "flags1": 2176,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\effects\\reactor\\arcgrid.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 305419896,
+              "flags1": 2176,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\effects\\reactor\\arcgrid.dds",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "missing_parallax_slot3.empty.payload_resolved_real_layout_drift.repeated_blocks.fallout.real"
+          ],
+          "expected_remediation_steps": [
+            "set_slot3_parallax_for_repeated_real_layout_drift",
+            "enable_parallax_for_repeated_real_layout_drift"
+          ]
         }
       ],
       "expected_family_allowed_difference_buckets": {

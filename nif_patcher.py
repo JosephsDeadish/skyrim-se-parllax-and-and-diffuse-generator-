@@ -3931,6 +3931,12 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "unsupported_header.profile_value_drift.fallout_signature_drift": (
         "Fallout-signature header/profile drift detected; keep this mesh in guarded no-op/manual-review and re-save/export before patching.",
     ),
+    "unsupported_header.user_version_value_drift.fallout_signature_drift": (
+        "Fallout-signature user-version drift detected; keep this mesh in guarded no-op/manual-review and re-save/export before patching.",
+    ),
+    "unsupported_header.user_version_value_drift.header_table_drift": (
+        "Header-table drift is present alongside user-version mismatch; keep manual-review/no-op and re-export before patching.",
+    ),
     "unsupported_header.profile_value_drift.unparsed.header_table_drift": (
         "Malformed header-table drift detected without recoverable profile values; keep this mesh in guarded/manual-review and re-export before patching.",
     ),
@@ -4025,6 +4031,10 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "missing_parallax_slot3.empty.payload_resolved_real_layout_drift": (
         "Real-layout drift detected: unknown raw shader type was payload-resolved while slot 3 is unresolved.",
         "Prefer restoring a deterministic slot-3 _p.dds path first; disable parallax/POM only when no safe slot-3 reconstruction is available.",
+    ),
+    "missing_parallax_slot3.empty.payload_resolved_real_layout_drift.repeated_blocks": (
+        "Repeated real-layout drift detected: multiple blocks resolve unknown shader types from payload while slot 3 remains unresolved.",
+        "Prefer restoring a deterministic shared slot-3 _p.dds path and enabling parallax in one controlled pass; disable parallax/POM only when no safe slot-3 reconstruction path exists.",
     ),
     "missing_parallax_slot3": (
         "Set texture slot 3 to a valid _p.dds height map path.",
@@ -4196,7 +4206,12 @@ def _classify_conflict_code(message: str) -> str:
     if unexpected_user_versions:
         user_version = int(unexpected_user_versions.group(1))
         user_version_2 = int(unexpected_user_versions.group(2))
-        return f"unsupported_header.user_version_value_drift.u{user_version}_u2{user_version_2}"
+        base_code = f"unsupported_header.user_version_value_drift.u{user_version}_u2{user_version_2}"
+        if "could not parse full header tables" in lowered:
+            base_code += ".header_table_drift"
+        if _is_fallout_signature_drift(user_version, user_version_2):
+            base_code += ".fallout_signature_drift"
+        return base_code
     if "could not parse full header tables for this mesh" in lowered and "header-table drift" in lowered:
         return "unsupported_header.profile_value_drift.unparsed.header_table_drift"
     if "unsupported nif header/profile values" in lowered or "unexpected user version values" in lowered:
@@ -4319,6 +4334,13 @@ def _classify_conflict_code(message: str) -> str:
         and "unresolved" in lowered
     ):
         return "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks"
+    if (
+        "real-layout drift combo repeats across" in lowered
+        and "payload shader resolution" in lowered
+        and "slot 3" in lowered
+        and "unresolved" in lowered
+    ):
+        return "missing_parallax_slot3.empty.payload_resolved_real_layout_drift.repeated_blocks"
     if (
         "real-layout drift combo" in lowered
         and "semantic shader resolution" in lowered
@@ -4447,6 +4469,14 @@ def _classify_conflict_code(message: str) -> str:
 
 
 def _actions_for_conflict_code(base_code: str) -> tuple[str, ...]:
+    segments = base_code.split(".")
+    if len(segments) >= 4:
+        for idx, segment in enumerate(segments[2:-1], start=2):
+            if re.fullmatch(r"u\d+_u2\d+", segment):
+                collapsed = ".".join([*segments[:idx], *segments[idx + 1 :]])
+                actions = _CONFLICT_ACTIONS.get(collapsed)
+                if actions:
+                    return actions
     probe = base_code
     while probe:
         actions = _CONFLICT_ACTIONS.get(probe)
@@ -4489,6 +4519,7 @@ def _build_conflict_report(
     grouped: dict[tuple[str, str, str], list[str]] = {}
     block_code_sets: dict[tuple[str, str, int], set[str]] = {}
     semantic_slot3_real_layout_combo_counts: dict[tuple[str, str], int] = {}
+    payload_slot3_real_layout_combo_counts: dict[tuple[str, str], int] = {}
     for message in [*result.skip_reasons, *result.issues]:
         base_code = _classify_conflict_code(message)
         block_idx = _extract_block_index(message)
@@ -4525,6 +4556,9 @@ def _build_conflict_report(
             "missing_parallax_slot3.empty" in block_codes
             and "unknown_shader_type.payload_resolved" in block_codes
         ):
+            payload_slot3_real_layout_combo_counts[(profile, layout)] = (
+                payload_slot3_real_layout_combo_counts.get((profile, layout), 0) + 1
+            )
             grouped.setdefault(
                 ("missing_parallax_slot3.empty.payload_resolved_real_layout_drift", profile, layout),
                 [],
@@ -4540,6 +4574,16 @@ def _build_conflict_report(
         ).append(
             "Real-layout drift combo repeats across "
             f"{combo_count} blocks: semantic shader resolution is present while slot 3 remains unresolved."
+        )
+    for (profile, layout), combo_count in payload_slot3_real_layout_combo_counts.items():
+        if combo_count < 2:
+            continue
+        grouped.setdefault(
+            ("missing_parallax_slot3.empty.payload_resolved_real_layout_drift.repeated_blocks", profile, layout),
+            [],
+        ).append(
+            "Real-layout drift combo repeats across "
+            f"{combo_count} blocks: payload shader resolution is present while slot 3 remains unresolved."
         )
     summaries: list[NifConflictSummary] = []
     for (base_code, profile, layout), messages in sorted(
@@ -4887,6 +4931,10 @@ def build_auto_remediation_patch_options(
         code.startswith("missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks")
         for code in base_codes
     )
+    has_repeated_payload_slot3_real_layout_combo = any(
+        code.startswith("missing_parallax_slot3.empty.payload_resolved_real_layout_drift.repeated_blocks")
+        for code in base_codes
+    )
     has_payload_slot3_real_layout_combo = (
         any(code.startswith("missing_parallax_slot3.empty.payload_resolved_real_layout_drift") for code in base_codes)
         or (
@@ -4936,7 +4984,7 @@ def build_auto_remediation_patch_options(
             opts.disable_pom = True
             applied_steps.append("disable_parallax_for_resolved_real_layout_drift")
             applied_steps.append("disable_pom_for_resolved_real_layout_drift")
-    if has_repeated_semantic_slot3_real_layout_combo:
+    if has_repeated_semantic_slot3_real_layout_combo or has_repeated_payload_slot3_real_layout_combo:
         if guessed_parallax:
             opts.parallax_texture_path = guessed_parallax
             opts.enable_parallax = True

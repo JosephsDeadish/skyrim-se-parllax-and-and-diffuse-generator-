@@ -1149,6 +1149,24 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "unsupported_header.no_patchable_shader_blocks")
 
+    def test_conflict_classifier_maps_unexpected_user_values_with_fallout_signature_drift_suffix(self) -> None:
+        code = _classify_conflict_code(
+            "Unexpected user version values (11, 140). Expected Skyrim variants."
+        )
+        self.assertEqual(
+            code,
+            "unsupported_header.user_version_value_drift.u11_u2140.fallout_signature_drift",
+        )
+
+    def test_conflict_classifier_maps_unexpected_user_values_with_header_table_drift_suffix(self) -> None:
+        code = _classify_conflict_code(
+            "Unexpected user version values (12, 142). Could not parse full header tables for this mesh; malformed export/header-table drift is likely."
+        )
+        self.assertEqual(
+            code,
+            "unsupported_header.user_version_value_drift.u12_u2142.header_table_drift.fallout_signature_drift",
+        )
+
     def test_conflict_classifier_maps_semantic_shader_resolution_notes(self) -> None:
         code = _classify_conflict_code(
             "Block 1: raw shader_type 0x00000080 resolved to Environment Map via semantic_flag_envmap (RESOLVED, confidence=0.95, method=semantic)."
@@ -1186,6 +1204,15 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertEqual(
             code,
             "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks",
+        )
+
+    def test_conflict_classifier_maps_repeated_real_layout_payload_slot3_drift_combo(self) -> None:
+        code = _classify_conflict_code(
+            "Real-layout drift combo repeats across 3 blocks: payload shader resolution is present while slot 3 remains unresolved."
+        )
+        self.assertEqual(
+            code,
+            "missing_parallax_slot3.empty.payload_resolved_real_layout_drift.repeated_blocks",
         )
 
     def test_conflict_classifier_maps_shader_block_size_mismatch_notes(self) -> None:
@@ -1270,7 +1297,10 @@ class TestValidateNifForParallax(unittest.TestCase):
         code = _classify_conflict_code(
             "Unexpected user version values (11, 155). The file may use a different game/export format."
         )
-        self.assertEqual(code, "unsupported_header.user_version_value_drift.u11_u2155")
+        self.assertEqual(
+            code,
+            "unsupported_header.user_version_value_drift.u11_u2155.fallout_signature_drift",
+        )
 
     def test_conflict_classifier_maps_strict_unknown_shader_failure(self) -> None:
         code = _classify_conflict_code("Strict unknown-shader check failed.")
@@ -2700,6 +2730,41 @@ class TestPatchNifFlags(unittest.TestCase):
         self.assertTrue(
             _is_retryable_force_type3_error(
                 ValueError("recorded block size 104 does not match expected type-0 size 100")
+            )
+        )
+
+    def test_conflict_report_flags_repeated_real_layout_payload_missing_slot3_combo(self) -> None:
+        payload = {
+            "cases": [
+                {
+                    "id": "repeated_real_layout_payload_slot3",
+                    "profile": "fallout",
+                    "shader_layout": "real",
+                    "user_version": 11,
+                    "user_ver2": 131,
+                    "shader_type": 0x12345678,
+                    "flags1": SLSF1_PARALLAX | SLSF1_ENVIRONMENT_MAPPING,
+                    "texture_set_layout_shift": 4,
+                    "texture_paths": ["textures\\arch\\stone.dds"] + [""] * 8,
+                    "extra_shader_blocks": [
+                        {
+                            "shader_type": 0x12345678,
+                            "flags1": SLSF1_PARALLAX | SLSF1_ENVIRONMENT_MAPPING,
+                            "texture_set_layout_shift": 4,
+                            "texture_paths": ["textures\\arch\\stone.dds"] + [""] * 8,
+                        }
+                    ],
+                }
+            ]
+        }
+        nif = _materialize_fixture_corpus(self.tmp, payload)[0]
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(
+            any(
+                group.code.startswith(
+                    "missing_parallax_slot3.empty.payload_resolved_real_layout_drift.repeated_blocks."
+                )
+                for group in v.conflict_report
             )
         )
         self.assertTrue(
@@ -4684,6 +4749,29 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         opts, steps = build_auto_remediation_patch_options(
             nif,
             ["missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks.skyrim.real"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(str(opts.parallax_texture_path).lower().endswith("_p.dds"))
+        self.assertTrue(opts.enable_parallax)
+        self.assertIn("set_slot3_parallax_for_repeated_real_layout_drift", steps)
+        self.assertIn("enable_parallax_for_repeated_real_layout_drift", steps)
+
+    def test_auto_remediation_build_options_adds_repeated_real_layout_slot3_payload_combo_steps(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            user_ver2=130,
+            texture_set_layout_shift=4,
+            shader_type=0x12345678,
+            flags1=SLSF1_PARALLAX | SLSF1_ENVIRONMENT_MAPPING,
+            texture_paths=paths,
+        )
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["missing_parallax_slot3.empty.payload_resolved_real_layout_drift.repeated_blocks.skyrim.real"],
             backup=False,
         )
         self.assertIsNotNone(opts)
