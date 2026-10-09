@@ -140,7 +140,7 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
             for entry in scenarios
             if isinstance(entry, dict)
         }
-        for expected in ("vanilla", "community_shaders", "truepbr", "enb"):
+        for expected in ("vanilla", "community_shaders", "truepbr", "enb", "performance_core", "custom_glow_env"):
             self.assertIn(expected, scenario_by_name)
             entry = scenario_by_name[expected]
             args = entry.get("args", [])
@@ -149,10 +149,16 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
             self.assertGreaterEqual(int(entry.get("min_outputs", 0) or 0), 1)
             required_suffixes = entry.get("required_suffixes", ())
             self.assertTrue(required_suffixes)
+            forbidden_suffixes = entry.get("forbidden_suffixes", ())
+            self.assertIsInstance(forbidden_suffixes, tuple)
         truepbr_suffixes = {
             str(value).lower() for value in scenario_by_name["truepbr"].get("required_suffixes", ())
         }
         self.assertIn("_rmaos.dds", truepbr_suffixes)
+        truepbr_sidecars = {
+            str(value).lower() for value in scenario_by_name["truepbr"].get("required_sidecar_suffixes", ())
+        }
+        self.assertIn("_rmaos.json", truepbr_sidecars)
 
 
 class TestPreReleaseValidationRepositoryHygiene(unittest.TestCase):

@@ -3349,6 +3349,9 @@ class TestParitySampleMatrix(unittest.TestCase):
         validations = [validate_nif_for_parallax(path) for path in corpus]
 
         all_codes: list[str] = []
+        fallback_conflict_groups = 0
+        total_conflict_groups = 0
+        generic_unsupported_header_groups = 0
         for case, validation in zip(cases, validations):
             self.assertIsInstance(case, dict)
             expected_prefixes = case.get("expected_prefixes", [])
@@ -3362,6 +3365,17 @@ class TestParitySampleMatrix(unittest.TestCase):
             expected_no_auto_remediation = bool(case.get("expected_no_auto_remediation", False))
             codes = [group.code for group in validation.conflict_report]
             all_codes.extend(codes)
+            total_conflict_groups += len(codes)
+            fallback_conflict_groups += sum(
+                1 for code in codes if str(code).startswith("fallback_or_unknown.")
+            )
+            generic_unsupported_header_groups += sum(
+                1
+                for code in codes
+                if str(code).startswith("unsupported_header.")
+                and str(code).split(".")[0] == "unsupported_header"
+                and len(str(code).split(".")) == 3
+            )
             for prefix in expected_prefixes:
                 self.assertTrue(
                     any(code.startswith(str(prefix)) for code in codes),
@@ -3403,6 +3417,26 @@ class TestParitySampleMatrix(unittest.TestCase):
 
         self.assertTrue(any(".skyrim." in code for code in all_codes))
         self.assertTrue(any(".fallout." in code for code in all_codes))
+        expected_max_fallback_ratio = float(payload.get("expected_max_fallback_ratio", 0.02))
+        expected_max_fallback_groups = payload.get("expected_max_fallback_groups")
+        if expected_max_fallback_groups is None:
+            allowed_fallback_groups = int(total_conflict_groups * expected_max_fallback_ratio)
+        else:
+            allowed_fallback_groups = int(expected_max_fallback_groups)
+        self.assertLessEqual(
+            fallback_conflict_groups,
+            allowed_fallback_groups,
+            (
+                f"parity sample matrix: fallback_or_unknown groups {fallback_conflict_groups} exceed threshold "
+                f"{allowed_fallback_groups} out of {total_conflict_groups} grouped conflicts "
+                f"(max_ratio={expected_max_fallback_ratio:.3f})"
+            ),
+        )
+        self.assertEqual(
+            generic_unsupported_header_groups,
+            0,
+            "parity sample matrix: found generic unsupported_header groups; promote to deterministic subcodes",
+        )
         annotated_strategy_cases = [
             case
             for case in cases

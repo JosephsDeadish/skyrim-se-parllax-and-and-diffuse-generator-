@@ -530,6 +530,29 @@ def compute_preview_refresh_delay_ms(
     return min(delay, 700)
 
 
+def compute_processing_queue_event_budget(
+    *,
+    queue_backlog: int,
+    total_sources: int,
+    show_batch_preview: bool,
+    source_pixels: int,
+) -> int:
+    backlog = max(0, int(queue_backlog))
+    if backlog >= 512:
+        budget = 128
+    elif backlog >= 128:
+        budget = 64
+    else:
+        budget = 32
+    if total_sources >= 1000 and not show_batch_preview:
+        budget = max(budget, 96)
+    if total_sources >= 2000 and not show_batch_preview:
+        budget = max(budget, 128)
+    if source_pixels >= (8192 * 8192) and not show_batch_preview:
+        budget = max(budget, 112)
+    return min(budget, 192)
+
+
 def compute_deferred_preview_tile_interval_ms(
     *,
     total_sources: int,
@@ -10069,12 +10092,12 @@ if GUI_AVAILABLE:
                 queue_backlog = max(0, int(self.processing_queue.qsize()))
             except Exception:
                 queue_backlog = 0
-            if queue_backlog >= 512:
-                max_events_per_poll = 128
-            elif queue_backlog >= 128:
-                max_events_per_poll = 64
-            else:
-                max_events_per_poll = 32
+            max_events_per_poll = compute_processing_queue_event_budget(
+                queue_backlog=queue_backlog,
+                total_sources=max(0, len(getattr(self, "selected_inputs", []) or [])),
+                show_batch_preview=bool(self.show_batch_preview_var.get()),
+                source_pixels=max(0, int(getattr(self, "_active_batch_max_source_pixels", 0) or 0)),
+            )
             while True:
                 if processed_events >= max_events_per_poll:
                     break

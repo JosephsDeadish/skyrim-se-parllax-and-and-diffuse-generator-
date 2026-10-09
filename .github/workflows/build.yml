@@ -167,6 +167,16 @@ jobs:
                       for suffix in (scenario.get("required_suffixes", ()) or ())
                       if str(suffix).strip()
                   )
+                  forbidden_suffixes = tuple(
+                      str(suffix).strip().lower()
+                      for suffix in (scenario.get("forbidden_suffixes", ()) or ())
+                      if str(suffix).strip()
+                  )
+                  required_sidecar_suffixes = tuple(
+                      str(suffix).strip().lower()
+                      for suffix in (scenario.get("required_sidecar_suffixes", ()) or ())
+                      if str(suffix).strip()
+                  )
                   smoke_out = smoke_root / f"out_loop{loop_index}_{scenario_name}"
                   smoke_out.mkdir(parents=True, exist_ok=True)
                   cmd = [binary, str(input_png), "--output-dir", str(smoke_out), *scenario_args]
@@ -184,6 +194,18 @@ jobs:
                           raise SystemExit(
                               f"Scenario '{scenario_name}' missing required suffix '{suffix}'. Produced: {produced_names}"
                           )
+                  for suffix in forbidden_suffixes:
+                      if any(name.endswith(suffix) for name in produced_names):
+                          raise SystemExit(
+                              f"Scenario '{scenario_name}' produced forbidden suffix '{suffix}'. Produced: {produced_names}"
+                          )
+                  if required_sidecar_suffixes:
+                      produced_all = [path.name.lower() for path in smoke_out.glob("*")]
+                      for suffix in required_sidecar_suffixes:
+                          if not any(name.endswith(suffix) for name in produced_all):
+                              raise SystemExit(
+                                  f"Scenario '{scenario_name}' missing required sidecar suffix '{suffix}'. Produced: {produced_all}"
+                              )
           PY
 
       - name: Upload packaged smoke artifacts

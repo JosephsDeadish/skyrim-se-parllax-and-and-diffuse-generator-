@@ -186,6 +186,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             ],
             "min_outputs": 3,
             "required_suffixes": ("_n.dds", "_p.dds"),
+            "forbidden_suffixes": ("_rmaos.dds", "_cm.dds", "_msn.dds"),
         },
         {
             "name": "community_shaders",
@@ -201,6 +202,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             ],
             "min_outputs": 5,
             "required_suffixes": ("_cm.dds", "_m.dds"),
+            "forbidden_suffixes": ("_rmaos.dds", "_msn.dds"),
         },
         {
             "name": "truepbr",
@@ -214,6 +216,8 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             ],
             "min_outputs": 5,
             "required_suffixes": ("_rmaos.dds", "_m.dds"),
+            "required_sidecar_suffixes": ("_rmaos.json",),
+            "forbidden_suffixes": ("_cm.dds", "_msn.dds"),
         },
         {
             "name": "enb",
@@ -231,6 +235,33 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             ],
             "min_outputs": 5,
             "required_suffixes": ("_msn.dds", "_m.dds", "_p.dds"),
+            "forbidden_suffixes": ("_rmaos.dds", "_cm.dds"),
+        },
+        {
+            "name": "performance_core",
+            "args": [
+                "--render-profile",
+                "performance",
+                "--no-parallax",
+            ],
+            "min_outputs": 2,
+            "required_suffixes": ("_n.dds",),
+            "forbidden_suffixes": ("_p.dds", "_rmaos.dds", "_cm.dds", "_msn.dds"),
+        },
+        {
+            "name": "custom_glow_env",
+            "args": [
+                "--render-profile",
+                "custom",
+                "--no-parallax",
+                "--glow-map",
+                "--environment-mask",
+                "--environment-mask-mode",
+                "standard",
+            ],
+            "min_outputs": 4,
+            "required_suffixes": ("_g.dds", "_m.dds", "_n.dds"),
+            "forbidden_suffixes": ("_rmaos.dds", "_cm.dds", "_msn.dds"),
         },
     ]
 
@@ -274,6 +305,16 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                 for suffix in (scenario.get("required_suffixes", ()) or ())
                 if str(suffix).strip()
             )
+            forbidden_suffixes = tuple(
+                str(suffix).strip().lower()
+                for suffix in (scenario.get("forbidden_suffixes", ()) or ())
+                if str(suffix).strip()
+            )
+            required_sidecar_suffixes = tuple(
+                str(suffix).strip().lower()
+                for suffix in (scenario.get("required_sidecar_suffixes", ()) or ())
+                if str(suffix).strip()
+            )
             smoke_out = smoke_io / f"out_loop{loop_index}_{scenario_name}"
             smoke_out.mkdir(parents=True, exist_ok=True)
             run_completed = subprocess.run(
@@ -305,6 +346,20 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                         f"Packaged executable smoke run for '{scenario_name}' is missing required output suffix '{suffix}'. "
                         f"Produced: {produced_names}"
                     )
+            for suffix in forbidden_suffixes:
+                if any(name.endswith(suffix) for name in produced_names):
+                    raise SystemExit(
+                        f"Packaged executable smoke run for '{scenario_name}' produced forbidden output suffix '{suffix}'. "
+                        f"Produced: {produced_names}"
+                    )
+            if required_sidecar_suffixes:
+                produced_all = [path.name.lower() for path in smoke_out.glob("*")]
+                for suffix in required_sidecar_suffixes:
+                    if not any(name.endswith(suffix) for name in produced_all):
+                        raise SystemExit(
+                            f"Packaged executable smoke run for '{scenario_name}' is missing required sidecar suffix '{suffix}'. "
+                            f"Produced files: {produced_all}"
+                        )
 
 
 def _collect_localization_coverage(

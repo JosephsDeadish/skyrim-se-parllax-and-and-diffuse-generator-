@@ -37,6 +37,7 @@ from generate_textures import (
     _summarize_batch_texture_dimensions,
     build_batch_bottleneck_hints,
     compute_checkpoint_mismatch_flags,
+    compute_processing_queue_event_budget,
     compute_deferred_preview_tile_interval_ms,
     compute_preview_refresh_delay_ms,
     _save_with_dds_fallback,
@@ -2079,6 +2080,24 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("checkpoint input path differs", mismatch)
         self.assertIn("checkpoint output path differs", mismatch)
         self.assertIn("checkpoint file count differs", mismatch)
+
+    def test_compute_processing_queue_event_budget_increases_for_huge_runs_when_preview_off(self) -> None:
+        budget = compute_processing_queue_event_budget(
+            queue_backlog=24,
+            total_sources=2200,
+            show_batch_preview=False,
+            source_pixels=8192 * 8192,
+        )
+        self.assertGreaterEqual(budget, 128)
+
+    def test_compute_processing_queue_event_budget_keeps_default_budget_for_small_backlog(self) -> None:
+        budget = compute_processing_queue_event_budget(
+            queue_backlog=24,
+            total_sources=80,
+            show_batch_preview=True,
+            source_pixels=2048 * 2048,
+        )
+        self.assertEqual(budget, 32)
 
     def test_build_batch_bottleneck_hints_includes_large_run_resume_guidance(self) -> None:
         hints = build_batch_bottleneck_hints(
