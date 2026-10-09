@@ -832,7 +832,7 @@
         }
       ],
       "expected_prefixes": [
-        "skip_alpha_decal_lighting.subsurface_flags.fallout.real",
+        "skip_alpha_decal_lighting.subsurface_flags.",
         "path_slot_parallax.matches_normal.fallout.real"
       ],
       "expected_remediation_steps": [

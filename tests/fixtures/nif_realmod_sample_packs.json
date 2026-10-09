@@ -1119,7 +1119,7 @@
         "incompatible_shader_type.fallout.",
         "skip_alpha_decal_lighting.decal_flag.fallout.",
         "unsupported_header.",
-        "skip_alpha_decal_lighting.subsurface_flags.fallout.",
+        "skip_alpha_decal_lighting.subsurface_flags.",
         "skip_alpha_decal_lighting.anisotropic_flag.fallout.",
         "unsupported_header.profile_value_drift."
       ],
@@ -2614,7 +2614,7 @@
           "user_ver2": 131,
           "flags2": 33554432,
           "expected_prefixes": [
-            "skip_alpha_decal_lighting.subsurface_flags.fallout."
+            "skip_alpha_decal_lighting.subsurface_flags."
           ],
           "expected_no_auto_remediation": true,
           "expected_difference_bucket": "guarded_fallout",
@@ -2754,7 +2754,7 @@
             }
           ],
           "expected_prefixes": [
-            "skip_alpha_decal_lighting.subsurface_flags.fallout.",
+            "skip_alpha_decal_lighting.subsurface_flags.",
             "path_slot_parallax.matches_normal.fallout."
           ],
           "expected_remediation_steps": [

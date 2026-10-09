@@ -3960,6 +3960,15 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "skip_alpha_decal_lighting.subsurface_flags": (
         "Disable parallax on soft/rim/back-lighting blocks; those lighting models conflict with parallax.",
     ),
+    "skip_alpha_decal_lighting.subsurface_flags.soft_lighting_only": (
+        "Disable parallax on blocks using SLSF2_Soft_Lighting; soft-lighting and parallax conflict on the same material.",
+    ),
+    "skip_alpha_decal_lighting.subsurface_flags.rim_lighting_only": (
+        "Disable parallax on blocks using SLSF2_Rim_Lighting; rim-lighting and parallax conflict on the same material.",
+    ),
+    "skip_alpha_decal_lighting.subsurface_flags.back_lighting_only": (
+        "Disable parallax on blocks using SLSF2_Back_Lighting; back-lighting and parallax conflict on the same material.",
+    ),
     "skip_alpha_decal_lighting.anisotropic_flag": (
         "Disable parallax on anisotropic-lighting blocks or use a compatible shader setup.",
     ),
@@ -4212,6 +4221,20 @@ def _classify_conflict_code(message: str) -> str:
     if "decal flag" in lowered:
         return "skip_alpha_decal_lighting.decal_flag"
     if "subsurface-scattering lighting flags active" in lowered:
+        has_soft = "slsf2_soft_lighting" in lowered
+        has_rim = "slsf2_rim_lighting" in lowered
+        has_back = "slsf2_back_lighting" in lowered
+        active_suffixes: list[str] = []
+        if has_soft:
+            active_suffixes.append("soft_lighting")
+        if has_rim:
+            active_suffixes.append("rim_lighting")
+        if has_back:
+            active_suffixes.append("back_lighting")
+        if len(active_suffixes) == 1:
+            return f"skip_alpha_decal_lighting.subsurface_flags.{active_suffixes[0]}_only"
+        if len(active_suffixes) > 1:
+            return "skip_alpha_decal_lighting.subsurface_flags." + "_".join(active_suffixes) + "_combo"
         return "skip_alpha_decal_lighting.subsurface_flags"
     if "slsf2_anisotropic_lighting is set" in lowered:
         return "skip_alpha_decal_lighting.anisotropic_flag"

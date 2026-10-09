@@ -1225,6 +1225,42 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "workflow_mix.cs_slot5_generic_alias")
 
+    def test_conflict_classifier_maps_subsurface_soft_lighting_only(self) -> None:
+        code = _classify_conflict_code(
+            "Block 2: subsurface-scattering lighting flags active (SLSF2_Soft_Lighting) — these are mutually exclusive with parallax"
+        )
+        self.assertEqual(
+            code,
+            "skip_alpha_decal_lighting.subsurface_flags.soft_lighting_only",
+        )
+
+    def test_conflict_classifier_maps_subsurface_rim_lighting_only(self) -> None:
+        code = _classify_conflict_code(
+            "Block 2: subsurface-scattering lighting flags active (SLSF2_Rim_Lighting) — these are mutually exclusive with parallax"
+        )
+        self.assertEqual(
+            code,
+            "skip_alpha_decal_lighting.subsurface_flags.rim_lighting_only",
+        )
+
+    def test_conflict_classifier_maps_subsurface_back_lighting_only(self) -> None:
+        code = _classify_conflict_code(
+            "Block 2: subsurface-scattering lighting flags active (SLSF2_Back_Lighting) — these are mutually exclusive with parallax"
+        )
+        self.assertEqual(
+            code,
+            "skip_alpha_decal_lighting.subsurface_flags.back_lighting_only",
+        )
+
+    def test_conflict_classifier_maps_subsurface_soft_rim_combo(self) -> None:
+        code = _classify_conflict_code(
+            "Block 2: subsurface-scattering lighting flags active (SLSF2_Soft_Lighting, SLSF2_Rim_Lighting) — these are mutually exclusive with parallax"
+        )
+        self.assertEqual(
+            code,
+            "skip_alpha_decal_lighting.subsurface_flags.soft_lighting_rim_lighting_combo",
+        )
+
     def test_conflict_classifier_maps_non_patchable_shader_family_summary(self) -> None:
         code = _classify_conflict_code(
             "Detected shader/material blocks: BSShaderPPLightingProperty, NiTexturingProperty."
