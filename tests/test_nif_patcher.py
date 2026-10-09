@@ -13,6 +13,7 @@ from unittest import mock
 
 from nif_patcher import (
     SLSF1_ENVIRONMENT_MAPPING,
+    SLSF1_LANDSCAPE,
     SLSF1_SINGLE_PASS,
     SLSF1_PARALLAX,
     SLSF1_PARALLAX_OCCLUSION,
