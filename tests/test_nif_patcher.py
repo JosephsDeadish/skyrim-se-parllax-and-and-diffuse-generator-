@@ -1077,13 +1077,23 @@ class TestValidateNifForParallax(unittest.TestCase):
         code = _classify_conflict_code(
             "Malformed or truncated NIF: Unsupported NIF header/profile values"
         )
-        self.assertEqual(code, "unsupported_header.profile_value_drift.unparsed")
+        self.assertEqual(code, "unsupported_header.profile_value_drift.unparsed.signature_only")
 
     def test_conflict_classifier_maps_wrapped_unsupported_profile_drift_with_values(self) -> None:
         code = _classify_conflict_code(
             "Malformed or truncated NIF: Unsupported NIF header/profile values (user_version=11, user_version_2=155)."
         )
         self.assertEqual(code, "unsupported_header.profile_value_drift.u11_u2155")
+
+    def test_conflict_classifier_maps_wrapped_unsupported_profile_drift_header_table_variant(self) -> None:
+        code = _classify_conflict_code(
+            "Malformed or truncated NIF: Unsupported NIF header/profile values (user_version=11, user_version_2=130). "
+            "Could not parse full header tables for this mesh; malformed export/header-table drift is likely."
+        )
+        self.assertEqual(
+            code,
+            "unsupported_header.profile_value_drift.u11_u2130.header_table_drift",
+        )
 
     def test_conflict_classifier_maps_wrapped_header_prefix_notice(self) -> None:
         code = _classify_conflict_code(
@@ -3957,6 +3967,41 @@ class TestRealModSamplePacks(unittest.TestCase):
                     any(code.startswith(str(prefix)) for code in summary_codes),
                     f"{pack_id}: missing required prefix {prefix!r}",
                 )
+            expected_top_manual_priority_prefixes = pack.get("expected_top_manual_priority_prefixes", [])
+            self.assertIsInstance(expected_top_manual_priority_prefixes, list)
+            if expected_top_manual_priority_prefixes:
+                report = build_parity_delta_report_text(summary, max_rows=max(20, len(summary)))
+                manual_rows: list[str] = []
+                in_manual_table = False
+                for raw_line in report.splitlines():
+                    line = raw_line.strip()
+                    if line == "Top manual parity priorities (frequency-first):":
+                        in_manual_table = True
+                        continue
+                    if not in_manual_table:
+                        continue
+                    if line.startswith("Interpretation:"):
+                        break
+                    if line.startswith("| P0") or line.startswith("| P1"):
+                        manual_rows.append(line)
+                manual_codes: list[str] = []
+                for row in manual_rows:
+                    parts = [part.strip() for part in row.strip("|").split("|")]
+                    if len(parts) >= 2:
+                        manual_codes.append(parts[1].strip("`"))
+                self.assertGreaterEqual(
+                    len(manual_codes),
+                    len(expected_top_manual_priority_prefixes),
+                    f"{pack_id}: expected manual-priority rows are missing from parity report output.",
+                )
+                for index, prefix in enumerate(expected_top_manual_priority_prefixes):
+                    self.assertTrue(
+                        manual_codes[index].startswith(str(prefix)),
+                        (
+                            f"{pack_id}: manual priority row {index + 1} expected prefix {prefix!r} "
+                            f"but saw {manual_codes[index]!r}"
+                        ),
+                    )
 
 
 class TestBatchConflictSummaries(unittest.TestCase):

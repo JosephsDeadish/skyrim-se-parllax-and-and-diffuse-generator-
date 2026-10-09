@@ -1222,11 +1222,44 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
                 f"Unexpected user version values ({user_version}, {user_version_2}). The file may use a different game/export format."
             )
     except Exception:
-        pass
+        quick_profile_values = _extract_quick_user_profile_values(data)
+        if quick_profile_values is not None:
+            user_version, user_version_2 = quick_profile_values
+            diagnostics[0] = (
+                "Malformed or truncated NIF: Unsupported NIF header/profile values "
+                f"(user_version={user_version}, user_version_2={user_version_2}). "
+                "Could not parse full header tables for this mesh; malformed export/header-table drift is likely."
+            )
     diagnostics.append(
         "Resolution: open the mesh in NifSkope or the Creation Kit and re-save/export it as a clean Skyrim SE NIF, then run the patch again."
     )
     return diagnostics
+
+
+def _extract_quick_user_profile_values(data: bytes) -> tuple[int, int] | None:
+    """Best-effort parse of user-version fields when full header parsing fails."""
+    try:
+        header_line_end = _find_header_terminator(data)
+        if header_line_end is None:
+            return None
+        header_line = data[:header_line_end]
+        if not _has_supported_header_prefix(header_line):
+            return None
+        offset = header_line_end
+        version = struct.unpack_from("<I", data, offset)[0]
+        if version != _NIF_VERSION_20_2_0_7:
+            return None
+        offset += 4
+        endianness = struct.unpack_from("<B", data, offset)[0]
+        if endianness != 1:
+            return None
+        offset += 1
+        user_version = struct.unpack_from("<I", data, offset)[0]
+        offset += 8  # skip user_version + num_blocks
+        user_version_2 = struct.unpack_from("<I", data, offset)[0]
+        return user_version, user_version_2
+    except (struct.error, ValueError, IndexError):
+        return None
 
 
 def _find_header_terminator(data: bytes) -> int | None:
@@ -4083,9 +4116,14 @@ def _classify_conflict_code(message: str) -> str:
     if unsupported_profile_values:
         user_version = int(unsupported_profile_values.group(1))
         user_version_2 = int(unsupported_profile_values.group(2))
+        if "could not parse full header tables" in lowered:
+            return (
+                f"unsupported_header.profile_value_drift.u{user_version}_u2{user_version_2}."
+                "header_table_drift"
+            )
         return f"unsupported_header.profile_value_drift.u{user_version}_u2{user_version_2}"
     if lowered.startswith("malformed or truncated nif: unsupported nif header/profile values"):
-        return "unsupported_header.profile_value_drift.unparsed"
+        return "unsupported_header.profile_value_drift.unparsed.signature_only"
     if lowered.startswith("malformed or truncated nif: header prefix is not"):
         return "unsupported_header.header_prefix_mismatch"
     if lowered.startswith("malformed or truncated nif: nif version is 0x"):

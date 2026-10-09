@@ -689,7 +689,7 @@
       "flags1": 128,
       "num_blocks_delta": 2,
       "expected_prefixes": [
-        "unsupported_header.string_read_out_of_range.",
+        "unsupported_header.profile_value_drift.u11_u2131.header_table_drift.",
         "unsupported_header.reexport_resolution."
       ],
       "expected_no_auto_remediation": true,
@@ -1123,6 +1123,33 @@
       ],
       "expected_difference_bucket": "binary_drift_guarded",
       "safety_difference_note": "Long-tail profile drift variant with unsupported Fallout-adjacent user_version_2=140 remains deterministic manual-review/no-op."
+    },
+    {
+      "id": "parity_fallout_effects_crlf_u16_numblocks_drift_u11_u2130_v6",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 130,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "num_blocks_delta": 3,
+      "expected_prefixes": [
+        "unsupported_header.profile_value_drift.unparsed.signature_only.",
+        "unsupported_header.reexport_resolution."
+      ],
+      "expected_absent_prefixes": [
+        "fallback_or_unknown.fallout."
+      ],
+      "expected_no_auto_remediation": true,
+      "expected_absent_remediation_steps": [
+        "enable_env_mapping",
+        "set_slot5_env_mask"
+      ],
+      "expected_difference_bucket": "binary_drift_guarded",
+      "safety_difference_note": "Long-tail malformed export drift with inflated block-count header stays deterministic manual-review/no-op."
     }
   ]
 }

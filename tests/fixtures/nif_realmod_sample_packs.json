@@ -1044,8 +1044,8 @@
       "id": "fallout_guarded_family_pack",
       "expected_max_fallback_ratio": 0.0,
       "expected_family_case_counts": {
-        "architecture": 30,
-        "effects": 28,
+        "architecture": 31,
+        "effects": 29,
         "clutter": 22,
         "armor": 1,
         "landscape": 1,
@@ -1122,6 +1122,10 @@
         "skip_alpha_decal_lighting.subsurface_flags.fallout.",
         "skip_alpha_decal_lighting.anisotropic_flag.fallout.",
         "unsupported_header.profile_value_drift."
+      ],
+      "expected_top_manual_priority_prefixes": [
+        "unsupported_header.reexport_resolution.",
+        "unsupported_header.profile_value_drift.unparsed.signature_only."
       ],
       "cases": [
         {
@@ -4508,6 +4512,60 @@
           ],
           "expected_difference_bucket": "partial_recoverability_guarded",
           "safety_difference_note": "Larger-pack drift variant: explicit unsupported profile values with table drift remain guarded manual-review/no-op."
+        },
+        {
+          "id": "pack_fallout_architecture_real_crlf_u16_numblocks_drift_u11_u2130_v8",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "num_blocks_delta": 3,
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift.unparsed.signature_only."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_absent_remediation_steps": [
+            "enable_env_mapping",
+            "set_slot5_env_mask"
+          ],
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Larger-pack malformed export drift variant: inflated block-count headers stay deterministic manual-review/no-op."
+        },
+        {
+          "id": "pack_fallout_effects_real_crlf_u16_numblocks_drift_u11_u2131_v8",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "num_blocks_delta": 3,
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift.unparsed.signature_only."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_absent_remediation_steps": [
+            "enable_env_mapping",
+            "disable_env_mapping_for_missing_slots4_5"
+          ],
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Larger-pack malformed export drift variant: real-layout table drift remains guarded no-op/manual-review."
         }
       ],
       "expected_family_allowed_difference_buckets": {

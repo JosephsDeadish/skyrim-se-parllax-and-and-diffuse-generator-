@@ -476,6 +476,8 @@ def build_batch_bottleneck_hints(
         hints.append("A few outlier files were much slower; inspect unusually large or noisy source textures first.")
     if total_failed > 0:
         hints.append("Check batch_failure_report.csv/json for repeated failure patterns before rerun.")
+    if total_sources >= 1000 and total_failed > 0:
+        hints.append("For huge runs with failures, rerun only failed files first before attempting a full start-fresh pass.")
     return hints[:3]
 
 
@@ -8215,6 +8217,20 @@ if GUI_AVAILABLE:
                 foreground="gray",
             )
             _preset_usage_hint.grid(row=4, column=0, columnspan=3, sticky=tk.W, pady=(0, 2))
+            simplified_optional_preset_widgets: list[tk.Widget] = [
+                _preset_cs_button,
+                _preset_truepbr_button,
+                _preset_hint,
+                _preset_usage_hint,
+            ]
+            _simplified_optional_preset_pack_layout: dict[tk.Widget, dict[str, object]] = {
+                _preset_cs_button: _preset_cs_button.pack_info(),
+                _preset_truepbr_button: _preset_truepbr_button.pack_info(),
+            }
+            _simplified_optional_preset_grid_layout: dict[tk.Widget, dict[str, object]] = {
+                _preset_hint: _preset_hint.grid_info(),
+                _preset_usage_hint: _preset_usage_hint.grid_info(),
+            }
 
             self._render_profile_managed_output_widgets = [
                 _diffuse_check,
@@ -8994,6 +9010,18 @@ if GUI_AVAILABLE:
                         _show_advanced_generation_check.grid(**_show_advanced_generation_check_layout)
                     if not _advanced_workflow_toggle.winfo_manager():
                         _advanced_workflow_toggle.grid(**_advanced_workflow_toggle_layout)
+                for widget in simplified_optional_preset_widgets:
+                    if simplified:
+                        if widget in _simplified_optional_preset_pack_layout:
+                            widget.pack_forget()
+                        else:
+                            widget.grid_remove()
+                    else:
+                        if widget in _simplified_optional_preset_pack_layout:
+                            if not widget.winfo_manager():
+                                widget.pack(**_simplified_optional_preset_pack_layout[widget])
+                        elif not widget.winfo_manager():
+                            widget.grid(**_simplified_optional_preset_grid_layout[widget])
                 for widget in advanced_batch_widgets:
                     if show_advanced:
                         if not widget.winfo_manager():
@@ -11445,6 +11473,10 @@ if GUI_AVAILABLE:
                     )
                     if enable_resume:
                         self.batch_resume_mode_var.set("resume")
+                if is_huge_batch:
+                    self.status_var.set(
+                        "Huge-run mode: checkpoint safety prompts and queue pacing are enabled for smoother long runs."
+                    )
                 resumed_completed_count = 0
                 completed_checkpoint_files: set[str] = set()
                 if self.batch_resume_mode_var.get() == "resume":
