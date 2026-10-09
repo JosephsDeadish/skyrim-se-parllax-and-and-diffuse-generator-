@@ -1055,6 +1055,13 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "fallout_profile.experimental_notice")
 
+    def test_conflict_classifier_maps_fallout_experimental_nif_header_notice(self) -> None:
+        code = _classify_conflict_code(
+            "Detected Fallout-era NIF header (user_version=11, user_version_2=131). "
+            "Fallout patching is available in guarded experimental mode."
+        )
+        self.assertEqual(code, "fallout_profile.experimental_notice.nif_header")
+
     def test_conflict_classifier_maps_reexport_resolution_notice(self) -> None:
         code = _classify_conflict_code(
             "Resolution: open the mesh in NifSkope or the Creation Kit and re-save/export it as a clean Skyrim or Fallout NIF, then run the patch again."
@@ -1128,6 +1135,12 @@ class TestValidateNifForParallax(unittest.TestCase):
     def test_conflict_classifier_maps_real_layout_semantic_slot3_drift_combo(self) -> None:
         code = _classify_conflict_code(
             "Block 4: real-layout drift combo detected — semantic shader resolution is present while slot 3 remains unresolved."
+        )
+        self.assertEqual(code, "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift")
+
+    def test_conflict_classifier_maps_real_layout_semantic_slot3_drift_combo_variant_copy(self) -> None:
+        code = _classify_conflict_code(
+            "Block 4: real-layout drift combo detected — semantic shader resolution present while slot 3 is unresolved."
         )
         self.assertEqual(code, "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift")
 
@@ -4539,6 +4552,32 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         opts, steps = build_auto_remediation_patch_options(
             nif,
             ["missing_parallax_slot3.empty.payload_resolved_real_layout_drift.skyrim.real"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(str(opts.parallax_texture_path).lower().endswith("_p.dds"))
+        self.assertTrue(opts.enable_parallax)
+        self.assertIn("set_slot3_parallax_for_resolved_real_layout_drift", steps)
+        self.assertIn("enable_parallax_for_resolved_real_layout_drift", steps)
+
+    def test_auto_remediation_build_options_detects_real_layout_slot3_semantic_combo_without_dedicated_subcode(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            user_ver2=130,
+            texture_set_layout_shift=4,
+            shader_type=0,
+            flags1=SLSF1_PARALLAX | SLSF1_ENVIRONMENT_MAPPING,
+            texture_paths=paths,
+        )
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            [
+                "missing_parallax_slot3.empty.skyrim.real",
+                "unknown_shader_type.semantic_resolved.skyrim.real",
+            ],
             backup=False,
         )
         self.assertIsNotNone(opts)

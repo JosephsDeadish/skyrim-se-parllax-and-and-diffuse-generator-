@@ -3911,6 +3911,9 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "fallout_profile.experimental_notice": (
         "Detected Fallout-era profile notice: keep guarded mode enabled, keep backups, and verify in-game after patching.",
     ),
+    "fallout_profile.experimental_notice.nif_header": (
+        "Detected Fallout-era NIF header notice: keep guarded mode enabled, keep backups, and verify in-game after patching.",
+    ),
     "fallout_profile.guarded_noop_no_compatible_blocks": (
         "Guarded Fallout mode found no compatible shader blocks for safe writes; keep this mesh as no-op/manual-review.",
         "Re-export/re-save the mesh to normalize block tables before attempting guarded Fallout patching again.",
@@ -4224,10 +4227,15 @@ def _classify_conflict_code(message: str) -> str:
         return "unsupported_header.convert_to_bslighting_required"
     if "resolution: re-export or modernize the mesh so it uses bslightingshaderproperty before patching" in lowered:
         return "unsupported_header.convert_to_bslighting_required"
-    if "fallout profile" in lowered or "experimental_fallout_write" in lowered:
-        return "fallout_profile"
+    if (
+        "detected fallout-era nif header" in lowered
+        and "fallout patching is available in guarded experimental mode" in lowered
+    ):
+        return "fallout_profile.experimental_notice.nif_header"
     if "detected fallout-era profile" in lowered:
         return "fallout_profile.experimental_notice"
+    if "fallout profile" in lowered or "experimental_fallout_write" in lowered:
+        return "fallout_profile"
     if "no fallout-compatible bslightingshaderproperty blocks found for experimental patch mode" in lowered:
         return "fallout_profile.guarded_noop_no_compatible_blocks"
     if "no supported shader layouts are available for profile" in lowered and "skipping all shader blocks" in lowered:
@@ -4282,14 +4290,16 @@ def _classify_conflict_code(message: str) -> str:
         return "missing_parallax_slot3.empty.hint_path"
     if (
         "real-layout drift combo" in lowered
-        and "semantic shader resolution is present" in lowered
-        and "slot 3 remains unresolved" in lowered
+        and "semantic shader resolution" in lowered
+        and "slot 3" in lowered
+        and "unresolved" in lowered
     ):
         return "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift"
     if (
         "real-layout drift combo" in lowered
-        and "payload shader resolution is present" in lowered
-        and "slot 3 remains unresolved" in lowered
+        and "payload shader resolution" in lowered
+        and "slot 3" in lowered
+        and "unresolved" in lowered
     ):
         return "missing_parallax_slot3.empty.payload_resolved_real_layout_drift"
     if "slot 0 diffuse path" in lowered and "not a .dds texture path" in lowered:
@@ -4819,6 +4829,23 @@ def build_auto_remediation_patch_options(
     guessed_glow = guess_glow_path_for_nif(nif_path)
     guessed_env = guess_env_mask_path_for_nif(nif_path)
     guessed_cubemap = guess_cubemap_path_for_nif(nif_path)
+    has_real_layout_conflict = any(str(code).endswith(".real") for code in conflict_codes)
+    has_semantic_slot3_real_layout_combo = (
+        any(code.startswith("missing_parallax_slot3.empty.semantic_resolved_real_layout_drift") for code in base_codes)
+        or (
+            has_real_layout_conflict
+            and "missing_parallax_slot3.empty" in base_codes
+            and "unknown_shader_type.semantic_resolved" in base_codes
+        )
+    )
+    has_payload_slot3_real_layout_combo = (
+        any(code.startswith("missing_parallax_slot3.empty.payload_resolved_real_layout_drift") for code in base_codes)
+        or (
+            has_real_layout_conflict
+            and "missing_parallax_slot3.empty" in base_codes
+            and "unknown_shader_type.payload_resolved" in base_codes
+        )
+    )
     has_non_heightmap_pom_conflict = any(
         code.startswith("flag_pom.non_heightmap_shader") for code in base_codes
     )
@@ -4849,11 +4876,7 @@ def build_auto_remediation_patch_options(
         if guessed_parallax:
             opts.parallax_texture_path = guessed_parallax
             applied_steps.append("set_slot3_parallax")
-    if any(
-        code.startswith("missing_parallax_slot3.empty.semantic_resolved_real_layout_drift")
-        or code.startswith("missing_parallax_slot3.empty.payload_resolved_real_layout_drift")
-        for code in base_codes
-    ):
+    if has_semantic_slot3_real_layout_combo or has_payload_slot3_real_layout_combo:
         if guessed_parallax:
             opts.parallax_texture_path = guessed_parallax
             opts.enable_parallax = True

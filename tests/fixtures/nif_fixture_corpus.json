@@ -387,6 +387,44 @@
       ]
     },
     {
+      "id": "skyrim_real_semantic_slot3_drift_combo_core_family",
+      "profile": "skyrim",
+      "family": "core_drift_semantic_slot3",
+      "shader_layout": "real",
+      "user_ver2": 130,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_set_layout_shift": 4,
+      "texture_paths": [
+        "textures\\architecture\\dwemer\\metal.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\architecture\\dwemer\\metal_m.dds",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\dwemer\\metal.dds",
+            "",
+            "",
+            "textures\\architecture\\dwemer\\metal.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    {
       "id": "skyrim_real_crossblock_parallax_envmap_glow_no_source",
       "profile": "skyrim",
       "shader_layout": "real",
