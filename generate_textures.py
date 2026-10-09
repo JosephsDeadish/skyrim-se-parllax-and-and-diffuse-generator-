@@ -43,6 +43,17 @@ except Exception:
     GUI_AVAILABLE = False
 
 try:
+    from PySide6 import QtCore, QtWidgets
+
+    QT_GUI_AVAILABLE = True
+    QT_GUI_IMPORT_ERROR = ""
+except Exception as exc:
+    QtCore = None
+    QtWidgets = None
+    QT_GUI_AVAILABLE = False
+    QT_GUI_IMPORT_ERROR = str(exc)
+
+try:
     def _candidate_nif_patcher_search_dirs(
         *,
         script_path: Path | None = None,
@@ -7628,6 +7639,12 @@ def parse_args() -> argparse.Namespace:
         help="Write batch performance telemetry JSON to this path for folder runs.",
     )
     parser.add_argument("--gui", action="store_true", help="Launch graphical interface.")
+    parser.add_argument(
+        "--gui-backend",
+        choices=("auto", "tk", "qt"),
+        default="auto",
+        help="GUI backend selection: auto (default), tk (legacy full UI), or qt (migration preview UI).",
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {APP_VERSION}")
     return parser.parse_args()
 
@@ -13951,20 +13968,131 @@ else:
             raise RuntimeError("GUI dependencies are unavailable in this environment.")
 
 
+def _launch_tk_gui() -> None:
+    if not GUI_AVAILABLE:
+        raise RuntimeError("GUI dependencies are unavailable in this environment.")
+    try:
+        TextureGeneratorGUI().run()
+    except Exception as exc:
+        if tk is not None and isinstance(exc, tk.TclError):
+            raise RuntimeError(
+                "GUI could not start because no desktop display is available in this environment."
+            ) from exc
+        raise
+
+
+def _launch_qt_migration_gui() -> None:
+    if not QT_GUI_AVAILABLE or QtWidgets is None or QtCore is None:
+        install_hint = "Install PySide6 (pip install PySide6) to use the Qt migration UI."
+        if QT_GUI_IMPORT_ERROR:
+            raise RuntimeError(f"Qt GUI dependencies are unavailable ({QT_GUI_IMPORT_ERROR}). {install_hint}")
+        raise RuntimeError(f"Qt GUI dependencies are unavailable. {install_hint}")
+
+    app = QtWidgets.QApplication.instance()
+    if app is None:
+        app = QtWidgets.QApplication(sys.argv)
+
+    window = QtWidgets.QMainWindow()
+    window.setWindowTitle(f"Skyrim Texture Generator {APP_VERSION} — Qt migration preview")
+    window.resize(920, 620)
+
+    root = QtWidgets.QWidget(window)
+    layout = QtWidgets.QVBoxLayout(root)
+    layout.setContentsMargins(14, 14, 14, 14)
+    layout.setSpacing(10)
+
+    banner = QtWidgets.QLabel(
+        "Qt migration bootstrap is now available.\n"
+        "Use this preview shell to validate startup/runtime behavior while full Tkinter→Qt feature parity is implemented."
+    )
+    banner.setWordWrap(True)
+    layout.addWidget(banner)
+
+    tabs = QtWidgets.QTabWidget(root)
+    layout.addWidget(tabs, 1)
+
+    overview = QtWidgets.QWidget()
+    overview_layout = QtWidgets.QVBoxLayout(overview)
+    overview_layout.setSpacing(8)
+    overview_text = QtWidgets.QLabel(
+        "Current Qt bootstrap scope:\n"
+        "• validates Qt startup and desktop integration\n"
+        "• keeps migration status visible\n"
+        "• can open the full legacy Tk interface for complete feature access"
+    )
+    overview_text.setWordWrap(True)
+    overview_layout.addWidget(overview_text)
+
+    button_row = QtWidgets.QHBoxLayout()
+    launch_tk_button = QtWidgets.QPushButton("Open full legacy UI (Tkinter)")
+    launch_tk_button.setEnabled(GUI_AVAILABLE)
+    if not GUI_AVAILABLE:
+        launch_tk_button.setToolTip("Tkinter is unavailable in this environment.")
+    button_row.addWidget(launch_tk_button)
+    button_row.addStretch(1)
+    overview_layout.addLayout(button_row)
+    overview_layout.addStretch(1)
+    tabs.addTab(overview, "Overview")
+
+    status_tab = QtWidgets.QWidget()
+    status_layout = QtWidgets.QVBoxLayout(status_tab)
+    status_layout.setSpacing(8)
+    status_box = QtWidgets.QPlainTextEdit()
+    status_box.setReadOnly(True)
+    status_lines = [
+        f"Tkinter available: {'yes' if GUI_AVAILABLE else 'no'}",
+        f"Qt available: {'yes' if QT_GUI_AVAILABLE else 'no'}",
+        f"NIF patcher available: {'yes' if NIF_PATCHER_AVAILABLE else 'no'}",
+        "",
+        "Migration next step: incrementally port generation rows and queue/preview flows from Tkinter to Qt.",
+    ]
+    if not NIF_PATCHER_AVAILABLE and NIF_PATCHER_IMPORT_ERROR:
+        status_lines.extend(["", f"NIF patcher import warning: {NIF_PATCHER_IMPORT_ERROR}"])
+    if QT_GUI_IMPORT_ERROR:
+        status_lines.extend(["", f"Qt import warning: {QT_GUI_IMPORT_ERROR}"])
+    status_box.setPlainText("\n".join(status_lines))
+    status_layout.addWidget(status_box, 1)
+    tabs.addTab(status_tab, "Status")
+
+    def _open_legacy_tk() -> None:
+        if not GUI_AVAILABLE:
+            QtWidgets.QMessageBox.warning(window, "Tkinter unavailable", "Tkinter GUI dependencies are unavailable.")
+            return
+        window.setEnabled(False)
+        try:
+            _launch_tk_gui()
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(window, "Legacy UI failed", str(exc))
+        finally:
+            window.setEnabled(True)
+            window.raise_()
+            window.activateWindow()
+
+    launch_tk_button.clicked.connect(_open_legacy_tk)
+    window.setCentralWidget(root)
+    window.show()
+    app.exec()
+
+
 def main() -> int:
     args = _apply_cli_pbr_overrides(parse_args())
     if args.gui or args.input_file is None:
-        if not GUI_AVAILABLE:
-            raise RuntimeError("GUI dependencies are unavailable in this environment.")
-        try:
-            TextureGeneratorGUI().run()
-        except Exception as exc:
-            if tk is not None and isinstance(exc, tk.TclError):
-                raise RuntimeError(
-                    "GUI could not start because no desktop display is available in this environment."
-                ) from exc
-            raise
-        return 0
+        backend = str(getattr(args, "gui_backend", "auto") or "auto").strip().lower()
+        if backend not in {"auto", "tk", "qt"}:
+            backend = "auto"
+        if backend == "qt":
+            _launch_qt_migration_gui()
+            return 0
+        if backend == "tk":
+            _launch_tk_gui()
+            return 0
+        if GUI_AVAILABLE:
+            _launch_tk_gui()
+            return 0
+        if QT_GUI_AVAILABLE:
+            _launch_qt_migration_gui()
+            return 0
+        raise RuntimeError("GUI dependencies are unavailable in this environment.")
 
     if getattr(args, "pbr_material", False):
         cli_recommended_profile: str | None = None
@@ -14124,7 +14252,7 @@ def _run_cli() -> int:
         if message == "GUI dependencies are unavailable in this environment.":
             print(
                 "Error: GUI dependencies are unavailable in this environment. "
-                "Install tkinter support or provide an input file to run in CLI mode.",
+                "Install tkinter/PySide6 support or provide an input file to run in CLI mode.",
                 file=sys.stderr,
             )
             return 1

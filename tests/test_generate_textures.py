@@ -4328,6 +4328,31 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(args.checkpoint_file, checkpoint)
         self.assertTrue(args.resume_checkpoint)
 
+    def test_parse_args_accepts_gui_backend_qt(self) -> None:
+        with mock.patch("sys.argv", ["generate_textures.py", "--gui", "--gui-backend", "qt"]):
+            args = parse_args()
+        self.assertEqual(str(args.gui_backend), "qt")
+
+    def test_main_routes_to_qt_backend_when_requested(self) -> None:
+        args = mock.Mock(gui=True, input_file=None, gui_backend="qt")
+        with mock.patch("generate_textures.parse_args", return_value=args):
+            with mock.patch("generate_textures._launch_qt_migration_gui") as qt_launch:
+                with mock.patch("generate_textures._launch_tk_gui") as tk_launch:
+                    exit_code = main()
+        self.assertEqual(exit_code, 0)
+        qt_launch.assert_called_once()
+        tk_launch.assert_not_called()
+
+    def test_main_auto_prefers_qt_when_tk_unavailable(self) -> None:
+        args = mock.Mock(gui=True, input_file=None, gui_backend="auto")
+        with mock.patch("generate_textures.parse_args", return_value=args):
+            with mock.patch("generate_textures.GUI_AVAILABLE", False):
+                with mock.patch("generate_textures.QT_GUI_AVAILABLE", True):
+                    with mock.patch("generate_textures._launch_qt_migration_gui") as qt_launch:
+                        exit_code = main()
+        self.assertEqual(exit_code, 0)
+        qt_launch.assert_called_once()
+
     def test_main_pbr_material_forces_complex_material_cm_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             input_file = Path(temp_dir) / "brick.dds"

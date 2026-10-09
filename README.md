@@ -44,6 +44,15 @@ When the tool is launched from **MO2** or **Vortex**, it now tries to detect the
 python generate_textures.py
 ```
 
+Tkinter remains the full-featured default UI.  
+An experimental Qt migration bootstrap can be launched with:
+
+```bash
+python generate_textures.py --gui --gui-backend qt
+```
+
+If Qt dependencies are missing, install `PySide6` first.
+
 This opens a desktop interface where you can:
 - select one input texture or an entire folder of source DDS textures
 - pick an output folder
