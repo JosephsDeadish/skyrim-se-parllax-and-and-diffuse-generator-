@@ -936,6 +936,82 @@
       "intentional_strategy_difference": true,
       "expected_difference_bucket": "partial_recoverability_guarded",
       "safety_difference_note": "Partial-recoverability split: local strategy keeps guarded no-op behavior until deterministic reconstruction confidence is high."
+    },
+    {
+      "id": "parity_fallout_real_shader_block_too_small_crossblock_drift",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "shader_size_delta": -84,
+      "expected_prefixes": [
+        "unsupported_header.shader_block_too_small.fallout."
+      ],
+      "expected_no_auto_remediation": true,
+      "pgpatcher_strategy": "attempt_binary_layout_recovery_then_continue",
+      "local_strategy": "guarded_manual_review_for_undersized_shader_block",
+      "intentional_strategy_difference": true,
+      "expected_difference_bucket": "binary_drift_guarded",
+      "safety_difference_note": "Fresh malformed Fallout drift family: undersized shader blocks remain deterministic manual-review/no-op instead of speculative table rewrites."
+    },
+    {
+      "id": "parity_fallout_real_shader_block_past_eof_crossblock_drift",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "block_size_delta_overrides": [
+        {
+          "ordinal": 0,
+          "delta": 256
+        }
+      ],
+      "expected_prefixes": [
+        "unsupported_header.shader_block_past_eof.fallout."
+      ],
+      "expected_no_auto_remediation": true,
+      "pgpatcher_strategy": "attempt_crossblock_reflow_for_declared_block_size_drift",
+      "local_strategy": "guarded_manual_review_for_block_past_eof_drift",
+      "intentional_strategy_difference": true,
+      "expected_difference_bucket": "binary_drift_guarded",
+      "safety_difference_note": "Fresh malformed Fallout drift family: declared block-size past EOF remains deterministic no-op/manual-review for safety."
+    },
+    {
+      "id": "parity_fallout_real_texture_set_u16_out_of_range_drift",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "block_size_delta_overrides": [
+        {
+          "ordinal": 1,
+          "delta": -28
+        }
+      ],
+      "expected_prefixes": [
+        "unsupported_header.texture_set_u16_count_out_of_range.fallout."
+      ],
+      "expected_no_auto_remediation": true,
+      "pgpatcher_strategy": "attempt_partial_texture_set_reconstruction",
+      "local_strategy": "guarded_manual_review_for_texture_set_count_drift",
+      "intentional_strategy_difference": true,
+      "expected_difference_bucket": "partial_recoverability_guarded",
+      "safety_difference_note": "Fresh malformed Fallout drift family: u16 texture-set count/table skew remains deterministic no-op/manual-review until reconstruction confidence improves."
     }
   ]
 }

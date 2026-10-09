@@ -4042,8 +4042,20 @@ def _classify_conflict_code(message: str) -> str:
     if "could not parse user version fields from header" in lowered:
         return "unsupported_header.user_version_parse_failure"
     if "failed to parse bslightingshaderproperty" in lowered:
+        if "block too small for bslightingshaderproperty" in lowered:
+            return "unsupported_header.shader_block_too_small"
+        if "block extends past end of file" in lowered:
+            return "unsupported_header.shader_block_past_eof"
+        if "niobjectnet header unresolvable" in lowered:
+            return "unsupported_header.niobjectnet_unresolvable"
+        if "niobjectnet header truncated at controller field" in lowered:
+            return "unsupported_header.niobjectnet_controller_truncated"
         return "unsupported_header.shader_block_parse_error"
     if "failed to parse bsshadertextureset" in lowered or "texture-set parse error" in lowered:
+        if "u16 read out of range" in lowered:
+            return "unsupported_header.texture_set_u16_count_out_of_range"
+        if "u32 read out of range" in lowered:
+            return "unsupported_header.texture_set_u32_count_out_of_range"
         return "unsupported_header.texture_set_parse_error"
     if "resolution: open the mesh in nifskope or the creation kit and re-save/export it as a clean skyrim or fallout nif" in lowered:
         return "unsupported_header.reexport_resolution"

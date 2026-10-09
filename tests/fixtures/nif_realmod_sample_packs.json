@@ -814,9 +814,9 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 26,
-        "effects": 21,
-        "clutter": 19,
+        "architecture": 27,
+        "effects": 22,
+        "clutter": 20,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -3685,6 +3685,96 @@
           "intentional_strategy_difference": true,
           "expected_difference_bucket": "partial_recoverability_guarded",
           "safety_difference_note": "Rarer clutter cross-block single-pass env-alias ref-skew remains deterministic no-op until deterministic reconstruction paths are validated."
+        },
+        {
+          "id": "pack_fallout_architecture_real_shader_block_too_small_crossblock_drift_v3",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "shader_size_delta": -84,
+          "expected_prefixes": [
+            "unsupported_header.shader_block_too_small.fallout."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Additional malformed Fallout family: undersized cross-block shader payloads are classified deterministically and kept in manual-review/no-op mode."
+        },
+        {
+          "id": "pack_fallout_effects_real_shader_block_past_eof_crossblock_drift_v3",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 0,
+              "delta": 256
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header.shader_block_past_eof.fallout."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Additional malformed Fallout family: declared block-size past EOF under cross-block drift remains deterministic manual-review/no-op."
+        },
+        {
+          "id": "pack_fallout_clutter_real_texture_set_u16_count_drift_crossblock_v3",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 0,
+          "flags1": 32,
+          "texture_paths": [
+            "textures\\clutter\\industrial\\controlrack.dds",
+            "",
+            "",
+            "textures\\clutter\\industrial\\controlrack_n.dds",
+            "",
+            "textures\\clutter\\industrial\\controlrack_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": -28
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header.texture_set_u16_count_out_of_range.fallout."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Additional malformed Fallout family: u16 texture-set count drift under cross-block clutter patterns remains deterministic manual-review/no-op."
         }
       ],
       "expected_family_allowed_difference_buckets": {
