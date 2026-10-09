@@ -8708,7 +8708,7 @@ if GUI_AVAILABLE:
             self.preview_pause_button.pack(side=tk.LEFT, padx=(4, 4))
             self._add_tooltip(
                 self.preview_pause_button,
-                "Pause preview rendering manually during long runs. Generation continues.",
+                "Pause/resume preview rendering manually during long runs. Generation keeps running in the background.",
             )
             _batch_prev_check = ttk.Checkbutton(
                 source_controls,
@@ -8719,7 +8719,7 @@ if GUI_AVAILABLE:
             _batch_prev_check.pack(side=tk.LEFT, padx=(14, 4))
             self._add_tooltip(
                 _batch_prev_check,
-                "Show live preview while batch processing. This can slow large runs.",
+                "Show live preview while batch processing. Disable this for maximum batch throughput on large runs.",
             )
             _large_batch_opt_check = ttk.Checkbutton(
                 source_controls,

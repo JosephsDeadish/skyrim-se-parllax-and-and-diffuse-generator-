@@ -4004,6 +4004,8 @@ def _classify_conflict_code(message: str) -> str:
     lowered = message.lower()
     if "shorter than a normal skyrim nif header" in lowered:
         return "unsupported_header.malformed_or_truncated"
+    if "probably truncated, corrupt, or not really a nif" in lowered:
+        return "unsupported_header.malformed_or_truncated"
     if "malformed or truncated nif" in lowered:
         return "unsupported_header.malformed_or_truncated"
     if "string read out of range" in lowered:

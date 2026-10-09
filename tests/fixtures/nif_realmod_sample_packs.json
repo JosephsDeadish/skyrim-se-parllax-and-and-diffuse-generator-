@@ -814,9 +814,9 @@
     {
       "id": "fallout_guarded_family_pack",
       "expected_family_case_counts": {
-        "architecture": 22,
-        "effects": 17,
-        "clutter": 15,
+        "architecture": 23,
+        "effects": 18,
+        "clutter": 16,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -3081,6 +3081,138 @@
           "intentional_strategy_difference": false,
           "expected_difference_bucket": "guarded_fallout",
           "safety_difference_note": "Additional clutter drift edge: single-pass + decal corruption under table drift stays guarded no-op/manual-review first for stability."
+        },
+        {
+          "id": "pack_fallout_architecture_real_crossblock_env_slot5_alias_multidrift_manual_review_tail3",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_paths": [
+            "textures\\architecture\\industrial\\coolingtower.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\coolingtower_e.dds",
+            "textures\\architecture\\industrial\\coolingtower_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 1,
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 12
+            },
+            {
+              "ordinal": 3,
+              "delta": -8
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_crossblock_env_alias_repair_under_multidrift",
+          "local_strategy": "guarded_noop_for_env_slot5_alias_multidrift",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "binary_drift_guarded",
+          "safety_difference_note": "Additional architecture long-tail: slot-5 alias plus cross-block drift remains guarded no-op/manual-review under binary skew."
+        },
+        {
+          "id": "pack_fallout_effects_real_crossblock_envmap_pom_multidrift_manual_review_tail3",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 268435584,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\effects\\industrial\\steamjet.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 2,
+          "extra_shader_texture_set_refs": [
+            95
+          ],
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 15
+            },
+            {
+              "ordinal": 2,
+              "delta": -10
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_crossblock_envmap_pom_recovery_under_multidrift",
+          "local_strategy": "guarded_noop_for_envmap_pom_multidrift",
+          "intentional_strategy_difference": false,
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Additional effects long-tail: mixed EnvMap+POM drift with cross-block ref skew stays guarded no-op until deterministic recovery is proven."
+        },
+        {
+          "id": "pack_fallout_clutter_real_crossblock_singlepass_env_alias_multidrift_manual_review_tail3",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 0,
+          "flags1": 160,
+          "texture_paths": [
+            "textures\\clutter\\industrial\\terminal.dds",
+            "",
+            "",
+            "textures\\clutter\\industrial\\terminal_n.dds",
+            "",
+            "textures\\clutter\\industrial\\terminal_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 1,
+          "block_type_index_overrides": [
+            {
+              "ordinal": 0,
+              "value": 65535
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_singlepass_env_alias_repair_under_multidrift",
+          "local_strategy": "guarded_noop_for_singlepass_env_alias_multidrift",
+          "intentional_strategy_difference": false,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Additional clutter long-tail: single-pass env alias corruption under table/index drift remains conservative no-op for stability."
         }
       ],
       "expected_family_allowed_difference_buckets": {

@@ -1344,6 +1344,106 @@
       ]
     },
     {
+      "id": "fallout_architecture_real_crlf_u16_multidrift_envmap_glow_tail",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "num_blocks_delta": 1,
+      "block_size_delta_overrides": [
+        {
+          "ordinal": 1,
+          "delta": 10
+        },
+        {
+          "ordinal": 3,
+          "delta": -6
+        }
+      ],
+      "texture_paths": [
+        "textures\\architecture\\industrial\\catwalk.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\catwalk_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_effects_real_crlf_u16_envmap_pom_glow_alias_multidrift_tail",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 268435584,
+      "flags2": 64,
+      "num_blocks_delta": 2,
+      "block_size_delta_overrides": [
+        {
+          "ordinal": 1,
+          "delta": 14
+        },
+        {
+          "ordinal": 2,
+          "delta": -8
+        }
+      ],
+      "texture_paths": [
+        "textures\\effects\\reactor\\haze.dds",
+        "",
+        "textures\\effects\\reactor\\haze_n.dds",
+        "",
+        "",
+        "textures\\effects\\reactor\\haze_orm.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_clutter_real_crlf_u16_single_pass_envmap_multidrift_tail",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 0,
+      "flags1": 160,
+      "num_blocks_delta": 1,
+      "block_type_index_overrides": [
+        {
+          "ordinal": 0,
+          "value": 65535
+        }
+      ],
+      "texture_paths": [
+        "textures\\clutter\\industrial\\console.dds",
+        "",
+        "",
+        "textures\\clutter\\industrial\\console_n.dds",
+        "",
+        "textures\\clutter\\industrial\\console_m.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
       "id": "unknown_header_signature",
       "profile": "unknown",
       "shader_layout": "legacy",
