@@ -1155,6 +1155,24 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "unsupported_header.texture_set_u16_count_out_of_range")
 
+    def test_conflict_classifier_maps_texture_set_string_read_out_of_range(self) -> None:
+        code = _classify_conflict_code(
+            "Block 2: texture-set parse error: string read out of range at offset 412 (need 64 byte(s), buffer size 416)"
+        )
+        self.assertEqual(code, "unsupported_header.texture_set_string_read_out_of_range")
+
+    def test_conflict_classifier_maps_texture_set_block_past_eof(self) -> None:
+        code = _classify_conflict_code(
+            "Block 3: texture-set parse error: block extends past end of file: block_end=0x240 > file_size=512"
+        )
+        self.assertEqual(code, "unsupported_header.texture_set_block_past_eof")
+
+    def test_conflict_classifier_maps_texture_set_block_too_small(self) -> None:
+        code = _classify_conflict_code(
+            "Block 1: texture-set parse error: block too small for expected slot table metadata"
+        )
+        self.assertEqual(code, "unsupported_header.texture_set_block_too_small")
+
     def test_conflict_classifier_prefers_specific_subcode_for_wrapped_texture_set_parse_error(self) -> None:
         code = _classify_conflict_code(
             "Malformed or truncated NIF: Failed to parse BSShaderTextureSet at block 2: texture-set parse error: u16 read out of range at offset 804 (need 2 byte(s), buffer size 805)"

@@ -4147,7 +4147,7 @@ def _classify_conflict_code(message: str) -> str:
         return "unsupported_header.num_extra_recovery"
     if "strict unknown-shader check failed" in lowered:
         return "unknown_shader_type.strict_violation"
-    if "string read out of range" in lowered:
+    if "string read out of range" in lowered and "texture-set parse error" not in lowered:
         return "unsupported_header.string_read_out_of_range"
     if "no bslightingshaderproperty blocks found or not a supported skyrim/fallout nif" in lowered:
         return "unsupported_header.no_patchable_shader_blocks"
@@ -4183,6 +4183,12 @@ def _classify_conflict_code(message: str) -> str:
             return "unsupported_header.texture_set_u16_count_out_of_range"
         if "u32 read out of range" in lowered:
             return "unsupported_header.texture_set_u32_count_out_of_range"
+        if "string read out of range" in lowered:
+            return "unsupported_header.texture_set_string_read_out_of_range"
+        if "block extends past end of file" in lowered:
+            return "unsupported_header.texture_set_block_past_eof"
+        if "block too small" in lowered:
+            return "unsupported_header.texture_set_block_too_small"
         return "unsupported_header.texture_set_parse_error"
     if "resolution: open the mesh in nifskope or the creation kit and re-save/export it as a clean skyrim or fallout nif" in lowered:
         return "unsupported_header.reexport_resolution"

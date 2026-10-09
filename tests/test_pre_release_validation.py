@@ -189,6 +189,8 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
             "enb",
             "performance_core",
             "custom_glow_env",
+            "community_shaders_wet_snow",
+            "truepbr_plus_aux_maps",
             "vr_safe_core",
         ):
             self.assertIn(expected, scenario_by_name)

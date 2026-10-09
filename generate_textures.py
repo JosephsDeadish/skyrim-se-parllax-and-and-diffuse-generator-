@@ -7822,6 +7822,8 @@ if GUI_AVAILABLE:
             self.preview_deferred_queue: list[str] = []
             self._last_live_batch_preview_update_at = 0.0
             self._last_live_batch_preview_index = 0
+            self._max_observed_queue_backlog = 0
+            self._queue_backlog_notice_emitted = False
             self._active_batch_max_source_pixels = 0
             self._active_batch_high_res_8k_count = 0
             self.normal_strength_var = tk.DoubleVar(value=2.0)
@@ -9899,6 +9901,9 @@ if GUI_AVAILABLE:
                 self._cancel_deferred_preview_staging(clear_queue=False)
                 if not self.preview_paused_var.get():
                     self._set_preview_speed_badge("none")
+            else:
+                self._max_observed_queue_backlog = 0
+                self._queue_backlog_notice_emitted = False
             self._update_output_location_controls()
             self._update_preview_navigation_state()
 
@@ -10134,6 +10139,19 @@ if GUI_AVAILABLE:
                 queue_backlog = max(0, int(self.processing_queue.qsize()))
             except Exception:
                 queue_backlog = 0
+            self._max_observed_queue_backlog = max(
+                int(getattr(self, "_max_observed_queue_backlog", 0) or 0),
+                queue_backlog,
+            )
+            if (
+                self.is_processing
+                and queue_backlog >= 128
+                and not bool(getattr(self, "_queue_backlog_notice_emitted", False))
+            ):
+                self.status_var.set(
+                    "Queue pacing active: event backlog is high, so GUI updates are intentionally throttled for stability."
+                )
+                self._queue_backlog_notice_emitted = True
             max_events_per_poll = compute_processing_queue_event_budget(
                 queue_backlog=queue_backlog,
                 total_sources=max(0, len(getattr(self, "selected_inputs", []) or [])),
@@ -10263,6 +10281,11 @@ if GUI_AVAILABLE:
                             )
                         if max_megapixels > 0:
                             lines.append(f"Largest sampled source: {max_megapixels:.1f} MP.")
+                        max_queue_backlog = int(getattr(self, "_max_observed_queue_backlog", 0) or 0)
+                        if max_queue_backlog > 0:
+                            lines.append(
+                                f"Queue health: peak event backlog {max_queue_backlog}; adaptive queue pacing kept the UI responsive."
+                            )
                         perf_hints = build_batch_bottleneck_hints(
                             avg_file_seconds=avg_file,
                             max_file_seconds=max_file,
@@ -10325,16 +10348,18 @@ if GUI_AVAILABLE:
                             planned_total=max(0, total_sources + resumed),
                         )
                         checkpoint_status = f"Checkpoint health: {self.checkpoint_health_var.get() or 'unavailable'}"
+                    peak_backlog = int(getattr(self, "_max_observed_queue_backlog", 0) or 0)
                     messagebox.showinfo(
-                        "Generation cancelled",
-                        (
-                            f"Summary focus: resumed-skipped={resumed_cancelled}, failed={len(self.batch_failures)}.\n"
-                            "Processing was cancelled.\n"
-                            f"Summary: processed {total_sources}/{planned_cancelled}, wrote {total_outputs} files, "
-                            f"resumed-skip {resumed_cancelled}, failed {len(self.batch_failures)}.\n"
-                            f"{checkpoint_status}\n"
-                            "Use Revert Process to undo files from this run if needed."
-                        ),
+                    "Generation cancelled",
+                    (
+                        f"Summary focus: resumed-skipped={resumed_cancelled}, failed={len(self.batch_failures)}.\n"
+                        "Processing was cancelled.\n"
+                        f"Summary: processed {total_sources}/{planned_cancelled}, wrote {total_outputs} files, "
+                        f"resumed-skip {resumed_cancelled}, failed {len(self.batch_failures)}.\n"
+                        f"Queue health: peak event backlog {peak_backlog}.\n"
+                        f"{checkpoint_status}\n"
+                        "Use Revert Process to undo files from this run if needed."
+                    ),
                         parent=self.root,
                     )
                     if telemetry:
