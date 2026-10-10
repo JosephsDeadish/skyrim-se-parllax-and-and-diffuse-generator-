@@ -1938,6 +1938,30 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(rows[0], ("SKIP", "test_mesh.nif", "No .nif.bak backup found."))
             self.assertEqual(mesh_path.read_bytes(), b"current-data")
 
+    def test_restore_nif_backups_stops_before_next_file_when_cancelled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            first_mesh = Path(tmpdir) / "first.nif"
+            second_mesh = Path(tmpdir) / "second.nif"
+            first_mesh.write_bytes(b"new-first")
+            first_mesh.with_suffix(".nif.bak").write_bytes(b"old-first")
+            second_mesh.write_bytes(b"new-second")
+            second_mesh.with_suffix(".nif.bak").write_bytes(b"old-second")
+            cancel_checks = 0
+
+            def cancel_after_first_restore() -> bool:
+                nonlocal cancel_checks
+                cancel_checks += 1
+                return cancel_checks > 1
+
+            rows = restore_nif_backups(
+                [first_mesh, second_mesh],
+                should_cancel=cancel_after_first_restore,
+            )
+
+            self.assertEqual([row[1] for row in rows], ["first.nif"])
+            self.assertEqual(first_mesh.read_bytes(), b"old-first")
+            self.assertEqual(second_mesh.read_bytes(), b"new-second")
+
     def test_should_apply_preview_recommendations_disabled_when_processing(self) -> None:
         self.assertFalse(should_apply_preview_recommendations(
             auto_suggestions_enabled=True,

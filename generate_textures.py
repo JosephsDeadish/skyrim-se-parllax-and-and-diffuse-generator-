@@ -389,10 +389,16 @@ def _compute_nif_editor_result_details_height(
     return min(requested_height, max_details_height)
 
 
-def restore_nif_backups(nif_paths: list[Path]) -> list[tuple[str, str, str]]:
+def restore_nif_backups(
+    nif_paths: list[Path],
+    *,
+    should_cancel: Callable[[], bool] | None = None,
+) -> list[tuple[str, str, str]]:
     """Restore ``.nif`` files from sibling ``.nif.bak`` backups."""
     results: list[tuple[str, str, str]] = []
     for nif_path in nif_paths:
+        if should_cancel is not None and should_cancel():
+            break
         backup_path = nif_path.with_suffix(".nif.bak")
         if not backup_path.exists():
             results.append(("SKIP", nif_path.name, "No .nif.bak backup found."))
@@ -8744,13 +8750,14 @@ if GUI_AVAILABLE:
             self.revert_button = ttk.Button(actions, text="Revert Process", command=self._revert_last_generation, state=tk.DISABLED)
             self.revert_button.pack(side=tk.LEFT, padx=(6, 0))
             self._add_tooltip(self.revert_button, "↩ Restore files from the most recent generation run.\nDisabled until a generation run has something to undo.")
-            nif_editor_button = ttk.Button(actions, text="NIF Editor (Skyrim/Fallout)… [Experimental]", command=self._open_nif_editor)
+            nif_editor_button = ttk.Button(actions, text="NIF Editor (Skyrim/Fallout)…", command=self._open_nif_editor)
             nif_editor_button.pack(side=tk.LEFT, padx=(12, 0))
             self._add_tooltip(
                 nif_editor_button,
-                "🔧 Open the NIF Editor window. ⚠ Experimental feature.\n"
-                "Patch BSLightingShaderProperty flags and texture slots in Skyrim/Fallout mesh files.\n"
+                "🔧 Open the advanced NIF Editor.\n"
+                "Review scan results before patching BSLightingShaderProperty flags and texture slots.\n"
                 "Use 'NIF game profile' inside the editor to switch Auto/Skyrim/Fallout mode.\n"
+                "Fallout writes remain experimental and require explicit safety options.\n"
                 "Always keep backups before patching NIFs.",
             )
             _status_label = ttk.Label(actions, textvariable=self.status_var, justify=tk.LEFT, anchor=tk.W)
@@ -12065,8 +12072,9 @@ if GUI_AVAILABLE:
                 intro_label = tk.Label(
                     controls_wrapper,
                     text=(
-                        "⚠ Experimental feature — always keep backups of your NIF files before patching.\n\n"
-                        "Patch Skyrim SE NIF files so generated textures work in-game.\n"
+                        "Advanced NIF editing — keep backups of your NIF files before patching.\n\n"
+                        "Patch Skyrim SE NIF files so generated textures work in-game. Fallout writes remain experimental "
+                        "and require explicit safety options.\n"
                         "Quick start: choose your target renderer first, then use Scan NIFs to review, "
                         "Apply patch to enable features, Remove features to disable them, and Restore backups "
                         "to roll back .nif.bak copies."
@@ -13209,6 +13217,7 @@ if GUI_AVAILABLE:
                 # rather than called directly from the worker thread.
                 _is_running = [False]
                 _cancel_requested = [False]
+                _close_when_idle = [False]
                 _action_buttons_ref: list[Any] = []  # populated after button creation
 
                 def _set_ops_active(active: bool) -> None:
@@ -13227,6 +13236,8 @@ if GUI_AVAILABLE:
                     _is_running[0] = False
                     _cancel_requested[0] = False
                     _set_ops_active(True)
+                    if _close_when_idle[0]:
+                        win.destroy()
 
                 def _request_cancel_nif_editor_ops() -> None:
                     if not _is_running[0]:
@@ -13234,6 +13245,20 @@ if GUI_AVAILABLE:
                         return
                     _cancel_requested[0] = True
                     status_var.set("Cancellation requested. Current file will finish, then operation stops.")
+
+                def _request_close_nif_editor() -> None:
+                    if not _is_running[0]:
+                        win.destroy()
+                        return
+                    if not messagebox.askyesno(
+                        "Cancel operation and close?",
+                        "A NIF Editor operation is still running. Cancel after the current file finishes "
+                        "and close the editor?",
+                        parent=win,
+                    ):
+                        return
+                    _close_when_idle[0] = True
+                    _request_cancel_nif_editor_ops()
 
                 def _queue_ui_update(callback: Callable[[], None]) -> None:
                     try:
@@ -13919,7 +13944,10 @@ if GUI_AVAILABLE:
 
                     def _restore_worker(nif_list=nifs) -> None:
                         ok = skip = fail = 0
-                        for index, (row_status, file_name, details) in enumerate(restore_nif_backups(nif_list), start=1):
+                        for index, (row_status, file_name, details) in enumerate(
+                            restore_nif_backups(nif_list, should_cancel=lambda: _cancel_requested[0]),
+                            start=1,
+                        ):
                             if _cancel_requested[0]:
                                 break
                             _safe_add_row(row_status, file_name, details)
@@ -13984,8 +14012,9 @@ if GUI_AVAILABLE:
                 copy_all_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 cancel_ops_button = ttk.Button(btn_frame, text="Cancel operation", command=_request_cancel_nif_editor_ops, state=tk.DISABLED)
                 cancel_ops_button.pack(in_=op_row2, side="left", padx=(0, 6))
-                close_button = ttk.Button(btn_frame, text="Close", command=win.destroy)
+                close_button = ttk.Button(btn_frame, text="Close", command=_request_close_nif_editor)
                 close_button.pack(in_=op_row2, side="right")
+                win.protocol("WM_DELETE_WINDOW", _request_close_nif_editor)
                 # Register action buttons so _set_ops_active can disable them during ops
                 _action_buttons_ref.extend(
                     [
