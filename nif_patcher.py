@@ -5616,6 +5616,22 @@ def build_auto_remediation_patch_options(
         if not restored_any_env_slot:
             opts.disable_env_mapping = True
             applied_steps.append("disable_env_mapping_for_parallax_envmap_glow_mixed_unresolved")
+    if (
+        any(code.startswith("shader_state.crossblock_texture_ref_drift_mixed_slots") for code in base_codes)
+        and any(".skyrim." in code for code in conflict_codes)
+    ):
+        if guessed_parallax:
+            opts.parallax_texture_path = guessed_parallax
+            applied_steps.append("set_slot3_parallax_for_crossblock_ref_drift")
+        if guessed_glow:
+            opts.glow_texture_path = guessed_glow
+            applied_steps.append("set_slot2_glow_for_crossblock_ref_drift")
+        if guessed_cubemap:
+            opts.cubemap_texture_path = guessed_cubemap
+            applied_steps.append("set_slot4_cubemap_for_crossblock_ref_drift")
+        if guessed_env:
+            opts.env_mask_texture_path = guessed_env
+            applied_steps.append("set_slot5_env_mask_for_crossblock_ref_drift")
 
     if not applied_steps:
         return None, (

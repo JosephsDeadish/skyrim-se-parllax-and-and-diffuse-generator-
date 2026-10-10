@@ -5407,6 +5407,38 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertTrue(str(opts.env_mask_texture_path).lower().endswith("_m.dds"))
         self.assertIn("set_slot5_env_mask_for_missing_envmap_slot5", steps)
 
+    def test_auto_remediation_build_options_reseeds_crossblock_ref_drift_slots_for_skyrim(self) -> None:
+        paths = ["textures\\effects\\magic\\fxrunes.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT, texture_paths=paths)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["shader_state.crossblock_texture_ref_drift_mixed_slots.skyrim.real"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(str(opts.parallax_texture_path).lower().endswith("_p.dds"))
+        self.assertTrue(str(opts.glow_texture_path).lower().endswith("_g.dds"))
+        self.assertTrue(str(opts.cubemap_texture_path).lower().endswith("_e.dds"))
+        self.assertTrue(str(opts.env_mask_texture_path).lower().endswith("_m.dds"))
+        self.assertIn("set_slot3_parallax_for_crossblock_ref_drift", steps)
+        self.assertIn("set_slot2_glow_for_crossblock_ref_drift", steps)
+        self.assertIn("set_slot4_cubemap_for_crossblock_ref_drift", steps)
+        self.assertIn("set_slot5_env_mask_for_crossblock_ref_drift", steps)
+
+    def test_auto_remediation_build_options_keeps_crossblock_ref_drift_noop_for_fallout(self) -> None:
+        paths = ["textures\\effects\\magic\\fxrunes.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT, texture_paths=paths, user_ver2=131)
+        _rewrite_user_version(nif, 11)
+        opts, _steps = build_auto_remediation_patch_options(
+            nif,
+            ["shader_state.crossblock_texture_ref_drift_mixed_slots.fallout.real"],
+            backup=False,
+            target_game="fallout",
+            experimental_fallout_write=True,
+        )
+        self.assertIsNone(opts)
+
     def test_auto_remediation_build_options_prefers_slot3_restore_for_real_layout_resolved_slot3_combo(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8
         nif = _write_nif(

@@ -17,7 +17,7 @@
         "armor": 2,
         "landscape": 2,
         "foliage": 2,
-        "effects": 7
+        "effects": 8
       },
       "expected_family_min_pass_ratio": {
         "architecture": 1.0,
@@ -1016,6 +1016,56 @@
           "pgpatcher_strategy": "rebuild_missing_envmask_while_preserving_parallax_envmap",
           "local_strategy": "rebuild_slot5_when_guessable_then_keep_parallax_envmap",
           "intentional_strategy_difference": false
+        },
+        {
+          "id": "pack_skyrim_effects_real_crossblock_refdrift_guessable_slots_reseed",
+          "family": "effects",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "flags1": 2048,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\effects\\magic\\fxrunes.dds",
+            "textures\\effects\\magic\\fxrunes_n.dds",
+            "",
+            "textures\\effects\\magic\\fxrunes_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "flags1": 2048,
+              "flags2": 64,
+              "texture_paths": [
+                "textures\\effects\\magic\\fxrunes.dds",
+                "textures\\effects\\magic\\fxrunes_n.dds",
+                "",
+                "textures\\effects\\magic\\fxrunes_n.dds",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            0
+          ],
+          "expected_prefixes": [
+            "shader_state.crossblock_texture_ref_drift_mixed_slots.skyrim.",
+            "path_slot_parallax.matches_normal.skyrim.",
+            "flag_glow_map.flag_set_without_slot2.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot3_parallax_for_crossblock_ref_drift",
+            "set_slot2_glow_for_crossblock_ref_drift"
+          ]
         },
         {
           "id": "pack_skyrim_architecture_singlepass_guarded_manual_review_destructive_disabled",

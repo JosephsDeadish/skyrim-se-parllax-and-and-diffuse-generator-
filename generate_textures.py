@@ -9030,6 +9030,10 @@ if GUI_AVAILABLE:
                     bool(self.show_advanced_generation_var.get())
                     and not simplified
                 )
+                show_advanced_workflow = (
+                    bool(self.show_advanced_workflow_outputs_var.get())
+                    and not simplified
+                )
                 _show_advanced_generation_check.configure(
                     state=(tk.DISABLED if simplified else tk.NORMAL)
                 )
@@ -9045,7 +9049,7 @@ if GUI_AVAILABLE:
                     if not _advanced_workflow_toggle.winfo_manager():
                         _advanced_workflow_toggle.grid(**_advanced_workflow_toggle_layout)
                 for widget in simplified_optional_preset_widgets:
-                    if simplified:
+                    if not show_advanced_workflow:
                         if widget in _simplified_optional_preset_pack_layout:
                             widget.pack_forget()
                         else:
@@ -9076,6 +9080,7 @@ if GUI_AVAILABLE:
 
             self.simplified_main_layout_var.trace_add("write", _sync_simplified_layout_preview)
             self.show_advanced_generation_var.trace_add("write", _sync_simplified_layout_preview)
+            self.show_advanced_workflow_outputs_var.trace_add("write", _sync_simplified_layout_preview)
             _sync_simplified_layout_preview()
             self._update_preview_navigation_state()
 
