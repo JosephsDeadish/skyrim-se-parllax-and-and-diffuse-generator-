@@ -4400,9 +4400,15 @@ class GenerateTexturesTests(unittest.TestCase):
                     interrupted_after,
                 )
 
-            done_event = worker.processing_queue.get_nowait()
+            resumed_events = []
+            while not worker.processing_queue.empty():
+                resumed_events.append(worker.processing_queue.get_nowait())
+            self.assertEqual(
+                [event_type for event_type, _payload in resumed_events],
+                ["progress"] * (len(dimensions) - interrupted_after) + ["done"],
+            )
+            done_event = resumed_events[-1]
             self.assertEqual(done_event[0], "done")
-            self.assertTrue(worker.processing_queue.empty())
             resumed_results, resumed_telemetry = done_event[1]
             self.assertEqual(
                 resumed_attempts,
