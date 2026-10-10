@@ -602,6 +602,42 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "forbidden_output_families": ("parallax", "rmaos", "complex_msn"),
         },
         {
+            "name": "community_shaders_high_resolution_wet_snow",
+            "args": [
+                "--render-profile",
+                "community_shaders",
+                "--complex-material",
+                "--complex-format",
+                "cm",
+                "--environment-mask",
+                "--environment-mask-mode",
+                "complex",
+                "--wetness-mask",
+                "--snow-mask",
+            ],
+            "input_size": 128,
+            "min_outputs": 7,
+            "required_suffixes": ("_n.dds", "_p.dds", "_cm.dds", "_m.dds", "_wt.dds", "_sm.dds"),
+            "required_exact_suffix_counts": {
+                "_cm.dds": 1,
+                "_m.dds": 1,
+                "_wt.dds": 1,
+                "_sm.dds": 1,
+            },
+            "forbidden_suffixes": ("_rmaos.dds", "_msn.dds"),
+            "required_exact_output_family_counts": {
+                "diffuse": 1,
+                "normal": 1,
+                "parallax": 1,
+                "complex_cm": 1,
+                "env_mask": 1,
+                "wetness": 1,
+                "snow": 1,
+            },
+            "required_output_families": ("diffuse", "normal", "parallax", "complex_cm", "env_mask", "wetness", "snow"),
+            "forbidden_output_families": ("rmaos", "complex_msn"),
+        },
+        {
             "name": "architecture_base",
             "args": [
                 "--render-profile",
@@ -748,6 +784,8 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
     smoke_io.mkdir(parents=True, exist_ok=True)
     loops = max(1, int(loops))
     scenarios = _packaged_smoke_scenarios()
+    from PIL import Image
+
     for loop_index in range(1, loops + 1):
         for scenario in scenarios:
             scenario_name = str(scenario.get("name", "scenario")).strip() or "scenario"
@@ -856,6 +894,12 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                     raise SystemExit(
                         f"Packaged executable smoke run for '{scenario_name}' produced empty output file '{output_path.name}'."
                     )
+                with Image.open(output_path) as output_image:
+                    if output_image.size != (input_size, input_size):
+                        raise SystemExit(
+                            f"Packaged executable smoke run for '{scenario_name}' produced "
+                            f"'{output_path.name}' at {output_image.size}; expected {(input_size, input_size)}."
+                        )
             produced_names = [path.name.lower() for path in produced_dds]
             specialized_suffixes = (
                 "_n.dds",

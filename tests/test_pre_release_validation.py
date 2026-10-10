@@ -357,6 +357,7 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
             "performance_core",
             "custom_glow_env",
             "community_shaders_wet_snow",
+            "community_shaders_high_resolution_wet_snow",
             "truepbr_plus_aux_maps",
             "vr_safe_core",
             "enb_glow_combo",
@@ -420,6 +421,20 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         self.assertEqual(scenario_by_name["vanilla"].get("input_size"), 16)
         self.assertEqual(scenario_by_name["community_shaders"].get("input_size"), 64)
         self.assertEqual(scenario_by_name["truepbr"].get("input_size"), 32)
+        high_resolution_scenario = scenario_by_name["community_shaders_high_resolution_wet_snow"]
+        self.assertEqual(high_resolution_scenario.get("input_size"), 128)
+        self.assertEqual(
+            high_resolution_scenario.get("required_exact_output_family_counts"),
+            {
+                "diffuse": 1,
+                "normal": 1,
+                "parallax": 1,
+                "complex_cm": 1,
+                "env_mask": 1,
+                "wetness": 1,
+                "snow": 1,
+            },
+        )
         truepbr_suffixes = {
             str(value).lower() for value in scenario_by_name["truepbr"].get("required_suffixes", ())
         }
