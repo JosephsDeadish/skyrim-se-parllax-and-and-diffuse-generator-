@@ -147,6 +147,7 @@ This gate runs:
   - `localization_coverage_report.json`
   - `localization_coverage_report.md`
   - optional strict mode via `--strict-localization-completeness` to fail if non-English catalogs are missing `en.json` keys.
+  - optional parity-fallback drift guard via `--max-fallback-ratio-drift` / `--max-fallback-group-drift` against prior seeded `nif_realmod_parity_delta_report.json` artifacts.
   - locked profiles (and `auto` in single-file mode) now auto-correct conflicting `--complex-format`, `--environment-mask-mode`, and `--parallax-mode` values, then print the applied guardrail changes to stderr
 - `--target-game` (`skyrim`, `fallout3`, `falloutnv`, `fallout4`, `fallout76`; default: `skyrim`)
   - controls generated filename conventions (for example, Fallout 4/76 diffuse defaults to `_d.dds` and env-mask defaults to `_s.dds`)
@@ -351,6 +352,7 @@ The same release-readiness gate now emits `nif_parity_feature_report.json` and `
 It also emits `nif_realmod_parity_delta_report.json` and `nif_realmod_parity_delta_report.md` for direct real-sample-pack side-by-side parity deltas, including intended-difference buckets (`safety_first`, `guarded_fallout`, `destructive_disabled`).
 When you want to sweep larger external broken-mod packs in the same report pipeline, pass one or more `--extra-realmod-pack-file <json>` arguments to `scripts/pre_release_validation.py` (same `packs[]` schema as `tests/fixtures/nif_realmod_sample_packs.json`).
 Release validation additionally supports a bucket-distribution drift gate against prior `nif_realmod_parity_delta_report.json` artifacts, so large parity strategy-bucket shifts are flagged before release cut.
+Release validation also emits `nif_realmod_fallback_drift_report.json` / `.md` and applies per-pack fallback drift gates (`--max-fallback-ratio-drift`, `--max-fallback-group-drift`) when prior parity-delta seeds are provided.
 The regression suite also includes a locked fixture corpus baseline at `tests/fixtures/nif_fixture_corpus*.json` for cross-profile/layout conflict-matrix stability checks, including truncated-header and shifted texture-set layout edge signatures.
 CLI folder batch runs now emit `batch_failure_report.json` and `batch_failure_report.csv` when any source files fail, with per-file action/conflict/error fields for triage.
 For long-running folder batches, use `--checkpoint-file <path>` to persist successful-file progress and `--resume-checkpoint` to skip already completed files after interruption/restart.

@@ -1413,6 +1413,163 @@ def _assert_realmod_fallback_guard(report: dict[str, object]) -> None:
     )
 
 
+def _load_latest_seed_report(seed_files: list[Path] | None) -> dict[str, object]:
+    if not seed_files:
+        return {}
+    latest_payload: dict[str, object] | None = None
+    latest_mtime = -1.0
+    for seed in seed_files:
+        if seed is None or not seed.exists():
+            continue
+        try:
+            mtime = seed.stat().st_mtime
+            payload = json.loads(seed.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if mtime > latest_mtime:
+            latest_payload = payload
+            latest_mtime = mtime
+    return latest_payload or {}
+
+
+def _build_realmod_fallback_drift_report(
+    *,
+    current_fallback_guard_report: dict[str, object],
+    seed_realmod_delta_files: list[Path] | None = None,
+    extra_pack_files: list[Path] | None = None,
+) -> dict[str, object]:
+    current_rows = current_fallback_guard_report.get("packs", [])
+    if not isinstance(current_rows, list):
+        current_rows = []
+    current_by_pack: dict[str, dict[str, object]] = {}
+    for row in current_rows:
+        if not isinstance(row, dict):
+            continue
+        pack_id = str(row.get("pack_id", "pack")).strip() or "pack"
+        current_by_pack[pack_id] = row
+
+    prior_delta_report = _load_latest_seed_report(seed_realmod_delta_files)
+    prior_by_pack: dict[str, dict[str, object]] = {}
+    if prior_delta_report:
+        prior_fallback_report = _build_realmod_fallback_guard_report(
+            realmod_delta_report=prior_delta_report,
+            extra_pack_files=extra_pack_files,
+        )
+        prior_rows = prior_fallback_report.get("packs", [])
+        if isinstance(prior_rows, list):
+            for row in prior_rows:
+                if not isinstance(row, dict):
+                    continue
+                pack_id = str(row.get("pack_id", "pack")).strip() or "pack"
+                prior_by_pack[pack_id] = row
+
+    rows: list[dict[str, object]] = []
+    for pack_id in sorted(set(current_by_pack) | set(prior_by_pack)):
+        current = current_by_pack.get(pack_id, {})
+        prior = prior_by_pack.get(pack_id, {})
+        current_total = int(current.get("total_conflict_groups", 0) or 0)
+        current_fallback = int(current.get("fallback_or_unknown_groups", 0) or 0)
+        prior_total = int(prior.get("total_conflict_groups", 0) or 0)
+        prior_fallback = int(prior.get("fallback_or_unknown_groups", 0) or 0)
+        current_ratio = (float(current_fallback) / float(current_total)) if current_total > 0 else 0.0
+        prior_ratio = (float(prior_fallback) / float(prior_total)) if prior_total > 0 else 0.0
+        rows.append(
+            {
+                "pack_id": pack_id,
+                "current_total_conflict_groups": current_total,
+                "current_fallback_or_unknown_groups": current_fallback,
+                "current_fallback_ratio": current_ratio,
+                "prior_total_conflict_groups": prior_total,
+                "prior_fallback_or_unknown_groups": prior_fallback,
+                "prior_fallback_ratio": prior_ratio,
+                "fallback_group_drift": current_fallback - prior_fallback,
+                "fallback_ratio_drift": current_ratio - prior_ratio,
+                "has_prior_baseline": pack_id in prior_by_pack,
+            }
+        )
+    return {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "baseline_found": bool(prior_by_pack),
+        "pack_count": len(rows),
+        "packs": rows,
+    }
+
+
+def _render_realmod_fallback_drift_markdown(report: dict[str, object]) -> str:
+    rows = report.get("packs", [])
+    lines = [
+        "# NIF real-sample fallback drift report",
+        "",
+        f"- Generated: {report.get('generated_at_utc', '')}",
+        f"- Baseline found: {'yes' if bool(report.get('baseline_found', False)) else 'no'}",
+        f"- Pack count: {report.get('pack_count', 0)}",
+        "",
+        "| Pack | Current fallback | Current ratio | Prior fallback | Prior ratio | Group drift | Ratio drift | Prior baseline |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+    ]
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            pack_id = str(row.get("pack_id", "pack")).replace("|", "\\|")
+            lines.append(
+                f"| `{pack_id}` | "
+                f"{int(row.get('current_fallback_or_unknown_groups', 0) or 0)}/"
+                f"{int(row.get('current_total_conflict_groups', 0) or 0)} | "
+                f"{float(row.get('current_fallback_ratio', 0.0) or 0.0):.3f} | "
+                f"{int(row.get('prior_fallback_or_unknown_groups', 0) or 0)}/"
+                f"{int(row.get('prior_total_conflict_groups', 0) or 0)} | "
+                f"{float(row.get('prior_fallback_ratio', 0.0) or 0.0):.3f} | "
+                f"{int(row.get('fallback_group_drift', 0) or 0)} | "
+                f"{float(row.get('fallback_ratio_drift', 0.0) or 0.0):.3f} | "
+                f"{'yes' if bool(row.get('has_prior_baseline', False)) else 'no'} |"
+            )
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _assert_realmod_fallback_drift_within_limit(
+    *,
+    report: dict[str, object],
+    max_fallback_ratio_drift: float,
+    max_fallback_group_drift: int,
+) -> None:
+    if max_fallback_ratio_drift < 0:
+        raise SystemExit("--max-fallback-ratio-drift must be >= 0.")
+    if max_fallback_group_drift < 0:
+        raise SystemExit("--max-fallback-group-drift must be >= 0.")
+    if not bool(report.get("baseline_found", False)):
+        print("Fallback-drift gate skipped (no prior realmod parity-delta seed report found).")
+        return
+    rows = report.get("packs", [])
+    if not isinstance(rows, list):
+        return
+    violations: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        if not bool(row.get("has_prior_baseline", False)):
+            continue
+        ratio_drift = float(row.get("fallback_ratio_drift", 0.0) or 0.0)
+        group_drift = int(row.get("fallback_group_drift", 0) or 0)
+        if ratio_drift > max_fallback_ratio_drift or group_drift > max_fallback_group_drift:
+            violations.append(
+                f"{row.get('pack_id')}: ratio_drift={ratio_drift:.3f}, group_drift={group_drift}"
+            )
+    if violations:
+        print("Fallback-drift gate failed:")
+        for row in violations:
+            print(" -", row)
+        raise SystemExit(1)
+    print(
+        "Fallback-drift gate passed "
+        f"(max ratio drift {max_fallback_ratio_drift:.3f}, "
+        f"max group drift {max_fallback_group_drift})."
+    )
+
+
 def _normalize_bucket_distribution(
     bucket_counts: dict[str, int] | None,
 ) -> dict[str, float]:
@@ -1436,24 +1593,8 @@ def _normalize_bucket_distribution(
 def _load_prior_bucket_distribution(
     seed_files: list[Path] | None,
 ) -> dict[str, float]:
-    if not seed_files:
-        return {}
-    latest_payload: dict[str, object] | None = None
-    latest_mtime = -1.0
-    for seed in seed_files:
-        if seed is None or not seed.exists():
-            continue
-        try:
-            mtime = seed.stat().st_mtime
-            payload = json.loads(seed.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if not isinstance(payload, dict):
-            continue
-        if mtime > latest_mtime:
-            latest_payload = payload
-            latest_mtime = mtime
-    if latest_payload is None:
+    latest_payload = _load_latest_seed_report(seed_files)
+    if not latest_payload:
         return {}
     return _normalize_bucket_distribution(
         latest_payload.get("intended_difference_bucket_counts"),
@@ -1675,10 +1816,11 @@ def _write_release_artifacts(
     realmod_delta_report: dict[str, object],
     realmod_delta_mismatch_summary: dict[str, object],
     realmod_fallback_guard_report: dict[str, object],
+    realmod_fallback_drift_report: dict[str, object],
     localization_report: dict[str, object] | None = None,
     localization_json_path: Path | None = None,
     localization_md_path: Path | None = None,
-) -> tuple[Path, Path, Path, Path, Path, Path, Path, Path, Path, Path]:
+) -> tuple[Path, Path, Path, Path, Path, Path, Path, Path, Path, Path, Path, Path]:
     artifact_dir.mkdir(parents=True, exist_ok=True)
     trend_path = artifact_dir / "nif_family_trend_snapshot.json"
     trend_path.write_text(json.dumps(trend_snapshot, indent=2, sort_keys=True), encoding="utf-8")
@@ -1713,6 +1855,16 @@ def _write_release_artifacts(
         _render_realmod_fallback_guard_markdown(realmod_fallback_guard_report),
         encoding="utf-8",
     )
+    realmod_fallback_drift_json_path = artifact_dir / "nif_realmod_fallback_drift_report.json"
+    realmod_fallback_drift_json_path.write_text(
+        json.dumps(realmod_fallback_drift_report, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    realmod_fallback_drift_md_path = artifact_dir / "nif_realmod_fallback_drift_report.md"
+    realmod_fallback_drift_md_path.write_text(
+        _render_realmod_fallback_drift_markdown(realmod_fallback_drift_report),
+        encoding="utf-8",
+    )
 
     checklist_path = artifact_dir / "release_checklist.md"
     lines = [
@@ -1744,6 +1896,8 @@ def _write_release_artifacts(
             f"- Real-sample parity mismatch summary markdown: `{realmod_delta_mismatch_md_path.name}`",
             f"- Real-sample fallback guard JSON: `{realmod_fallback_guard_json_path.name}`",
             f"- Real-sample fallback guard markdown: `{realmod_fallback_guard_md_path.name}`",
+            f"- Real-sample fallback drift JSON: `{realmod_fallback_drift_json_path.name}`",
+            f"- Real-sample fallback drift markdown: `{realmod_fallback_drift_md_path.name}`",
             "",
             "## Manual release-candidate verification (post-CI artifact review)",
             "",
@@ -1801,6 +1955,8 @@ def _write_release_artifacts(
         realmod_delta_mismatch_md_path,
         realmod_fallback_guard_json_path,
         realmod_fallback_guard_md_path,
+        realmod_fallback_drift_json_path,
+        realmod_fallback_drift_md_path,
     )
 
 
@@ -1905,6 +2061,24 @@ def main() -> int:
         help=(
             "Maximum allowed absolute drift for intended-difference bucket ratios "
             "versus prior realmod parity-delta baseline."
+        ),
+    )
+    parser.add_argument(
+        "--max-fallback-ratio-drift",
+        type=float,
+        default=0.05,
+        help=(
+            "Maximum allowed increase in fallback_or_unknown ratio per realmod pack "
+            "versus the prior seeded parity-delta report."
+        ),
+    )
+    parser.add_argument(
+        "--max-fallback-group-drift",
+        type=int,
+        default=2,
+        help=(
+            "Maximum allowed increase in fallback_or_unknown conflict-group count per realmod pack "
+            "versus the prior seeded parity-delta report."
         ),
     )
     parser.add_argument(
@@ -2016,6 +2190,17 @@ def main() -> int:
     )
     _assert_realmod_fallback_guard(realmod_fallback_guard_report)
     step_status.append(("Realmod fallback/generic-subcode regression guard", "pass"))
+    realmod_fallback_drift_report = _build_realmod_fallback_drift_report(
+        current_fallback_guard_report=realmod_fallback_guard_report,
+        seed_realmod_delta_files=[path for path in args.seed_realmod_delta_file if path is not None],
+        extra_pack_files=extra_realmod_pack_files,
+    )
+    _assert_realmod_fallback_drift_within_limit(
+        report=realmod_fallback_drift_report,
+        max_fallback_ratio_drift=float(args.max_fallback_ratio_drift),
+        max_fallback_group_drift=max(0, int(args.max_fallback_group_drift)),
+    )
+    step_status.append(("Realmod fallback drift guard", "pass"))
     (
         checklist_path,
         trend_path,
@@ -2027,6 +2212,8 @@ def main() -> int:
         realmod_delta_mismatch_md_path,
         realmod_fallback_guard_json_path,
         realmod_fallback_guard_md_path,
+        realmod_fallback_drift_json_path,
+        realmod_fallback_drift_md_path,
     ) = _write_release_artifacts(
         artifact_dir=args.artifact_dir,
         step_status=step_status,
@@ -2035,6 +2222,7 @@ def main() -> int:
         realmod_delta_report=realmod_delta_report,
         realmod_delta_mismatch_summary=realmod_delta_mismatch_summary,
         realmod_fallback_guard_report=realmod_fallback_guard_report,
+        realmod_fallback_drift_report=realmod_fallback_drift_report,
         localization_report=localization_report,
         localization_json_path=localization_json_path,
         localization_md_path=localization_md_path,
@@ -2064,6 +2252,8 @@ def main() -> int:
     print(f"NIF real-sample parity mismatch summary markdown artifact: {realmod_delta_mismatch_md_path}")
     print(f"NIF real-sample fallback guard JSON artifact: {realmod_fallback_guard_json_path}")
     print(f"NIF real-sample fallback guard markdown artifact: {realmod_fallback_guard_md_path}")
+    print(f"NIF real-sample fallback drift JSON artifact: {realmod_fallback_drift_json_path}")
+    print(f"NIF real-sample fallback drift markdown artifact: {realmod_fallback_drift_md_path}")
     print(f"Localization coverage JSON artifact: {localization_json_path}")
     print(f"Localization coverage markdown artifact: {localization_md_path}")
     print(f"Packaged accessibility acceptance JSON artifact: {packaged_accessibility_json_path}")

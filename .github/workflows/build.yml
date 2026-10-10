@@ -99,6 +99,8 @@ jobs:
             --repeat-validation-loops 4 \
             --packaged-smoke-loops 3 \
             --strict-localization-completeness \
+            --max-fallback-ratio-drift 0.03 \
+            --max-fallback-group-drift 1 \
             --artifact-dir artifacts/release_readiness \
             --history-file artifacts/release_readiness/nif_family_trend_history.json \
             --seed-history-file artifacts/previous_release_readiness/nif_family_trend_history.json \

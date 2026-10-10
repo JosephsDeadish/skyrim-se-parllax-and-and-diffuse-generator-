@@ -7,7 +7,9 @@ import unittest.mock
 from pathlib import Path
 
 from scripts.pre_release_validation import (
+    _assert_realmod_fallback_drift_within_limit,
     _append_trend_history,
+    _build_realmod_fallback_drift_report,
     _collect_localization_coverage,
     _load_realmod_pack_payload,
     _packaged_smoke_scenarios,
@@ -151,6 +153,84 @@ class TestPreReleaseValidationRealmodPayload(unittest.TestCase):
         packs = payload.get("packs", [])
         self.assertIsInstance(packs, list)
         self.assertTrue(any(str(pack.get("id", "")) == "external_pack" for pack in packs if isinstance(pack, dict)))
+
+
+class TestPreReleaseValidationFallbackDrift(unittest.TestCase):
+    def test_fallback_drift_report_builds_from_seed_delta_file(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            seed = tmp / "seed_delta.json"
+            seed.write_text(
+                json.dumps(
+                    {
+                        "cases": [
+                            {
+                                "pack_id": "pack_alpha",
+                                "detected_conflict_codes": [
+                                    "fallback_or_unknown.skyrim.legacy",
+                                    "path_slot_parallax.wrong_suffix.skyrim.legacy",
+                                ],
+                            },
+                            {
+                                "pack_id": "pack_alpha",
+                                "detected_conflict_codes": [
+                                    "path_slot_normal.wrong_suffix.skyrim.legacy",
+                                ],
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            current_report = {
+                "packs": [
+                    {
+                        "pack_id": "pack_alpha",
+                        "total_conflict_groups": 4,
+                        "fallback_or_unknown_groups": 1,
+                    }
+                ]
+            }
+            report = _build_realmod_fallback_drift_report(
+                current_fallback_guard_report=current_report,
+                seed_realmod_delta_files=[seed],
+            )
+            self.assertTrue(bool(report.get("baseline_found", False)))
+            rows = report.get("packs", [])
+            self.assertIsInstance(rows, list)
+            self.assertTrue(rows)
+            first = rows[0]
+            self.assertEqual(str(first.get("pack_id", "")), "pack_alpha")
+            self.assertTrue(bool(first.get("has_prior_baseline", False)))
+            self.assertEqual(int(first.get("prior_fallback_or_unknown_groups", 0)), 1)
+            self.assertAlmostEqual(float(first.get("prior_fallback_ratio", 0.0)), 1.0 / 3.0, places=6)
+
+    def test_fallback_drift_guard_fails_when_ratio_or_group_drift_exceeds_threshold(self) -> None:
+        report = {
+            "baseline_found": True,
+            "packs": [
+                {
+                    "pack_id": "pack_alpha",
+                    "has_prior_baseline": True,
+                    "fallback_ratio_drift": 0.2,
+                    "fallback_group_drift": 3,
+                }
+            ],
+        }
+        with self.assertRaises(SystemExit):
+            _assert_realmod_fallback_drift_within_limit(
+                report=report,
+                max_fallback_ratio_drift=0.05,
+                max_fallback_group_drift=1,
+            )
+
+    def test_fallback_drift_guard_skips_when_no_baseline(self) -> None:
+        report = {"baseline_found": False, "packs": []}
+        _assert_realmod_fallback_drift_within_limit(
+            report=report,
+            max_fallback_ratio_drift=0.01,
+            max_fallback_group_drift=0,
+        )
 
 
 class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
