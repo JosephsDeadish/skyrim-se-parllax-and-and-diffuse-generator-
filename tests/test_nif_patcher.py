@@ -1477,6 +1477,36 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "shader_state.parallax_envmap_missing_slots3_4_5")
 
+    def test_conflict_classifier_maps_envmap_glow_stateful_subcode(self) -> None:
+        code = _classify_conflict_code(
+            "Block 0: EnvMap and glow are enabled together, but required slot 2 and EnvMap textures are unresolved "
+            "(slot2=empty, slot4=missing_on_disk, slot5=empty)."
+        )
+        self.assertEqual(
+            code,
+            "shader_state.envmap_glow_missing_slots2_4_5.slot2_empty_slot4_missing_on_disk_slot5_empty",
+        )
+
+    def test_conflict_classifier_maps_parallax_envmap_stateful_subcode(self) -> None:
+        code = _classify_conflict_code(
+            "Block 1: Parallax/POM and env mapping are enabled together, but required slot 3 and EnvMap textures are unresolved "
+            "(slot3=missing_on_disk, slot4=empty, slot5=missing_on_disk)."
+        )
+        self.assertEqual(
+            code,
+            "shader_state.parallax_envmap_missing_slots3_4_5.slot3_missing_on_disk_slot4_empty_slot5_missing_on_disk",
+        )
+
+    def test_conflict_classifier_maps_parallax_envmap_glow_stateful_subcode(self) -> None:
+        code = _classify_conflict_code(
+            "Block 2: Parallax/POM, env mapping, and glow are enabled together, but required slot 2/3 and EnvMap textures are unresolved "
+            "(slot2=empty, slot3=empty, slot4=missing_on_disk, slot5=empty)."
+        )
+        self.assertEqual(
+            code,
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.slot2_empty_slot3_empty_slot4_missing_on_disk_slot5_empty",
+        )
+
     def test_conflict_classifier_maps_crossblock_drift_detected_wording_variant(self) -> None:
         code = _classify_conflict_code(
             "Cross-block texture-set reference drift detected with mixed slot conflicts; keep auto-fix conservative and review linked blocks manually before patching."
@@ -2003,6 +2033,15 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertTrue(
             any(group.code.startswith("shader_state.envmap_glow_missing_slots2_4_5.") for group in v.conflict_report)
         )
+        self.assertTrue(
+            any(
+                group.code.startswith(
+                    "shader_state.envmap_glow_missing_slots2_4_5.slot2_empty_slot4_resolved_slot5_empty."
+                )
+                for group in v.conflict_report
+            ),
+            [group.code for group in v.conflict_report],
+        )
 
     def test_conflict_report_flags_envmap_glow_with_slot2_unresolved_and_env_slots_present(self) -> None:
         (self.tmp / "textures" / "cubemaps").mkdir(parents=True, exist_ok=True)
@@ -2023,6 +2062,10 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertTrue(
             any(group.code.startswith("shader_state.envmap_glow_missing_slot2.") for group in v.conflict_report)
         )
+        self.assertTrue(
+            any(group.code.startswith("shader_state.envmap_glow_missing_slot2.slot2_empty.") for group in v.conflict_report),
+            [group.code for group in v.conflict_report],
+        )
 
     def test_conflict_report_flags_parallax_envmap_with_unresolved_slots(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8
@@ -2036,6 +2079,15 @@ class TestValidateNifForParallax(unittest.TestCase):
         v = validate_nif_for_parallax(nif)
         self.assertTrue(
             any(group.code.startswith("shader_state.parallax_envmap_missing_slots3_4_5.") for group in v.conflict_report)
+        )
+        self.assertTrue(
+            any(
+                group.code.startswith(
+                    "shader_state.parallax_envmap_missing_slots3_4_5.slot3_empty_slot4_resolved_slot5_empty."
+                )
+                for group in v.conflict_report
+            ),
+            [group.code for group in v.conflict_report],
         )
 
     def test_conflict_report_flags_parallax_envmap_with_slot5_unresolved_and_slot3_4_present(self) -> None:
@@ -2096,6 +2148,10 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertTrue(
             any(group.code.startswith("shader_state.parallax_envmap_missing_slot3.") for group in v.conflict_report)
         )
+        self.assertTrue(
+            any(group.code.startswith("shader_state.parallax_envmap_missing_slot3.slot3_empty.") for group in v.conflict_report),
+            [group.code for group in v.conflict_report],
+        )
 
     def test_conflict_report_flags_parallax_envmap_glow_with_unresolved_slots(self) -> None:
         nif = _write_nif(
@@ -2111,6 +2167,15 @@ class TestValidateNifForParallax(unittest.TestCase):
                 group.code.startswith("shader_state.parallax_envmap_glow_missing_slots2_3_4_5.")
                 for group in v.conflict_report
             )
+        )
+        self.assertTrue(
+            any(
+                group.code.startswith(
+                    "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.slot2_empty_slot3_empty_slot4_empty_slot5_empty."
+                )
+                for group in v.conflict_report
+            ),
+            [group.code for group in v.conflict_report],
         )
 
     def test_reports_wrong_texture_type_in_normal_slot(self) -> None:
@@ -3974,6 +4039,17 @@ class TestParitySampleMatrix(unittest.TestCase):
             expected_no_auto_remediation = bool(case.get("expected_no_auto_remediation", False))
             codes = [group.code for group in validation.conflict_report]
             all_codes.extend(codes)
+            generic_mixed_state_codes = [
+                code
+                for code in codes
+                if str(code).startswith("shader_state.envmap_glow_missing_slots2_4_5.")
+                or str(code).startswith("shader_state.parallax_envmap_missing_slots3_4_5.")
+                or str(code).startswith("shader_state.parallax_envmap_glow_missing_slots2_3_4_5.")
+            ]
+            self.assertTrue(
+                all(".slot" in str(code) or ".hint_" in str(code) for code in generic_mixed_state_codes),
+                f"{case.get('id', 'case')}: expected stateful mixed-slot subcodes, got {generic_mixed_state_codes}",
+            )
             total_conflict_groups += len(codes)
             fallback_conflict_groups += sum(
                 1 for code in codes if str(code).startswith("fallback_or_unknown.")
@@ -4317,6 +4393,17 @@ class TestRealModSamplePacks(unittest.TestCase):
                 ))
                 family_layout_variants[family].add(layout_variant)
                 codes = [group.code for group in validation.conflict_report]
+                generic_mixed_state_codes = [
+                    code
+                    for code in codes
+                    if str(code).startswith("shader_state.envmap_glow_missing_slots2_4_5.")
+                    or str(code).startswith("shader_state.parallax_envmap_missing_slots3_4_5.")
+                    or str(code).startswith("shader_state.parallax_envmap_glow_missing_slots2_3_4_5.")
+                ]
+                self.assertTrue(
+                    all(".slot" in str(code) or ".hint_" in str(code) for code in generic_mixed_state_codes),
+                    f"{pack_id}/{nif_path.stem}: expected stateful mixed-slot subcodes, got {generic_mixed_state_codes}",
+                )
                 if tracked_prefixes:
                     prefix_counts = family_prefix_counts[family]
                     for code in codes:

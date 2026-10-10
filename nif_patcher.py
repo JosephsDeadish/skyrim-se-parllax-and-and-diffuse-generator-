@@ -4267,6 +4267,7 @@ _UNSUPPORTED_PROFILE_VALUES_RE = re.compile(
     r"unsupported nif header/profile values\s*\(\s*user_version\s*=\s*(\d+)\s*,\s*user_version_2\s*=\s*(\d+)\s*\)",
     re.IGNORECASE,
 )
+_SLOT_STATE_RE = re.compile(r"slot([2345])=(empty|missing_on_disk|resolved)", re.IGNORECASE)
 
 
 def _is_fallout_signature_drift(user_version: int, user_version_2: int) -> bool:
@@ -4274,6 +4275,13 @@ def _is_fallout_signature_drift(user_version: int, user_version_2: int) -> bool:
     if user_version not in fallout_user_versions:
         return False
     return (user_version, user_version_2) not in _KNOWN_FALLOUT_USER_VERSION_SIGNATURES
+
+
+def _extract_slot_states(message: str) -> dict[str, str]:
+    states: dict[str, str] = {}
+    for match in _SLOT_STATE_RE.finditer(message):
+        states[match.group(1)] = match.group(2).lower()
+    return states
 
 
 def _extract_block_index(message: str) -> int | None:
@@ -4640,18 +4648,48 @@ def _classify_conflict_code(message: str) -> str:
     if "envmap + pom is active" in lowered and "required envmap textures are unresolved" in lowered:
         return "shader_state.envmap_pom_missing_env_slots"
     if "envmap and glow are enabled" in lowered and "required slot 2 and envmap textures are unresolved" in lowered:
+        states = _extract_slot_states(lowered)
+        if {"2", "4", "5"}.issubset(states):
+            return (
+                "shader_state.envmap_glow_missing_slots2_4_5."
+                f"slot2_{states['2']}_slot4_{states['4']}_slot5_{states['5']}"
+            )
         return "shader_state.envmap_glow_missing_slots2_4_5"
     if "envmap + glow are active" in lowered and "slot 2 and envmap textures are unresolved" in lowered:
+        states = _extract_slot_states(lowered)
+        if {"2", "4", "5"}.issubset(states):
+            return (
+                "shader_state.envmap_glow_missing_slots2_4_5."
+                f"slot2_{states['2']}_slot4_{states['4']}_slot5_{states['5']}"
+            )
         return "shader_state.envmap_glow_missing_slots2_4_5"
     if "restore valid slot 2/4/5 textures, or disable both glow and environment mapping for this mixed block" in lowered:
         return "shader_state.envmap_glow_missing_slots2_4_5.hint_restore_or_disable"
     if "envmap and glow are enabled" in lowered and "slot 2 is unresolved while envmap slots are present" in lowered:
+        states = _extract_slot_states(lowered)
+        if "2" in states:
+            return f"shader_state.envmap_glow_missing_slot2.slot2_{states['2']}"
         return "shader_state.envmap_glow_missing_slot2"
     if "envmap + glow are active" in lowered and "slot 2 is unresolved" in lowered:
+        states = _extract_slot_states(lowered)
+        if "2" in states:
+            return f"shader_state.envmap_glow_missing_slot2.slot2_{states['2']}"
         return "shader_state.envmap_glow_missing_slot2"
     if "parallax/pom and env mapping are enabled" in lowered and "required slot 3 and envmap textures are unresolved" in lowered:
+        states = _extract_slot_states(lowered)
+        if {"3", "4", "5"}.issubset(states):
+            return (
+                "shader_state.parallax_envmap_missing_slots3_4_5."
+                f"slot3_{states['3']}_slot4_{states['4']}_slot5_{states['5']}"
+            )
         return "shader_state.parallax_envmap_missing_slots3_4_5"
     if "parallax/pom + env mapping are active" in lowered and "slot 3 and envmap textures are unresolved" in lowered:
+        states = _extract_slot_states(lowered)
+        if {"3", "4", "5"}.issubset(states):
+            return (
+                "shader_state.parallax_envmap_missing_slots3_4_5."
+                f"slot3_{states['3']}_slot4_{states['4']}_slot5_{states['5']}"
+            )
         return "shader_state.parallax_envmap_missing_slots3_4_5"
     if "restore valid slot 3/4/5 textures, or disable both parallax/pom and environment mapping for this mixed block" in lowered:
         return "shader_state.parallax_envmap_missing_slots3_4_5.hint_restore_or_disable"
@@ -4661,6 +4699,9 @@ def _classify_conflict_code(message: str) -> str:
         "parallax/pom and env mapping are enabled" in lowered
         and "slot 3 parallax is unresolved while slot 4 and slot 5 are present" in lowered
     ):
+        states = _extract_slot_states(lowered)
+        if "3" in states:
+            return f"shader_state.parallax_envmap_missing_slot3.slot3_{states['3']}"
         return "shader_state.parallax_envmap_missing_slot3"
     if (
         "parallax/pom and env mapping are enabled" in lowered
@@ -4675,6 +4716,12 @@ def _classify_conflict_code(message: str) -> str:
         "parallax/pom, env mapping, and glow are enabled" in lowered
         and "required slot 2/3 and envmap textures are unresolved" in lowered
     ):
+        states = _extract_slot_states(lowered)
+        if {"2", "3", "4", "5"}.issubset(states):
+            return (
+                "shader_state.parallax_envmap_glow_missing_slots2_3_4_5."
+                f"slot2_{states['2']}_slot3_{states['3']}_slot4_{states['4']}_slot5_{states['5']}"
+            )
         return "shader_state.parallax_envmap_glow_missing_slots2_3_4_5"
     if (
         "restore valid slot 2/3/4/5 textures" in lowered
@@ -6064,6 +6111,16 @@ def validate_nif_for_parallax(
                 result.suggestions,
                 f"{bname}: SLSF2_Glow_Map is set but slot 2 is empty or unresolved; add a valid _g.dds emissive map or disable the flag."
             )
+        slot2_state = (
+            "empty"
+            if not glow_path
+            else ("missing_on_disk" if glow_path_missing else "resolved")
+        )
+        slot3_state = (
+            "empty"
+            if not parallax_path
+            else ("missing_on_disk" if parallax_missing else "resolved")
+        )
         if (
             info.shader_type == SHADER_TYPE_ENVMAP
             and info.has_env_mapping_flag
@@ -6076,7 +6133,10 @@ def validate_nif_for_parallax(
         ):
             _append_unique(
                 result.issues,
-                f"{bname}: EnvMap and glow are enabled together, but required slot 2 and EnvMap textures are unresolved."
+                (
+                    f"{bname}: EnvMap and glow are enabled together, but required slot 2 and EnvMap textures are unresolved "
+                    f"(slot2={slot2_state}, slot4={slot4_state}, slot5={slot5_state})."
+                )
             )
             _append_unique(
                 result.suggestions,
@@ -6094,7 +6154,7 @@ def validate_nif_for_parallax(
         ):
             _append_unique(
                 result.issues,
-                f"{bname}: EnvMap and glow are enabled, but slot 2 is unresolved while EnvMap slots are present."
+                f"{bname}: EnvMap and glow are enabled, but slot 2 is unresolved while EnvMap slots are present (slot2={slot2_state})."
             )
             _append_unique(
                 result.suggestions,
@@ -6111,7 +6171,10 @@ def validate_nif_for_parallax(
         ):
             _append_unique(
                 result.issues,
-                f"{bname}: Parallax/POM and env mapping are enabled together, but required slot 3 and EnvMap textures are unresolved."
+                (
+                    f"{bname}: Parallax/POM and env mapping are enabled together, but required slot 3 and EnvMap textures are unresolved "
+                    f"(slot3={slot3_state}, slot4={slot4_state}, slot5={slot5_state})."
+                )
             )
             _append_unique(
                 result.suggestions,
@@ -6128,7 +6191,10 @@ def validate_nif_for_parallax(
         ):
             _append_unique(
                 result.issues,
-                f"{bname}: Parallax/POM and env mapping are enabled, but slot 3 parallax is unresolved while slot 4 and slot 5 are present."
+                (
+                    f"{bname}: Parallax/POM and env mapping are enabled, but slot 3 parallax is unresolved "
+                    f"while slot 4 and slot 5 are present (slot3={slot3_state})."
+                )
             )
             _append_unique(
                 result.suggestions,
@@ -6167,7 +6233,10 @@ def validate_nif_for_parallax(
         ):
             _append_unique(
                 result.issues,
-                f"{bname}: Parallax/POM, env mapping, and glow are enabled together, but required slot 2/3 and EnvMap textures are unresolved."
+                (
+                    f"{bname}: Parallax/POM, env mapping, and glow are enabled together, but required slot 2/3 and EnvMap textures are unresolved "
+                    f"(slot2={slot2_state}, slot3={slot3_state}, slot4={slot4_state}, slot5={slot5_state})."
+                )
             )
             _append_unique(
                 result.suggestions,

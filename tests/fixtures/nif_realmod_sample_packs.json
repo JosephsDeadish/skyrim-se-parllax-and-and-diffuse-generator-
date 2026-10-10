@@ -76,12 +76,12 @@
         "shader_state.envmap_missing_slot4.",
         "shader_state.envmap_missing_slot5.",
         "shader_state.envmap_pom_missing_env_slots.skyrim.",
-        "shader_state.envmap_glow_missing_slots2_4_5.skyrim.",
-        "shader_state.envmap_glow_missing_slot2.skyrim.",
-        "shader_state.parallax_envmap_missing_slots3_4_5.skyrim.",
-        "shader_state.parallax_envmap_missing_slot3.skyrim.",
-        "shader_state.parallax_envmap_missing_slot5.skyrim.",
-        "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim.",
+        "shader_state.envmap_glow_missing_slots2_4_5.",
+        "shader_state.envmap_glow_missing_slot2.",
+        "shader_state.parallax_envmap_missing_slots3_4_5.",
+        "shader_state.parallax_envmap_missing_slot3.",
+        "shader_state.parallax_envmap_missing_slot5.",
+        "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.",
         "shader_state.crossblock_texture_ref_drift_mixed_slots.skyrim.",
         "path_slot_env_mask.generic_alias_suffix.skyrim.",
         "path_slot_cubemap.wrong_suffix.skyrim.",
@@ -211,7 +211,7 @@
             ""
           ],
           "expected_prefixes": [
-            "shader_state.parallax_envmap_missing_slot3.skyrim."
+            "shader_state.parallax_envmap_missing_slot3."
           ],
           "expected_remediation_steps": [
             "set_slot3_parallax_for_parallax_envmap_slot3"
@@ -298,7 +298,7 @@
             ""
           ],
           "expected_prefixes": [
-            "shader_state.envmap_glow_missing_slot2.skyrim."
+            "shader_state.envmap_glow_missing_slot2."
           ],
           "expected_remediation_steps": [
             "set_slot2_glow_for_envmap_glow_slot2_only",
@@ -410,7 +410,7 @@
             ""
           ],
           "expected_prefixes": [
-            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim."
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5."
           ],
           "expected_remediation_steps": [
             "set_slot3_parallax_for_parallax_envmap_glow_mixed_unresolved",
@@ -457,7 +457,7 @@
           "flags1": 2176,
           "flags2": 64,
           "expected_prefixes": [
-            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim."
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5."
           ]
         },
         {
@@ -481,7 +481,7 @@
             ""
           ],
           "expected_prefixes": [
-            "shader_state.envmap_glow_missing_slot2.skyrim."
+            "shader_state.envmap_glow_missing_slot2."
           ],
           "expected_remediation_steps": [
             "set_slot2_glow_for_envmap_glow_slot2_only",
@@ -512,7 +512,7 @@
             ""
           ],
           "expected_prefixes": [
-            "shader_state.envmap_glow_missing_slots2_4_5.skyrim."
+            "shader_state.envmap_glow_missing_slots2_4_5."
           ],
           "expected_remediation_steps": [
             "set_slot2_glow_for_envmap_glow_mixed_unresolved",
@@ -550,7 +550,7 @@
             ""
           ],
           "expected_prefixes": [
-            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim."
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5."
           ],
           "expected_remediation_steps": [
             "set_slot3_parallax_for_parallax_envmap_glow_mixed_unresolved",
@@ -607,7 +607,7 @@
           "expected_prefixes": [
             "shader_state.envmap_pom_missing_env_slots.skyrim.",
             "path_slot_parallax.matches_normal.skyrim.",
-            "shader_state.parallax_envmap_missing_slots3_4_5.skyrim."
+            "shader_state.parallax_envmap_missing_slots3_4_5."
           ],
           "expected_remediation_steps": [
             "disable_env_mapping_for_envmap_pom_mixed_unresolved",
@@ -734,7 +734,7 @@
             ""
           ],
           "expected_prefixes": [
-            "shader_state.envmap_glow_missing_slots2_4_5.skyrim.real"
+            "shader_state.envmap_glow_missing_slots2_4_5."
           ],
           "expected_remediation_steps": [
             "set_slot2_glow_for_envmap_glow_mixed_unresolved",
@@ -776,7 +776,7 @@
             ""
           ],
           "expected_prefixes": [
-            "shader_state.parallax_envmap_missing_slots3_4_5.skyrim.real"
+            "shader_state.parallax_envmap_missing_slots3_4_5."
           ],
           "expected_remediation_steps": [
             "disable_env_mapping_for_parallax_envmap_mixed_unresolved",
@@ -807,7 +807,7 @@
             ""
           ],
           "expected_prefixes": [
-            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim."
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5."
           ],
           "expected_remediation_steps": [
             "disable_parallax_for_parallax_envmap_glow_mixed_unresolved",
@@ -857,7 +857,7 @@
             }
           ],
           "expected_prefixes": [
-            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim.real",
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.",
             "path_slot_parallax.matches_normal.skyrim.real"
           ],
           "pgpatcher_strategy": "aggressive_crossblock_rebuild_for_missing_slots",
@@ -908,7 +908,7 @@
             }
           ],
           "expected_prefixes": [
-            "shader_state.envmap_glow_missing_slot2.skyrim.real"
+            "shader_state.envmap_glow_missing_slot2."
           ],
           "expected_remediation_steps": [
             "set_slot2_glow_for_envmap_glow_slot2_only",
@@ -997,7 +997,7 @@
           ],
           "expected_prefixes": [
             "shader_state.envmap_missing_slot5.",
-            "shader_state.parallax_envmap_missing_slot5.skyrim.real"
+            "shader_state.parallax_envmap_missing_slot5."
           ],
           "expected_remediation_steps": [
             "set_slot5_env_mask_for_missing_envmap_slot5",
@@ -1145,10 +1145,10 @@
         "shader_state.envmap_missing_slot4.",
         "shader_state.envmap_missing_slot5.",
         "shader_state.envmap_pom_missing_env_slots.fallout.",
-        "shader_state.envmap_glow_missing_slots2_4_5.fallout.",
-        "shader_state.parallax_envmap_missing_slots3_4_5.fallout.",
-        "shader_state.parallax_envmap_missing_slot5.fallout.",
-        "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.fallout.",
+        "shader_state.envmap_glow_missing_slots2_4_5.",
+        "shader_state.parallax_envmap_missing_slots3_4_5.",
+        "shader_state.parallax_envmap_missing_slot5.",
+        "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.",
         "missing_parallax_flag.flag1_not_set.fallout.",
         "shader_state.parallax_type_missing_slot3.fallout.",
         "path_slot_parallax.matches_diffuse.fallout.",
@@ -1163,7 +1163,7 @@
         "flag_env_mapping.slot4_filled_without_flag.fallout.",
         "flag_pom.non_heightmap_shader.fallout.",
         "flag_pom.without_base_parallax.fallout.",
-        "shader_state.envmap_glow_missing_slot2.fallout.",
+        "shader_state.envmap_glow_missing_slot2.",
         "incompatible_shader_type.fallout.",
         "skip_alpha_decal_lighting.decal_flag.fallout.",
         "unsupported_header.",
@@ -1234,7 +1234,7 @@
             ""
           ],
           "expected_prefixes": [
-            "shader_state.envmap_glow_missing_slots2_4_5.fallout.real"
+            "shader_state.envmap_glow_missing_slots2_4_5."
           ],
           "expected_remediation_steps": [
             "set_slot2_glow_for_envmap_glow_mixed_unresolved",
@@ -1275,7 +1275,7 @@
             ""
           ],
           "expected_prefixes": [
-            "shader_state.parallax_envmap_missing_slots3_4_5.fallout.real"
+            "shader_state.parallax_envmap_missing_slots3_4_5."
           ],
           "expected_remediation_steps": [
             "disable_env_mapping_for_parallax_envmap_mixed_unresolved",
@@ -1323,7 +1323,7 @@
             }
           ],
           "expected_prefixes": [
-            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.fallout.real"
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5."
           ],
           "expected_remediation_steps": [
             "set_slot4_cubemap_for_parallax_envmap_glow_mixed_unresolved",
@@ -1386,7 +1386,7 @@
             ""
           ],
           "expected_prefixes": [
-            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.fallout."
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5."
           ],
           "expected_remediation_steps": [
             "set_slot3_parallax_for_parallax_envmap_glow_mixed_unresolved",
@@ -1452,7 +1452,7 @@
             "unsupported_header."
           ],
           "expected_absent_prefixes": [
-            "shader_state.envmap_glow_missing_slots2_4_5.fallout.real",
+            "shader_state.envmap_glow_missing_slots2_4_5.",
             "path_slot_parallax.matches_normal.fallout.real"
           ],
           "expected_no_auto_remediation": true,
@@ -1528,7 +1528,7 @@
             }
           ],
           "expected_prefixes": [
-            "shader_state.envmap_glow_missing_slots2_4_5.fallout.real"
+            "shader_state.envmap_glow_missing_slots2_4_5."
           ],
           "expected_remediation_steps": [
             "set_slot2_glow_for_envmap_glow_mixed_unresolved",
@@ -1785,7 +1785,7 @@
             "unsupported_header."
           ],
           "expected_absent_prefixes": [
-            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.fallout.real"
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5."
           ],
           "expected_no_auto_remediation": true,
           "pgpatcher_strategy": "guarded_crossblock_rebuild_for_missing_slots",
@@ -1945,7 +1945,7 @@
             }
           ],
           "expected_prefixes": [
-            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.fallout.real",
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.",
             "path_slot_parallax.matches_normal.fallout.real"
           ],
           "pgpatcher_strategy": "guarded_crossblock_rebuild_for_missing_slots",
@@ -2047,7 +2047,7 @@
             ""
           ],
           "expected_prefixes": [
-            "shader_state.envmap_glow_missing_slot2.fallout.real"
+            "shader_state.envmap_glow_missing_slot2."
           ],
           "expected_remediation_steps": [
             "set_slot2_glow_for_envmap_glow_slot2_only",
@@ -3031,7 +3031,7 @@
             }
           ],
           "expected_prefixes": [
-            "shader_state.parallax_envmap_missing_slots3_4_5.fallout.",
+            "shader_state.parallax_envmap_missing_slots3_4_5.",
             "path_slot_parallax.matches_diffuse.fallout."
           ],
           "expected_remediation_steps": [
@@ -3107,7 +3107,7 @@
           ],
           "expected_prefixes": [
             "skip_single_pass.fallout.",
-            "shader_state.envmap_glow_missing_slots2_4_5.fallout."
+            "shader_state.envmap_glow_missing_slots2_4_5."
           ],
           "expected_remediation_steps": [
             "set_slot2_glow_for_envmap_glow_mixed_unresolved",
@@ -4456,7 +4456,7 @@
           ],
           "expected_prefixes": [
             "shader_state.envmap_missing_slot5.",
-            "shader_state.parallax_envmap_missing_slot5.fallout."
+            "shader_state.parallax_envmap_missing_slot5."
           ],
           "expected_remediation_steps": [
             "set_slot5_env_mask_for_missing_envmap_slot5",
@@ -4492,7 +4492,7 @@
           ],
           "expected_prefixes": [
             "shader_state.envmap_missing_slot5.",
-            "shader_state.parallax_envmap_missing_slot5.fallout."
+            "shader_state.parallax_envmap_missing_slot5."
           ],
           "expected_remediation_steps": [
             "disable_env_mapping_for_missing_slot5",

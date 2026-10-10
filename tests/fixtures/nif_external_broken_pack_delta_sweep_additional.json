@@ -145,7 +145,7 @@
             ""
           ],
           "expected_prefixes": [
-            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim.",
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.",
             "path_slot_env_mask.generic_alias_suffix.skyrim."
           ],
           "expected_absent_prefixes": [
