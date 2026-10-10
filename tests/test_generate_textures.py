@@ -4140,7 +4140,13 @@ class GenerateTexturesTests(unittest.TestCase):
             output_dir = temp_path / "out"
             checkpoint = temp_path / "batch_checkpoint.json"
             input_dir.mkdir()
-            dimensions = {"a": (8, 8), "b": (16, 12), "c": (32, 24)}
+            dimensions = {
+                f"source_{index:02d}": (
+                    8 + (index % 4) * 4,
+                    8 + (index % 3) * 4,
+                )
+                for index in range(12)
+            }
             for name, size in dimensions.items():
                 Image.new("RGB", size, color=(60, 100, 140)).save(
                     input_dir / f"{name}.dds",
@@ -4155,7 +4161,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 input_file = kwargs["input_file"]
                 assert isinstance(input_file, Path)
                 first_attempts.append(input_file.stem)
-                if input_file.stem == "b":
+                if input_file.stem == "source_04":
                     raise RuntimeError("synthetic interruption")
                 return original_run_with_options(**kwargs)
 
@@ -4178,20 +4184,59 @@ class GenerateTexturesTests(unittest.TestCase):
                     )
 
             interrupted_state = json.loads(checkpoint.read_text(encoding="utf-8"))
-            self.assertEqual(interrupted_state["completed_success_files"], [str((input_dir / "a.dds").resolve())])
-            self.assertEqual(first_attempts, ["a", "b"])
+            first_completed = [str((input_dir / f"source_{index:02d}.dds").resolve()) for index in range(4)]
+            self.assertEqual(interrupted_state["completed_success_files"], first_completed)
+            self.assertEqual(first_attempts, [f"source_{index:02d}" for index in range(5)])
 
-            resumed_attempts: list[str] = []
+            second_attempts: list[str] = []
 
-            def record_resume_attempt(**kwargs: object) -> dict[str, Path]:
+            def interrupt_second_resume(**kwargs: object) -> dict[str, Path]:
                 input_file = kwargs["input_file"]
                 assert isinstance(input_file, Path)
-                resumed_attempts.append(input_file.stem)
+                second_attempts.append(input_file.stem)
+                if input_file.stem == "source_08":
+                    raise RuntimeError("synthetic second interruption")
                 return original_run_with_options(**kwargs)
 
             with mock.patch(
                 "generate_textures.run_with_options",
-                side_effect=record_resume_attempt,
+                side_effect=interrupt_second_resume,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "synthetic second interruption"):
+                    run_batch_with_options(
+                        input_path=input_dir,
+                        output_dir=output_dir,
+                        include_diffuse=True,
+                        include_normal=True,
+                        include_parallax=True,
+                        include_glow=False,
+                        include_environment_mask=False,
+                        include_complex=False,
+                        batch_workers=1,
+                        checkpoint_file=checkpoint,
+                        resume_from_checkpoint=True,
+                    )
+
+            second_state = json.loads(checkpoint.read_text(encoding="utf-8"))
+            all_completed_before_second_interrupt = [
+                str((input_dir / f"source_{index:02d}.dds").resolve())
+                for index in range(8)
+            ]
+            self.assertEqual(second_state["completed_success_files"], all_completed_before_second_interrupt)
+            self.assertEqual(second_state["resumed_completed_count"], 4)
+            self.assertEqual(second_attempts, [f"source_{index:02d}" for index in range(4, 9)])
+
+            final_attempts: list[str] = []
+
+            def record_final_resume(**kwargs: object) -> dict[str, Path]:
+                input_file = kwargs["input_file"]
+                assert isinstance(input_file, Path)
+                final_attempts.append(input_file.stem)
+                return original_run_with_options(**kwargs)
+
+            with mock.patch(
+                "generate_textures.run_with_options",
+                side_effect=record_final_resume,
             ):
                 resumed_outputs = run_batch_with_options(
                     input_path=input_dir,
@@ -4207,28 +4252,26 @@ class GenerateTexturesTests(unittest.TestCase):
                     resume_from_checkpoint=True,
                 )
 
-            self.assertEqual(resumed_attempts, ["b", "c"])
-            self.assertEqual(sorted(path.name for path in resumed_outputs), ["b.dds", "c.dds"])
+            self.assertEqual(final_attempts, [f"source_{index:02d}" for index in range(8, 12)])
+            self.assertEqual(
+                sorted(path.name for path in resumed_outputs),
+                [f"source_{index:02d}.dds" for index in range(8, 12)],
+            )
             self.assertEqual(
                 sorted(path.name for path in output_dir.iterdir()),
-                [
-                    "a.dds",
-                    "a_n.dds",
-                    "a_p.dds",
-                    "b.dds",
-                    "b_n.dds",
-                    "b_p.dds",
-                    "c.dds",
-                    "c_n.dds",
-                    "c_p.dds",
-                ],
+                sorted(
+                    f"{name}{suffix}.dds"
+                    for name in dimensions
+                    for suffix in ("", "_n", "_p")
+                ),
             )
-            for output_path in output_dir.glob("*.dds"):
-                with Image.open(output_path) as output_image:
-                    self.assertEqual(output_image.size, dimensions[output_path.stem.split("_")[0]])
+            for name, size in dimensions.items():
+                for suffix in ("", "_n", "_p"):
+                    with Image.open(output_dir / f"{name}{suffix}.dds") as output_image:
+                        self.assertEqual(output_image.size, size)
             resumed_state = json.loads(checkpoint.read_text(encoding="utf-8"))
-            self.assertEqual(resumed_state["resumed_completed_count"], 1)
-            self.assertEqual(resumed_state["completed_success_count"], 3)
+            self.assertEqual(resumed_state["resumed_completed_count"], 8)
+            self.assertEqual(resumed_state["completed_success_count"], 12)
 
     def test_run_batch_with_options_recovers_failed_file_under_parallel_queue_pressure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
