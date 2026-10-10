@@ -467,6 +467,7 @@ def build_batch_bottleneck_hints(
     resumed_completed_count: int,
     total_failed: int,
     total_sources: int,
+    show_advanced_workflow_outputs: bool = True,
     peak_queue_backlog: int = 0,
     translate: Callable[[str], str] | None = None,
 ) -> list[str]:
@@ -495,7 +496,12 @@ def build_batch_bottleneck_hints(
             _tr("Very high queue backlog observed; avoid rapid preview navigation during huge runs and let queue pacing drain before manual spot-checks."),
         )
     if high_res_4k_count >= 50:
-        hints.append(_tr("Large high-res set detected; run core outputs first, then advanced/niche outputs in a second pass."))
+        if show_advanced_workflow_outputs:
+            hints.append(_tr("Large high-res set detected; run core outputs first, then advanced/niche outputs in a second pass."))
+        else:
+            hints.append(
+                _tr("Large high-res set detected; enable Advanced workflow outputs if you need additional maps in a second pass.")
+            )
     if max_file_seconds >= max(5.0, avg_file_seconds * 2.5):
         hints.append(_tr("A few outlier files were much slower; inspect unusually large or noisy source textures first."))
     if total_failed > 0:
@@ -10403,6 +10409,9 @@ if GUI_AVAILABLE:
                             resumed_completed_count=resumed,
                             total_failed=total_failed,
                             total_sources=total_sources,
+                            show_advanced_workflow_outputs=bool(
+                                self.show_advanced_workflow_outputs_var.get()
+                            ),
                             peak_queue_backlog=max_queue_backlog,
                             translate=self._tr,
                         )

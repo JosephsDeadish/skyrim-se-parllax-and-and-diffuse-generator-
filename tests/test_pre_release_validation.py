@@ -369,6 +369,7 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
             "community_shaders_no_parallax_wet_snow",
             "architecture_base",
             "fallout4_core_naming",
+            "fallout4_batch_checkpoint_resume",
         ):
             self.assertIn(expected, scenario_by_name)
             entry = scenario_by_name[expected]
@@ -390,6 +391,14 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         self.assertEqual(fallout4_suffixes, {"_d.dds", "_n.dds"})
         self.assertIn("--target-game", scenario_by_name["fallout4_core_naming"].get("args", []))
         self.assertIn("--environment-mask", scenario_by_name["architecture_base"].get("args", []))
+        resume_scenario = scenario_by_name["fallout4_batch_checkpoint_resume"]
+        self.assertEqual(resume_scenario.get("input_count"), 2)
+        self.assertEqual(resume_scenario.get("input_size"), 16)
+        self.assertTrue(resume_scenario.get("checkpoint_resume"))
+        self.assertEqual(
+            resume_scenario.get("required_exact_output_family_counts"),
+            {"diffuse": 2, "normal": 2},
+        )
         truepbr_suffixes = {
             str(value).lower() for value in scenario_by_name["truepbr"].get("required_suffixes", ())
         }

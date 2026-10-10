@@ -2153,6 +2153,31 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         self.assertTrue(any("Queue backlog spiked" in hint for hint in hints))
 
+    def test_build_batch_bottleneck_hints_respects_advanced_workflow_visibility(self) -> None:
+        shared = {
+            "avg_file_seconds": 1.0,
+            "max_file_seconds": 2.0,
+            "high_res_4k_count": 60,
+            "high_res_8k_count": 0,
+            "max_source_dimension": 4096,
+            "max_source_megapixels": 16.0,
+            "resumed_completed_count": 0,
+            "total_failed": 0,
+            "total_sources": 500,
+        }
+        advanced_hints = build_batch_bottleneck_hints(
+            **shared,
+            show_advanced_workflow_outputs=True,
+        )
+        basic_hints = build_batch_bottleneck_hints(
+            **shared,
+            show_advanced_workflow_outputs=False,
+        )
+
+        self.assertTrue(any("advanced/niche outputs" in hint for hint in advanced_hints))
+        self.assertTrue(any("enable Advanced workflow outputs" in hint for hint in basic_hints))
+        self.assertFalse(any("advanced/niche outputs" in hint for hint in basic_hints))
+
     def test_build_batch_bottleneck_hints_prioritizes_queue_backlog_in_dense_huge_run(self) -> None:
         hints = build_batch_bottleneck_hints(
             avg_file_seconds=2.1,

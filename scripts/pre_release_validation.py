@@ -8,9 +8,11 @@ import base64
 import json
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
@@ -170,6 +172,20 @@ def _resolve_packaged_smoke_binary(artifact_dir: Path) -> Path:
         if candidate.exists() and candidate.is_file():
             return candidate
     raise SystemExit("Packaging smoke binary was not produced at expected dist path.")
+
+
+def _write_packaged_smoke_png(path: Path, size: int) -> None:
+    dimension = max(1, int(size))
+
+    def _chunk(kind: bytes, payload: bytes) -> bytes:
+        body = kind + payload
+        return struct.pack(">I", len(payload)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+
+    header = struct.pack(">IIBBBBB", dimension, dimension, 8, 2, 0, 0, 0)
+    row = bytes((0,)) + bytes((112, 128, 144)) * dimension
+    compressed = zlib.compress(row * dimension)
+    png = b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", header) + _chunk(b"IDAT", compressed) + _chunk(b"IEND", b"")
+    path.write_bytes(png)
 
 
 def _packaged_smoke_scenarios() -> list[dict[str, object]]:
@@ -608,6 +624,25 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "forbidden_output_families": ("parallax", "env_mask", "rmaos", "complex_cm", "complex_msn"),
         },
         {
+            "name": "fallout4_batch_checkpoint_resume",
+            "args": [
+                "--target-game",
+                "fallout4",
+                "--render-profile",
+                "vanilla",
+                "--no-parallax",
+            ],
+            "input_size": 16,
+            "input_count": 2,
+            "checkpoint_resume": True,
+            "min_outputs": 4,
+            "required_suffixes": ("_d.dds", "_n.dds"),
+            "required_exact_suffix_counts": {"_d.dds": 2, "_n.dds": 2},
+            "required_exact_output_family_counts": {"diffuse": 2, "normal": 2},
+            "required_output_families": ("diffuse", "normal"),
+            "forbidden_output_families": ("parallax", "env_mask", "rmaos", "complex_cm", "complex_msn"),
+        },
+        {
             "name": "custom_diffuse_only",
             "args": [
                 "--render-profile",
@@ -672,18 +707,25 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
 
     smoke_io = artifact_dir / "packaging_smoke" / "io"
     smoke_io.mkdir(parents=True, exist_ok=True)
-    smoke_input = smoke_io / "sample_input.png"
-    smoke_input.write_bytes(
-        base64.b64decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP8z8Dwn4GBgYGJAQoAHxcCAr7cGDwAAAAASUVORK5CYII="
-        )
-    )
     loops = max(1, int(loops))
     scenarios = _packaged_smoke_scenarios()
     for loop_index in range(1, loops + 1):
         for scenario in scenarios:
             scenario_name = str(scenario.get("name", "scenario")).strip() or "scenario"
             scenario_args = [str(arg) for arg in (scenario.get("args", []) or [])]
+            input_size = max(1, int(scenario.get("input_size", 2) or 2))
+            input_count = max(1, int(scenario.get("input_count", 1) or 1))
+            if input_count > 1:
+                smoke_input = smoke_io / f"inputs_{scenario_name}"
+                smoke_input.mkdir(parents=True, exist_ok=True)
+                for input_index in range(input_count):
+                    _write_packaged_smoke_png(
+                        smoke_input / f"sample_{input_index + 1:02d}.png",
+                        input_size,
+                    )
+            else:
+                smoke_input = smoke_io / f"sample_{scenario_name}.png"
+                _write_packaged_smoke_png(smoke_input, input_size)
             min_outputs = max(1, int(scenario.get("min_outputs", 1) or 1))
             required_suffixes = tuple(
                 str(suffix).strip().lower()
@@ -741,13 +783,18 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                         required_exact_output_family_counts[family_key] = parsed_count
             smoke_out = smoke_io / f"out_loop{loop_index}_{scenario_name}"
             smoke_out.mkdir(parents=True, exist_ok=True)
+            checkpoint_path: Path | None = None
+            invocation_args = list(scenario_args)
+            if bool(scenario.get("checkpoint_resume", False)):
+                checkpoint_path = smoke_io / f"checkpoint_loop{loop_index}_{scenario_name}.json"
+                invocation_args.extend(("--checkpoint-file", str(checkpoint_path)))
             run_completed = subprocess.run(
                 [
                     str(binary),
                     str(smoke_input),
                     "--output-dir",
                     str(smoke_out),
-                    *scenario_args,
+                    *invocation_args,
                 ],
                 cwd=REPO_ROOT,
                 capture_output=True,
@@ -949,6 +996,54 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                                 f"Packaged executable smoke run for '{scenario_name}' sidecar '{sidecar_path.name}' "
                                 f"key '{key}' expected non-empty string."
                             )
+            if checkpoint_path is not None:
+                resume_out = smoke_io / f"out_loop{loop_index}_{scenario_name}_resume"
+                resume_out.mkdir(parents=True, exist_ok=True)
+                resume_telemetry = smoke_io / f"telemetry_loop{loop_index}_{scenario_name}_resume.json"
+                resumed = subprocess.run(
+                    [
+                        str(binary),
+                        str(smoke_input),
+                        "--output-dir",
+                        str(resume_out),
+                        *invocation_args,
+                        "--resume-checkpoint",
+                        "--batch-telemetry-file",
+                        str(resume_telemetry),
+                    ],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                )
+                if resumed.returncode != 0:
+                    print(resumed.stdout)
+                    print(resumed.stderr)
+                    raise SystemExit(resumed.returncode)
+                resumed_outputs = sorted(resume_out.glob("*.dds"))
+                if resumed_outputs:
+                    raise SystemExit(
+                        f"Packaged executable smoke resume for '{scenario_name}' regenerated "
+                        f"{len(resumed_outputs)} DDS file(s) instead of skipping completed inputs."
+                    )
+                try:
+                    telemetry_payload = json.loads(resume_telemetry.read_text(encoding="utf-8"))
+                    summary = telemetry_payload.get("summary", {})
+                except (OSError, json.JSONDecodeError) as exc:
+                    raise SystemExit(
+                        f"Packaged executable smoke resume for '{scenario_name}' left invalid telemetry: {exc}"
+                    ) from exc
+                if not isinstance(summary, Mapping):
+                    raise SystemExit(
+                        f"Packaged executable smoke resume for '{scenario_name}' omitted telemetry summary."
+                    )
+                resumed_count = int(summary.get("resumed_completed_count", -1) or 0)
+                processed_count = int(summary.get("processed_files", -1) or 0)
+                if resumed_count != input_count or processed_count != 0:
+                    raise SystemExit(
+                        f"Packaged executable smoke resume for '{scenario_name}' reported "
+                        f"{resumed_count} resumed and {processed_count} processed input(s), expected "
+                        f"{input_count} resumed and 0 processed."
+                    )
 
 
 def _run_packaged_runtime_env_stress(artifact_dir: Path) -> list[dict[str, object]]:
