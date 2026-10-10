@@ -4081,6 +4081,12 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
         "Set texture slot 3 to a valid _p.dds height map path.",
         "Verify slot 3 is not blank after exports/conversions from DCC tools.",
     ),
+    "missing_parallax_slot3.empty.flag_unset": (
+        "Slot 3 is empty and SLSF1_Parallax is disabled; restore slot 3 first, then enable parallax if intended.",
+    ),
+    "missing_parallax_slot3.empty.flag_set": (
+        "Slot 3 is empty while SLSF1_Parallax is enabled; restore a valid _p.dds path or disable parallax for safety.",
+    ),
     "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift": (
         "Real-layout drift detected: unknown raw shader type was semantically resolved while slot 3 is unresolved.",
         "Prefer restoring a deterministic slot-3 _p.dds path first; disable parallax/POM only when no safe slot-3 reconstruction is available.",
@@ -4297,8 +4303,10 @@ def _classify_conflict_code(message: str) -> str:
         return "unsupported_header.profile_value_drift.unparsed.header_table_drift"
     if "malformed header-table drift signature detected without stable profile values" in lowered:
         return "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift"
-    if "unsupported nif header/profile values" in lowered or "unexpected user version values" in lowered:
-        return "unsupported_header"
+    if "unsupported nif header/profile values" in lowered:
+        return "unsupported_header.profile_value_drift.unparsed"
+    if "unexpected user version values" in lowered:
+        return "unsupported_header.user_version_value_drift.unparsed"
     if "header prefix is not a skyrim/gamebryo 20.2.0.7 nif" in lowered:
         return "unsupported_header.header_prefix_mismatch"
     if "nif version is 0x" in lowered and "not skyrim se 20.2.0.7" in lowered:
@@ -4428,6 +4436,10 @@ def _classify_conflict_code(message: str) -> str:
         return "missing_parallax_flag.flag1_not_set"
     if "run patch_nif with enable_parallax=true" in lowered:
         return "missing_parallax_flag.enable_option"
+    if "texture slot 3 (parallax) is empty while slsf1_parallax flag is not set" in lowered:
+        return "missing_parallax_slot3.empty.flag_unset"
+    if "texture slot 3 (parallax) is empty while slsf1_parallax flag is set" in lowered:
+        return "missing_parallax_slot3.empty.flag_set"
     if "texture slot 3 (parallax) is empty" in lowered:
         return "missing_parallax_slot3.empty"
     if "supply parallax_texture_path pointing to a _p.dds height map" in lowered:
@@ -5595,9 +5607,14 @@ def validate_nif_for_parallax(
                         "Run patch_nif with enable_parallax=True."
                     )
                 if not has_tex:
+                    slot3_issue_suffix = (
+                        " while SLSF1_Parallax flag is set."
+                        if has_flag
+                        else " while SLSF1_Parallax flag is not set."
+                    )
                     _append_unique(
                         result.issues,
-                        f"{bname}: Texture slot 3 (parallax) is empty."
+                        f"{bname}: Texture slot 3 (parallax) is empty{slot3_issue_suffix}"
                     )
                     _append_unique(
                         result.suggestions,

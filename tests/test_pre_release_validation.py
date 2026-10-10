@@ -7,12 +7,14 @@ import unittest.mock
 from pathlib import Path
 
 from scripts.pre_release_validation import (
+    _DEFAULT_REALMOD_DELTA_SEED,
     _assert_realmod_fallback_drift_within_limit,
     _append_trend_history,
     _build_realmod_fallback_drift_report,
     _collect_localization_coverage,
     _load_realmod_pack_payload,
     _packaged_smoke_scenarios,
+    _resolve_seed_realmod_delta_files,
     _run_repository_hygiene_scan,
     _resolve_packaged_smoke_binary,
 )
@@ -236,6 +238,22 @@ class TestPreReleaseValidationFallbackDrift(unittest.TestCase):
             report=report,
             max_fallback_ratio_drift=0.01,
             max_fallback_group_drift=0,
+        )
+
+
+class TestPreReleaseValidationSeedResolution(unittest.TestCase):
+    def test_seed_realmod_delta_resolution_includes_repo_default_seed(self) -> None:
+        resolved = _resolve_seed_realmod_delta_files([])
+        self.assertIn(_DEFAULT_REALMOD_DELTA_SEED, resolved)
+
+    def test_seed_realmod_delta_resolution_deduplicates_entries(self) -> None:
+        resolved = _resolve_seed_realmod_delta_files([
+            _DEFAULT_REALMOD_DELTA_SEED,
+            _DEFAULT_REALMOD_DELTA_SEED,
+        ])
+        self.assertEqual(
+            sum(1 for path in resolved if path == _DEFAULT_REALMOD_DELTA_SEED),
+            1,
         )
 
 

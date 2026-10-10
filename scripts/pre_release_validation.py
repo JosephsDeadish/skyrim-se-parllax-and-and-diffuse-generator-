@@ -19,6 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 PYTHON = sys.executable
+_DEFAULT_REALMOD_DELTA_SEED = REPO_ROOT / "tests" / "fixtures" / "nif_realmod_parity_delta_seed.json"
 
 SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("private_key_block", re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----")),
@@ -1666,6 +1667,24 @@ def _load_latest_seed_report(seed_files: list[Path] | None) -> dict[str, object]
     return latest_payload or {}
 
 
+def _resolve_seed_realmod_delta_files(seed_files: list[Path] | None) -> list[Path]:
+    resolved: list[Path] = []
+    seen: set[str] = set()
+    for seed in seed_files or []:
+        if seed is None:
+            continue
+        key = str(seed)
+        if key in seen:
+            continue
+        seen.add(key)
+        resolved.append(seed)
+    if _DEFAULT_REALMOD_DELTA_SEED.exists():
+        seed_key = str(_DEFAULT_REALMOD_DELTA_SEED)
+        if seed_key not in seen:
+            resolved.append(_DEFAULT_REALMOD_DELTA_SEED)
+    return resolved
+
+
 def _build_realmod_fallback_drift_report(
     *,
     current_fallback_guard_report: dict[str, object],
@@ -2422,9 +2441,12 @@ def main() -> int:
     )
     _assert_realmod_fallback_guard(realmod_fallback_guard_report)
     step_status.append(("Realmod fallback/generic-subcode regression guard", "pass"))
+    resolved_seed_realmod_delta_files = _resolve_seed_realmod_delta_files(
+        [path for path in args.seed_realmod_delta_file if path is not None],
+    )
     realmod_fallback_drift_report = _build_realmod_fallback_drift_report(
         current_fallback_guard_report=realmod_fallback_guard_report,
-        seed_realmod_delta_files=[path for path in args.seed_realmod_delta_file if path is not None],
+        seed_realmod_delta_files=resolved_seed_realmod_delta_files,
         extra_pack_files=extra_realmod_pack_files,
     )
     _assert_realmod_fallback_drift_within_limit(
@@ -2493,7 +2515,7 @@ def main() -> int:
     if history_path is not None:
         print(f"NIF trend history artifact: {history_path}")
     prior_bucket_distribution = _load_prior_bucket_distribution(
-        [path for path in args.seed_realmod_delta_file if path is not None],
+        resolved_seed_realmod_delta_files,
     )
     _assert_bucket_distribution_drift_within_limit(
         current_report=realmod_delta_report,

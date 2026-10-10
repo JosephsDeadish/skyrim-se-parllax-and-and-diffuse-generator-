@@ -1201,6 +1201,30 @@ class TestValidateNifForParallax(unittest.TestCase):
             "unsupported_header.user_version_value_drift.u12_u2142.header_table_drift.fallout_signature_drift",
         )
 
+    def test_conflict_classifier_maps_unparsed_unsupported_header_values_to_explicit_subcode(self) -> None:
+        code = _classify_conflict_code(
+            "Unsupported NIF header/profile values (user_version=?, user_version_2=?)."
+        )
+        self.assertEqual(code, "unsupported_header.profile_value_drift.unparsed")
+
+    def test_conflict_classifier_maps_unparsed_unexpected_user_values_to_explicit_subcode(self) -> None:
+        code = _classify_conflict_code(
+            "Unexpected user version values (unknown, unknown). Expected Skyrim variants."
+        )
+        self.assertEqual(code, "unsupported_header.user_version_value_drift.unparsed")
+
+    def test_conflict_classifier_maps_slot3_empty_with_flag_unset_subcode(self) -> None:
+        code = _classify_conflict_code(
+            "Block 0: Texture slot 3 (parallax) is empty while SLSF1_Parallax flag is not set."
+        )
+        self.assertEqual(code, "missing_parallax_slot3.empty.flag_unset")
+
+    def test_conflict_classifier_maps_slot3_empty_with_flag_set_subcode(self) -> None:
+        code = _classify_conflict_code(
+            "Block 2: Texture slot 3 (parallax) is empty while SLSF1_Parallax flag is set."
+        )
+        self.assertEqual(code, "missing_parallax_slot3.empty.flag_set")
+
     def test_conflict_classifier_maps_semantic_shader_resolution_notes(self) -> None:
         code = _classify_conflict_code(
             "Block 1: raw shader_type 0x00000080 resolved to Environment Map via semantic_flag_envmap (RESOLVED, confidence=0.95, method=semantic)."
