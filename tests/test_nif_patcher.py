@@ -4972,7 +4972,7 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP, texture_paths=paths)
         opts, steps = build_auto_remediation_patch_options(
             nif,
-            ["shader_state.envmap_missing_slots4_5.skyrim.legacy"],
+            ["shader_state.envmap_missing_slots4_5.slot4_empty_slot5_empty.skyrim.legacy"],
             backup=False,
         )
         self.assertIsNotNone(opts)
@@ -4991,7 +4991,7 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_ENVMAP, texture_paths=paths)
         opts, steps = build_auto_remediation_patch_options(
             nif,
-            ["shader_state.envmap_missing_slots4_5.skyrim.legacy"],
+            ["shader_state.envmap_missing_slots4_5.slot4_empty_slot5_empty.skyrim.legacy"],
             backup=False,
         )
         self.assertIsNotNone(opts)

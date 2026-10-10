@@ -18,7 +18,7 @@
       "shader_type": 1,
       "flags1": 128,
       "expected_prefixes": [
-        "shader_state.envmap_missing_slots4_5.skyrim."
+        "shader_state.envmap_missing_slots4_5."
       ],
       "expected_remediation_steps": [
         "set_slot4_cubemap_for_missing_envmap_slots4_5",
@@ -52,7 +52,7 @@
         ""
       ],
       "expected_prefixes": [
-        "shader_state.envmap_missing_slot5.skyrim."
+        "shader_state.envmap_missing_slot5."
       ],
       "expected_remediation_steps": [
         "set_slot5_env_mask_for_missing_envmap_slot5"
@@ -277,7 +277,7 @@
       ],
       "expected_prefixes": [
         "path_slot_parallax.matches_diffuse.skyrim.",
-        "shader_state.envmap_missing_slots4_5.skyrim."
+        "shader_state.envmap_missing_slots4_5."
       ]
     },
     {
@@ -328,7 +328,7 @@
         }
       ],
       "expected_prefixes": [
-        "shader_state.envmap_missing_slot5.skyrim.",
+        "shader_state.envmap_missing_slot5.",
         "path_slot_parallax.matches_normal.skyrim."
       ]
     },
@@ -408,7 +408,7 @@
         }
       ],
       "expected_prefixes": [
-        "shader_state.envmap_missing_slot4.skyrim.real",
+        "shader_state.envmap_missing_slot4.",
         "path_slot_parallax.matches_diffuse.skyrim.real"
       ],
       "expected_remediation_steps": [
@@ -454,7 +454,7 @@
         }
       ],
       "expected_prefixes": [
-        "shader_state.envmap_missing_slot5.skyrim.real",
+        "shader_state.envmap_missing_slot5.",
         "path_slot_glow.wrong_suffix.skyrim.real"
       ],
       "expected_remediation_steps": [
@@ -493,7 +493,7 @@
       "shader_type": 1,
       "flags1": 128,
       "expected_prefixes": [
-        "shader_state.envmap_missing_slots4_5.fallout."
+        "shader_state.envmap_missing_slots4_5."
       ]
     },
     {
@@ -540,7 +540,7 @@
         ""
       ],
       "expected_prefixes": [
-        "shader_state.envmap_missing_slot5.fallout."
+        "shader_state.envmap_missing_slot5."
       ],
       "expected_remediation_steps": [
         "set_slot5_env_mask_for_missing_envmap_slot5"
@@ -589,7 +589,7 @@
         }
       ],
       "expected_prefixes": [
-        "shader_state.envmap_missing_slot4.fallout.real",
+        "shader_state.envmap_missing_slot4.",
         "path_slot_parallax.matches_diffuse.fallout.real"
       ],
       "expected_remediation_steps": [
@@ -785,7 +785,7 @@
         }
       ],
       "expected_prefixes": [
-        "shader_state.envmap_missing_slots4_5.fallout.",
+        "shader_state.envmap_missing_slots4_5.",
         "unknown_shader_type.semantic_resolved.envmap.fallout."
       ],
       "expected_remediation_steps": [

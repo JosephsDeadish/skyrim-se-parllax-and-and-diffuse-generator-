@@ -154,7 +154,7 @@
           ],
           "expected_prefixes": [
             "path_slot_env_mask.generic_alias_suffix.skyrim.",
-            "shader_state.envmap_missing_slot4.skyrim."
+            "shader_state.envmap_missing_slot4."
           ]
         },
         {

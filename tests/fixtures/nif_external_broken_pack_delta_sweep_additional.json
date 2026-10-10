@@ -24,7 +24,7 @@
             ""
           ],
           "expected_prefixes": [
-            "shader_state.envmap_missing_slot5.skyrim."
+            "shader_state.envmap_missing_slot5."
           ],
           "expected_absent_prefixes": [
             "fallback_or_unknown.skyrim."
