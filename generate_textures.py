@@ -8250,6 +8250,7 @@ if GUI_AVAILABLE:
             simplified_optional_preset_widgets: list[tk.Widget] = [
                 _preset_cs_button,
                 _preset_truepbr_button,
+                _preset_custom_button,
                 _preset_hint,
                 _preset_usage_hint,
             ]

@@ -7,9 +7,9 @@
     "NIF Editor — Skyrim Texture Generator v{version}": "Editor NIF — Generador de Texturas de Skyrim v{version}",
     "🌙 Dark mode": "🌙 Modo oscuro",
     "☀ Light mode": "☀ Modo claro",
-    "Switched to {theme_name} mode.": "Cambiado al modo {theme_name}.",
+    "Switched to {theme_name} mode.": "Se cambió al modo {theme_name}.",
     "Interface language set to {language}.": "Idioma de la interfaz cambiado a {language}.",
-    "UI scale set to {scale:.2f}x.": "Escala de la interfaz ajustada a {scale:.2f}x.",
+    "UI scale set to {scale:.2f}x.": "La escala de la interfaz se ajustó a {scale:.2f}x.",
     "Patch conflicts only": "Parchear solo conflictos",
     "Auto-remediate conflict files only": "Auto-corregir solo archivos con conflicto",
     "Fallout safety gates:": "Límites de seguridad de Fallout:",
@@ -45,13 +45,13 @@
     "✨ Turn it up for glorious shine, down for ancient weathered stone.\nLive value shown beside slider.": "✨ Aumenta para más brillo especular; reduce para reflejos más sutiles.",
     "🌑 Right = stronger AO bake, left = subtle cavity hints.": "🌑 Derecha aumenta el contraste de AO; izquierda mantiene AO más sutil.",
     "🪨 Right = higher contrast roughness, left = uniform surface.": "🪨 Derecha aumenta el contraste de rugosidad; izquierda hace superficies más uniformes.",
-    "You queued {count} textures.\n\nResume mode is strongly recommended for 1000+ runs.\nIt saves progress so crashes/restarts do not force a full rerun.\n\nEnable Resume mode now?": "Has puesto {count} texturas en cola.\n\nSe recomienda encarecidamente el modo Reanudar para ejecuciones de 1000+ archivos.\nGuarda el progreso para que fallos/reinicios no obliguen a repetir todo.\n\n¿Activar modo Reanudar ahora?",
-    "Resume mode is strongly recommended for 1000+ runs.\nIt saves progress so crashes/restarts do not force a full rerun.\n\nEnable Resume mode now?": "Se recomienda encarecidamente el modo Reanudar para ejecuciones de 1000+ archivos.\nGuarda el progreso para que fallos/reinicios no obliguen a repetir todo.\n\n¿Activar modo Reanudar ahora?",
-    "This run will start fresh and create a checkpoint as files finish.\nContinue?": "Esta ejecución comenzará desde cero y creará un checkpoint al terminar cada archivo.\n¿Continuar?",
-    "This run will start fresh and create a checkpoint after successful files.\nContinue?": "Esta ejecución comenzará desde cero y creará un checkpoint tras archivos exitosos.\n¿Continuar?",
-    "Resume data may be incomplete, and this may behave like start-fresh.\nContinue with Resume mode?": "Los datos de reanudación pueden estar incompletos y podría comportarse como inicio desde cero.\n¿Continuar en modo Reanudar?",
-    "Checkpoint metadata does not fully match this run ({mismatch_flags}).\n\nResume mode could skip the wrong files in this state.\nContinue with Resume anyway?": "Los metadatos del checkpoint no coinciden completamente con esta ejecución ({mismatch_flags}).\n\nEl modo Reanudar podría saltarse archivos incorrectos en este estado.\n¿Continuar de todos modos en Reanudar?",
-    "Resume mode could skip the wrong files in this state.\nContinue with Resume anyway?": "El modo Reanudar podría saltarse archivos incorrectos en este estado.\n¿Continuar de todos modos en Reanudar?",
-    "Continuing will process all selected files (same as start fresh) while creating checkpoint history.\nContinue?": "Si continúas se procesarán todos los archivos seleccionados (igual que inicio desde cero) y se creará historial de checkpoints.\n¿Continuar?"
+    "You queued {count} textures.\n\nResume mode is strongly recommended for 1000+ runs.\nIt saves progress so crashes/restarts do not force a full rerun.\n\nEnable Resume mode now?": "Has puesto {count} texturas en cola.\n\nPara ejecuciones de 1000+ archivos se recomienda encarecidamente el modo Reanudar.\nGuarda el progreso para que fallos o reinicios no obliguen a repetir todo.\n\n¿Activar ahora el modo Reanudar?",
+    "Resume mode is strongly recommended for 1000+ runs.\nIt saves progress so crashes/restarts do not force a full rerun.\n\nEnable Resume mode now?": "Para ejecuciones de 1000+ archivos se recomienda encarecidamente el modo Reanudar.\nGuarda el progreso para que fallos o reinicios no obliguen a repetir todo.\n\n¿Activar ahora el modo Reanudar?",
+    "This run will start fresh and create a checkpoint as files finish.\nContinue?": "Esta ejecución comenzará desde cero y creará un punto de control a medida que terminen los archivos.\n¿Continuar?",
+    "This run will start fresh and create a checkpoint after successful files.\nContinue?": "Esta ejecución comenzará desde cero y creará un punto de control después de cada archivo correcto.\n¿Continuar?",
+    "Resume data may be incomplete, and this may behave like start-fresh.\nContinue with Resume mode?": "Los datos de reanudación pueden estar incompletos y podría comportarse como un inicio desde cero.\n¿Continuar con el modo Reanudar?",
+    "Checkpoint metadata does not fully match this run ({mismatch_flags}).\n\nResume mode could skip the wrong files in this state.\nContinue with Resume anyway?": "Los metadatos del punto de control no coinciden por completo con esta ejecución ({mismatch_flags}).\n\nEn este estado, Reanudar podría omitir archivos incorrectos.\n¿Continuar igualmente con Reanudar?",
+    "Resume mode could skip the wrong files in this state.\nContinue with Resume anyway?": "En este estado, Reanudar podría omitir archivos incorrectos.\n¿Continuar igualmente con Reanudar?",
+    "Continuing will process all selected files (same as start fresh) while creating checkpoint history.\nContinue?": "Si continúas, se procesarán todos los archivos seleccionados (igual que inicio desde cero) y se creará historial de puntos de control.\n¿Continuar?"
   }
 }

@@ -155,6 +155,9 @@ class TestPreReleaseValidationRealmodPayload(unittest.TestCase):
         self.assertTrue(
             any(str(pack.get("id", "")) == "external_broken_longtail_pack" for pack in packs if isinstance(pack, dict))
         )
+        self.assertTrue(
+            any(str(pack.get("id", "")) == "external_broken_additional_pack" for pack in packs if isinstance(pack, dict))
+        )
         self.assertTrue(any(str(pack.get("id", "")) == "external_pack" for pack in packs if isinstance(pack, dict)))
 
 
@@ -279,6 +282,8 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
             "truepbr_wet_snow_combo",
             "terrain_no_parallax_env",
             "enb_no_parallax_glow",
+            "community_shaders_aux_wet_only",
+            "truepbr_no_parallax",
         ):
             self.assertIn(expected, scenario_by_name)
             entry = scenario_by_name[expected]
@@ -290,6 +295,9 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
             self.assertTrue(required_suffixes)
             forbidden_suffixes = entry.get("forbidden_suffixes", ())
             self.assertIsInstance(forbidden_suffixes, tuple)
+            required_families = entry.get("required_output_families", ())
+            self.assertIsInstance(required_families, tuple)
+            self.assertGreater(len(required_families), 0)
         truepbr_suffixes = {
             str(value).lower() for value in scenario_by_name["truepbr"].get("required_suffixes", ())
         }
@@ -303,6 +311,13 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         }
         self.assertIn("parallax", truepbr_keys)
         self.assertIn("displacement_scale", truepbr_keys)
+        truepbr_key_types = {
+            str(key): str(value).lower()
+            for key, value in dict(scenario_by_name["truepbr"].get("required_sidecar_key_types", {})).items()
+        }
+        self.assertEqual(truepbr_key_types.get("parallax"), "bool")
+        self.assertEqual(truepbr_key_types.get("displacement_scale"), "number")
+        self.assertEqual(truepbr_key_types.get("texture"), "string_nonempty")
         truepbr_exact_counts = {
             str(key).lower(): int(value)
             for key, value in dict(scenario_by_name["truepbr"].get("required_exact_suffix_counts", {})).items()

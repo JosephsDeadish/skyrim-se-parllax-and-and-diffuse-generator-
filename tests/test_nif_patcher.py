@@ -73,6 +73,9 @@ _FIXTURE_CORPUS_BASELINE = _FIXTURE_DIR / "nif_fixture_corpus_baseline.json"
 _FIXTURE_PARITY_SAMPLE_MATRIX = _FIXTURE_DIR / "nif_parity_sample_matrix.json"
 _FIXTURE_REALMOD_SAMPLE_PACKS = _FIXTURE_DIR / "nif_realmod_sample_packs.json"
 _FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP = _FIXTURE_DIR / "nif_external_broken_pack_delta_sweep.json"
+_FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP_ADDITIONAL = (
+    _FIXTURE_DIR / "nif_external_broken_pack_delta_sweep_additional.json"
+)
 
 
 # ---------------------------------------------------------------------------
