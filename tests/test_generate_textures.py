@@ -456,6 +456,65 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertAlmostEqual(float(loaded["complex_strength"]), 2.2)
         self.assertAlmostEqual(float(loaded["specular_strength"]), 2.3)
 
+    def test_tk_advanced_workflow_visibility_round_trips_saved_settings(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_apply_persisted_gui_state"):
+            self.skipTest("Tk GUI is unavailable in this environment.")
+
+        def find_label_frame(root, title: str):
+            pending = list(root.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TLabelframe" and widget.cget("text") == title:
+                    return widget
+                pending.extend(widget.winfo_children())
+            self.fail(f"Could not find Tk section '{title}'.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_file = Path(temp_dir) / "gui-state.json"
+            saved_state = load_gui_state(state_file)
+            saved_state["simplified_main_layout"] = False
+            saved_state["show_advanced_workflow_outputs"] = True
+            first_gui = None
+            restored_gui = None
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state):
+                    first_gui = TextureGeneratorGUI()
+                first_gui.root.update_idletasks()
+                pbr_section = find_label_frame(first_gui.root, "Community Shaders PBR Workflow")
+                self.assertTrue(first_gui.show_advanced_workflow_outputs_var.get())
+                self.assertFalse(first_gui.simplified_main_layout_var.get())
+                self.assertTrue(pbr_section.grid_info())
+
+                first_gui.show_advanced_workflow_outputs_var.set(False)
+                first_gui.root.update_idletasks()
+                self.assertFalse(pbr_section.grid_info())
+                first_gui.show_advanced_workflow_outputs_var.set(True)
+                first_gui.root.geometry("1120x820")
+                first_gui.root.update_idletasks()
+                self.assertTrue(pbr_section.grid_info())
+
+                save_gui_state(first_gui._build_gui_state(), state_file)
+                persisted_state = load_gui_state(state_file)
+                self.assertFalse(bool(persisted_state["simplified_main_layout"]))
+                self.assertTrue(bool(persisted_state["show_advanced_workflow_outputs"]))
+            finally:
+                if first_gui is not None:
+                    first_gui.root.destroy()
+
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=persisted_state):
+                    restored_gui = TextureGeneratorGUI()
+                restored_gui.root.update_idletasks()
+                restored_pbr_section = find_label_frame(restored_gui.root, "Community Shaders PBR Workflow")
+                self.assertTrue(restored_gui.show_advanced_workflow_outputs_var.get())
+                self.assertTrue(restored_pbr_section.grid_info())
+                restored_gui.simplified_main_layout_var.set(True)
+                restored_gui.root.update_idletasks()
+                self.assertFalse(restored_pbr_section.grid_info())
+            finally:
+                if restored_gui is not None:
+                    restored_gui.root.destroy()
+
     def test_normalize_gui_state_clamps_slider_values_and_sanitizes_modes(self) -> None:
         normalized = _normalize_gui_state(
             {
@@ -4170,6 +4229,107 @@ class GenerateTexturesTests(unittest.TestCase):
             resumed_state = json.loads(checkpoint.read_text(encoding="utf-8"))
             self.assertEqual(resumed_state["resumed_completed_count"], 1)
             self.assertEqual(resumed_state["completed_success_count"], 3)
+
+    def test_run_batch_with_options_recovers_failed_file_under_parallel_queue_pressure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            checkpoint = temp_path / "batch_checkpoint.json"
+            telemetry = temp_path / "batch_telemetry.json"
+            input_dir.mkdir()
+            input_count = 24
+            dimensions = {
+                f"source_{index:02d}": (8 + (index % 4) * 4, 8 + (index % 3) * 4)
+                for index in range(input_count)
+            }
+            for name, size in dimensions.items():
+                Image.new("RGB", size, color=(60, 100, 140)).save(
+                    input_dir / f"{name}.dds",
+                    format="DDS",
+                    pixel_format="DXT5",
+                )
+            failed_source = input_dir / "source_07.dds"
+            failed_source.write_bytes(b"invalid DDS source")
+            first_progress: list[tuple[int, int, str]] = []
+            first_errors: list[str] = []
+
+            first_outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=True,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                continue_on_error=True,
+                batch_workers=4,
+                checkpoint_file=checkpoint,
+                batch_telemetry_file=telemetry,
+                progress_callback=lambda index, total, path: first_progress.append(
+                    (index, total, path.name)
+                ),
+                error_callback=lambda _index, _total, path, _exc: first_errors.append(path.name),
+            )
+
+            self.assertEqual(len(first_outputs), input_count - 1)
+            self.assertEqual(first_errors, [failed_source.name])
+            self.assertEqual(len(first_progress), input_count)
+            self.assertEqual({total for _index, total, _name in first_progress}, {input_count})
+            first_state = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(first_state["completed_success_count"], input_count - 1)
+            self.assertNotIn(str(failed_source.resolve()), first_state["completed_success_files"])
+            first_telemetry = json.loads(telemetry.read_text(encoding="utf-8"))["summary"]
+            self.assertEqual(first_telemetry["processed_files"], input_count)
+            self.assertEqual(first_telemetry["successful_files"], input_count - 1)
+            self.assertEqual(first_telemetry["failed_files"], 1)
+
+            Image.new("RGB", dimensions[failed_source.stem], color=(60, 100, 140)).save(
+                failed_source,
+                format="DDS",
+                pixel_format="DXT5",
+            )
+            resumed_progress: list[tuple[int, int, str]] = []
+            resumed_outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=True,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                batch_workers=4,
+                checkpoint_file=checkpoint,
+                resume_from_checkpoint=True,
+                batch_telemetry_file=telemetry,
+                progress_callback=lambda index, total, path: resumed_progress.append(
+                    (index, total, path.name)
+                ),
+            )
+
+            self.assertEqual([name for _index, _total, name in resumed_progress], [failed_source.name])
+            self.assertEqual({total for _index, total, _name in resumed_progress}, {1})
+            self.assertEqual([path.name for path in resumed_outputs], [failed_source.name])
+            expected_outputs = sorted(
+                output_name
+                for name in dimensions
+                for output_name in (f"{name}.dds", f"{name}_n.dds")
+            )
+            self.assertEqual(sorted(path.name for path in output_dir.iterdir()), expected_outputs)
+            for output_path in output_dir.glob("*.dds"):
+                source_name = output_path.stem.removesuffix("_n")
+                with Image.open(output_path) as output_image:
+                    self.assertEqual(output_image.size, dimensions[source_name])
+            resumed_state = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(resumed_state["resumed_completed_count"], input_count - 1)
+            self.assertEqual(resumed_state["completed_success_count"], input_count)
+            resumed_telemetry = json.loads(telemetry.read_text(encoding="utf-8"))["summary"]
+            self.assertEqual(resumed_telemetry["processed_files"], 1)
+            self.assertEqual(resumed_telemetry["successful_files"], 1)
+            self.assertEqual(resumed_telemetry["failed_files"], 0)
+            self.assertEqual(resumed_telemetry["resumed_completed_count"], input_count - 1)
 
     def test_run_batch_with_options_writes_batch_telemetry_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

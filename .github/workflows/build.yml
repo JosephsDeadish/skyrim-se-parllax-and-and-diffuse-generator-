@@ -60,6 +60,7 @@ jobs:
             tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_writes_checkpoint_file \
             tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_resume_checkpoint_skips_completed_successes \
             tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_recovers_interrupted_multiresolution_batch \
+            tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_recovers_failed_file_under_parallel_queue_pressure \
             tests.test_generate_textures.GenerateTexturesTests.test_gui_processing_queue_smoke_done_event_reports_outputs_failures_and_autopatch
 
   release-readiness:
@@ -174,6 +175,9 @@ jobs:
             throw "Packaged Tk GUI did not create a main window. Launcher PID=$($launcher.Id). Processes: $details"
           }
           $launchedProcesses | Stop-Process -Force
+
+      - name: Validate Tk Advanced output visibility settings
+        run: python -m unittest -v tests.test_generate_textures.GenerateTexturesTests.test_tk_advanced_workflow_visibility_round_trips_saved_settings
 
       - name: End-to-end packaged executable smoke generation
         run: |
