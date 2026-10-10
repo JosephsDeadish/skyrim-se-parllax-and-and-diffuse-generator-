@@ -156,22 +156,23 @@ jobs:
       - name: Smoke launch packaged Tk GUI
         shell: pwsh
         run: |
-          $process = Start-Process -FilePath ".\dist\generate_textures.exe" -ArgumentList @("--gui", "--gui-backend", "tk") -PassThru
+          $existingIds = @(Get-Process -Name "generate_textures" -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+          $launcher = Start-Process -FilePath ".\dist\generate_textures.exe" -ArgumentList @("--gui", "--gui-backend", "tk") -PassThru
           $deadline = (Get-Date).AddSeconds(20)
+          $windowProcess = $null
           do {
-            $process.Refresh()
-            if ($process.HasExited) {
-              throw "Packaged Tk GUI exited during startup (exit code $($process.ExitCode))."
-            }
-            if ($process.MainWindowHandle -ne 0) {
+            $launchedProcesses = @(Get-Process -Name "generate_textures" -ErrorAction SilentlyContinue | Where-Object { $existingIds -notcontains $_.Id })
+            $windowProcess = $launchedProcesses | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+            if ($windowProcess) {
               break
             }
             Start-Sleep -Seconds 1
           } while ((Get-Date) -lt $deadline)
-          if ($process.MainWindowHandle -eq 0) {
-            throw "Packaged Tk GUI remained alive but did not create a main window."
+          if (-not $windowProcess) {
+            $details = ($launchedProcesses | ForEach-Object { "PID=$($_.Id) Handle=$($_.MainWindowHandle) Title='$($_.MainWindowTitle)'" }) -join "; "
+            throw "Packaged Tk GUI did not create a main window. Launcher PID=$($launcher.Id). Processes: $details"
           }
-          Stop-Process -Id $process.Id -Force
+          $launchedProcesses | Stop-Process -Force
 
       - name: End-to-end packaged executable smoke generation
         run: |
