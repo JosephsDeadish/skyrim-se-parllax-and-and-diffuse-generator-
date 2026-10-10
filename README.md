@@ -321,10 +321,10 @@ Community Shaders Extended Materials and ENB complex material are separate workf
 
 When both Community Shaders and ENB markers are detected in mod-manager context, the app's auto renderer recommendation now prefers **ENB**. This mirrors Community Shaders compatibility guidance that CS disables itself when ENB is active, so ENB reflects the effective runtime path in mixed installs.
 
-### NIF Editor — Experimental Feature
+### NIF Editor — Supported Skyrim Workflows
 
 The **NIF Editor** (accessible from the toolbar button) patches Skyrim-format BSLightingShaderProperty flags and texture slots for supported Skyrim LE/SE/AE/VR/CK variants. Fallout-era headers are now detected with an experimental profile path and should be treated as best-effort.
-**This is an experimental feature.** Always keep backups of your NIF files before patching.
+Skyrim NIF editing is a supported workflow; review scan results and keep backups before patching. Fallout-era writes remain experimental and best-effort.
 The **Auto-patch NIFs after generation** checkbox (off by default) triggers NIF patching automatically after each generation run.
 For safety, parallax auto-patching skips known-problem cases by default (Havok-attached meshes, skinned/alpha meshes, decal/anisotropic/soft-lighting variants, and single-pass shader blocks).
 For CLI runs, `nif_patcher.py --target-game auto|skyrim|fallout` now makes profile intent explicit. Fallout writes require `--experimental-fallout-write` and default to guarded flag/texture-slot patching.
@@ -389,7 +389,7 @@ Before publishing a release, run at least one real mod-scale verification pass:
 
 - Very large batches (1000+ sources) can become UI-heavy if live preview is forced on continuously; use Resume mode and keep lazy/staged preview enabled.
 - 8K-heavy runs may require lower worker counts and longer preview refresh intervals; this is expected to avoid memory spikes.
-- NIF Editor remains experimental, especially for Fallout-era profiles; keep backups and validate in game after patching.
+- Skyrim NIF Editor workflows are supported; keep backups and validate changes in game. Fallout-era writes remain experimental and should be treated as best-effort.
 - TruePBR/Community Shaders/ENB outputs are workflow-specific; avoid mixing output families on the same mesh/material unless you explicitly know that pipeline is supported.
 
 ### Consolidated compatibility matrix (game + workflow + profile)
