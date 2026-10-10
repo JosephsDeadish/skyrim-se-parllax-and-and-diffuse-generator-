@@ -5358,6 +5358,65 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertEqual(after.flags2, before.flags2)
         self.assertEqual(after.texture_paths, before.texture_paths)
 
+    def test_fallout_multidrift_fixture_remediation_preserves_unrelated_state(self) -> None:
+        payload = _load_fixture_corpus_payload(_FIXTURE_CORPUS_MANIFEST)
+        cases = payload.get("cases", [])
+        case = next(
+            (
+                entry
+                for entry in cases
+                if isinstance(entry, dict)
+                and entry.get("id") == "fallout_real_shifted_multiblock_envmap_glow_parallax_reuse"
+            ),
+            None,
+        )
+        self.assertIsNotNone(case)
+        assert isinstance(case, dict)
+        nif = _materialize_fixture_corpus(self.tmp, {"cases": [case]})[0]
+        before = scan_nif(nif)
+        validation = validate_nif_for_parallax(nif)
+        before_codes = [group.code for group in validation.conflict_report]
+        for prefix in (
+            "missing_parallax_flag.flag1_not_set.fallout.real",
+            "path_slot_parallax.matches_diffuse.fallout.real",
+            "shader_state.envmap_glow_missing_slots2_4_5.",
+        ):
+            self.assertTrue(any(code.startswith(prefix) for code in before_codes), before_codes)
+
+        parallax_flag_code = next(
+            code for code in before_codes if code.startswith("missing_parallax_flag.flag1_not_set.")
+        )
+        result, steps = auto_remediate_nif_conflicts(
+            nif,
+            [parallax_flag_code],
+            target_game="fallout",
+            experimental_fallout_write=True,
+            backup=False,
+        )
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertTrue(result.success, result.errors)
+        self.assertEqual(steps, ("enable_parallax",))
+        after = scan_nif(nif)
+        self.assertEqual(len(after), len(before))
+        for old_info, new_info in zip(before, after):
+            self.assertTrue(new_info.has_parallax_flag)
+            self.assertEqual(
+                old_info.flags1 & ~SLSF1_PARALLAX,
+                new_info.flags1 & ~SLSF1_PARALLAX,
+            )
+            self.assertEqual(new_info.flags2, old_info.flags2 | SLSF2_VERTEX_COLORS)
+            self.assertEqual(new_info.texture_paths, old_info.texture_paths)
+
+        remaining_codes = [
+            group.code for group in validate_nif_for_parallax(nif).conflict_report
+        ]
+        self.assertTrue(
+            any(code.startswith("path_slot_parallax.matches_diffuse.fallout.real") for code in remaining_codes),
+            remaining_codes,
+        )
+
     def test_auto_remediation_build_options_carries_fallout_gate_flags(self) -> None:
         nif = _write_nif(self.tmp, user_ver2=130)
         _rewrite_user_version(nif, 11)
