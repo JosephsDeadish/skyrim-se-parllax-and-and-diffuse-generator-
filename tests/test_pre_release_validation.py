@@ -428,7 +428,7 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         self.assertIn("fallout76", fallout76_args)
         self.assertIn("--environment-mask", fallout76_args)
         self.assertEqual(fallout76_scenario.get("input_count"), 6)
-        self.assertEqual(fallout76_scenario.get("input_size"), 64)
+        self.assertEqual(fallout76_scenario.get("input_dimensions"), (64, 48))
         self.assertEqual(fallout76_scenario.get("input_format"), "dds")
         self.assertTrue(fallout76_scenario.get("checkpoint_resume"))
         self.assertTrue(fallout76_scenario.get("interruption_resume"))

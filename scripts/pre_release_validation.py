@@ -730,7 +730,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
                 "--environment-mask",
                 "--no-parallax",
             ],
-            "input_size": 64,
+            "input_dimensions": (64, 48),
             "input_count": 6,
             "input_format": "dds",
             "checkpoint_resume": True,
