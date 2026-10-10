@@ -1076,13 +1076,19 @@ class TestValidateNifForParallax(unittest.TestCase):
         code = _classify_conflict_code(
             "The file is shorter than a normal Skyrim NIF header. It is probably truncated, corrupt, or not really a NIF."
         )
-        self.assertEqual(code, "unsupported_header.malformed_or_truncated")
+        self.assertEqual(code, "unsupported_header.malformed_or_truncated.short_header")
 
     def test_conflict_classifier_maps_probably_truncated_corruption_notice(self) -> None:
         code = _classify_conflict_code(
             "This mesh is probably truncated, corrupt, or not really a NIF."
         )
-        self.assertEqual(code, "unsupported_header.malformed_or_truncated")
+        self.assertEqual(code, "unsupported_header.malformed_or_truncated.corrupt_or_non_nif")
+
+    def test_conflict_classifier_maps_generic_malformed_or_truncated_notice(self) -> None:
+        code = _classify_conflict_code(
+            "Malformed or truncated NIF detected while parsing shader tables."
+        )
+        self.assertEqual(code, "unsupported_header.malformed_or_truncated.generic")
 
     def test_conflict_classifier_maps_wrapped_unsupported_profile_drift_notice(self) -> None:
         code = _classify_conflict_code(

@@ -4011,6 +4011,15 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "unsupported_header.convert_to_bslighting_required": (
         "Convert/re-export the mesh so it uses BSLightingShaderProperty before running auto-patch/remediation.",
     ),
+    "unsupported_header.malformed_or_truncated.short_header": (
+        "The file is shorter than a normal Skyrim/Fallout NIF header; treat as truncated/corrupt and re-export before patching.",
+    ),
+    "unsupported_header.malformed_or_truncated.corrupt_or_non_nif": (
+        "This input looks truncated/corrupt or may not be a valid NIF; replace or re-export a known-good mesh before patching.",
+    ),
+    "unsupported_header.malformed_or_truncated.generic": (
+        "The file appears malformed/truncated; validate the source mesh and re-export from trusted tools before patching.",
+    ),
     "unknown_shader_type": (
         "Unknown raw shader type could not be confidently resolved; use unknown_shader_type_map for explicit overrides or keep this mesh in manual-review/no-op mode.",
     ),
@@ -4378,11 +4387,11 @@ def _classify_conflict_code(message: str) -> str:
     if "resolution: open the mesh in nifskope or the creation kit and re-save/export it as a clean skyrim se nif" in lowered:
         return "unsupported_header.reexport_resolution"
     if "shorter than a normal skyrim nif header" in lowered:
-        return "unsupported_header.malformed_or_truncated"
+        return "unsupported_header.malformed_or_truncated.short_header"
     if "probably truncated, corrupt, or not really a nif" in lowered:
-        return "unsupported_header.malformed_or_truncated"
+        return "unsupported_header.malformed_or_truncated.corrupt_or_non_nif"
     if "malformed or truncated nif" in lowered:
-        return "unsupported_header.malformed_or_truncated"
+        return "unsupported_header.malformed_or_truncated.generic"
     if lowered.startswith("detected shader/material blocks:"):
         return "unsupported_header.non_patchable_shader_family_detected"
     if "this mesh uses bsshaderpplightingproperty instead of bslightingshaderproperty" in lowered:
