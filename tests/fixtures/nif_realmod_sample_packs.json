@@ -4538,7 +4538,7 @@
           "flags1": 128,
           "num_block_types_delta": -1,
           "expected_prefixes": [
-            "unsupported_header.profile_value_drift.unparsed."
+            "unsupported_header.profile_value_drift.unparsed.header_field_alignment_drift.stream_header_shift."
           ],
           "expected_absent_prefixes": [
             "fallback_or_unknown.fallout."
@@ -4568,7 +4568,7 @@
             77
           ],
           "expected_prefixes": [
-            "unsupported_header.profile_value_drift.unparsed."
+            "unsupported_header.profile_value_drift.unparsed.header_field_alignment_drift.stream_header_shift."
           ],
           "expected_absent_prefixes": [
             "fallback_or_unknown.fallout."
@@ -4595,7 +4595,7 @@
           "flags1": 128,
           "num_blocks_delta": 3,
           "expected_prefixes": [
-            "unsupported_header.profile_value_drift.unparsed.signature_only."
+            "unsupported_header.profile_value_drift.signature_only.user_version_parse_failure."
           ],
           "expected_absent_prefixes": [
             "fallback_or_unknown.fallout."
@@ -4622,7 +4622,7 @@
           "flags1": 128,
           "num_blocks_delta": 3,
           "expected_prefixes": [
-            "unsupported_header.profile_value_drift.unparsed.signature_only."
+            "unsupported_header.profile_value_drift.signature_only.user_version_parse_failure."
           ],
           "expected_absent_prefixes": [
             "fallback_or_unknown.fallout."

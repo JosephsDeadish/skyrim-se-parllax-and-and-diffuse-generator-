@@ -3992,6 +3992,12 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift": (
         "Malformed header-table drift signature detected without stable profile values; keep manual-review/no-op and re-export before patching.",
     ),
+    "unsupported_header.profile_value_drift.signature_only.user_version_parse_failure": (
+        "Header signature-only drift also failed user-version parsing; keep manual-review/no-op and re-export before patching.",
+    ),
+    "unsupported_header.profile_value_drift.unparsed.header_field_alignment_drift.stream_header_shift": (
+        "Header field-alignment drift shifted stream-header offsets; re-export/re-save to rebuild aligned header tables before patching.",
+    ),
     "unsupported_header.read_failure": (
         "Verify the NIF path is readable and not locked, then re-export or replace corrupt files before patching.",
     ),
@@ -4339,6 +4345,10 @@ def _classify_conflict_code(message: str) -> str:
             base_code += ".fallout_signature_drift"
         return base_code
     if lowered.startswith("malformed or truncated nif: unsupported nif header/profile values"):
+        if "could not parse user version fields from header" in lowered:
+            if "could not parse full header tables" in lowered:
+                return "unsupported_header.profile_value_drift.signature_only.user_version_parse_failure.header_table_drift"
+            return "unsupported_header.profile_value_drift.signature_only.user_version_parse_failure"
         if "could not parse full header tables" in lowered:
             return "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift"
         return "unsupported_header.profile_value_drift.unparsed.signature_only"
@@ -4413,6 +4423,8 @@ def _classify_conflict_code(message: str) -> str:
     if "could not parse full header tables for this mesh" in lowered and "header-table drift" in lowered:
         return "unsupported_header.profile_value_drift.unparsed.header_table_drift"
     if "header field alignment drift detected" in lowered:
+        if "stream-header fields were shifted from expected skyrim offsets" in lowered:
+            return "unsupported_header.profile_value_drift.unparsed.header_field_alignment_drift.stream_header_shift"
         return "unsupported_header.profile_value_drift.unparsed.header_field_alignment_drift"
     if "header-table drift is present alongside user-version mismatch" in lowered:
         return "unsupported_header.user_version_value_drift.header_table_drift"
@@ -4984,6 +4996,36 @@ def _build_conflict_report(
             "Real-layout drift combo repeats across "
             f"{combo_count} blocks: default fallback shader resolution is unresolved while slot 3 remains unresolved."
         )
+    profile_layout_codes: dict[tuple[str, str], set[str]] = {}
+    for (base_code, profile, layout), messages in grouped.items():
+        if not messages:
+            continue
+        profile_layout_codes.setdefault((profile, layout), set()).add(base_code)
+    for (profile, layout), base_codes in profile_layout_codes.items():
+        if (
+            "unsupported_header.profile_value_drift.unparsed.signature_only" in base_codes
+            and "unsupported_header.user_version_parse_failure" in base_codes
+        ):
+            grouped.setdefault(
+                ("unsupported_header.profile_value_drift.signature_only.user_version_parse_failure", profile, layout),
+                [],
+            ).append(
+                "Signature-only unsupported-header profile drift also failed user-version parsing; long-tail subcode promoted."
+            )
+        if (
+            "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift" in base_codes
+            and "unsupported_header.user_version_parse_failure" in base_codes
+        ):
+            grouped.setdefault(
+                (
+                    "unsupported_header.profile_value_drift.signature_only.user_version_parse_failure.header_table_drift",
+                    profile,
+                    layout,
+                ),
+                [],
+            ).append(
+                "Signature-only header-table drift also failed user-version parsing; long-tail subcode promoted."
+            )
     summaries: list[NifConflictSummary] = []
     for (base_code, profile, layout), messages in sorted(
         grouped.items(),

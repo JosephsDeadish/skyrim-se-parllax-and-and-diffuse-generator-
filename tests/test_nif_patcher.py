@@ -1162,6 +1162,27 @@ class TestValidateNifForParallax(unittest.TestCase):
             "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift",
         )
 
+    def test_conflict_classifier_maps_unparsed_signature_only_user_version_parse_failure_variant(self) -> None:
+        code = _classify_conflict_code(
+            "Malformed or truncated NIF: Unsupported NIF header/profile values. "
+            "Could not parse user version fields from header; the file may be truncated or malformed."
+        )
+        self.assertEqual(
+            code,
+            "unsupported_header.profile_value_drift.signature_only.user_version_parse_failure",
+        )
+
+    def test_conflict_classifier_maps_unparsed_signature_only_user_version_parse_failure_with_header_table_drift(self) -> None:
+        code = _classify_conflict_code(
+            "Malformed or truncated NIF: Unsupported NIF header/profile values. "
+            "Could not parse user version fields from header; the file may be truncated or malformed. "
+            "Could not parse full header tables for this mesh; malformed export/header-table drift is likely."
+        )
+        self.assertEqual(
+            code,
+            "unsupported_header.profile_value_drift.signature_only.user_version_parse_failure.header_table_drift",
+        )
+
     def test_conflict_classifier_maps_header_table_drift_notice_without_wrapped_signature(self) -> None:
         code = _classify_conflict_code(
             "Could not parse full header tables for this mesh; malformed export/header-table drift is likely."
@@ -1169,6 +1190,15 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertEqual(
             code,
             "unsupported_header.profile_value_drift.unparsed.header_table_drift",
+        )
+
+    def test_conflict_classifier_maps_header_field_alignment_drift_stream_header_variant(self) -> None:
+        code = _classify_conflict_code(
+            "Header field alignment drift detected: endianness/stream-header fields were shifted from expected Skyrim offsets."
+        )
+        self.assertEqual(
+            code,
+            "unsupported_header.profile_value_drift.unparsed.header_field_alignment_drift.stream_header_shift",
         )
 
     def test_conflict_classifier_maps_wrapped_header_prefix_notice(self) -> None:
