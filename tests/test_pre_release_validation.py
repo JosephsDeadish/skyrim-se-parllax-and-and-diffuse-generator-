@@ -152,6 +152,9 @@ class TestPreReleaseValidationRealmodPayload(unittest.TestCase):
         payload = _load_realmod_pack_payload([extra])
         packs = payload.get("packs", [])
         self.assertIsInstance(packs, list)
+        self.assertTrue(
+            any(str(pack.get("id", "")) == "external_broken_longtail_pack" for pack in packs if isinstance(pack, dict))
+        )
         self.assertTrue(any(str(pack.get("id", "")) == "external_pack" for pack in packs if isinstance(pack, dict)))
 
 

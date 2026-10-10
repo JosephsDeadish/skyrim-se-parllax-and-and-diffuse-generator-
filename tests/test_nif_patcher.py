@@ -1103,6 +1103,36 @@ class TestValidateNifForParallax(unittest.TestCase):
             "unsupported_header.profile_value_drift.u11_u2130.header_table_drift",
         )
 
+    def test_conflict_classifier_maps_slot5_workflow_suffix_guidance(self) -> None:
+        code = _classify_conflict_code(
+            "Use _m for vanilla/ENB, _cm/_c for Community Shaders Extended Materials, or canonical _rmaos/_ramos for TruePBR so the target workflow is unambiguous."
+        )
+        self.assertEqual(code, "workflow_mix.slot5_suffix_guidance")
+
+    def test_conflict_classifier_maps_truepbr_path_convention_hint(self) -> None:
+        code = _classify_conflict_code(
+            "TruePBR _rmaos workflows are usually placed under textures\\pbr\\... and paired with a matching PBRNifPatcher JSON entry."
+        )
+        self.assertEqual(code, "workflow_mix.truepbr_path_convention")
+
+    def test_conflict_classifier_maps_envmap_pom_restore_disable_hint(self) -> None:
+        code = _classify_conflict_code(
+            "Restore valid slot 4/5 EnvMap textures, or disable both environment mapping and POM for this mixed block."
+        )
+        self.assertEqual(code, "shader_state.envmap_pom_missing_env_slots.hint_restore_or_disable")
+
+    def test_conflict_classifier_maps_parallax_envmap_glow_restore_disable_hint(self) -> None:
+        code = _classify_conflict_code(
+            "Restore valid slot 2/3/4/5 textures, or disable parallax/POM, glow, and environment mapping for this mixed block."
+        )
+        self.assertEqual(code, "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.hint_restore_or_disable")
+
+    def test_conflict_classifier_maps_crossblock_manual_review_hint(self) -> None:
+        code = _classify_conflict_code(
+            "Cross-block texture-set drift detected: prefer manual review/no-op first, then apply targeted per-block fixes before broad auto-remediation."
+        )
+        self.assertEqual(code, "shader_state.crossblock_texture_ref_drift_mixed_slots.hint_manual_review_first")
+
     def test_conflict_classifier_maps_fallout_signature_header_table_drift_variant(self) -> None:
         code = _classify_conflict_code(
             "Malformed or truncated NIF: Unsupported NIF header/profile values (user_version=11, user_version_2=140). "

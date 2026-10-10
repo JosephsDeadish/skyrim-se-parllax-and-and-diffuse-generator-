@@ -487,6 +487,11 @@ def build_batch_bottleneck_hints(
             0,
             "Queue backlog spiked during this run; keep live preview off and use Resume mode to reduce UI churn on the next pass."
         )
+    if peak_queue_backlog >= 512:
+        hints.insert(
+            1,
+            "Very high queue backlog observed; avoid rapid preview navigation during huge runs and let queue pacing drain before manual spot-checks.",
+        )
     if high_res_4k_count >= 50:
         hints.append("Large high-res set detected; run core outputs first, then advanced/niche outputs in a second pass.")
     if max_file_seconds >= max(5.0, avg_file_seconds * 2.5):
@@ -495,7 +500,7 @@ def build_batch_bottleneck_hints(
         hints.append("Check batch_failure_report.csv/json for repeated failure patterns before rerun.")
     if total_sources >= 1000 and total_failed > 0:
         hints.append("For huge runs with failures, rerun only failed files first before attempting a full start-fresh pass.")
-    return hints[:3]
+    return hints[:4]
 
 
 def compute_checkpoint_mismatch_flags(
@@ -10323,6 +10328,10 @@ if GUI_AVAILABLE:
                             peak_queue_backlog=max_queue_backlog,
                         )
                         self.batch_perf_hint_var.set(" | ".join(perf_hints[:3]))
+                        if perf_hints:
+                            lines.append("Next-run bottleneck guidance:")
+                            for hint in perf_hints[:3]:
+                                lines.append(f"- {hint}")
                         checkpoint_value = str(telemetry.get("checkpoint_path", "") or "").strip()
                         if checkpoint_value:
                             checkpoint_health_available = True

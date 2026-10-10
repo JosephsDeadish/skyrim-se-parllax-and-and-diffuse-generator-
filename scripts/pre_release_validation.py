@@ -419,6 +419,32 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "required_suffixes": ("_msn.dds", "_m.dds", "_g.dds"),
             "forbidden_suffixes": ("_p.dds", "_rmaos.dds", "_cm.dds"),
         },
+        {
+            "name": "custom_diffuse_only",
+            "args": [
+                "--render-profile",
+                "custom",
+                "--no-normal",
+                "--no-parallax",
+            ],
+            "min_outputs": 1,
+            "required_exact_suffix_counts": {
+                ".dds": 1,
+            },
+            "forbidden_suffixes": (
+                "_n.dds",
+                "_p.dds",
+                "_g.dds",
+                "_m.dds",
+                "_rmaos.dds",
+                "_cm.dds",
+                "_msn.dds",
+                "_wt.dds",
+                "_sm.dds",
+                "_ao.dds",
+                "_rough.dds",
+            ),
+        },
     ]
 
 
@@ -933,6 +959,7 @@ def _load_realmod_pack_payload(
     extra_pack_files: list[Path] | None = None,
 ) -> dict[str, object]:
     from tests.test_nif_patcher import (
+        _FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP,
         _FIXTURE_REALMOD_SAMPLE_PACKS,
         _load_fixture_corpus_payload,
     )
@@ -940,6 +967,12 @@ def _load_realmod_pack_payload(
     payload = _load_fixture_corpus_payload(_FIXTURE_REALMOD_SAMPLE_PACKS)
     packs = payload.get("packs", [])
     merged_packs = [pack for pack in packs if isinstance(pack, dict)] if isinstance(packs, list) else []
+    external_payload = _load_fixture_corpus_payload(_FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP)
+    external_packs = external_payload.get("packs", [])
+    if isinstance(external_packs, list):
+        for pack in external_packs:
+            if isinstance(pack, dict):
+                merged_packs.append(pack)
     for pack_file in extra_pack_files or []:
         if not pack_file.exists():
             raise SystemExit(f"Extra realmod pack file does not exist: {pack_file}")

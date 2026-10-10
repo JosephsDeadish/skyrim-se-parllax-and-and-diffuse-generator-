@@ -4137,6 +4137,12 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "workflow_mix.cs_slot5_generic_alias": (
         "Slot 5 uses generic packed alias naming for a Community Shaders path; repack to explicit _cm/_c for CS Extended Materials or _rmaos for TruePBR.",
     ),
+    "workflow_mix.slot5_suffix_guidance": (
+        "Align slot 5 naming with the intended workflow: _m (ENB/vanilla), _cm/_c (Community Shaders), or _rmaos/_ramos (TruePBR).",
+    ),
+    "workflow_mix.truepbr_path_convention": (
+        "When using TruePBR _rmaos, place assets under textures\\pbr\\... and keep matching JSON sidecar entries aligned.",
+    ),
     "flag_glow_map.slot2_filled_without_flag": (
         "Enable SLSF2_Glow_Map when slot 2 emissive is present, or clear slot 2.",
     ),
@@ -4487,6 +4493,14 @@ def _classify_conflict_code(message: str) -> str:
         return "workflow_mix.cs_slot5_m_suffix"
     if "slot 5 uses generic packed alias naming" in lowered and "for cs extended materials" in lowered:
         return "workflow_mix.cs_slot5_generic_alias"
+    if (
+        "use _m for vanilla/enb" in lowered
+        and "_cm/_c for community shaders extended materials" in lowered
+        and "_rmaos/_ramos" in lowered
+    ):
+        return "workflow_mix.slot5_suffix_guidance"
+    if "truepbr _rmaos workflows are usually placed under textures\\pbr\\" in lowered:
+        return "workflow_mix.truepbr_path_convention"
     if "slot 4 cubemap path" in lowered and "not a .dds texture path" in lowered:
         return "path_slot_cubemap.non_dds"
     if "slot 4 cubemap path" in lowered and "looks like a non-cubemap texture" in lowered:
@@ -4503,12 +4517,16 @@ def _classify_conflict_code(message: str) -> str:
         return "flag_pom.non_heightmap_shader"
     if "pom flag is enabled without the base slsf1_parallax flag" in lowered:
         return "flag_pom.without_base_parallax"
+    if "enable standard parallax alongside pom, or disable pom for this block" in lowered:
+        return "flag_pom.without_base_parallax.hint_enable_or_disable"
     if "shader type is parallax-focused" in lowered and "slot 3 is unresolved" in lowered:
         return "shader_state.parallax_type_missing_slot3"
     if "shader type is envmap" in lowered and "both slot 4 cubemap and slot 5 env-mask are unresolved" in lowered:
         return "shader_state.envmap_missing_slots4_5"
     if "restore valid slot 4/5 textures for envmap or disable environment mapping for this block" in lowered:
         return "shader_state.envmap_missing_slots4_5.hint_restore_or_disable"
+    if "restore valid slot 4/5 envmap textures, or disable both environment mapping and pom for this mixed block" in lowered:
+        return "shader_state.envmap_pom_missing_env_slots.hint_restore_or_disable"
     if "shader type is envmap" in lowered and "slot 4 cubemap is unresolved" in lowered:
         return "shader_state.envmap_missing_slot4"
     if "shader type is envmap" in lowered and "slot 5 env-mask is unresolved" in lowered:
@@ -4551,10 +4569,17 @@ def _classify_conflict_code(message: str) -> str:
     ):
         return "shader_state.parallax_envmap_glow_missing_slots2_3_4_5"
     if (
+        "restore valid slot 2/3/4/5 textures" in lowered
+        and "disable parallax/pom, glow, and environment mapping for this mixed block" in lowered
+    ):
+        return "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.hint_restore_or_disable"
+    if (
         ("share texture set ref" in lowered or "shares texture set ref" in lowered)
         and "cross-block reference drift" in lowered
     ):
         return "shader_state.crossblock_texture_ref_drift_mixed_slots"
+    if "cross-block texture-set drift detected" in lowered and "manual review/no-op first" in lowered:
+        return "shader_state.crossblock_texture_ref_drift_mixed_slots.hint_manual_review_first"
     if "cross-block texture-set reference drift detected" in lowered and "mixed slot conflicts" in lowered:
         return "shader_state.crossblock_texture_ref_drift_mixed_slots"
     if "slot 0 " in lowered:
