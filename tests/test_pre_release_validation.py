@@ -370,6 +370,7 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
             "architecture_base",
             "fallout4_core_naming",
             "fallout4_batch_checkpoint_resume",
+            "fallout76_surface_batch_checkpoint_resume",
         ):
             self.assertIn(expected, scenario_by_name)
             entry = scenario_by_name[expected]
@@ -393,13 +394,32 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         self.assertIn("--environment-mask", scenario_by_name["architecture_base"].get("args", []))
         resume_scenario = scenario_by_name["fallout4_batch_checkpoint_resume"]
         self.assertEqual(resume_scenario.get("input_count"), 2)
-        self.assertEqual(resume_scenario.get("input_size"), 16)
+        self.assertEqual(resume_scenario.get("input_size"), 32)
         self.assertEqual(resume_scenario.get("input_format"), "dds")
         self.assertTrue(resume_scenario.get("checkpoint_resume"))
         self.assertEqual(
             resume_scenario.get("required_exact_output_family_counts"),
             {"diffuse": 2, "normal": 2},
         )
+        fallout76_scenario = scenario_by_name["fallout76_surface_batch_checkpoint_resume"]
+        fallout76_args = fallout76_scenario.get("args", [])
+        self.assertIn("fallout76", fallout76_args)
+        self.assertIn("--environment-mask", fallout76_args)
+        self.assertEqual(fallout76_scenario.get("input_count"), 6)
+        self.assertEqual(fallout76_scenario.get("input_size"), 64)
+        self.assertEqual(fallout76_scenario.get("input_format"), "dds")
+        self.assertTrue(fallout76_scenario.get("checkpoint_resume"))
+        self.assertEqual(
+            fallout76_scenario.get("required_exact_suffix_counts"),
+            {"_d.dds": 6, "_n.dds": 6, "_s.dds": 6},
+        )
+        self.assertEqual(
+            fallout76_scenario.get("required_exact_output_family_counts"),
+            {"diffuse": 6, "normal": 6, "env_mask": 6},
+        )
+        self.assertEqual(scenario_by_name["vanilla"].get("input_size"), 16)
+        self.assertEqual(scenario_by_name["community_shaders"].get("input_size"), 64)
+        self.assertEqual(scenario_by_name["truepbr"].get("input_size"), 32)
         truepbr_suffixes = {
             str(value).lower() for value in scenario_by_name["truepbr"].get("required_suffixes", ())
         }

@@ -213,6 +213,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
                 "--parallax-strength",
                 "1.0",
             ],
+            "input_size": 16,
             "min_outputs": 3,
             "required_suffixes": ("_n.dds", "_p.dds"),
             "forbidden_suffixes": ("_rmaos.dds", "_cm.dds", "_msn.dds"),
@@ -246,6 +247,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
                 "--environment-mask-mode",
                 "complex",
             ],
+            "input_size": 64,
             "min_outputs": 5,
             "required_suffixes": ("_cm.dds", "_m.dds"),
             "forbidden_suffixes": ("_rmaos.dds", "_msn.dds"),
@@ -261,6 +263,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
                 "--normal-strength",
                 "1.1",
             ],
+            "input_size": 32,
             "min_outputs": 4,
             "required_suffixes": ("_rmaos.dds",),
             "required_sidecar_suffixes": ("_rmaos.json",),
@@ -620,6 +623,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
                 "vanilla",
                 "--no-parallax",
             ],
+            "input_size": 48,
             "min_outputs": 2,
             "required_suffixes": ("_d.dds", "_n.dds"),
             "required_exact_suffix_counts": {"_d.dds": 1, "_n.dds": 1},
@@ -644,7 +648,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
                 "vanilla",
                 "--no-parallax",
             ],
-            "input_size": 16,
+            "input_size": 32,
             "input_count": 2,
             "input_format": "dds",
             "checkpoint_resume": True,
@@ -654,6 +658,27 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "required_exact_output_family_counts": {"diffuse": 2, "normal": 2},
             "required_output_families": ("diffuse", "normal"),
             "forbidden_output_families": ("parallax", "env_mask", "rmaos", "complex_cm", "complex_msn"),
+        },
+        {
+            "name": "fallout76_surface_batch_checkpoint_resume",
+            "args": [
+                "--target-game",
+                "fallout76",
+                "--render-profile",
+                "vanilla",
+                "--environment-mask",
+                "--no-parallax",
+            ],
+            "input_size": 64,
+            "input_count": 6,
+            "input_format": "dds",
+            "checkpoint_resume": True,
+            "min_outputs": 18,
+            "required_suffixes": ("_d.dds", "_n.dds", "_s.dds"),
+            "required_exact_suffix_counts": {"_d.dds": 6, "_n.dds": 6, "_s.dds": 6},
+            "required_exact_output_family_counts": {"diffuse": 6, "normal": 6, "env_mask": 6},
+            "required_output_families": ("diffuse", "normal", "env_mask"),
+            "forbidden_output_families": ("parallax", "rmaos", "complex_cm", "complex_msn"),
         },
         {
             "name": "custom_diffuse_only",
@@ -673,6 +698,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
                 "_p.dds",
                 "_g.dds",
                 "_m.dds",
+                "_s.dds",
                 "_rmaos.dds",
                 "_cm.dds",
                 "_msn.dds",
@@ -867,7 +893,7 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                 elif name.endswith("_msn.dds"):
                     produced_families.add("complex_msn")
                     produced_family_counts["complex_msn"] = int(produced_family_counts.get("complex_msn", 0)) + 1
-                elif name.endswith("_m.dds"):
+                elif name.endswith("_m.dds") or name.endswith("_s.dds"):
                     produced_families.add("env_mask")
                     produced_family_counts["env_mask"] = int(produced_family_counts.get("env_mask", 0)) + 1
                 elif name.endswith("_wt.dds"):
