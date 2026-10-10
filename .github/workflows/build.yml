@@ -189,6 +189,7 @@ jobs:
           )
           _run_packaged_executable_smoke(artifact_dir, loops=3)
           PY
+        shell: bash
 
       - name: Upload packaged smoke artifacts
         uses: actions/upload-artifact@v4
