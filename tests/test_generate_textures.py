@@ -35,8 +35,10 @@ from generate_textures import (
     _normalize_gui_state,
     _resolve_batch_workers,
     _summarize_batch_texture_dimensions,
+    _visible_preview_output_keys,
     build_batch_bottleneck_hints,
     compute_checkpoint_mismatch_flags,
+    compute_checkpoint_resume_counts,
     compute_processing_queue_event_budget,
     compute_deferred_preview_tile_interval_ms,
     compute_preview_refresh_delay_ms,
@@ -2080,6 +2082,27 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("checkpoint input path differs", mismatch)
         self.assertIn("checkpoint output path differs", mismatch)
         self.assertIn("checkpoint file count differs", mismatch)
+
+    def test_compute_checkpoint_resume_counts_reports_matching_completed_and_remaining(self) -> None:
+        selected = [Path("/input/a.dds"), Path("/input/b.dds"), Path("/input/c.dds")]
+        completed = {str(selected[0].resolve()), str(selected[2].resolve()), "/stale/old.dds"}
+        self.assertEqual(
+            compute_checkpoint_resume_counts(
+                selected_files=selected,
+                completed_success_files=completed,
+            ),
+            (2, 1),
+        )
+
+    def test_basic_preview_outputs_hide_advanced_workflow_tiles(self) -> None:
+        self.assertEqual(
+            _visible_preview_output_keys(show_advanced_workflow_outputs=False),
+            ("diffuse", "normal", "parallax", "glow", "environment_mask"),
+        )
+        advanced = _visible_preview_output_keys(show_advanced_workflow_outputs=True)
+        self.assertIn("rmaos", advanced)
+        self.assertIn("complex_material", advanced)
+        self.assertEqual(len(advanced), 11)
 
     def test_compute_processing_queue_event_budget_increases_for_huge_runs_when_preview_off(self) -> None:
         budget = compute_processing_queue_event_budget(

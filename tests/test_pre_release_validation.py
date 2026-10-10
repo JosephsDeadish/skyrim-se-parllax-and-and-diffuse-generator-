@@ -367,6 +367,8 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
             "truepbr_no_parallax",
             "vanilla_glow_env_combo",
             "community_shaders_no_parallax_wet_snow",
+            "architecture_base",
+            "fallout4_core_naming",
         ):
             self.assertIn(expected, scenario_by_name)
             entry = scenario_by_name[expected]
@@ -381,6 +383,12 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
             required_families = entry.get("required_output_families", ())
             self.assertIsInstance(required_families, tuple)
             self.assertGreater(len(required_families), 0)
+        fallout4_suffixes = {
+            str(value).lower()
+            for value in scenario_by_name["fallout4_core_naming"].get("required_suffixes", ())
+        }
+        self.assertEqual(fallout4_suffixes, {"_d.dds", "_n.dds"})
+        self.assertIn("--target-game", scenario_by_name["fallout4_core_naming"].get("args", []))
         truepbr_suffixes = {
             str(value).lower() for value in scenario_by_name["truepbr"].get("required_suffixes", ())
         }

@@ -505,6 +505,29 @@ def build_batch_bottleneck_hints(
     return hints[:4]
 
 
+_CORE_PREVIEW_OUTPUT_KEYS = (
+    "diffuse",
+    "normal",
+    "parallax",
+    "glow",
+    "environment_mask",
+)
+_ADVANCED_PREVIEW_OUTPUT_KEYS = (
+    "rmaos",
+    "wetness_mask",
+    "snow_mask",
+    "ao",
+    "roughness",
+    "complex_material",
+)
+
+
+def _visible_preview_output_keys(*, show_advanced_workflow_outputs: bool) -> tuple[str, ...]:
+    if show_advanced_workflow_outputs:
+        return (*_CORE_PREVIEW_OUTPUT_KEYS, *_ADVANCED_PREVIEW_OUTPUT_KEYS)
+    return _CORE_PREVIEW_OUTPUT_KEYS
+
+
 def compute_checkpoint_mismatch_flags(
     *,
     checkpoint_payload: dict[str, object],
@@ -523,6 +546,15 @@ def compute_checkpoint_mismatch_flags(
     if planned_total > 0 and checkpoint_total > 0 and checkpoint_total != planned_total:
         mismatch_flags.append("checkpoint file count differs")
     return mismatch_flags
+
+
+def compute_checkpoint_resume_counts(
+    *,
+    selected_files: Sequence[Path],
+    completed_success_files: set[str],
+) -> tuple[int, int]:
+    completed = sum(1 for path in selected_files if str(path.resolve()) in completed_success_files)
+    return completed, max(0, len(selected_files) - completed)
 
 
 def compute_preview_refresh_delay_ms(
@@ -8599,8 +8631,11 @@ if GUI_AVAILABLE:
                 self.complex_format_combo,
                 _env_mode_row,
                 _env_mode_hint_label,
+                self.normal_strength_display_label,
                 self.auto_normal_check,
+                self.parallax_strength_display_label,
                 self.auto_parallax_check,
+                self.glow_threshold_display_label,
                 self.auto_glow_check,
                 _env_mask_label,
                 self.environment_mask_scale,
@@ -9008,21 +9043,38 @@ if GUI_AVAILABLE:
                 "roughness": "🪵 Roughness/microsurface preview (_rough).\nBrighter = rougher (matte), darker = smoother (glossy). Controls how blurry reflections look.",
                 "complex_material": "Complex-material preview.\nFor MSN format this pane is split: LEFT = RGB normal channels, RIGHT = alpha/specular channel.\nFor CM format it shows the packed texture directly.",
             }
+            preview_output_widgets: dict[str, tuple[ttk.Label, ttk.Label]] = {}
             for index, (output_key, output_label) in enumerate(output_specs):
                 row = (index // 2) * 2
                 column = index % 2
                 _out_title = ttk.Label(output_grid, text=output_label, anchor=tk.CENTER, justify=tk.CENTER)
-                _out_title.grid(row=row, column=column, padx=3, pady=(1, 0), sticky="")
                 self._add_tooltip(_out_title, _output_tooltips.get(output_key, f"Preview of {output_label} output."))
                 label = ttk.Label(output_grid, text="No preview", anchor=tk.CENTER, justify=tk.CENTER)
-                label.grid(row=row + 1, column=column, padx=3, pady=(0, 2), sticky="")
                 self._add_tooltip(label, _output_tooltips.get(output_key, f"Preview of {output_label} output."))
                 self.preview_output_labels[output_key] = label
+                preview_output_widgets[output_key] = (_out_title, label)
+
+            def _sync_preview_output_grid(*_: object) -> None:
+                visible_keys = _visible_preview_output_keys(
+                    show_advanced_workflow_outputs=bool(self.show_advanced_workflow_outputs_var.get())
+                )
+                for key, (title, label) in preview_output_widgets.items():
+                    title.grid_remove()
+                    label.grid_remove()
+                    if key not in visible_keys:
+                        continue
+                    index = visible_keys.index(key)
+                    row = (index // 2) * 2
+                    column = index % 2
+                    title.grid(row=row, column=column, padx=3, pady=(1, 0), sticky="")
+                    label.grid(row=row + 1, column=column, padx=3, pady=(0, 2), sticky="")
 
             preview_frame.columnconfigure(0, weight=1)
             preview_frame.columnconfigure(1, weight=1)
             output_grid.columnconfigure(0, weight=0)
             output_grid.columnconfigure(1, weight=0)
+            self.show_advanced_workflow_outputs_var.trace_add("write", _sync_preview_output_grid)
+            _sync_preview_output_grid()
 
             def _sync_simplified_layout_preview(*_: object) -> None:
                 simplified = bool(self.simplified_main_layout_var.get())
@@ -11650,6 +11702,26 @@ if GUI_AVAILABLE:
                             self.status_var.set("Resume canceled because checkpoint had no completed entries.")
                             return
                     if completed_checkpoint_files:
+                        resumed_completed_count, remaining_file_count = compute_checkpoint_resume_counts(
+                            selected_files=self.selected_inputs,
+                            completed_success_files=completed_checkpoint_files,
+                        )
+                        if resumed_completed_count:
+                            proceed_resume_count = messagebox.askyesno(
+                                "Confirm checkpoint resume",
+                                self._tr(
+                                    "Resume will skip {completed} completed file(s) and process "
+                                    "{remaining} of {total} selected file(s).\n\nContinue?"
+                                ).format(
+                                    completed=resumed_completed_count,
+                                    remaining=remaining_file_count,
+                                    total=len(self.selected_inputs),
+                                ),
+                                parent=self.root,
+                            )
+                            if not proceed_resume_count:
+                                self.status_var.set("Resume canceled before skipping completed files.")
+                                return
                         filtered_inputs = [
                             candidate for candidate in self.selected_inputs
                             if str(candidate.resolve()) not in completed_checkpoint_files

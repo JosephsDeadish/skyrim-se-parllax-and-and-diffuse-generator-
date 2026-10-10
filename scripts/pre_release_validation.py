@@ -571,6 +571,42 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "forbidden_output_families": ("parallax", "rmaos", "complex_msn"),
         },
         {
+            "name": "architecture_base",
+            "args": [
+                "--render-profile",
+                "architecture",
+            ],
+            "min_outputs": 4,
+            "required_suffixes": ("_n.dds", "_p.dds", "_m.dds"),
+            "forbidden_suffixes": ("_rmaos.dds", "_cm.dds", "_msn.dds"),
+            "required_output_families": ("diffuse", "normal", "parallax", "env_mask"),
+            "forbidden_output_families": ("rmaos", "complex_cm", "complex_msn"),
+        },
+        {
+            "name": "fallout4_core_naming",
+            "args": [
+                "--target-game",
+                "fallout4",
+                "--render-profile",
+                "vanilla",
+                "--no-parallax",
+            ],
+            "min_outputs": 2,
+            "required_suffixes": ("_d.dds", "_n.dds"),
+            "required_exact_suffix_counts": {"_d.dds": 1, "_n.dds": 1},
+            "required_exact_output_family_counts": {"diffuse": 1, "normal": 1},
+            "forbidden_suffixes": (
+                "_p.dds",
+                "_m.dds",
+                "_s.dds",
+                "_rmaos.dds",
+                "_cm.dds",
+                "_msn.dds",
+            ),
+            "required_output_families": ("diffuse", "normal"),
+            "forbidden_output_families": ("parallax", "env_mask", "rmaos", "complex_cm", "complex_msn"),
+        },
+        {
             "name": "custom_diffuse_only",
             "args": [
                 "--render-profile",

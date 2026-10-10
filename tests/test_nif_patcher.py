@@ -5088,9 +5088,25 @@ class TestRealModSamplePacks(unittest.TestCase):
         target_case_ids = {
             "pack_skyrim_architecture_ae_real_crlf_shifted_envmap_glow_mixed",
             "pack_skyrim_architecture_aevr_real_crlf_u16_shifted_parallax_envmap_mixed",
+            "pack_skyrim_architecture_real_multiblock_env_slot5_and_glow_wrong",
             "pack_fallout_architecture_real_shifted_envmap_glow_mixed",
             "pack_fallout_architecture_aevr_real_crlf_u16_shifted_parallax_envmap_mixed",
+            "pack_fallout_architecture_envmap_missing_slots",
+            "pack_fallout_effects_env_slot5_without_flag",
+            "pack_fallout_clutter_single_pass_skip",
+            "pack_fallout_armor_envmap_slot4_missing",
+            "pack_fallout_landscape_envmap_slot5_missing",
+            "pack_fallout_spec_strength_gate_profile",
+            "pack_fallout_spec_color_gate_profile",
+            "pack_fallout_env_scale_gate_profile",
+            "pack_fallout_fix_lighting_gate_profile",
             "pack_fallout_parallax_scale_gate_profile",
+            "pack_fallout_clutter_real_multiblock_env_slot4_and_parallax_diffuse",
+            "pack_fallout_architecture_real_crlf_u16_shifted_env_alias_without_flag",
+            "pack_fallout_architecture_real_crlf_u16_shifted_envmap_glow_slot5_missing",
+            "pack_fallout_architecture_real_crlf_u16_shifted_multiblock_guarded_unsupported",
+            "pack_fallout_effects_real_multiblock_singlepass_decal_anisotropic_manual_v11",
+            "pack_fallout_architecture_real_crossblock_semantic_payload_slot3_drift_v10",
             "pack_fallout_architecture_real_crossblock_semantic_payload_slot3_drift_v10",
         }
         observed = 0
@@ -5117,6 +5133,16 @@ class TestRealModSamplePacks(unittest.TestCase):
                     fallback_codes,
                     f"{pack_id}/{nif_path.stem}: expected no fallback_or_unknown conflicts, got {fallback_codes}",
                 )
+                case = next(
+                    entry
+                    for entry in cases
+                    if isinstance(entry, dict) and str(entry.get("id", "")).strip() == nif_path.stem
+                )
+                for prefix in case.get("expected_prefixes", []):
+                    self.assertTrue(
+                        any(str(group.code).startswith(str(prefix)) for group in validation.conflict_report),
+                        f"{pack_id}/{nif_path.stem}: expected explicit long-tail subcode {prefix!r}",
+                    )
         self.assertEqual(
             observed,
             len(target_case_ids),

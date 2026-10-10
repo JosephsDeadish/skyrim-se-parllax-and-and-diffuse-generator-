@@ -1139,7 +1139,7 @@
       },
       "expected_family_case_counts": {
         "architecture": 34,
-        "effects": 30,
+        "effects": 31,
         "clutter": 23,
         "armor": 1,
         "landscape": 1,
@@ -4942,6 +4942,60 @@
             "set_slot3_parallax_for_repeated_real_layout_drift",
             "enable_parallax_for_repeated_real_layout_drift"
           ]
+        },
+        {
+          "id": "pack_fallout_effects_real_multiblock_singlepass_decal_anisotropic_manual_v11",
+          "family": "effects",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "shader_type": 0,
+          "flags1": 67108896,
+          "flags2": 2097152,
+          "texture_paths": [
+            "textures\\effects\\reactor\\arcgrid.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "flags1": 32,
+              "flags2": 2097152,
+              "texture_paths": [
+                "textures\\effects\\reactor\\arcgrid.dds",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "skip_single_pass.fallout.real",
+            "skip_alpha_decal_lighting.decal_flag.fallout.real",
+            "skip_alpha_decal_lighting.anisotropic_flag.fallout.real"
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_cross_block_material_repair",
+          "local_strategy": "manual_review_for_multi_flag_rendering_conflicts",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Combined single-pass, decal, and anisotropic flags across real-layout blocks remain manual-review in guarded Fallout mode."
         }
       ],
       "expected_family_allowed_difference_buckets": {
