@@ -59,7 +59,7 @@
             ""
           ],
           "expected_prefixes": [
-            "shader_state.parallax_envmap_missing_slot5.missing_on_disk.skyrim."
+            "shader_state.parallax_envmap_missing_slots3_4_5.slot3_missing_on_disk_slot4_missing_on_disk_slot5_missing_on_disk.skyrim."
           ],
           "expected_absent_prefixes": [
             "fallback_or_unknown.skyrim."
@@ -124,7 +124,7 @@
           "flags1": 128,
           "num_blocks_delta": 4,
           "expected_prefixes": [
-            "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift."
+            "unsupported_header.profile_value_drift.signature_only.user_version_parse_failure."
           ],
           "expected_absent_prefixes": [
             "fallback_or_unknown.fallout."

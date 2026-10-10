@@ -1138,7 +1138,7 @@
         "parallax_scale_gate": 0.0
       },
       "expected_family_case_counts": {
-        "architecture": 33,
+        "architecture": 34,
         "effects": 30,
         "clutter": 23,
         "armor": 1,
@@ -1190,9 +1190,9 @@
         "architecture": {
           "fallback_or_unknown.": 0,
           "unsupported_header.profile_value_drift.unparsed.": 23,
-          "shader_state.envmap_missing_slots4_5.": 6,
-          "shader_state.parallax_envmap_missing_slots3_4_5.": 3,
-          "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.": 2
+          "shader_state.envmap_missing_slots4_5.": 7,
+          "shader_state.parallax_envmap_missing_slots3_4_5.": 4,
+          "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.": 3
         },
         "effects": {
           "fallback_or_unknown.": 0,
@@ -1228,6 +1228,8 @@
         "missing_parallax_slot3.empty.",
         "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks.fallout.",
         "missing_parallax_slot3.empty.payload_resolved_real_layout_drift.repeated_blocks.fallout.",
+        "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.fallout.",
+        "missing_parallax_slot3.empty.payload_resolved_real_layout_drift.fallout.",
         "flag_glow_map.slot2_filled_without_flag.fallout.",
         "flag_glow_map.flag_set_without_slot2.fallout.",
         "flag_env_mapping.slot4_filled_without_flag.fallout.",
@@ -4740,6 +4742,58 @@
             "set_slot3_parallax_for_repeated_real_layout_drift",
             "enable_parallax_for_repeated_real_layout_drift"
           ]
+        },
+        {
+          "id": "pack_fallout_architecture_real_crossblock_semantic_payload_slot3_drift_v10",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_paths": [
+            "textures\\architecture\\vault\\reactorwall.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "flags1": 2176,
+              "flags2": 64,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\architecture\\vault\\reactorwall.dds",
+                "textures\\architecture\\vault\\reactorwall_n.dds",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "unknown_shader_type.semantic_resolved.envmap.fallout.real",
+            "unknown_shader_type.payload_resolved.default.fallout.real",
+            "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.fallout.real",
+            "missing_parallax_slot3.empty.payload_resolved_real_layout_drift.fallout.real"
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "pgpatcher_strategy": "rebuild_slot3_after_unknown_shader_layout_drift",
+          "local_strategy": "classify_default_fallback_drift_then_restore_slot3"
         },
         {
           "id": "pack_fallout_architecture_real_crossblock_multidrift_manual_review_tail_v10",

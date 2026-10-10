@@ -4466,6 +4466,54 @@ class TestExternalBrokenPackDeltaSweep(unittest.TestCase):
         )
         self.assertFalse(any(code.startswith("fallback_or_unknown.") for code in codes), codes)
 
+    def test_external_delta_packs_use_specific_subcodes_without_generic_fallback(self) -> None:
+        for fixture in (
+            _FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP,
+            _FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP_ADDITIONAL,
+            _FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP_LARGE,
+        ):
+            payload = _load_fixture_corpus_payload(fixture)
+            packs = payload.get("packs", [])
+            self.assertIsInstance(packs, list)
+            for pack in packs:
+                self.assertIsInstance(pack, dict)
+                pack_id = str(pack.get("id", "pack")).strip() or "pack"
+                cases = pack.get("cases", [])
+                self.assertIsInstance(cases, list)
+                pack_root = self.tmp / pack_id
+                pack_root.mkdir(parents=True, exist_ok=True)
+                for case in cases:
+                    self.assertIsInstance(case, dict)
+                    case_id = str(case.get("id", "case")).strip() or "case"
+                    case_root = pack_root / case_id
+                    case_root.mkdir(parents=True, exist_ok=True)
+                    expected_prefixes = case.get("expected_prefixes", [])
+                    if any("missing_on_disk" in str(prefix) for prefix in expected_prefixes):
+                        (case_root / "textures").mkdir(exist_ok=True)
+                    corpus = _materialize_fixture_corpus(case_root, {"cases": [case]})
+                    self.assertEqual(
+                        len(corpus),
+                        1,
+                        f"{fixture.name}/{case_id}: case materialization mismatch",
+                    )
+                    nif_path = corpus[0]
+                    validation = validate_nif_for_parallax(nif_path)
+                    codes = [group.code for group in validation.conflict_report]
+                    self.assertFalse(
+                        any(code.startswith("fallback_or_unknown.") for code in codes),
+                        f"{fixture.name}/{case_id}: generic fallback conflict found: {codes}",
+                    )
+                    for prefix in case.get("expected_prefixes", []):
+                        self.assertTrue(
+                            any(code.startswith(str(prefix)) for code in codes),
+                            f"{fixture.name}/{case_id}: expected conflict prefix {prefix!r}, got {codes}",
+                        )
+                    for prefix in case.get("expected_absent_prefixes", []):
+                        self.assertFalse(
+                            any(code.startswith(str(prefix)) for code in codes),
+                            f"{fixture.name}/{case_id}: unexpected conflict prefix {prefix!r}, got {codes}",
+                        )
+
 
 class TestRealModSamplePacks(unittest.TestCase):
     def setUp(self) -> None:
@@ -5043,6 +5091,7 @@ class TestRealModSamplePacks(unittest.TestCase):
             "pack_fallout_architecture_real_shifted_envmap_glow_mixed",
             "pack_fallout_architecture_aevr_real_crlf_u16_shifted_parallax_envmap_mixed",
             "pack_fallout_parallax_scale_gate_profile",
+            "pack_fallout_architecture_real_crossblock_semantic_payload_slot3_drift_v10",
         }
         observed = 0
         for pack in packs:
