@@ -4639,10 +4639,16 @@ def _classify_conflict_code(message: str) -> str:
         return "shader_state.envmap_missing_slot5"
     if (
         "slsf1_environment_mapping is enabled" in lowered
-        and "slot 5 is empty" in lowered
-        and "add an _m.dds mask or disable the flag" in lowered
+        and "slot 5 is unresolved" in lowered
+        and "add or restore an _m.dds mask" in lowered
     ):
-        return "shader_state.envmap_missing_slot5.flag_set_slot5_empty"
+        if "(slot5=empty)" in lowered:
+            return "shader_state.envmap_missing_slot5.flag_set_slot5_empty"
+        if "(slot5=missing_on_disk)" in lowered:
+            return "shader_state.envmap_missing_slot5.flag_set_slot5_missing_on_disk"
+        return "shader_state.envmap_missing_slot5.flag_set_slot5_unresolved"
+    if "slsf1_environment_mapping is enabled but slot 5 env-mask path is missing on disk" in lowered:
+        return "shader_state.envmap_missing_slot5.flag_set_slot5_missing_on_disk"
     if "envmap and pom are enabled" in lowered and "required envmap textures are unresolved" in lowered:
         return "shader_state.envmap_pom_missing_env_slots"
     if "envmap + pom is active" in lowered and "required envmap textures are unresolved" in lowered:
@@ -5969,11 +5975,6 @@ def validate_nif_for_parallax(
                 result.suggestions,
                 "Enable environment mapping in BSLightingShaderProperty or clear slot 4 if this mesh should not be reflective."
             )
-        if info.has_env_mapping_flag and not env_mask_path:
-            _append_unique(
-                result.suggestions,
-                f"{bname}: SLSF1_Environment_Mapping is enabled but slot 5 is empty; add an _m.dds mask or disable the flag."
-            )
         env_mask_missing = _texture_slot_path_missing_near_nif(
             nif_path,
             env_mask_path,
@@ -5994,6 +5995,16 @@ def validate_nif_for_parallax(
             if not env_mask_path
             else ("missing_on_disk" if env_mask_missing else "resolved")
         )
+        if info.has_env_mapping_flag and (not env_mask_path or env_mask_missing):
+            _append_unique(
+                result.suggestions,
+                f"{bname}: SLSF1_Environment_Mapping is enabled but slot 5 is unresolved (slot5={slot5_state}); add or restore an _m.dds mask, or disable the flag."
+            )
+            if env_mask_missing:
+                _append_unique(
+                    result.issues,
+                    f"{bname}: SLSF1_Environment_Mapping is enabled but slot 5 env-mask path is missing on disk."
+                )
         if (
             info.shader_type == SHADER_TYPE_ENVMAP
             and (not env_mask_path or env_mask_missing)

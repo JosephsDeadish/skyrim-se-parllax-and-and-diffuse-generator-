@@ -1257,9 +1257,15 @@ class TestValidateNifForParallax(unittest.TestCase):
 
     def test_conflict_classifier_maps_envmap_flag_set_slot5_empty_hint(self) -> None:
         code = _classify_conflict_code(
-            "Block 2: SLSF1_Environment_Mapping is enabled but slot 5 is empty; add an _m.dds mask or disable the flag."
+            "Block 2: SLSF1_Environment_Mapping is enabled but slot 5 is unresolved (slot5=empty); add or restore an _m.dds mask, or disable the flag."
         )
         self.assertEqual(code, "shader_state.envmap_missing_slot5.flag_set_slot5_empty")
+
+    def test_conflict_classifier_maps_envmap_flag_set_slot5_missing_on_disk_hint(self) -> None:
+        code = _classify_conflict_code(
+            "Block 2: SLSF1_Environment_Mapping is enabled but slot 5 is unresolved (slot5=missing_on_disk); add or restore an _m.dds mask, or disable the flag."
+        )
+        self.assertEqual(code, "shader_state.envmap_missing_slot5.flag_set_slot5_missing_on_disk")
 
     def test_conflict_classifier_maps_default_fallback_unresolved_shader_resolution_notes(self) -> None:
         code = _classify_conflict_code(
@@ -1924,6 +1930,26 @@ class TestValidateNifForParallax(unittest.TestCase):
         v = validate_nif_for_parallax(nif)
         self.assertTrue(
             any(group.code.startswith("shader_state.envmap_missing_slot5.empty.") for group in v.conflict_report),
+            [group.code for group in v.conflict_report],
+        )
+
+    def test_conflict_report_flags_env_mapping_flag_with_slot5_missing_on_disk(self) -> None:
+        textures_arch = self.tmp / "textures" / "arch"
+        textures_arch.mkdir(parents=True, exist_ok=True)
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\missing_mask_m.dds"
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_DEFAULT,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            texture_paths=paths,
+        )
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(
+            any(
+                group.code.startswith("shader_state.envmap_missing_slot5.flag_set_slot5_missing_on_disk.")
+                for group in v.conflict_report
+            ),
             [group.code for group in v.conflict_report],
         )
 
@@ -5173,6 +5199,19 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         opts, steps = build_auto_remediation_patch_options(
             nif,
             ["shader_state.envmap_missing_slot5.skyrim.legacy"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(str(opts.env_mask_texture_path).lower().endswith("_m.dds"))
+        self.assertIn("set_slot5_env_mask_for_missing_envmap_slot5", steps)
+
+    def test_auto_remediation_build_options_sets_env_mask_for_flag_set_slot5_missing_on_disk_subcode(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT, texture_paths=paths)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["shader_state.envmap_missing_slot5.flag_set_slot5_missing_on_disk.skyrim.legacy"],
             backup=False,
         )
         self.assertIsNotNone(opts)
