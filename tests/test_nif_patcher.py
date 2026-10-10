@@ -1562,6 +1562,39 @@ class TestValidateNifForParallax(unittest.TestCase):
         joined = "\n".join(v.issues + v.suggestions).lower()
         self.assertIn("re-save", joined)
 
+    def test_reports_shifted_header_drift_values_for_fallout_style_malformed_headers(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            user_ver2=131,
+        )
+        raw = bytearray(nif.read_bytes())
+        header_line_end = raw.find(b"\n")
+        self.assertGreaterEqual(header_line_end, 0)
+        version_offset = header_line_end + 1
+        self.assertEqual(struct.unpack_from("<I", raw, version_offset)[0], 0x14020007)
+        # Simulate malformed Fallout-style drift where endianness byte carries user_version.
+        raw[version_offset + 4] = 11
+        struct.pack_into("<I", raw, version_offset + 5, 0)
+        nif.write_bytes(bytes(raw))
+
+        v = validate_nif_for_parallax(nif)
+        codes = {group.code for group in v.conflict_report}
+        self.assertTrue(
+            any(
+                code.startswith(
+                    "unsupported_header.profile_value_drift.u11_u2131.header_table_drift."
+                )
+                for code in codes
+            ),
+            codes,
+        )
+        self.assertFalse(
+            any(code.startswith("unsupported_header.profile_value_drift.unparsed.signature_only.") for code in codes),
+            codes,
+        )
+        self.assertFalse(any(code.startswith("fallback_or_unknown.") for code in codes), codes)
+
     def test_reports_legacy_shader_property_when_no_bslighting_blocks_exist(self) -> None:
         nif = _write_nif(self.tmp, shader_block_type="BSShaderPPLightingProperty")
         v = validate_nif_for_parallax(nif)

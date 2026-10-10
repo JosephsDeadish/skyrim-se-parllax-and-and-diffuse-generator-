@@ -123,7 +123,7 @@
             }
           ],
           "expected_prefixes": [
-            "unsupported_header.user_version_parse_failure."
+            "unsupported_header.profile_value_drift.u11_u2131.header_table_drift."
           ],
           "expected_no_auto_remediation": true,
           "pgpatcher_strategy": "attempt_crossblock_reflow",

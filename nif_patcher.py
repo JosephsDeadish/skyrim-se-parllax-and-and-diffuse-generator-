@@ -1188,6 +1188,21 @@ def _diagnose_header_parse_failure(data: bytes, exc: Exception) -> list[str]:
             ),
         )
         if header is None:
+            inferred_profile_values = _extract_shifted_user_profile_values(data)
+            if inferred_profile_values is not None:
+                user_version, user_version_2 = inferred_profile_values
+                diagnostics[0] = (
+                    "Malformed or truncated NIF: Unsupported NIF header/profile values "
+                    f"(user_version={user_version}, user_version_2={user_version_2}). "
+                    "Could not parse full header tables for this mesh; malformed export/header-table drift is likely."
+                )
+                diagnostics.append(
+                    "Header field alignment drift detected: endianness/stream-header fields were shifted from expected Skyrim offsets."
+                )
+                diagnostics.append(
+                    "Resolution: open the mesh in NifSkope or the Creation Kit and re-save/export it as a clean Skyrim or Fallout NIF, then run the patch again."
+                )
+                return diagnostics
             diagnostics.append(
                 "Could not parse user version fields from header; the file may be truncated or malformed."
             )
@@ -1258,6 +1273,40 @@ def _extract_quick_user_profile_values(data: bytes) -> tuple[int, int] | None:
         offset += 8  # skip user_version + num_blocks
         user_version_2 = struct.unpack_from("<I", data, offset)[0]
         return user_version, user_version_2
+    except (struct.error, ValueError, IndexError):
+        return None
+
+
+def _extract_shifted_user_profile_values(data: bytes) -> tuple[int, int] | None:
+    """Best-effort profile extraction for malformed headers with shifted fields.
+
+    Some Fallout-style malformed exports drift the header field alignment so that
+    the endianness byte contains ``user_version`` (commonly 11/12) while the
+    actual ``user_version`` u32 slot becomes zeroed or otherwise invalid. This
+    helper infers the intended profile values from those shifted fields.
+    """
+    try:
+        header_line_end = _find_header_terminator(data)
+        if header_line_end is None:
+            return None
+        header_line = data[:header_line_end]
+        if not _has_supported_header_prefix(header_line):
+            return None
+        offset = header_line_end
+        version = struct.unpack_from("<I", data, offset)[0]
+        if version != _NIF_VERSION_20_2_0_7:
+            return None
+        endianness_offset = offset + 4
+        endianness = struct.unpack_from("<B", data, endianness_offset)[0]
+        raw_user_version = struct.unpack_from("<I", data, endianness_offset + 1)[0]
+        raw_user_version_2 = struct.unpack_from("<I", data, endianness_offset + 9)[0]
+        if endianness not in (11, 12):
+            return None
+        if raw_user_version not in (0, 1):
+            return None
+        if raw_user_version_2 <= 0:
+            return None
+        return int(endianness), int(raw_user_version_2)
     except (struct.error, ValueError, IndexError):
         return None
 
@@ -4225,6 +4274,8 @@ def _classify_conflict_code(message: str) -> str:
         return base_code
     if "could not parse full header tables for this mesh" in lowered and "header-table drift" in lowered:
         return "unsupported_header.profile_value_drift.unparsed.header_table_drift"
+    if "header field alignment drift detected" in lowered:
+        return "unsupported_header.profile_value_drift.unparsed.header_field_alignment_drift"
     if "header-table drift is present alongside user-version mismatch" in lowered:
         return "unsupported_header.user_version_value_drift.header_table_drift"
     if "malformed header-table drift detected without recoverable profile values" in lowered:

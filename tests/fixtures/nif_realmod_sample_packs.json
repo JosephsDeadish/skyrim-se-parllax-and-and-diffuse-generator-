@@ -1127,7 +1127,7 @@
       ],
       "expected_top_manual_priority_prefixes": [
         "unsupported_header.reexport_resolution.",
-        "unsupported_header.profile_value_drift.unparsed.signature_only."
+        "fallout_profile.experimental_notice."
       ],
       "cases": [
         {
@@ -3953,7 +3953,7 @@
           "flags1": 128,
           "shader_size_delta": -84,
           "expected_prefixes": [
-            "unsupported_header.user_version_parse_failure."
+            "unsupported_header.profile_value_drift.u11_u2131.header_table_drift."
           ],
           "expected_absent_prefixes": [
             "fallback_or_unknown.fallout."
@@ -3981,7 +3981,7 @@
             }
           ],
           "expected_prefixes": [
-            "unsupported_header.user_version_parse_failure."
+            "unsupported_header.profile_value_drift.u11_u2131.header_table_drift."
           ],
           "expected_absent_prefixes": [
             "fallback_or_unknown.fallout."
@@ -4020,7 +4020,7 @@
             }
           ],
           "expected_prefixes": [
-            "unsupported_header.user_version_parse_failure."
+            "unsupported_header.profile_value_drift.u11_u2131.header_table_drift."
           ],
           "expected_absent_prefixes": [
             "fallback_or_unknown.fallout."

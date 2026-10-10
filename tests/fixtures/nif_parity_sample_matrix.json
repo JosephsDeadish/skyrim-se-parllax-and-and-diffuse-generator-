@@ -980,7 +980,7 @@
       "flags1": 128,
       "shader_size_delta": -84,
       "expected_prefixes": [
-        "unsupported_header.user_version_parse_failure."
+        "unsupported_header.profile_value_drift.u11_u2131.header_table_drift."
       ],
       "expected_no_auto_remediation": true,
       "pgpatcher_strategy": "attempt_binary_layout_recovery_then_continue",
@@ -1007,7 +1007,7 @@
         }
       ],
       "expected_prefixes": [
-        "unsupported_header.user_version_parse_failure."
+        "unsupported_header.profile_value_drift.u11_u2131.header_table_drift."
       ],
       "expected_no_auto_remediation": true,
       "pgpatcher_strategy": "attempt_crossblock_reflow_for_declared_block_size_drift",
@@ -1034,7 +1034,7 @@
         }
       ],
       "expected_prefixes": [
-        "unsupported_header.user_version_parse_failure."
+        "unsupported_header.profile_value_drift.u11_u2131.header_table_drift."
       ],
       "expected_no_auto_remediation": true,
       "pgpatcher_strategy": "attempt_partial_texture_set_reconstruction",
