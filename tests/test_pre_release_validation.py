@@ -389,6 +389,7 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         }
         self.assertEqual(fallout4_suffixes, {"_d.dds", "_n.dds"})
         self.assertIn("--target-game", scenario_by_name["fallout4_core_naming"].get("args", []))
+        self.assertIn("--environment-mask", scenario_by_name["architecture_base"].get("args", []))
         truepbr_suffixes = {
             str(value).lower() for value in scenario_by_name["truepbr"].get("required_suffixes", ())
         }

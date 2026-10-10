@@ -575,6 +575,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "args": [
                 "--render-profile",
                 "architecture",
+                "--environment-mask",
             ],
             "min_outputs": 4,
             "required_suffixes": ("_n.dds", "_p.dds", "_m.dds"),
