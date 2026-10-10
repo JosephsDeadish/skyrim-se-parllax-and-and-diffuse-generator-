@@ -174,26 +174,35 @@ def _resolve_packaged_smoke_binary(artifact_dir: Path) -> Path:
     raise SystemExit("Packaging smoke binary was not produced at expected dist path.")
 
 
-def _write_packaged_smoke_png(path: Path, size: int) -> None:
-    dimension = max(1, int(size))
+def _packaged_smoke_dimensions(size: int | tuple[int, int]) -> tuple[int, int]:
+    if isinstance(size, tuple):
+        width, height = size
+    else:
+        width = height = size
+    return max(1, int(width)), max(1, int(height))
+
+
+def _write_packaged_smoke_png(path: Path, size: int | tuple[int, int]) -> None:
+    width, height = _packaged_smoke_dimensions(size)
 
     def _chunk(kind: bytes, payload: bytes) -> bytes:
         body = kind + payload
         return struct.pack(">I", len(payload)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
 
-    header = struct.pack(">IIBBBBB", dimension, dimension, 8, 2, 0, 0, 0)
-    row = bytes((0,)) + bytes((112, 128, 144)) * dimension
-    compressed = zlib.compress(row * dimension)
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    row = bytes((0,)) + bytes((112, 128, 144)) * width
+    compressed = zlib.compress(row * height)
     png = b"\x89PNG\r\n\x1a\n" + _chunk(b"IHDR", header) + _chunk(b"IDAT", compressed) + _chunk(b"IEND", b"")
     path.write_bytes(png)
 
 
-def _write_packaged_smoke_dds(path: Path, size: int) -> None:
+def _write_packaged_smoke_dds(path: Path, size: int | tuple[int, int]) -> None:
     from PIL import Image
 
-    dimension = max(4, int(size))
-    dimension = (dimension + 3) // 4 * 4
-    Image.new("RGB", (dimension, dimension), (112, 128, 144)).save(
+    width, height = _packaged_smoke_dimensions(size)
+    width = max(4, (width + 3) // 4 * 4)
+    height = max(4, (height + 3) // 4 * 4)
+    Image.new("RGB", (width, height), (112, 128, 144)).save(
         path,
         format="DDS",
         pixel_format="DXT5",
@@ -630,7 +639,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
                 "--wetness-mask",
                 "--snow-mask",
             ],
-            "input_size": 128,
+            "input_dimensions": (128, 96),
             "min_outputs": 7,
             "required_suffixes": ("_n.dds", "_p.dds", "_cm.dds", "_m.dds", "_wt.dds", "_sm.dds"),
             "required_exact_suffix_counts": {
@@ -804,7 +813,9 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
         for scenario in scenarios:
             scenario_name = str(scenario.get("name", "scenario")).strip() or "scenario"
             scenario_args = [str(arg) for arg in (scenario.get("args", []) or [])]
-            input_size = max(1, int(scenario.get("input_size", 2) or 2))
+            input_dimensions = _packaged_smoke_dimensions(
+                scenario.get("input_dimensions", int(scenario.get("input_size", 2) or 2))
+            )
             input_count = max(1, int(scenario.get("input_count", 1) or 1))
             input_format = str(scenario.get("input_format", "png")).strip().lower()
             if input_format not in {"dds", "png"}:
@@ -815,14 +826,14 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                 smoke_input = smoke_io / f"inputs_{scenario_name}"
                 smoke_input.mkdir(parents=True, exist_ok=True)
                 for input_index in range(input_count):
-                    input_writer(smoke_input / f"sample_{input_index + 1:02d}{input_suffix}", input_size)
+                    input_writer(smoke_input / f"sample_{input_index + 1:02d}{input_suffix}", input_dimensions)
                 if bool(scenario.get("interruption_resume", False)):
                     (smoke_input / f"sample_{input_count:02d}{input_suffix}").write_bytes(
                         b"synthetic interrupted-run input"
                     )
             else:
                 smoke_input = smoke_io / f"sample_{scenario_name}{input_suffix}"
-                input_writer(smoke_input, input_size)
+                input_writer(smoke_input, input_dimensions)
             min_outputs = max(1, int(scenario.get("min_outputs", 1) or 1))
             required_suffixes = tuple(
                 str(suffix).strip().lower()
@@ -924,7 +935,7 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                         f"{len(completed_files)} successful inputs; expected {input_count - 1}."
                     )
                 repaired_input = smoke_input / f"sample_{input_count:02d}{input_suffix}"
-                input_writer(repaired_input, input_size)
+                input_writer(repaired_input, input_dimensions)
                 resumed_initial = subprocess.run(
                     [*run_args, "--resume-checkpoint"],
                     cwd=REPO_ROOT,
@@ -973,10 +984,10 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                         f"Packaged executable smoke run for '{scenario_name}' produced an invalid "
                         f"DDS output: {exc}"
                     ) from exc
-                if output_dimensions != (input_size, input_size):
+                if output_dimensions != input_dimensions:
                     raise SystemExit(
                         f"Packaged executable smoke run for '{scenario_name}' produced "
-                        f"'{output_path.name}' at {output_dimensions}; expected {(input_size, input_size)}."
+                        f"'{output_path.name}' at {output_dimensions}; expected {input_dimensions}."
                     )
             produced_names = [path.name.lower() for path in produced_dds]
             specialized_suffixes = (

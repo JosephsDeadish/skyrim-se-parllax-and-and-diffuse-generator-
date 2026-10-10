@@ -16,11 +16,13 @@ from scripts.pre_release_validation import (
     _collect_localization_coverage,
     _load_prior_bucket_distribution,
     _load_realmod_pack_payload,
+    _packaged_smoke_dimensions,
     _packaged_smoke_scenarios,
     _read_packaged_smoke_dds_dimensions,
     _resolve_seed_realmod_delta_files,
     _run_repository_hygiene_scan,
     _resolve_packaged_smoke_binary,
+    _write_packaged_smoke_png,
 )
 
 
@@ -352,6 +354,12 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         )
         self.assertEqual(_read_packaged_smoke_dds_dimensions(dds_path), (128, 96))
 
+    def test_packaged_smoke_png_writer_accepts_rectangular_dimensions(self) -> None:
+        png_path = self.tmp / "sample.png"
+        _write_packaged_smoke_png(png_path, (48, 32))
+        self.assertEqual(struct.unpack(">II", png_path.read_bytes()[16:24]), (48, 32))
+        self.assertEqual(_packaged_smoke_dimensions(24), (24, 24))
+
     def test_packaged_smoke_scenarios_define_required_outputs(self) -> None:
         scenarios = _packaged_smoke_scenarios()
         scenario_by_name = {
@@ -435,7 +443,7 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         self.assertEqual(scenario_by_name["community_shaders"].get("input_size"), 64)
         self.assertEqual(scenario_by_name["truepbr"].get("input_size"), 32)
         high_resolution_scenario = scenario_by_name["community_shaders_high_resolution_wet_snow"]
-        self.assertEqual(high_resolution_scenario.get("input_size"), 128)
+        self.assertEqual(high_resolution_scenario.get("input_dimensions"), (128, 96))
         self.assertEqual(
             high_resolution_scenario.get("required_exact_output_family_counts"),
             {
