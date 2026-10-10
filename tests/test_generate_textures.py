@@ -4525,6 +4525,7 @@ class GenerateTexturesTests(unittest.TestCase):
         fake_gui.is_processing = is_processing
         fake_gui.processing_queue = queue.Queue()
         fake_gui.status_var = _Var("")
+        fake_gui.batch_perf_hint_var = _Var("")
         fake_gui.show_batch_preview_var = _Var(show_batch_preview)
         fake_gui.batch_nif_patch_results = []
         fake_gui.batch_failures = []
@@ -4567,6 +4568,19 @@ class GenerateTexturesTests(unittest.TestCase):
 
         self.assertIn("Processing 1/3: stone.dds", fake_gui.status_var.get())
         fake_gui._set_preview_source_by_path.assert_called_once_with(current)
+        self.assertEqual(fake_gui.root.after_calls[0][0], 100)
+
+    def test_gui_processing_queue_reports_recovery_after_high_backlog_drains(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False, is_processing=True)
+        fake_gui._queue_high_backlog_seen = True
+        fake_gui.processing_queue.put(("progress", (10, 100, Path("test.dds"))))
+
+        TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        self.assertIn("Queue recovered to normal", fake_gui.batch_perf_hint_var.get())
+        self.assertFalse(fake_gui._queue_high_backlog_seen)
         self.assertEqual(fake_gui.root.after_calls[0][0], 100)
 
     def test_gui_processing_queue_smoke_nif_patch_event_updates_status_and_counts(self) -> None:

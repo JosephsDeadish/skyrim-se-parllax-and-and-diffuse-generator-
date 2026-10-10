@@ -7886,6 +7886,7 @@ if GUI_AVAILABLE:
             self._last_live_batch_preview_index = 0
             self._max_observed_queue_backlog = 0
             self._queue_backlog_notice_emitted = False
+            self._queue_high_backlog_seen = False
             self._active_batch_max_source_pixels = 0
             self._active_batch_high_res_8k_count = 0
             self.normal_strength_var = tk.DoubleVar(value=2.0)
@@ -9997,6 +9998,7 @@ if GUI_AVAILABLE:
             else:
                 self._max_observed_queue_backlog = 0
                 self._queue_backlog_notice_emitted = False
+                self._queue_high_backlog_seen = False
             self._update_output_location_controls()
             self._update_preview_navigation_state()
 
@@ -10247,6 +10249,8 @@ if GUI_AVAILABLE:
                     )
                 )
                 self._queue_backlog_notice_emitted = True
+            if self.is_processing and queue_backlog >= 128:
+                self._queue_high_backlog_seen = True
             if self.is_processing and queue_backlog >= 512:
                 self.batch_perf_hint_var.set(
                     self._tr(
@@ -10492,6 +10496,11 @@ if GUI_AVAILABLE:
                     break
 
             if keep_polling and self.is_processing:
+                if queue_backlog < 64 and bool(getattr(self, "_queue_high_backlog_seen", False)):
+                    self.batch_perf_hint_var.set(
+                        self._tr("Queue recovered to normal; UI responsiveness restored.")
+                    )
+                    self._queue_high_backlog_seen = False
                 self.root.after(100, self._poll_processing_queue)
 
         def _toggle_auto_suggestions(self) -> None:
