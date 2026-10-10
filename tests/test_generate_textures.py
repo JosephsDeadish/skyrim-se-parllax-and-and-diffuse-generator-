@@ -4273,6 +4273,135 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(resumed_state["resumed_completed_count"], 8)
             self.assertEqual(resumed_state["completed_success_count"], 12)
 
+    def test_gui_batch_worker_cancellation_checkpoint_resumes_long_run(self) -> None:
+        if not all(
+            hasattr(TextureGeneratorGUI, name)
+            for name in (
+                "_process_generation_batch",
+                "_record_created_outputs",
+                "_write_batch_checkpoint_state",
+            )
+        ):
+            self.skipTest("Tk batch worker is unavailable in this environment.")
+
+        class _BatchWorker:
+            _record_created_outputs = TextureGeneratorGUI._record_created_outputs
+            _write_batch_checkpoint_state = TextureGeneratorGUI._write_batch_checkpoint_state
+
+            def __init__(self) -> None:
+                self.cancel_requested = False
+                self.processing_queue = queue.Queue()
+                self.last_generation_backups: dict[Path, Path] = {}
+                self.last_generation_created_files: set[Path] = set()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "out"
+            checkpoint = root / "batch_checkpoint.json"
+            input_dir.mkdir()
+            dimensions = {
+                f"source_{index:02d}": (8 + (index % 4) * 4, 8 + (index % 3) * 4)
+                for index in range(48)
+            }
+            input_files = []
+            for name, size in dimensions.items():
+                input_file = input_dir / f"{name}.dds"
+                Image.new("RGB", size, color=(60, 100, 140)).save(
+                    input_file,
+                    format="DDS",
+                    pixel_format="DXT5",
+                )
+                input_files.append(input_file)
+
+            worker = _BatchWorker()
+            interrupted_after = 11
+            first_attempts: list[str] = []
+
+            def cancel_after_completed_files(**kwargs: object) -> dict[str, Path]:
+                input_file = kwargs["input_file"]
+                assert isinstance(input_file, Path)
+                first_attempts.append(input_file.stem)
+                if len(first_attempts) == interrupted_after:
+                    worker.cancel_requested = True
+                return {
+                    "diffuse": output_dir / f"{input_file.stem}.dds",
+                    "normal": output_dir / f"{input_file.stem}_n.dds",
+                }
+
+            with mock.patch(
+                "generate_textures.run_with_options",
+                side_effect=cancel_after_completed_files,
+            ):
+                TextureGeneratorGUI._process_generation_batch(
+                    worker,
+                    input_files,
+                    {"output_dir": output_dir},
+                    input_dir,
+                    checkpoint,
+                    set(),
+                    0,
+                )
+
+            cancelled_event = worker.processing_queue.get_nowait()
+            self.assertEqual(cancelled_event[0], "cancelled")
+            self.assertTrue(worker.processing_queue.empty())
+            cancelled_results, cancellation_telemetry = cancelled_event[1]
+            self.assertEqual(first_attempts, [f"source_{index:02d}" for index in range(interrupted_after)])
+            self.assertEqual(len(cancelled_results), interrupted_after)
+            self.assertEqual(cancellation_telemetry["checkpoint_path"], str(checkpoint))
+            interrupted_state = json.loads(checkpoint.read_text(encoding="utf-8"))
+            completed_before_resume = [
+                str((input_dir / f"source_{index:02d}.dds").resolve())
+                for index in range(interrupted_after)
+            ]
+            self.assertEqual(interrupted_state["completed_success_files"], completed_before_resume)
+
+            remaining_files = [
+                input_file
+                for input_file in input_files
+                if str(input_file.resolve()) not in interrupted_state["completed_success_files"]
+            ]
+            resumed_attempts: list[str] = []
+
+            def complete_remaining_files(**kwargs: object) -> dict[str, Path]:
+                input_file = kwargs["input_file"]
+                assert isinstance(input_file, Path)
+                resumed_attempts.append(input_file.stem)
+                return {
+                    "diffuse": output_dir / f"{input_file.stem}.dds",
+                    "normal": output_dir / f"{input_file.stem}_n.dds",
+                }
+
+            worker.cancel_requested = False
+            with mock.patch(
+                "generate_textures.run_with_options",
+                side_effect=complete_remaining_files,
+            ):
+                TextureGeneratorGUI._process_generation_batch(
+                    worker,
+                    remaining_files,
+                    {"output_dir": output_dir},
+                    input_dir,
+                    checkpoint,
+                    set(interrupted_state["completed_success_files"]),
+                    interrupted_after,
+                )
+
+            done_event = worker.processing_queue.get_nowait()
+            self.assertEqual(done_event[0], "done")
+            self.assertTrue(worker.processing_queue.empty())
+            resumed_results, resumed_telemetry = done_event[1]
+            self.assertEqual(
+                resumed_attempts,
+                [f"source_{index:02d}" for index in range(interrupted_after, len(dimensions))],
+            )
+            self.assertEqual(len(resumed_results), len(dimensions) - interrupted_after)
+            self.assertEqual(resumed_telemetry["resumed_completed_count"], interrupted_after)
+            completed_state = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(completed_state["completed_success_count"], len(dimensions))
+            self.assertEqual(completed_state["resumed_completed_count"], interrupted_after)
+
     def test_run_batch_with_options_recovers_failed_file_under_parallel_queue_pressure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -4281,7 +4410,7 @@ class GenerateTexturesTests(unittest.TestCase):
             checkpoint = temp_path / "batch_checkpoint.json"
             telemetry = temp_path / "batch_telemetry.json"
             input_dir.mkdir()
-            input_count = 24
+            input_count = 40
             dimensions = {
                 f"source_{index:02d}": (8 + (index % 4) * 4, 8 + (index % 3) * 4)
                 for index in range(input_count)
