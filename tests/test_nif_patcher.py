@@ -1211,13 +1211,38 @@ class TestValidateNifForParallax(unittest.TestCase):
         code = _classify_conflict_code(
             "Unsupported NIF header/profile values (user_version=?, user_version_2=?)."
         )
-        self.assertEqual(code, "unsupported_header.profile_value_drift.unparsed")
+        self.assertEqual(
+            code,
+            "unsupported_header.profile_value_drift.unparsed.user_version_unknown_token.user_version_2_unknown_token",
+        )
 
     def test_conflict_classifier_maps_unparsed_unexpected_user_values_to_explicit_subcode(self) -> None:
         code = _classify_conflict_code(
             "Unexpected user version values (unknown, unknown). Expected Skyrim variants."
         )
-        self.assertEqual(code, "unsupported_header.user_version_value_drift.unparsed")
+        self.assertEqual(
+            code,
+            "unsupported_header.user_version_value_drift.unparsed.user_version_unknown_token.user_version_2_unknown_token.expected_skyrim_variants",
+        )
+
+    def test_conflict_classifier_maps_non_numeric_unparsed_header_values_to_token_subcodes(self) -> None:
+        code = _classify_conflict_code(
+            "Unsupported NIF header/profile values (user_version=abc, user_version_2=0x83)."
+        )
+        self.assertEqual(
+            code,
+            "unsupported_header.profile_value_drift.unparsed.user_version_non_numeric_token.user_version_2_hex_token",
+        )
+
+    def test_conflict_classifier_maps_prewrite_header_validation_failure_to_explicit_subcode(self) -> None:
+        code = _classify_conflict_code(
+            "Pre-write header validation failed: unsupported NIF header/profile values."
+        )
+        self.assertEqual(code, "unsupported_header.profile_value_drift.prewrite_validation")
+
+    def test_conflict_classifier_maps_strict_validation_header_failure_to_explicit_subcode(self) -> None:
+        code = _classify_conflict_code("Unsupported NIF header/profile values")
+        self.assertEqual(code, "unsupported_header.profile_value_drift.unparsed.strict_validation")
 
     def test_conflict_classifier_maps_slot3_empty_with_flag_unset_subcode(self) -> None:
         code = _classify_conflict_code(

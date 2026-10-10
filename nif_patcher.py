@@ -4278,6 +4278,14 @@ _UNSUPPORTED_PROFILE_VALUES_RE = re.compile(
     r"unsupported nif header/profile values\s*\(\s*user_version\s*=\s*(\d+)\s*,\s*user_version_2\s*=\s*(\d+)\s*\)",
     re.IGNORECASE,
 )
+_UNSUPPORTED_PROFILE_VALUES_ANY_RE = re.compile(
+    r"unsupported nif header/profile values\s*\(\s*user_version\s*=\s*([^,\)]+)\s*,\s*user_version_2\s*=\s*([^\)]+)\s*\)",
+    re.IGNORECASE,
+)
+_UNEXPECTED_USER_VERSION_VALUES_ANY_RE = re.compile(
+    r"unexpected user version values\s*\(\s*([^,\)]+)\s*,\s*([^\)]+)\s*\)",
+    re.IGNORECASE,
+)
 _SLOT_STATE_RE = re.compile(r"slot([2345])=(empty|missing_on_disk|resolved)", re.IGNORECASE)
 
 
@@ -4293,6 +4301,19 @@ def _extract_slot_states(message: str) -> dict[str, str]:
     for match in _SLOT_STATE_RE.finditer(message):
         states[match.group(1)] = match.group(2).lower()
     return states
+
+
+def _tokenize_unparsed_version_value(raw_value: str) -> str:
+    token = raw_value.strip().lower()
+    if token in {"?", "unknown", "unk", "n/a", "na", "none", "null"}:
+        return "unknown_token"
+    if re.fullmatch(r"0x[0-9a-f]+", token):
+        return "hex_token"
+    if re.fullmatch(r"[-+]?\d+", token):
+        return "signed_numeric_token"
+    if not token:
+        return "empty_token"
+    return "non_numeric_token"
 
 
 def _extract_block_index(message: str) -> int | None:
@@ -4365,6 +4386,30 @@ def _classify_conflict_code(message: str) -> str:
         if _is_fallout_signature_drift(user_version, user_version_2):
             base_code += ".fallout_signature_drift"
         return base_code
+    unexpected_user_versions_any = _UNEXPECTED_USER_VERSION_VALUES_ANY_RE.search(message)
+    if unexpected_user_versions_any:
+        user_version_token = _tokenize_unparsed_version_value(unexpected_user_versions_any.group(1))
+        user_version_2_token = _tokenize_unparsed_version_value(unexpected_user_versions_any.group(2))
+        base_code = (
+            "unsupported_header.user_version_value_drift.unparsed."
+            f"user_version_{user_version_token}.user_version_2_{user_version_2_token}"
+        )
+        if "expected skyrim variants" in lowered:
+            base_code += ".expected_skyrim_variants"
+        if "could not parse full header tables" in lowered:
+            base_code += ".header_table_drift"
+        return base_code
+    unsupported_profile_values_any = _UNSUPPORTED_PROFILE_VALUES_ANY_RE.search(message)
+    if unsupported_profile_values_any:
+        user_version_token = _tokenize_unparsed_version_value(unsupported_profile_values_any.group(1))
+        user_version_2_token = _tokenize_unparsed_version_value(unsupported_profile_values_any.group(2))
+        base_code = (
+            "unsupported_header.profile_value_drift.unparsed."
+            f"user_version_{user_version_token}.user_version_2_{user_version_2_token}"
+        )
+        if "could not parse full header tables" in lowered:
+            base_code += ".header_table_drift"
+        return base_code
     if "could not parse full header tables for this mesh" in lowered and "header-table drift" in lowered:
         return "unsupported_header.profile_value_drift.unparsed.header_table_drift"
     if "header field alignment drift detected" in lowered:
@@ -4375,9 +4420,21 @@ def _classify_conflict_code(message: str) -> str:
         return "unsupported_header.profile_value_drift.unparsed.header_table_drift"
     if "malformed header-table drift signature detected without stable profile values" in lowered:
         return "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift"
+    if lowered.startswith("pre-write header validation failed: unsupported nif header/profile values"):
+        return "unsupported_header.profile_value_drift.prewrite_validation"
+    if lowered.strip() == "unsupported nif header/profile values":
+        return "unsupported_header.profile_value_drift.unparsed.strict_validation"
     if "unsupported nif header/profile values" in lowered:
+        if "expected skyrim variants" in lowered:
+            return "unsupported_header.profile_value_drift.unparsed.expected_skyrim_variants"
+        if "different game/export format" in lowered:
+            return "unsupported_header.profile_value_drift.unparsed.different_export_format"
         return "unsupported_header.profile_value_drift.unparsed"
     if "unexpected user version values" in lowered:
+        if "expected skyrim variants" in lowered:
+            return "unsupported_header.user_version_value_drift.unparsed.expected_skyrim_variants"
+        if "different game/export format" in lowered:
+            return "unsupported_header.user_version_value_drift.unparsed.different_export_format"
         return "unsupported_header.user_version_value_drift.unparsed"
     if "header prefix is not a skyrim/gamebryo 20.2.0.7 nif" in lowered:
         return "unsupported_header.header_prefix_mismatch"
