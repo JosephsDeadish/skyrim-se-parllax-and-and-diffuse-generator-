@@ -4560,6 +4560,7 @@ class GenerateTexturesTests(unittest.TestCase):
             side_effect=lambda active: setattr(fake_gui, "is_processing", bool(active))
         )
         fake_gui._refresh_preview = mock.Mock()
+        fake_gui._tr = lambda text: text
         return fake_gui
 
     def test_gui_processing_queue_smoke_done_event_reports_outputs_failures_and_autopatch(self) -> None:
@@ -4574,8 +4575,8 @@ class GenerateTexturesTests(unittest.TestCase):
             TextureGeneratorGUI._poll_processing_queue(fake_gui)
 
         self.assertFalse(fake_gui.is_processing)
-        self.assertIn("Generated 1 file(s)", fake_gui.status_var.get())
-        self.assertIn("Failed: 1", fake_gui.status_var.get())
+        self.assertIn("processed 1/1, generated 1", fake_gui.status_var.get())
+        self.assertIn("failed 1", fake_gui.status_var.get())
         showinfo.assert_called_once()
         shown_message = showinfo.call_args.args[1]
         self.assertIn("Automatic NIF patching: 2 succeeded, 1 failed.", shown_message)
