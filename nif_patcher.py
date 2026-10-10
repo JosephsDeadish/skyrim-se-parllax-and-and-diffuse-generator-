@@ -4698,8 +4698,9 @@ def _build_conflict_report(
             block_code_sets.setdefault(bucket_key, set()).add(base_code)
 
     for (profile, layout, block_idx), block_codes in block_code_sets.items():
+        has_missing_slot3_empty = any(code.startswith("missing_parallax_slot3.empty") for code in block_codes)
         if (
-            "missing_parallax_slot3.empty" in block_codes
+            has_missing_slot3_empty
             and "unknown_shader_type.default_fallback_unresolved" in block_codes
         ):
             default_fallback_slot3_real_layout_combo_counts[(profile, layout)] = (
@@ -4714,7 +4715,7 @@ def _build_conflict_report(
         if layout != "real":
             continue
         if (
-            "missing_parallax_slot3.empty" in block_codes
+            has_missing_slot3_empty
             and any(code.startswith("unknown_shader_type.semantic_resolved") for code in block_codes)
         ):
             semantic_slot3_real_layout_combo_counts[(profile, layout)] = (
@@ -4727,7 +4728,7 @@ def _build_conflict_report(
                 f"Block {block_idx}: real-layout drift combo detected — semantic shader resolution is present while slot 3 remains unresolved."
             )
         if (
-            "missing_parallax_slot3.empty" in block_codes
+            has_missing_slot3_empty
             and "unknown_shader_type.payload_resolved" in block_codes
         ):
             payload_slot3_real_layout_combo_counts[(profile, layout)] = (
@@ -5107,7 +5108,7 @@ def build_auto_remediation_patch_options(
         any(code.startswith("missing_parallax_slot3.empty.semantic_resolved_real_layout_drift") for code in base_codes)
         or (
             has_real_layout_conflict
-            and "missing_parallax_slot3.empty" in base_codes
+            and any(code.startswith("missing_parallax_slot3.empty") for code in base_codes)
             and any(code.startswith("unknown_shader_type.semantic_resolved") for code in base_codes)
         )
     )
@@ -5127,7 +5128,7 @@ def build_auto_remediation_patch_options(
         any(code.startswith("missing_parallax_slot3.empty.payload_resolved_real_layout_drift") for code in base_codes)
         or (
             has_real_layout_conflict
-            and "missing_parallax_slot3.empty" in base_codes
+            and any(code.startswith("missing_parallax_slot3.empty") for code in base_codes)
             and "unknown_shader_type.payload_resolved" in base_codes
         )
     )
@@ -5135,7 +5136,7 @@ def build_auto_remediation_patch_options(
         any(code.startswith("missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift") for code in base_codes)
         or (
             has_real_layout_conflict
-            and "missing_parallax_slot3.empty" in base_codes
+            and any(code.startswith("missing_parallax_slot3.empty") for code in base_codes)
             and "unknown_shader_type.default_fallback_unresolved" in base_codes
         )
     )
