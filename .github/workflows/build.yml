@@ -153,76 +153,48 @@ jobs:
       - name: Smoke run packaged executable
         run: .\dist\generate_textures.exe --help
 
+      - name: Smoke launch packaged Tk GUI
+        shell: pwsh
+        run: |
+          $process = Start-Process -FilePath ".\dist\generate_textures.exe" -ArgumentList @("--gui", "--gui-backend", "tk") -PassThru
+          $deadline = (Get-Date).AddSeconds(20)
+          do {
+            $process.Refresh()
+            if ($process.HasExited) {
+              throw "Packaged Tk GUI exited during startup (exit code $($process.ExitCode))."
+            }
+            if ($process.MainWindowHandle -ne 0) {
+              break
+            }
+            Start-Sleep -Seconds 1
+          } while ((Get-Date) -lt $deadline)
+          if ($process.MainWindowHandle -eq 0) {
+            throw "Packaged Tk GUI remained alive but did not create a main window."
+          }
+          Stop-Process -Id $process.Id -Force
+
       - name: End-to-end packaged executable smoke generation
         run: |
           python - <<'PY'
-          import base64
+          import shutil
           from pathlib import Path
-          import subprocess
-          from scripts.pre_release_validation import _packaged_smoke_scenarios
+          from scripts.pre_release_validation import _run_packaged_executable_smoke
 
-          smoke_root = Path("artifacts") / "packaged_smoke"
-          smoke_root.mkdir(parents=True, exist_ok=True)
-          input_png = smoke_root / "sample_input.png"
-          input_png.write_bytes(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP8z8Dwn4GBgYGJAQoAHxcCAr7cGDwAAAAASUVORK5CYII="))
-          binary = str(Path("dist") / "generate_textures.exe")
-          scenarios = _packaged_smoke_scenarios()
-          for loop_index in range(1, 4):
-              for scenario in scenarios:
-                  scenario_name = str(scenario.get("name", "scenario")).strip() or "scenario"
-                  scenario_args = [str(arg) for arg in (scenario.get("args", []) or [])]
-                  min_outputs = max(1, int(scenario.get("min_outputs", 1) or 1))
-                  required_suffixes = tuple(
-                      str(suffix).strip().lower()
-                      for suffix in (scenario.get("required_suffixes", ()) or ())
-                      if str(suffix).strip()
-                  )
-                  forbidden_suffixes = tuple(
-                      str(suffix).strip().lower()
-                      for suffix in (scenario.get("forbidden_suffixes", ()) or ())
-                      if str(suffix).strip()
-                  )
-                  required_sidecar_suffixes = tuple(
-                      str(suffix).strip().lower()
-                      for suffix in (scenario.get("required_sidecar_suffixes", ()) or ())
-                      if str(suffix).strip()
-                  )
-                  smoke_out = smoke_root / f"out_loop{loop_index}_{scenario_name}"
-                  smoke_out.mkdir(parents=True, exist_ok=True)
-                  cmd = [binary, str(input_png), "--output-dir", str(smoke_out), *scenario_args]
-                  completed = subprocess.run(cmd, capture_output=True, text=True)
-                  if completed.returncode != 0:
-                      raise SystemExit(completed.returncode)
-                  produced_dds = sorted(smoke_out.glob("*.dds"))
-                  if len(produced_dds) < min_outputs:
-                      raise SystemExit(
-                          f"Scenario '{scenario_name}' produced {len(produced_dds)} DDS file(s); expected at least {min_outputs}."
-                      )
-                  produced_names = [path.name.lower() for path in produced_dds]
-                  for suffix in required_suffixes:
-                      if not any(name.endswith(suffix) for name in produced_names):
-                          raise SystemExit(
-                              f"Scenario '{scenario_name}' missing required suffix '{suffix}'. Produced: {produced_names}"
-                          )
-                  for suffix in forbidden_suffixes:
-                      if any(name.endswith(suffix) for name in produced_names):
-                          raise SystemExit(
-                              f"Scenario '{scenario_name}' produced forbidden suffix '{suffix}'. Produced: {produced_names}"
-                          )
-                  if required_sidecar_suffixes:
-                      produced_all = [path.name.lower() for path in smoke_out.glob("*")]
-                      for suffix in required_sidecar_suffixes:
-                          if not any(name.endswith(suffix) for name in produced_all):
-                              raise SystemExit(
-                                  f"Scenario '{scenario_name}' missing required sidecar suffix '{suffix}'. Produced: {produced_all}"
-                              )
+          artifact_dir = Path("artifacts")
+          smoke_dist = artifact_dir / "packaging_smoke" / "dist"
+          smoke_dist.mkdir(parents=True, exist_ok=True)
+          shutil.copy2(
+              Path("dist") / "generate_textures.exe",
+              smoke_dist / "generate_textures_smoke.exe",
+          )
+          _run_packaged_executable_smoke(artifact_dir, loops=3)
           PY
 
       - name: Upload packaged smoke artifacts
         uses: actions/upload-artifact@v4
         with:
           name: packaged-smoke-artifacts
-          path: artifacts/packaged_smoke
+          path: artifacts/packaging_smoke
           if-no-files-found: error
 
       - name: Create application zip

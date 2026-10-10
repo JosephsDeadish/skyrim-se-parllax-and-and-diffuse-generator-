@@ -5311,6 +5311,53 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertFalse(any(code.startswith("flag_env_mapping.") for code in after_codes))
         self.assertFalse(any(code.startswith("flag_glow_map.") for code in after_codes))
 
+    def test_fallout_guarded_remediation_preserves_unrelated_flags_and_texture_slots(self) -> None:
+        paths = [
+            "textures\\keep\\stone.dds",
+            "textures\\keep\\stone_n.dds",
+            "textures\\keep\\stone_g.dds",
+            "textures\\keep\\stone_p.dds",
+            "textures\\keep\\stone_e.dds",
+            "textures\\keep\\stone_m.dds",
+            "textures\\keep\\slot6.dds",
+            "textures\\keep\\slot7.dds",
+            "textures\\keep\\slot8.dds",
+        ]
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            user_ver2=130,
+            shader_type=SHADER_TYPE_HEIGHTMAP,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            flags2=SLSF2_GLOW_MAP | SLSF2_VERTEX_COLORS,
+            texture_paths=paths,
+        )
+        _rewrite_user_version(nif, 11)
+        before = scan_nif(nif)[0]
+        codes = [group.code for group in validate_nif_for_parallax(nif).conflict_report]
+        self.assertTrue(
+            any(code.startswith("missing_parallax_flag.") for code in codes),
+            codes,
+        )
+
+        result, steps = auto_remediate_nif_conflicts(
+            nif,
+            codes,
+            target_game="fallout",
+            experimental_fallout_write=True,
+            backup=False,
+        )
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertTrue(result.success, result.errors)
+        self.assertIn("enable_parallax", steps)
+        after = scan_nif(nif)[0]
+        self.assertTrue(after.has_parallax_flag)
+        self.assertEqual(after.flags1 & ~SLSF1_PARALLAX, before.flags1)
+        self.assertEqual(after.flags2, before.flags2)
+        self.assertEqual(after.texture_paths, before.texture_paths)
+
     def test_auto_remediation_build_options_carries_fallout_gate_flags(self) -> None:
         nif = _write_nif(self.tmp, user_ver2=130)
         _rewrite_user_version(nif, 11)
@@ -5535,6 +5582,7 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         paths = ["textures\\effects\\magic\\fxrunes.dds"] + [""] * 8
         nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT, texture_paths=paths, user_ver2=131)
         _rewrite_user_version(nif, 11)
+        original = nif.read_bytes()
         opts, _steps = build_auto_remediation_patch_options(
             nif,
             ["shader_state.crossblock_texture_ref_drift_mixed_slots.fallout.real"],
@@ -5543,6 +5591,15 @@ class TestAutoRemediationExecutor(unittest.TestCase):
             experimental_fallout_write=True,
         )
         self.assertIsNone(opts)
+        result, _steps = auto_remediate_nif_conflicts(
+            nif,
+            ["shader_state.crossblock_texture_ref_drift_mixed_slots.fallout.real"],
+            target_game="fallout",
+            experimental_fallout_write=True,
+            backup=False,
+        )
+        self.assertIsNone(result)
+        self.assertEqual(nif.read_bytes(), original)
 
     def test_auto_remediation_build_options_prefers_slot3_restore_for_real_layout_resolved_slot3_combo(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8
