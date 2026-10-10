@@ -5376,12 +5376,12 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         before = scan_nif(nif)
         validation = validate_nif_for_parallax(nif)
         before_codes = [group.code for group in validation.conflict_report]
-        for prefix in (
+        for code in (
             "missing_parallax_flag.flag1_not_set.fallout.real",
             "path_slot_parallax.matches_diffuse.fallout.real",
-            "shader_state.envmap_glow_missing_slots2_4_5.",
+            "shader_state.envmap_glow_missing_slots2_4_5.slot2_empty_slot4_empty_slot5_empty.fallout.real",
         ):
-            self.assertTrue(any(code.startswith(prefix) for code in before_codes), before_codes)
+            self.assertIn(code, before_codes)
 
         parallax_flag_code = next(
             code for code in before_codes if code.startswith("missing_parallax_flag.flag1_not_set.")
