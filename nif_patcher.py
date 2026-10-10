@@ -4017,6 +4017,15 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "unknown_shader_type.semantic_resolved": (
         "Unknown raw shader type was semantically inferred from flags/slots; verify block intent manually when processing malformed long-tail meshes.",
     ),
+    "unknown_shader_type.semantic_resolved.envmap": (
+        "Unknown raw shader type was semantically inferred as EnvMap; verify slot 4/5 intent and environment mapping flags before auto-remediation.",
+    ),
+    "unknown_shader_type.semantic_resolved.default": (
+        "Unknown raw shader type was semantically inferred as Default; verify whether this block should remain non-parallax or be upgraded to Heightmap intentionally.",
+    ),
+    "unknown_shader_type.semantic_resolved.heightmap": (
+        "Unknown raw shader type was semantically inferred as Heightmap/parallax-capable; verify slot 3 and parallax/POM flags before enabling writes.",
+    ),
     "unknown_shader_type.payload_resolved": (
         "Unknown raw shader type was resolved from real-layout payload cues; verify block intent manually when processing malformed long-tail meshes.",
     ),
@@ -4362,6 +4371,16 @@ def _classify_conflict_code(message: str) -> str:
     if "no supported shader layouts are available for profile" in lowered and "skipping all shader blocks" in lowered:
         return "fallout_profile.guarded_noop_layout_policy_exhausted"
     if "raw shader_type 0x" in lowered and "resolved to" in lowered and "method=semantic" in lowered:
+        if "real-layout drift combo repeats across" in lowered and "slot 3" in lowered and "unresolved" in lowered:
+            return "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks"
+        if "real-layout drift combo" in lowered and "slot 3" in lowered and "unresolved" in lowered:
+            return "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift"
+        if "resolved to environment map" in lowered or "resolved to envmap" in lowered:
+            return "unknown_shader_type.semantic_resolved.envmap"
+        if "resolved to default" in lowered:
+            return "unknown_shader_type.semantic_resolved.default"
+        if "resolved to heightmap" in lowered or "resolved to parallax" in lowered:
+            return "unknown_shader_type.semantic_resolved.heightmap"
         return "unknown_shader_type.semantic_resolved"
     if "raw shader_type 0x" in lowered and "resolved to" in lowered and "method=payload" in lowered:
         return "unknown_shader_type.payload_resolved"
@@ -4684,7 +4703,7 @@ def _build_conflict_report(
             continue
         if (
             "missing_parallax_slot3.empty" in block_codes
-            and "unknown_shader_type.semantic_resolved" in block_codes
+            and any(code.startswith("unknown_shader_type.semantic_resolved") for code in block_codes)
         ):
             semantic_slot3_real_layout_combo_counts[(profile, layout)] = (
                 semantic_slot3_real_layout_combo_counts.get((profile, layout), 0) + 1
@@ -5077,7 +5096,7 @@ def build_auto_remediation_patch_options(
         or (
             has_real_layout_conflict
             and "missing_parallax_slot3.empty" in base_codes
-            and "unknown_shader_type.semantic_resolved" in base_codes
+            and any(code.startswith("unknown_shader_type.semantic_resolved") for code in base_codes)
         )
     )
     has_repeated_semantic_slot3_real_layout_combo = any(

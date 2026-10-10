@@ -786,7 +786,7 @@
       ],
       "expected_prefixes": [
         "shader_state.envmap_missing_slots4_5.fallout.",
-        "unknown_shader_type.semantic_resolved.fallout."
+        "unknown_shader_type.semantic_resolved.envmap.fallout."
       ],
       "expected_remediation_steps": [
         "set_slot4_cubemap_for_missing_envmap_slots4_5",

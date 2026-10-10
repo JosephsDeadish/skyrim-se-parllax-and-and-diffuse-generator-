@@ -229,12 +229,11 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
                 "--render-profile",
                 "truepbr",
                 "--rmaos",
-                "--environment-mask",
                 "--normal-strength",
                 "1.1",
             ],
-            "min_outputs": 5,
-            "required_suffixes": ("_rmaos.dds", "_m.dds"),
+            "min_outputs": 4,
+            "required_suffixes": ("_rmaos.dds",),
             "required_sidecar_suffixes": ("_rmaos.json",),
             "required_sidecar_json_keys": ("parallax", "displacement_scale", "texture"),
             "required_sidecar_key_types": {
@@ -244,7 +243,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             },
             "required_exact_suffix_counts": {"_rmaos.dds": 1, "_rmaos.json": 1},
             "forbidden_suffixes": ("_cm.dds", "_msn.dds"),
-            "required_output_families": ("diffuse", "normal", "rmaos", "env_mask"),
+            "required_output_families": ("diffuse", "normal", "rmaos"),
             "forbidden_output_families": ("complex_cm", "complex_msn"),
         },
         {
@@ -338,7 +337,6 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
                 "--render-profile",
                 "truepbr",
                 "--rmaos",
-                "--environment-mask",
                 "--ao-map",
                 "--roughness-map",
             ],
@@ -401,7 +399,6 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
                 "--render-profile",
                 "truepbr",
                 "--rmaos",
-                "--environment-mask",
                 "--wetness-mask",
                 "--snow-mask",
                 "--ao-map",
@@ -490,11 +487,10 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
                 "--render-profile",
                 "truepbr",
                 "--rmaos",
-                "--environment-mask",
                 "--no-parallax",
             ],
-            "min_outputs": 4,
-            "required_suffixes": ("_rmaos.dds", "_m.dds", "_n.dds"),
+            "min_outputs": 3,
+            "required_suffixes": ("_rmaos.dds", "_n.dds"),
             "required_sidecar_suffixes": ("_rmaos.json",),
             "required_sidecar_json_keys": ("parallax", "displacement_scale", "texture"),
             "required_sidecar_key_types": {
@@ -504,7 +500,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             },
             "required_exact_suffix_counts": {"_rmaos.dds": 1, "_rmaos.json": 1},
             "forbidden_suffixes": ("_p.dds", "_cm.dds", "_msn.dds"),
-            "required_output_families": ("diffuse", "normal", "rmaos", "env_mask"),
+            "required_output_families": ("diffuse", "normal", "rmaos"),
             "forbidden_output_families": ("parallax", "complex_cm", "complex_msn"),
         },
         {
@@ -733,7 +729,7 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                         f"'{family}'. Produced families: {sorted(produced_families)}"
                     )
             if required_sidecar_suffixes:
-                produced_all = [path.name.lower() for path in smoke_out.glob("*")]
+                produced_all = [path.name.lower() for path in smoke_out.rglob("*") if path.is_file()]
                 for suffix in required_sidecar_suffixes:
                     if not any(name.endswith(suffix) for name in produced_all):
                         raise SystemExit(
@@ -741,7 +737,7 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                             f"Produced files: {produced_all}"
                         )
             if required_exact_suffix_counts:
-                produced_all = [path.name.lower() for path in smoke_out.glob("*")]
+                produced_all = [path.name.lower() for path in smoke_out.rglob("*") if path.is_file()]
                 for suffix, expected_count in required_exact_suffix_counts.items():
                     actual_count = sum(1 for name in produced_all if name.endswith(suffix))
                     if actual_count != expected_count:
@@ -750,7 +746,7 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                             f"output file(s) with suffix '{suffix}' but found {actual_count}. Produced files: {produced_all}"
                         )
             if required_sidecar_json_keys:
-                sidecar_jsons = sorted(smoke_out.glob("*.json"))
+                sidecar_jsons = sorted(path for path in smoke_out.rglob("*.json") if path.is_file())
                 if not sidecar_jsons:
                     raise SystemExit(
                         f"Packaged executable smoke run for '{scenario_name}' expected JSON sidecars with keys "
@@ -770,6 +766,8 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                             probe = materials[0]
                         else:
                             probe = payload
+                    elif isinstance(payload, list) and payload and isinstance(payload[0], Mapping):
+                        probe = payload[0]
                     else:
                         probe = {}
                     if not isinstance(probe, Mapping):

@@ -1205,7 +1205,13 @@ class TestValidateNifForParallax(unittest.TestCase):
         code = _classify_conflict_code(
             "Block 1: raw shader_type 0x00000080 resolved to Environment Map via semantic_flag_envmap (RESOLVED, confidence=0.95, method=semantic)."
         )
-        self.assertEqual(code, "unknown_shader_type.semantic_resolved")
+        self.assertEqual(code, "unknown_shader_type.semantic_resolved.envmap")
+
+    def test_conflict_classifier_maps_semantic_shader_resolution_default_subcode(self) -> None:
+        code = _classify_conflict_code(
+            "Block 2: raw shader_type 0x00000880 resolved to Default via semantic_fallback_default (RESOLVED, confidence=0.67, method=semantic)."
+        )
+        self.assertEqual(code, "unknown_shader_type.semantic_resolved.default")
 
     def test_conflict_classifier_maps_payload_shader_resolution_notes(self) -> None:
         code = _classify_conflict_code(
@@ -4962,7 +4968,7 @@ class TestAutoRemediationExecutor(unittest.TestCase):
             nif,
             [
                 "missing_parallax_slot3.empty.skyrim.real",
-                "unknown_shader_type.semantic_resolved.skyrim.real",
+                "unknown_shader_type.semantic_resolved.default.skyrim.real",
             ],
             backup=False,
         )
