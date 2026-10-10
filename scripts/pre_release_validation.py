@@ -312,6 +312,21 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "forbidden_output_families": ("parallax", "rmaos", "complex_cm", "complex_msn"),
         },
         {
+            "name": "custom_glow_only_strict_counts",
+            "args": [
+                "--render-profile",
+                "custom",
+                "--no-parallax",
+                "--glow-map",
+            ],
+            "min_outputs": 3,
+            "required_suffixes": ("_g.dds", "_n.dds"),
+            "required_exact_suffix_counts": {"_g.dds": 1, "_n.dds": 1},
+            "forbidden_suffixes": ("_p.dds", "_m.dds", "_rmaos.dds", "_cm.dds", "_msn.dds"),
+            "required_output_families": ("diffuse", "normal", "glow"),
+            "forbidden_output_families": ("parallax", "env_mask", "rmaos", "complex_cm", "complex_msn"),
+        },
+        {
             "name": "community_shaders_wet_snow",
             "args": [
                 "--render-profile",

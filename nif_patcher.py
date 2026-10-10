@@ -4090,6 +4090,14 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
         "Set texture slot 3 to a valid _p.dds height map path.",
         "Verify slot 3 is not blank after exports/conversions from DCC tools.",
     ),
+    "missing_parallax_slot3.missing_on_disk.flag_set": (
+        "Fix slot 3 so it points to an existing _p.dds height map near the mesh, or restore the missing file.",
+        "If the path is stale from a moved/renamed texture, update it before patching.",
+    ),
+    "missing_parallax_slot3.missing_on_disk.flag_unset": (
+        "Fix slot 3 so it points to an existing _p.dds height map near the mesh before enabling parallax.",
+        "If the path is stale from a moved/renamed texture, update it before patching.",
+    ),
     "missing_parallax_slot3.empty.flag_unset": (
         "Slot 3 is empty and SLSF1_Parallax is disabled; restore slot 3 first, then enable parallax if intended.",
     ),
@@ -4499,6 +4507,10 @@ def _classify_conflict_code(message: str) -> str:
         return "missing_parallax_slot3.empty.flag_unset"
     if "texture slot 3 (parallax) is empty while slsf1_parallax flag is set" in lowered:
         return "missing_parallax_slot3.empty.flag_set"
+    if "texture slot 3 (parallax) points to a file that is missing on disk while slsf1_parallax flag is not set" in lowered:
+        return "missing_parallax_slot3.missing_on_disk.flag_unset"
+    if "texture slot 3 (parallax) points to a file that is missing on disk while slsf1_parallax flag is set" in lowered:
+        return "missing_parallax_slot3.missing_on_disk.flag_set"
     if "texture slot 3 (parallax) is empty" in lowered:
         return "missing_parallax_slot3.empty"
     if "supply parallax_texture_path pointing to a _p.dds height map" in lowered:
@@ -4610,6 +4622,10 @@ def _classify_conflict_code(message: str) -> str:
     if "enable standard parallax alongside pom, or disable pom for this block" in lowered:
         return "flag_pom.without_base_parallax.hint_enable_or_disable"
     if "shader type is parallax-focused" in lowered and "slot 3 is unresolved" in lowered:
+        if "(slot3=empty)" in lowered:
+            return "shader_state.parallax_type_missing_slot3.slot3_empty"
+        if "(slot3=missing_on_disk)" in lowered:
+            return "shader_state.parallax_type_missing_slot3.slot3_missing_on_disk"
         return "shader_state.parallax_type_missing_slot3"
     if "shader type is envmap" in lowered and "both slot 4 cubemap and slot 5 env-mask are unresolved" in lowered:
         if "(slot4=empty, slot5=empty)" in lowered:
@@ -5723,7 +5739,12 @@ def validate_nif_for_parallax(
         else:
             has_flag = info.has_parallax_flag
             parallax_path = info.texture_paths.get(TEXTURE_SLOT_PARALLAX, "").strip()
-            has_tex = bool(parallax_path)
+            parallax_missing = _texture_slot_path_missing_near_nif(
+                nif_path,
+                parallax_path,
+                texture_roots,
+            )
+            has_tex = bool(parallax_path) and not parallax_missing
             if has_flag and has_tex:
                 result.ready_count += 1
             else:
@@ -5738,15 +5759,26 @@ def validate_nif_for_parallax(
                         "Run patch_nif with enable_parallax=True."
                     )
                 if not has_tex:
-                    slot3_issue_suffix = (
-                        " while SLSF1_Parallax flag is set."
-                        if has_flag
-                        else " while SLSF1_Parallax flag is not set."
-                    )
-                    _append_unique(
-                        result.issues,
-                        f"{bname}: Texture slot 3 (parallax) is empty{slot3_issue_suffix}"
-                    )
+                    if parallax_path and parallax_missing:
+                        slot3_issue_suffix = (
+                            " while SLSF1_Parallax flag is set."
+                            if has_flag
+                            else " while SLSF1_Parallax flag is not set."
+                        )
+                        _append_unique(
+                            result.issues,
+                            f"{bname}: Texture slot 3 (parallax) points to a file that is missing on disk{slot3_issue_suffix}"
+                        )
+                    else:
+                        slot3_issue_suffix = (
+                            " while SLSF1_Parallax flag is set."
+                            if has_flag
+                            else " while SLSF1_Parallax flag is not set."
+                        )
+                        _append_unique(
+                            result.issues,
+                            f"{bname}: Texture slot 3 (parallax) is empty{slot3_issue_suffix}"
+                        )
                     _append_unique(
                         result.suggestions,
                         (
@@ -5762,9 +5794,10 @@ def validate_nif_for_parallax(
                         "the parallax_scale field for stronger in-game depth."
                     )
                 if info.shader_type in (SHADER_TYPE_HEIGHTMAP, SHADER_TYPE_PARALLAX_OCC) and not has_tex:
+                    slot3_state = "missing_on_disk" if (parallax_path and parallax_missing) else "empty"
                     _append_unique(
                         result.issues,
-                        f"{bname}: shader type is parallax-focused ({info.shader_type_name}) but slot 3 is unresolved."
+                        f"{bname}: shader type is parallax-focused ({info.shader_type_name}) but slot 3 is unresolved (slot3={slot3_state})."
                     )
                     _append_unique(
                         result.suggestions,

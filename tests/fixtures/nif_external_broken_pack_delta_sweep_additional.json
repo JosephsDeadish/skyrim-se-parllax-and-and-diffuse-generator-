@@ -160,6 +160,45 @@
           "expected_difference_bucket": "safety_first",
           "intentional_strategy_difference": true,
           "safety_difference_note": "Mixed-slot stacks prefer deterministic safe restoration before broad flag writes."
+        },
+        {
+          "id": "ext_additional_skyrim_heightmap_slot3_missing_on_disk_longtail",
+          "family": "external_additional",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 3,
+          "flags1": 2048,
+          "texture_paths": [
+            "textures\\architecture\\stonewall.dds",
+            "",
+            "",
+            "textures\\architecture\\missing_stonewall_p.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "missing_parallax_slot3.missing_on_disk.flag_set.skyrim.",
+            "shader_state.parallax_type_missing_slot3.slot3_missing_on_disk.skyrim."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot3_parallax",
+            "disable_parallax_for_missing_slot3"
+          ],
+          "pgpatcher_strategy": "restore_missing_slot3_when_path_is_stale",
+          "local_strategy": "classify_missing_on_disk_and_apply_safe_restore_or_disable",
+          "expected_difference_bucket": "safety_first",
+          "intentional_strategy_difference": true,
+          "safety_difference_note": "Prefer explicit missing-on-disk diagnostics and conservative remediation over silent slot reuse."
         }
       ]
     }

@@ -1231,6 +1231,18 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "missing_parallax_slot3.empty.flag_set")
 
+    def test_conflict_classifier_maps_slot3_missing_on_disk_with_flag_set_subcode(self) -> None:
+        code = _classify_conflict_code(
+            "Block 2: Texture slot 3 (parallax) points to a file that is missing on disk while SLSF1_Parallax flag is set."
+        )
+        self.assertEqual(code, "missing_parallax_slot3.missing_on_disk.flag_set")
+
+    def test_conflict_classifier_maps_parallax_focused_unresolved_slot3_missing_on_disk_subcode(self) -> None:
+        code = _classify_conflict_code(
+            "Block 1: shader type is parallax-focused (Heightmap) but slot 3 is unresolved (slot3=missing_on_disk)."
+        )
+        self.assertEqual(code, "shader_state.parallax_type_missing_slot3.slot3_missing_on_disk")
+
     def test_conflict_classifier_maps_semantic_shader_resolution_notes(self) -> None:
         code = _classify_conflict_code(
             "Block 1: raw shader_type 0x00000080 resolved to Environment Map via semantic_flag_envmap (RESOLVED, confidence=0.95, method=semantic)."
@@ -1785,6 +1797,29 @@ class TestValidateNifForParallax(unittest.TestCase):
         v = validate_nif_for_parallax(nif)
         self.assertTrue(
             any(group.code.startswith("shader_state.parallax_type_missing_slot3.") for group in v.conflict_report)
+        )
+
+    def test_conflict_report_flags_parallax_shader_type_with_missing_slot3_on_disk_subcode(self) -> None:
+        textures_arch = self.tmp / "textures" / "arch"
+        textures_arch.mkdir(parents=True, exist_ok=True)
+        (textures_arch / "stone.dds").write_bytes(b"dds")
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\missing_stone_p.dds"
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_HEIGHTMAP,
+            flags1=SLSF1_PARALLAX,
+            texture_paths=paths,
+        )
+        v = validate_nif_for_parallax(nif)
+        codes = {group.code for group in v.conflict_report}
+        self.assertTrue(
+            any(code.startswith("missing_parallax_slot3.missing_on_disk.flag_set.") for code in codes),
+            codes,
+        )
+        self.assertTrue(
+            any(code.startswith("shader_state.parallax_type_missing_slot3.slot3_missing_on_disk.") for code in codes),
+            codes,
         )
 
     def test_conflict_report_flags_envmap_shader_with_missing_slots4_5(self) -> None:
