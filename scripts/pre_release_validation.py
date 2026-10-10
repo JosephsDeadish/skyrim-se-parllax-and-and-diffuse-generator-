@@ -744,6 +744,30 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "forbidden_output_families": ("parallax", "rmaos", "complex_cm", "complex_msn"),
         },
         {
+            "name": "fallout76_extended_parallel_recovery",
+            "args": [
+                "--target-game",
+                "fallout76",
+                "--render-profile",
+                "vanilla",
+                "--environment-mask",
+                "--no-parallax",
+            ],
+            "input_dimensions": (64, 48),
+            "input_count": 24,
+            "input_format": "dds",
+            "batch_workers": 4,
+            "checkpoint_resume": True,
+            "interruption_resume": True,
+            "interruption_indices": (7, 18),
+            "min_outputs": 72,
+            "required_suffixes": ("_d.dds", "_n.dds", "_s.dds"),
+            "required_exact_suffix_counts": {"_d.dds": 24, "_n.dds": 24, "_s.dds": 24},
+            "required_exact_output_family_counts": {"diffuse": 24, "normal": 24, "env_mask": 24},
+            "required_output_families": ("diffuse", "normal", "env_mask"),
+            "forbidden_output_families": ("parallax", "rmaos", "complex_cm", "complex_msn"),
+        },
+        {
             "name": "custom_diffuse_only",
             "args": [
                 "--render-profile",
@@ -819,11 +843,21 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                 scenario.get("input_dimensions", int(scenario.get("input_size", 2) or 2))
             )
             input_count = max(1, int(scenario.get("input_count", 1) or 1))
-            interruption_index = int(scenario.get("interruption_index", input_count) or input_count)
-            if not 1 <= interruption_index <= input_count:
+            raw_interruption_indices = scenario.get(
+                "interruption_indices",
+                (scenario.get("interruption_index", input_count),),
+            )
+            if isinstance(raw_interruption_indices, int):
+                interruption_indices = (raw_interruption_indices,)
+            else:
+                interruption_indices = tuple(int(index) for index in raw_interruption_indices)
+            if (
+                len(set(interruption_indices)) != len(interruption_indices)
+                or any(not 1 <= index <= input_count for index in interruption_indices)
+            ):
                 raise SystemExit(
-                    f"Invalid interruption input index {interruption_index} for '{scenario_name}' "
-                    f"with {input_count} input(s)."
+                    f"Invalid interruption input indices {interruption_indices!r} for "
+                    f"'{scenario_name}' with {input_count} input(s)."
                 )
             input_format = str(scenario.get("input_format", "png")).strip().lower()
             if input_format not in {"dds", "png"}:
@@ -836,9 +870,10 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                 for input_index in range(input_count):
                     input_writer(smoke_input / f"sample_{input_index + 1:02d}{input_suffix}", input_dimensions)
                 if bool(scenario.get("interruption_resume", False)):
-                    (smoke_input / f"sample_{interruption_index:02d}{input_suffix}").write_bytes(
-                        b"synthetic interrupted-run input"
-                    )
+                    for interruption_index in interruption_indices:
+                        (smoke_input / f"sample_{interruption_index:02d}{input_suffix}").write_bytes(
+                            b"synthetic interrupted-run input"
+                        )
             else:
                 smoke_input = smoke_io / f"sample_{scenario_name}{input_suffix}"
                 input_writer(smoke_input, input_dimensions)
@@ -905,7 +940,8 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                 checkpoint_path = smoke_io / f"checkpoint_loop{loop_index}_{scenario_name}.json"
                 invocation_args.extend(("--checkpoint-file", str(checkpoint_path)))
             if bool(scenario.get("interruption_resume", False)):
-                invocation_args.extend(("--batch-workers", "1"))
+                interruption_workers = max(1, int(scenario.get("batch_workers", 1) or 1))
+                invocation_args.extend(("--batch-workers", str(interruption_workers)))
             run_args = [
                 str(binary),
                 str(smoke_input),
@@ -937,11 +973,12 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                         f"Packaged executable smoke interruption for '{scenario_name}' left an invalid "
                         f"checkpoint: {exc}"
                     ) from exc
-                expected_completed_count = input_count - 1
+                failed_indices = set(interruption_indices)
+                expected_completed_count = input_count - len(failed_indices)
                 expected_completed_files = {
                     str((smoke_input / f"sample_{index:02d}{input_suffix}").resolve())
                     for index in range(1, input_count + 1)
-                    if index != interruption_index
+                    if index not in failed_indices
                 }
                 if (
                     len(completed_files) != expected_completed_count
@@ -951,34 +988,51 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                         f"Packaged executable smoke interruption for '{scenario_name}' checkpointed "
                         f"{completed_files!r}; expected every valid input except the failed one."
                     )
-                repaired_input = smoke_input / f"sample_{interruption_index:02d}{input_suffix}"
-                input_writer(repaired_input, input_dimensions)
-                resumed_initial = subprocess.run(
-                    [*run_args, "--resume-checkpoint"],
-                    cwd=REPO_ROOT,
-                    capture_output=True,
-                    text=True,
-                )
-                if resumed_initial.returncode != 0:
-                    print(resumed_initial.stdout)
-                    print(resumed_initial.stderr)
-                    raise SystemExit(resumed_initial.returncode)
-                try:
-                    resumed_checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError) as exc:
-                    raise SystemExit(
-                        f"Packaged executable smoke resume for '{scenario_name}' left an invalid "
-                        f"checkpoint: {exc}"
-                    ) from exc
-                if (
-                    int(resumed_checkpoint.get("resumed_completed_count", -1)) != expected_completed_count
-                    or int(resumed_checkpoint.get("completed_success_count", -1)) != input_count
-                ):
-                    raise SystemExit(
-                        f"Packaged executable smoke resume for '{scenario_name}' reported checkpoint "
-                        f"state {resumed_checkpoint!r}; expected {expected_completed_count} resumed and "
-                        f"{input_count} completed inputs."
+                resumed_count = expected_completed_count
+                for interruption_index in interruption_indices:
+                    repaired_input = smoke_input / f"sample_{interruption_index:02d}{input_suffix}"
+                    input_writer(repaired_input, input_dimensions)
+                    resumed = subprocess.run(
+                        [*run_args, "--resume-checkpoint"],
+                        cwd=REPO_ROOT,
+                        capture_output=True,
+                        text=True,
                     )
+                    failed_indices.remove(interruption_index)
+                    expected_success_count = input_count - len(failed_indices)
+                    if failed_indices and resumed.returncode == 0:
+                        raise SystemExit(
+                            f"Packaged executable smoke for '{scenario_name}' unexpectedly completed "
+                            "while another deliberately invalid input remained."
+                        )
+                    if not failed_indices and resumed.returncode != 0:
+                        print(resumed.stdout)
+                        print(resumed.stderr)
+                        raise SystemExit(resumed.returncode)
+                    try:
+                        resumed_checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError) as exc:
+                        raise SystemExit(
+                            f"Packaged executable smoke resume for '{scenario_name}' left an invalid "
+                            f"checkpoint: {exc}"
+                        ) from exc
+                    expected_completed_files = {
+                        str((smoke_input / f"sample_{index:02d}{input_suffix}").resolve())
+                        for index in range(1, input_count + 1)
+                        if index not in failed_indices
+                    }
+                    completed_files = resumed_checkpoint.get("completed_success_files", [])
+                    if (
+                        int(resumed_checkpoint.get("resumed_completed_count", -1)) != resumed_count
+                        or int(resumed_checkpoint.get("completed_success_count", -1)) != expected_success_count
+                        or set(completed_files) != expected_completed_files
+                    ):
+                        raise SystemExit(
+                            f"Packaged executable smoke resume for '{scenario_name}' reported checkpoint "
+                            f"state {resumed_checkpoint!r}; expected {resumed_count} resumed and "
+                            f"{expected_success_count} completed inputs."
+                        )
+                    resumed_count = expected_success_count
             elif run_completed.returncode != 0:
                 print(run_completed.stdout)
                 print(run_completed.stderr)

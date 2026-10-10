@@ -392,6 +392,7 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
             "fallout4_core_naming",
             "fallout4_batch_checkpoint_resume",
             "fallout76_surface_batch_checkpoint_resume",
+            "fallout76_extended_parallel_recovery",
         ):
             self.assertIn(expected, scenario_by_name)
             entry = scenario_by_name[expected]
@@ -440,6 +441,16 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         self.assertEqual(
             fallout76_scenario.get("required_exact_output_family_counts"),
             {"diffuse": 6, "normal": 6, "env_mask": 6},
+        )
+        extended_recovery = scenario_by_name["fallout76_extended_parallel_recovery"]
+        self.assertEqual(extended_recovery.get("input_count"), 24)
+        self.assertEqual(extended_recovery.get("batch_workers"), 4)
+        self.assertEqual(extended_recovery.get("interruption_indices"), (7, 18))
+        self.assertTrue(extended_recovery.get("checkpoint_resume"))
+        self.assertTrue(extended_recovery.get("interruption_resume"))
+        self.assertEqual(
+            extended_recovery.get("required_exact_output_family_counts"),
+            {"diffuse": 24, "normal": 24, "env_mask": 24},
         )
         self.assertEqual(scenario_by_name["vanilla"].get("input_size"), 16)
         self.assertEqual(scenario_by_name["community_shaders"].get("input_size"), 64)
