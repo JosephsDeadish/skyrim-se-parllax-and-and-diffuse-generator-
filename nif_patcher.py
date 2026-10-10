@@ -4039,6 +4039,14 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
         "Repeated real-layout drift detected: multiple blocks resolve unknown shader types from payload while slot 3 remains unresolved.",
         "Prefer restoring a deterministic shared slot-3 _p.dds path and enabling parallax in one controlled pass; disable parallax/POM only when no safe slot-3 reconstruction path exists.",
     ),
+    "missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift": (
+        "Real-layout drift detected: unknown shader type remained unresolved under default fallback while slot 3 is unresolved.",
+        "Prefer restoring a deterministic slot-3 _p.dds path first; otherwise keep conservative manual-review/no-op behavior for uncertain shader intent.",
+    ),
+    "missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift.repeated_blocks": (
+        "Repeated real-layout drift detected: multiple blocks remain unresolved under default fallback while slot 3 is unresolved.",
+        "Prefer restoring a deterministic shared slot-3 _p.dds path; if intent is uncertain across blocks, keep conservative disable/manual-review handling.",
+    ),
     "missing_parallax_slot3": (
         "Set texture slot 3 to a valid _p.dds height map path.",
     ),
@@ -4363,6 +4371,13 @@ def _classify_conflict_code(message: str) -> str:
     ):
         return "missing_parallax_slot3.empty.payload_resolved_real_layout_drift.repeated_blocks"
     if (
+        "real-layout drift combo repeats across" in lowered
+        and "default fallback shader resolution" in lowered
+        and "slot 3" in lowered
+        and "unresolved" in lowered
+    ):
+        return "missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift.repeated_blocks"
+    if (
         "real-layout drift combo" in lowered
         and "semantic shader resolution" in lowered
         and "slot 3" in lowered
@@ -4376,6 +4391,13 @@ def _classify_conflict_code(message: str) -> str:
         and "unresolved" in lowered
     ):
         return "missing_parallax_slot3.empty.payload_resolved_real_layout_drift"
+    if (
+        "real-layout drift combo" in lowered
+        and "default fallback shader resolution" in lowered
+        and "slot 3" in lowered
+        and "unresolved" in lowered
+    ):
+        return "missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift"
     if "slot 0 diffuse path" in lowered and "not a .dds texture path" in lowered:
         return "path_slot_diffuse.non_dds"
     if "slot 0 diffuse path" in lowered and "authoring suffix naming" in lowered:
@@ -4541,6 +4563,7 @@ def _build_conflict_report(
     block_code_sets: dict[tuple[str, str, int], set[str]] = {}
     semantic_slot3_real_layout_combo_counts: dict[tuple[str, str], int] = {}
     payload_slot3_real_layout_combo_counts: dict[tuple[str, str], int] = {}
+    default_fallback_slot3_real_layout_combo_counts: dict[tuple[str, str], int] = {}
     for message in [*result.skip_reasons, *result.issues]:
         base_code = _classify_conflict_code(message)
         block_idx = _extract_block_index(message)
@@ -4558,6 +4581,19 @@ def _build_conflict_report(
             block_code_sets.setdefault(bucket_key, set()).add(base_code)
 
     for (profile, layout, block_idx), block_codes in block_code_sets.items():
+        if (
+            "missing_parallax_slot3.empty" in block_codes
+            and "unknown_shader_type.default_fallback_unresolved" in block_codes
+        ):
+            default_fallback_slot3_real_layout_combo_counts[(profile, layout)] = (
+                default_fallback_slot3_real_layout_combo_counts.get((profile, layout), 0) + 1
+            )
+            grouped.setdefault(
+                ("missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift", profile, layout),
+                [],
+            ).append(
+                f"Block {block_idx}: real-layout drift combo detected — default fallback shader resolution is unresolved while slot 3 remains unresolved."
+            )
         if layout != "real":
             continue
         if (
@@ -4605,6 +4641,16 @@ def _build_conflict_report(
         ).append(
             "Real-layout drift combo repeats across "
             f"{combo_count} blocks: payload shader resolution is present while slot 3 remains unresolved."
+        )
+    for (profile, layout), combo_count in default_fallback_slot3_real_layout_combo_counts.items():
+        if combo_count < 2:
+            continue
+        grouped.setdefault(
+            ("missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift.repeated_blocks", profile, layout),
+            [],
+        ).append(
+            "Real-layout drift combo repeats across "
+            f"{combo_count} blocks: default fallback shader resolution is unresolved while slot 3 remains unresolved."
         )
     summaries: list[NifConflictSummary] = []
     for (base_code, profile, layout), messages in sorted(
@@ -4956,12 +5002,24 @@ def build_auto_remediation_patch_options(
         code.startswith("missing_parallax_slot3.empty.payload_resolved_real_layout_drift.repeated_blocks")
         for code in base_codes
     )
+    has_repeated_default_fallback_slot3_real_layout_combo = any(
+        code.startswith("missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift.repeated_blocks")
+        for code in base_codes
+    )
     has_payload_slot3_real_layout_combo = (
         any(code.startswith("missing_parallax_slot3.empty.payload_resolved_real_layout_drift") for code in base_codes)
         or (
             has_real_layout_conflict
             and "missing_parallax_slot3.empty" in base_codes
             and "unknown_shader_type.payload_resolved" in base_codes
+        )
+    )
+    has_default_fallback_slot3_real_layout_combo = (
+        any(code.startswith("missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift") for code in base_codes)
+        or (
+            has_real_layout_conflict
+            and "missing_parallax_slot3.empty" in base_codes
+            and "unknown_shader_type.default_fallback_unresolved" in base_codes
         )
     )
     has_non_heightmap_pom_conflict = any(
@@ -4994,7 +5052,11 @@ def build_auto_remediation_patch_options(
         if guessed_parallax:
             opts.parallax_texture_path = guessed_parallax
             applied_steps.append("set_slot3_parallax")
-    if has_semantic_slot3_real_layout_combo or has_payload_slot3_real_layout_combo:
+    if (
+        has_semantic_slot3_real_layout_combo
+        or has_payload_slot3_real_layout_combo
+        or has_default_fallback_slot3_real_layout_combo
+    ):
         if guessed_parallax:
             opts.parallax_texture_path = guessed_parallax
             opts.enable_parallax = True
@@ -5005,7 +5067,11 @@ def build_auto_remediation_patch_options(
             opts.disable_pom = True
             applied_steps.append("disable_parallax_for_resolved_real_layout_drift")
             applied_steps.append("disable_pom_for_resolved_real_layout_drift")
-    if has_repeated_semantic_slot3_real_layout_combo or has_repeated_payload_slot3_real_layout_combo:
+    if (
+        has_repeated_semantic_slot3_real_layout_combo
+        or has_repeated_payload_slot3_real_layout_combo
+        or has_repeated_default_fallback_slot3_real_layout_combo
+    ):
         if guessed_parallax:
             opts.parallax_texture_path = guessed_parallax
             opts.enable_parallax = True

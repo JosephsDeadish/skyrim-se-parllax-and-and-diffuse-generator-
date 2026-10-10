@@ -1210,6 +1210,12 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "missing_parallax_slot3.empty.payload_resolved_real_layout_drift")
 
+    def test_conflict_classifier_maps_real_layout_default_fallback_slot3_drift_combo(self) -> None:
+        code = _classify_conflict_code(
+            "Block 6: real-layout drift combo detected — default fallback shader resolution is unresolved while slot 3 remains unresolved."
+        )
+        self.assertEqual(code, "missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift")
+
     def test_conflict_classifier_maps_repeated_real_layout_semantic_slot3_drift_combo(self) -> None:
         code = _classify_conflict_code(
             "Real-layout drift combo repeats across 2 blocks: semantic shader resolution is present while slot 3 remains unresolved."
@@ -1226,6 +1232,15 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertEqual(
             code,
             "missing_parallax_slot3.empty.payload_resolved_real_layout_drift.repeated_blocks",
+        )
+
+    def test_conflict_classifier_maps_repeated_real_layout_default_fallback_slot3_drift_combo(self) -> None:
+        code = _classify_conflict_code(
+            "Real-layout drift combo repeats across 3 blocks: default fallback shader resolution is unresolved while slot 3 remains unresolved."
+        )
+        self.assertEqual(
+            code,
+            "missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift.repeated_blocks",
         )
 
     def test_conflict_classifier_maps_shader_block_size_mismatch_notes(self) -> None:
@@ -3903,6 +3918,56 @@ class TestExternalBrokenPackDeltaSweep(unittest.TestCase):
         self.assertTrue(
             any(code.startswith("unknown_shader_type.default_fallback_unresolved.skyrim.") for code in codes)
         )
+        self.assertTrue(
+            any(
+                code.startswith("missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift.skyrim.")
+                for code in codes
+            ),
+            codes,
+        )
+        self.assertFalse(any(code.startswith("fallback_or_unknown.") for code in codes), codes)
+
+    def test_crossblock_default_fallback_variant_uses_explicit_longtail_subcode(self) -> None:
+        payload = _load_fixture_corpus_payload(_FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP)
+        packs = payload.get("packs", [])
+        self.assertIsInstance(packs, list)
+        self.assertGreater(len(packs), 0)
+        pack = next(
+            (
+                entry
+                for entry in packs
+                if isinstance(entry, dict)
+                and str(entry.get("id", "")).strip() == "external_broken_longtail_pack"
+            ),
+            None,
+        )
+        self.assertIsNotNone(pack)
+        assert isinstance(pack, dict)
+        cases = pack.get("cases", [])
+        self.assertIsInstance(cases, list)
+        target_case = next(
+            (
+                case
+                for case in cases
+                if isinstance(case, dict)
+                and str(case.get("id", "")).strip()
+                == "ext_skyrim_real_crossblock_default_fallback_slot3_combo_variant"
+            ),
+            None,
+        )
+        self.assertIsNotNone(target_case)
+        assert isinstance(target_case, dict)
+        corpus = _materialize_fixture_corpus(self.tmp, {"cases": [target_case]})
+        self.assertEqual(len(corpus), 1)
+        validation = validate_nif_for_parallax(corpus[0])
+        codes = [group.code for group in validation.conflict_report]
+        self.assertTrue(
+            any(
+                code.startswith("missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift.skyrim.")
+                for code in codes
+            ),
+            codes,
+        )
         self.assertFalse(any(code.startswith("fallback_or_unknown.") for code in codes), codes)
 
 
@@ -4855,6 +4920,52 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         opts, steps = build_auto_remediation_patch_options(
             nif,
             ["missing_parallax_slot3.empty.payload_resolved_real_layout_drift.repeated_blocks.skyrim.real"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(str(opts.parallax_texture_path).lower().endswith("_p.dds"))
+        self.assertTrue(opts.enable_parallax)
+        self.assertIn("set_slot3_parallax_for_repeated_real_layout_drift", steps)
+        self.assertIn("enable_parallax_for_repeated_real_layout_drift", steps)
+
+    def test_auto_remediation_build_options_adds_default_fallback_real_layout_slot3_combo_steps(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            user_ver2=130,
+            texture_set_layout_shift=4,
+            shader_type=0x12345678,
+            flags1=SLSF1_PARALLAX | SLSF1_ENVIRONMENT_MAPPING,
+            texture_paths=paths,
+        )
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift.skyrim.real"],
+            backup=False,
+        )
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertTrue(str(opts.parallax_texture_path).lower().endswith("_p.dds"))
+        self.assertTrue(opts.enable_parallax)
+        self.assertIn("set_slot3_parallax_for_resolved_real_layout_drift", steps)
+        self.assertIn("enable_parallax_for_resolved_real_layout_drift", steps)
+
+    def test_auto_remediation_build_options_adds_repeated_default_fallback_real_layout_slot3_combo_steps(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="real",
+            user_ver2=130,
+            texture_set_layout_shift=4,
+            shader_type=0x12345678,
+            flags1=SLSF1_PARALLAX | SLSF1_ENVIRONMENT_MAPPING,
+            texture_paths=paths,
+        )
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift.repeated_blocks.skyrim.real"],
             backup=False,
         )
         self.assertIsNotNone(opts)

@@ -217,7 +217,49 @@
             101
           ],
           "expected_prefixes": [
-            "shader_state.crossblock_texture_ref_drift_mixed_slots.skyrim."
+            "missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift.skyrim."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.skyrim."
+          ]
+        },
+        {
+          "id": "ext_skyrim_real_crossblock_default_fallback_slot3_combo_variant",
+          "family": "external_skyrim_real",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "flags1": 2176,
+              "flags2": 64,
+              "texture_paths": [
+                "textures\\architecture\\farmhouse\\farmwall02.dds",
+                "textures\\architecture\\farmhouse\\farmwall02_n.dds",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            101
+          ],
+          "expected_prefixes": [
+            "missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift.skyrim."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.skyrim."
           ]
         },
         {
