@@ -1433,6 +1433,18 @@ class TestValidateNifForParallax(unittest.TestCase):
         code = _classify_conflict_code("Strict unknown-shader check failed.")
         self.assertEqual(code, "unknown_shader_type.strict_violation")
 
+    def test_conflict_classifier_maps_unresolved_unknown_shader_diagnostic_to_explicit_subcode(self) -> None:
+        code = _classify_conflict_code(
+            "Block 5: unknown raw shader_type 0x00000880 could not be resolved (no mapping table entry, no semantic flag match, no texture-slot match). Add an explicit entry to unknown_shader_type_map or check the NIF for corruption."
+        )
+        self.assertEqual(code, "unknown_shader_type.unresolved.no_mapping_semantic_texture_match")
+
+    def test_unknown_shader_unresolved_subcode_inherits_unknown_shader_actions(self) -> None:
+        actions = _actions_for_conflict_code("unknown_shader_type.unresolved.no_mapping_semantic_texture_match")
+        joined = " ".join(actions).lower()
+        self.assertIn("unknown raw shader type", joined)
+        self.assertIn("unknown_shader_type_map", joined)
+
     def test_conflict_classifier_maps_fallout_guarded_noop_when_no_compatible_blocks(self) -> None:
         code = _classify_conflict_code(
             "No Fallout-compatible BSLightingShaderProperty blocks found for experimental patch mode."

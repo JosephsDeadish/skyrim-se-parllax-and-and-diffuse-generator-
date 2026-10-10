@@ -4023,6 +4023,9 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "unknown_shader_type": (
         "Unknown raw shader type could not be confidently resolved; use unknown_shader_type_map for explicit overrides or keep this mesh in manual-review/no-op mode.",
     ),
+    "unknown_shader_type.unresolved.no_mapping_semantic_texture_match": (
+        "Unknown raw shader type remained unresolved (no mapping/semantic/texture-slot match); add an explicit unknown_shader_type_map override or keep this block manual-review/no-op.",
+    ),
     "unknown_shader_type.semantic_resolved": (
         "Unknown raw shader type was semantically inferred from flags/slots; verify block intent manually when processing malformed long-tail meshes.",
     ),
@@ -4338,6 +4341,14 @@ def _classify_conflict_code(message: str) -> str:
         return "unsupported_header.num_extra_recovery"
     if "strict unknown-shader check failed" in lowered:
         return "unknown_shader_type.strict_violation"
+    if (
+        "unknown raw shader_type 0x" in lowered
+        and "could not be resolved" in lowered
+        and "no mapping table entry" in lowered
+        and "no semantic flag match" in lowered
+        and "no texture-slot match" in lowered
+    ):
+        return "unknown_shader_type.unresolved.no_mapping_semantic_texture_match"
     if "string read out of range" in lowered and "texture-set parse error" not in lowered:
         return "unsupported_header.string_read_out_of_range"
     if "no bslightingshaderproperty blocks found or not a supported skyrim/fallout nif" in lowered:

@@ -1170,7 +1170,7 @@
         "shader_state.parallax_envmap_missing_slot5.",
         "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.",
         "missing_parallax_flag.flag1_not_set.fallout.",
-        "shader_state.parallax_type_missing_slot3.fallout.",
+        "shader_state.parallax_type_missing_slot3.slot3_empty.fallout.",
         "path_slot_parallax.matches_diffuse.fallout.",
         "path_slot_parallax.matches_normal.fallout.",
         "path_slot_parallax.wrong_suffix.fallout.",
@@ -1703,7 +1703,7 @@
           "shader_type": 3,
           "flags1": 2048,
           "expected_prefixes": [
-            "shader_state.parallax_type_missing_slot3.fallout."
+            "shader_state.parallax_type_missing_slot3.slot3_empty.fallout."
           ]
         },
         {
