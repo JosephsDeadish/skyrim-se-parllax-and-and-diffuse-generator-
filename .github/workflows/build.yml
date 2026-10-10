@@ -59,6 +59,7 @@ jobs:
             tests.test_generate_textures.GenerateTexturesTests.test_build_batch_bottleneck_hints_includes_large_run_resume_guidance \
             tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_writes_checkpoint_file \
             tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_resume_checkpoint_skips_completed_successes \
+            tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_recovers_interrupted_multiresolution_batch \
             tests.test_generate_textures.GenerateTexturesTests.test_gui_processing_queue_smoke_done_event_reports_outputs_failures_and_autopatch
 
   release-readiness:

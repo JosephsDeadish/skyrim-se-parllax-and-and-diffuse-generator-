@@ -4074,6 +4074,103 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(payload["resumed_completed_count"], 1)
             self.assertEqual(payload["completed_success_count"], 2)
 
+    def test_run_batch_with_options_recovers_interrupted_multiresolution_batch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            checkpoint = temp_path / "batch_checkpoint.json"
+            input_dir.mkdir()
+            dimensions = {"a": (8, 8), "b": (16, 12), "c": (32, 24)}
+            for name, size in dimensions.items():
+                Image.new("RGB", size, color=(60, 100, 140)).save(
+                    input_dir / f"{name}.dds",
+                    format="DDS",
+                    pixel_format="DXT5",
+                )
+
+            original_run_with_options = run_with_options
+            first_attempts: list[str] = []
+
+            def interrupt_after_first_success(**kwargs: object) -> dict[str, Path]:
+                input_file = kwargs["input_file"]
+                assert isinstance(input_file, Path)
+                first_attempts.append(input_file.stem)
+                if input_file.stem == "b":
+                    raise RuntimeError("synthetic interruption")
+                return original_run_with_options(**kwargs)
+
+            with mock.patch(
+                "generate_textures.run_with_options",
+                side_effect=interrupt_after_first_success,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "synthetic interruption"):
+                    run_batch_with_options(
+                        input_path=input_dir,
+                        output_dir=output_dir,
+                        include_diffuse=True,
+                        include_normal=True,
+                        include_parallax=True,
+                        include_glow=False,
+                        include_environment_mask=False,
+                        include_complex=False,
+                        batch_workers=1,
+                        checkpoint_file=checkpoint,
+                    )
+
+            interrupted_state = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(interrupted_state["completed_success_files"], [str((input_dir / "a.dds").resolve())])
+            self.assertEqual(first_attempts, ["a", "b"])
+
+            resumed_attempts: list[str] = []
+
+            def record_resume_attempt(**kwargs: object) -> dict[str, Path]:
+                input_file = kwargs["input_file"]
+                assert isinstance(input_file, Path)
+                resumed_attempts.append(input_file.stem)
+                return original_run_with_options(**kwargs)
+
+            with mock.patch(
+                "generate_textures.run_with_options",
+                side_effect=record_resume_attempt,
+            ):
+                resumed_outputs = run_batch_with_options(
+                    input_path=input_dir,
+                    output_dir=output_dir,
+                    include_diffuse=True,
+                    include_normal=True,
+                    include_parallax=True,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                    batch_workers=1,
+                    checkpoint_file=checkpoint,
+                    resume_from_checkpoint=True,
+                )
+
+            self.assertEqual(resumed_attempts, ["b", "c"])
+            self.assertEqual(sorted(path.name for path in resumed_outputs), ["b.dds", "c.dds"])
+            self.assertEqual(
+                sorted(path.name for path in output_dir.iterdir()),
+                [
+                    "a.dds",
+                    "a_n.dds",
+                    "a_p.dds",
+                    "b.dds",
+                    "b_n.dds",
+                    "b_p.dds",
+                    "c.dds",
+                    "c_n.dds",
+                    "c_p.dds",
+                ],
+            )
+            for output_path in output_dir.glob("*.dds"):
+                with Image.open(output_path) as output_image:
+                    self.assertEqual(output_image.size, dimensions[output_path.stem.split("_")[0]])
+            resumed_state = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(resumed_state["resumed_completed_count"], 1)
+            self.assertEqual(resumed_state["completed_success_count"], 3)
+
     def test_run_batch_with_options_writes_batch_telemetry_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
