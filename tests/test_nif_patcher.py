@@ -1832,6 +1832,18 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "shader_state.envmap_missing_slot5.empty")
 
+    def test_classify_conflict_code_for_parallax_envmap_missing_slot5_empty_variant(self) -> None:
+        code = _classify_conflict_code(
+            "Block 4: Parallax/POM and env mapping are enabled, but slot 5 env-mask is unresolved while slot 3 and slot 4 are present (slot5=empty)."
+        )
+        self.assertEqual(code, "shader_state.parallax_envmap_missing_slot5.empty")
+
+    def test_classify_conflict_code_for_parallax_envmap_missing_slot5_missing_on_disk_variant(self) -> None:
+        code = _classify_conflict_code(
+            "Block 4: Parallax/POM and env mapping are enabled, but slot 5 env-mask is unresolved while slot 3 and slot 4 are present (slot5=missing_on_disk)."
+        )
+        self.assertEqual(code, "shader_state.parallax_envmap_missing_slot5.missing_on_disk")
+
     def test_classify_conflict_code_for_fallout_guarded_unsupported_ops(self) -> None:
         code = _classify_conflict_code(
             "Experimental Fallout patch mode does not support: force_shader_type_3. "
@@ -2037,6 +2049,27 @@ class TestValidateNifForParallax(unittest.TestCase):
         v = validate_nif_for_parallax(nif)
         self.assertTrue(
             any(group.code.startswith("shader_state.parallax_envmap_missing_slot5.") for group in v.conflict_report)
+        )
+
+    def test_conflict_report_flags_parallax_envmap_with_slot5_missing_on_disk_variant(self) -> None:
+        (self.tmp / "textures" / "effects").mkdir(parents=True, exist_ok=True)
+        (self.tmp / "textures" / "cubemaps").mkdir(parents=True, exist_ok=True)
+        (self.tmp / "textures" / "effects" / "aura_p.dds").write_bytes(b"dds")
+        (self.tmp / "textures" / "cubemaps" / "aura_e.dds").write_bytes(b"dds")
+        paths = ["textures\\effects\\aura.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\effects\\aura_p.dds"
+        paths[TEXTURE_SLOT_CUBEMAP] = "textures\\cubemaps\\aura_e.dds"
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\effects\\missing_aura_m.dds"
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=SLSF1_ENVIRONMENT_MAPPING | SLSF1_PARALLAX,
+            texture_paths=paths,
+        )
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(
+            any(group.code.startswith("shader_state.parallax_envmap_missing_slot5.missing_on_disk.") for group in v.conflict_report),
+            [group.code for group in v.conflict_report],
         )
 
     def test_conflict_report_flags_parallax_envmap_with_slot3_unresolved_and_slot4_5_present(self) -> None:

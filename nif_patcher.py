@@ -4230,6 +4230,12 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "shader_state.parallax_envmap_missing_slot5": (
         "Parallax/POM + env mapping are active while slot 5 is unresolved but slots 3/4 are present; restore slot 5 or disable env mapping while keeping parallax/POM.",
     ),
+    "shader_state.parallax_envmap_missing_slot5.empty": (
+        "Parallax/POM + env mapping are active while slot 5 is empty but slots 3/4 are present; restore slot 5 or disable env mapping while keeping parallax/POM.",
+    ),
+    "shader_state.parallax_envmap_missing_slot5.missing_on_disk": (
+        "Parallax/POM + env mapping are active while slot 5 path is unresolved on disk but slots 3/4 are present; restore slot 5 near the mesh or disable env mapping while keeping parallax/POM.",
+    ),
     "shader_state.parallax_envmap_glow_missing_slots2_3_4_5": (
         "Parallax/POM + env mapping + glow are active while slots 2/3/4/5 are unresolved; restore valid textures or disable all conflicting shader flags for the block.",
     ),
@@ -4651,6 +4657,10 @@ def _classify_conflict_code(message: str) -> str:
         "parallax/pom and env mapping are enabled" in lowered
         and "slot 5 env-mask is unresolved while slot 3 and slot 4 are present" in lowered
     ):
+        if "(slot5=empty)" in lowered:
+            return "shader_state.parallax_envmap_missing_slot5.empty"
+        if "(slot5=missing_on_disk)" in lowered:
+            return "shader_state.parallax_envmap_missing_slot5.missing_on_disk"
         return "shader_state.parallax_envmap_missing_slot5"
     if (
         "parallax/pom, env mapping, and glow are enabled" in lowered
@@ -6126,7 +6136,10 @@ def validate_nif_for_parallax(
         ):
             _append_unique(
                 result.issues,
-                f"{bname}: Parallax/POM and env mapping are enabled, but slot 5 env-mask is unresolved while slot 3 and slot 4 are present."
+                (
+                    f"{bname}: Parallax/POM and env mapping are enabled, but slot 5 env-mask is unresolved "
+                    f"while slot 3 and slot 4 are present (slot5={slot5_state})."
+                )
             )
             _append_unique(
                 result.suggestions,
