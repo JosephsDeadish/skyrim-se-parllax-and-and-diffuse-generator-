@@ -468,38 +468,40 @@ def build_batch_bottleneck_hints(
     total_failed: int,
     total_sources: int,
     peak_queue_backlog: int = 0,
+    translate: Callable[[str], str] | None = None,
 ) -> list[str]:
+    _tr = translate or (lambda text: text)
     hints: list[str] = []
     if total_sources >= 1000 and resumed_completed_count > 0:
         hints.append(
-            "Large 1000+ run resumed: keep Resume mode on and only switch to Start fresh when you intentionally need a full rerun."
+            _tr("Large 1000+ run resumed: keep Resume mode on and switch to Start fresh only when you intentionally need a full rerun.")
         )
     if high_res_8k_count > 0 and avg_file_seconds > 1.5:
-        hints.append("8K-heavy run detected; keep staged/lazy preview on and leave Resume mode enabled for safer restarts.")
+        hints.append(_tr("8K-heavy run detected; keep staged/lazy preview on and keep Resume mode enabled for safer restarts."))
     if total_sources >= 1000 and resumed_completed_count == 0:
-        hints.append("Large 1000+ run: switch checkpoint mode to Resume and keep live preview paused unless manual spot-checks are needed.")
+        hints.append(_tr("Large 1000+ run: switch checkpoint mode to Resume and keep live preview paused except for brief spot-checks."))
     if max_source_dimension >= 8192 or max_source_megapixels >= 48.0:
-        hints.append("Very large source textures detected; reduce worker count and keep live preview paused unless needed.")
+        hints.append(_tr("Very large source textures detected; reduce worker count and keep live preview paused unless needed."))
     if total_sources >= 1000 and avg_file_seconds > 0.9:
-        hints.append("Queue pacing is active for UI responsiveness on this huge run; brief status-update delays are expected.")
+        hints.append(_tr("Queue pacing is active to keep the UI responsive on this huge run; brief status-update delays are expected."))
     if peak_queue_backlog >= 256:
         hints.insert(
             0,
-            "Queue backlog spiked during this run; keep live preview off and use Resume mode to reduce UI churn on the next pass."
+            _tr("Queue backlog spiked during this run; keep live preview off and use Resume mode to reduce UI churn on the next pass.")
         )
     if peak_queue_backlog >= 512:
         hints.insert(
             1,
-            "Very high queue backlog observed; avoid rapid preview navigation during huge runs and let queue pacing drain before manual spot-checks.",
+            _tr("Very high queue backlog observed; avoid rapid preview navigation during huge runs and let queue pacing drain before manual spot-checks."),
         )
     if high_res_4k_count >= 50:
-        hints.append("Large high-res set detected; run core outputs first, then advanced/niche outputs in a second pass.")
+        hints.append(_tr("Large high-res set detected; run core outputs first, then advanced/niche outputs in a second pass."))
     if max_file_seconds >= max(5.0, avg_file_seconds * 2.5):
-        hints.append("A few outlier files were much slower; inspect unusually large or noisy source textures first.")
+        hints.append(_tr("A few outlier files were much slower; inspect unusually large or noisy source textures first."))
     if total_failed > 0:
-        hints.append("Check batch_failure_report.csv/json for repeated failure patterns before rerun.")
+        hints.append(_tr("Check batch_failure_report.csv/json for repeated failure patterns before rerun."))
     if total_sources >= 1000 and total_failed > 0:
-        hints.append("For huge runs with failures, rerun only failed files first before attempting a full start-fresh pass.")
+        hints.append(_tr("For huge runs with failures, rerun only failed files first before attempting a full start-fresh pass."))
     return hints[:4]
 
 
@@ -10303,7 +10305,9 @@ if GUI_AVAILABLE:
                             lines.append(f"Resume mode skipped {resumed} file(s) from checkpoint.")
                         if total_sources + resumed >= 1000:
                             lines.append(
-                                "Large-run guidance: keep Resume mode enabled and leave live preview paused except for quick spot-checks."
+                                self._tr(
+                                    "Large-run guidance: keep Resume mode enabled and leave live preview paused except for quick spot-checks."
+                                )
                             )
                         if high_4k > 0:
                             lines.append(
@@ -10327,6 +10331,7 @@ if GUI_AVAILABLE:
                             total_failed=total_failed,
                             total_sources=total_sources,
                             peak_queue_backlog=max_queue_backlog,
+                            translate=self._tr,
                         )
                         self.batch_perf_hint_var.set(" | ".join(perf_hints[:3]))
                         if perf_hints:
@@ -11535,7 +11540,9 @@ if GUI_AVAILABLE:
                         self.batch_resume_mode_var.set("resume")
                 if is_huge_batch:
                     self.status_var.set(
-                        "Huge-run mode: checkpoint safety prompts and queue pacing are enabled for smoother long runs."
+                        self._tr(
+                            "Huge-run mode: checkpoint safety prompts, safer resume decisions, and queue pacing are enabled for smoother long runs."
+                        )
                     )
                 resumed_completed_count = 0
                 completed_checkpoint_files: set[str] = set()

@@ -1771,6 +1771,25 @@ class TestValidateNifForParallax(unittest.TestCase):
             any(group.code.startswith("shader_state.envmap_missing_slot4.") for group in v.conflict_report)
         )
 
+    def test_conflict_report_flags_envmap_shader_with_missing_slot4_on_disk_variant(self) -> None:
+        env_root = self.tmp / "textures" / "arch"
+        env_root.mkdir(parents=True, exist_ok=True)
+        (env_root / "stone_m.dds").write_bytes(b"dds")
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_CUBEMAP] = "textures\\cubemaps\\missing_cube_e.dds"
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\arch\\stone_m.dds"
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            texture_paths=paths,
+        )
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(
+            any(group.code.startswith("shader_state.envmap_missing_slot4.missing_on_disk.") for group in v.conflict_report),
+            [group.code for group in v.conflict_report],
+        )
+
     def test_conflict_report_classifies_landscape_skip_reason(self) -> None:
         nif = _write_nif(
             self.tmp,
@@ -1801,6 +1820,18 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift")
 
+    def test_classify_conflict_code_for_envmap_missing_slot4_variant(self) -> None:
+        code = _classify_conflict_code(
+            "Block 1: shader type is EnvMap but slot 4 cubemap is unresolved (slot4=missing_on_disk)."
+        )
+        self.assertEqual(code, "shader_state.envmap_missing_slot4.missing_on_disk")
+
+    def test_classify_conflict_code_for_envmap_missing_slot5_variant(self) -> None:
+        code = _classify_conflict_code(
+            "Block 2: shader type is EnvMap but slot 5 env-mask is unresolved (slot5=empty)."
+        )
+        self.assertEqual(code, "shader_state.envmap_missing_slot5.empty")
+
     def test_classify_conflict_code_for_fallout_guarded_unsupported_ops(self) -> None:
         code = _classify_conflict_code(
             "Experimental Fallout patch mode does not support: force_shader_type_3. "
@@ -1828,6 +1859,24 @@ class TestValidateNifForParallax(unittest.TestCase):
         v = validate_nif_for_parallax(nif)
         self.assertTrue(
             any(group.code.startswith("shader_state.envmap_missing_slot5.") for group in v.conflict_report)
+        )
+
+    def test_conflict_report_flags_envmap_shader_with_missing_slot5_empty_variant(self) -> None:
+        textures_root = self.tmp / "textures" / "cubemaps"
+        textures_root.mkdir(parents=True, exist_ok=True)
+        (textures_root / "stone_e.dds").write_bytes(b"dds")
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_CUBEMAP] = "textures\\cubemaps\\stone_e.dds"
+        nif = _write_nif(
+            self.tmp,
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            texture_paths=paths,
+        )
+        v = validate_nif_for_parallax(nif)
+        self.assertTrue(
+            any(group.code.startswith("shader_state.envmap_missing_slot5.empty.") for group in v.conflict_report),
+            [group.code for group in v.conflict_report],
         )
 
     def test_conflict_report_flags_real_layout_payload_missing_slot3_combo(self) -> None:
@@ -4143,9 +4192,16 @@ class TestRealModSamplePacks(unittest.TestCase):
             family_layout_variants: dict[str, set[str]] = {}
             family_expected_noop_cases: dict[str, int] = {}
             family_expected_auto_cases: dict[str, int] = {}
+            family_prefix_counts: dict[str, dict[str, int]] = {}
             fallback_conflict_groups = 0
             total_conflict_groups = 0
             generic_unsupported_header_groups = 0
+            expected_family_max_prefix_counts = pack.get("expected_family_max_prefix_counts", {})
+            self.assertIsInstance(expected_family_max_prefix_counts, dict)
+            tracked_prefixes: set[str] = set()
+            for thresholds in expected_family_max_prefix_counts.values():
+                if isinstance(thresholds, dict):
+                    tracked_prefixes.update(str(prefix) for prefix in thresholds.keys())
             for nif_path, validation in zip(corpus, validations):
                 case = case_map.get(nif_path.stem, {})
                 family = str(case.get("family", "unknown")).strip() or "unknown"
@@ -4163,6 +4219,7 @@ class TestRealModSamplePacks(unittest.TestCase):
                 family_layout_variants.setdefault(family, set())
                 family_expected_noop_cases.setdefault(family, 0)
                 family_expected_auto_cases.setdefault(family, 0)
+                family_prefix_counts.setdefault(family, {})
                 expected_prefixes = case.get("expected_prefixes", []) if isinstance(case, dict) else []
                 expected_absent_prefixes = case.get("expected_absent_prefixes", []) if isinstance(case, dict) else []
                 expected_remediation_steps = (
@@ -4221,6 +4278,13 @@ class TestRealModSamplePacks(unittest.TestCase):
                 ))
                 family_layout_variants[family].add(layout_variant)
                 codes = [group.code for group in validation.conflict_report]
+                if tracked_prefixes:
+                    prefix_counts = family_prefix_counts[family]
+                    for code in codes:
+                        text = str(code)
+                        for prefix in tracked_prefixes:
+                            if text.startswith(prefix):
+                                prefix_counts[prefix] = int(prefix_counts.get(prefix, 0)) + 1
                 total_conflict_groups += len(codes)
                 fallback_conflict_groups += sum(
                     1 for code in codes if str(code).startswith("fallback_or_unknown.")
@@ -4340,6 +4404,30 @@ class TestRealModSamplePacks(unittest.TestCase):
                 0,
                 f"{pack_id}: found {generic_unsupported_header_groups} generic unsupported_header groups; promote to deterministic subcodes",
             )
+            for family, thresholds in expected_family_max_prefix_counts.items():
+                family_name = str(family)
+                self.assertIsInstance(
+                    thresholds,
+                    dict,
+                    f"{pack_id}: expected_family_max_prefix_counts[{family_name!r}] must be an object",
+                )
+                observed_counts = family_prefix_counts.get(family_name)
+                self.assertIsNotNone(
+                    observed_counts,
+                    f"{pack_id}: expected_family_max_prefix_counts references unknown family {family_name!r}",
+                )
+                assert observed_counts is not None
+                for prefix, max_count_raw in thresholds.items():
+                    max_count = int(max_count_raw)
+                    observed_count = int(observed_counts.get(str(prefix), 0))
+                    self.assertLessEqual(
+                        observed_count,
+                        max_count,
+                        (
+                            f"{pack_id}: family {family_name} broad-prefix count for {prefix!r} "
+                            f"was {observed_count}, above ceiling {max_count}"
+                        ),
+                    )
             for family, stats in family_pass_fail.items():
                 self.assertEqual(stats["fail"], 0, f"{pack_id}: family {family} has failing parity expectations")
                 self.assertGreater(stats["pass"], 0, f"{pack_id}: family {family} has zero passing cases")

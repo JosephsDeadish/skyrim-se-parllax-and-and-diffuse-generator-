@@ -49,6 +49,12 @@
     "Resume data may be incomplete, and this may behave like start-fresh.\nContinue with Resume mode?": "Resume data may be incomplete, and this may behave like start-fresh.\nContinue with Resume mode?",
     "Checkpoint metadata does not fully match this run ({mismatch_flags}).\n\nResume mode could skip the wrong files in this state.\nContinue with Resume anyway?": "Checkpoint metadata does not fully match this run ({mismatch_flags}).\n\nResume mode could skip the wrong files in this state.\nContinue with Resume anyway?",
     "Resume mode could skip the wrong files in this state.\nContinue with Resume anyway?": "Resume mode could skip the wrong files in this state.\nContinue with Resume anyway?",
-    "Continuing will process all selected files (same as start fresh) while creating checkpoint history.\nContinue?": "Continuing will process all selected files (same as start fresh) while creating checkpoint history.\nContinue?"
+    "Continuing will process all selected files (same as start fresh) while creating checkpoint history.\nContinue?": "Continuing will process all selected files (same as start fresh) while creating checkpoint history.\nContinue?",
+    "Large 1000+ run resumed: keep Resume mode on and switch to Start fresh only when you intentionally need a full rerun.": "Large 1000+ run resumed: keep Resume mode on and switch to Start fresh only when you intentionally need a full rerun.",
+    "8K-heavy run detected; keep staged/lazy preview on and keep Resume mode enabled for safer restarts.": "8K-heavy run detected; keep staged/lazy preview on and keep Resume mode enabled for safer restarts.",
+    "Large 1000+ run: switch checkpoint mode to Resume and keep live preview paused except for brief spot-checks.": "Large 1000+ run: switch checkpoint mode to Resume and keep live preview paused except for brief spot-checks.",
+    "Queue pacing is active to keep the UI responsive on this huge run; brief status-update delays are expected.": "Queue pacing is active to keep the UI responsive on this huge run; brief status-update delays are expected.",
+    "Huge-run mode: checkpoint safety prompts, safer resume decisions, and queue pacing are enabled for smoother long runs.": "Huge-run mode: checkpoint safety prompts, safer resume decisions, and queue pacing are enabled for smoother long runs.",
+    "Large-run guidance: keep Resume mode enabled and leave live preview paused except for quick spot-checks.": "Large-run guidance: keep Resume mode enabled and leave live preview paused except for quick spot-checks."
   }
 }

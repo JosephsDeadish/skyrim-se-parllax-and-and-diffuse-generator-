@@ -94,6 +94,72 @@
           "expected_difference_bucket": "guarded_fallout",
           "intentional_strategy_difference": true,
           "safety_difference_note": "Single-pass Fallout blocks remain manual-review due to instability risk."
+        },
+        {
+          "id": "ext_additional_fallout_malformed_numblocks_signature_only_v2",
+          "family": "external_additional",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "num_blocks_delta": 4,
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_malformed_numblocks_reflow",
+          "local_strategy": "guarded_manual_review_for_signature_only_header_drift",
+          "expected_difference_bucket": "guarded_fallout",
+          "intentional_strategy_difference": true,
+          "safety_difference_note": "Malformed signature-only header drift remains manual-review/no-op for safety."
+        },
+        {
+          "id": "ext_additional_skyrim_real_crossblock_mixed_slot_stack_v2",
+          "family": "external_additional",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 268437632,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\architecture\\icicle\\icewall01.dds",
+            "",
+            "",
+            "",
+            "",
+            "textures\\architecture\\icicle\\icewall01_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim.",
+            "path_slot_env_mask.generic_alias_suffix.skyrim."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot3_parallax_for_parallax_envmap_glow_mixed_unresolved",
+            "set_slot5_env_mask_for_parallax_envmap_glow_mixed_unresolved"
+          ],
+          "pgpatcher_strategy": "rebuild_mixed_slots_then_patch",
+          "local_strategy": "safe_guess_or_disable_for_mixed_slot_stack",
+          "expected_difference_bucket": "safety_first",
+          "intentional_strategy_difference": true,
+          "safety_difference_note": "Mixed-slot stacks prefer deterministic safe restoration before broad flag writes."
         }
       ]
     }

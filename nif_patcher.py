@@ -4182,11 +4182,35 @@ _CONFLICT_ACTIONS: dict[str, tuple[str, ...]] = {
     "shader_state.envmap_missing_slots4_5": (
         "Disable environment mapping when both slot 4 and slot 5 are unresolved, or restore valid EnvMap textures.",
     ),
+    "shader_state.envmap_missing_slots4_5.slot4_empty_slot5_empty": (
+        "Both EnvMap texture slots are empty; restore slot 4 cubemap + slot 5 env-mask paths, or disable environment mapping.",
+    ),
+    "shader_state.envmap_missing_slots4_5.slot4_missing_on_disk_slot5_empty": (
+        "Slot 4 cubemap path is unresolved on disk and slot 5 is empty; restore both EnvMap slots or disable environment mapping.",
+    ),
+    "shader_state.envmap_missing_slots4_5.slot4_empty_slot5_missing_on_disk": (
+        "Slot 4 cubemap is empty and slot 5 env-mask path is unresolved on disk; restore both EnvMap slots or disable environment mapping.",
+    ),
+    "shader_state.envmap_missing_slots4_5.slot4_missing_on_disk_slot5_missing_on_disk": (
+        "Both EnvMap slot paths are unresolved on disk; restore slot 4/5 textures near the mesh or disable environment mapping.",
+    ),
     "shader_state.envmap_missing_slot4": (
         "Restore a valid slot 4 cubemap texture for EnvMap shader blocks, or disable environment mapping for that block.",
     ),
+    "shader_state.envmap_missing_slot4.empty": (
+        "Slot 4 cubemap is empty for an EnvMap block; restore a cubemap path or disable environment mapping.",
+    ),
+    "shader_state.envmap_missing_slot4.missing_on_disk": (
+        "Slot 4 cubemap path is unresolved on disk; restore a valid cubemap file near the mesh or disable environment mapping.",
+    ),
     "shader_state.envmap_missing_slot5": (
         "Restore a valid slot 5 env-mask texture for EnvMap shader blocks, or disable environment mapping for that block.",
+    ),
+    "shader_state.envmap_missing_slot5.empty": (
+        "Slot 5 env-mask is empty for an EnvMap block; restore an env-mask path or disable environment mapping.",
+    ),
+    "shader_state.envmap_missing_slot5.missing_on_disk": (
+        "Slot 5 env-mask path is unresolved on disk; restore a valid env-mask file near the mesh or disable environment mapping.",
     ),
     "shader_state.envmap_pom_missing_env_slots": (
         "EnvMap + POM is active while required EnvMap textures are unresolved; restore slot 4/5 textures or disable both env mapping and POM for the block.",
@@ -4565,14 +4589,30 @@ def _classify_conflict_code(message: str) -> str:
     if "shader type is parallax-focused" in lowered and "slot 3 is unresolved" in lowered:
         return "shader_state.parallax_type_missing_slot3"
     if "shader type is envmap" in lowered and "both slot 4 cubemap and slot 5 env-mask are unresolved" in lowered:
+        if "(slot4=empty, slot5=empty)" in lowered:
+            return "shader_state.envmap_missing_slots4_5.slot4_empty_slot5_empty"
+        if "(slot4=missing_on_disk, slot5=empty)" in lowered:
+            return "shader_state.envmap_missing_slots4_5.slot4_missing_on_disk_slot5_empty"
+        if "(slot4=empty, slot5=missing_on_disk)" in lowered:
+            return "shader_state.envmap_missing_slots4_5.slot4_empty_slot5_missing_on_disk"
+        if "(slot4=missing_on_disk, slot5=missing_on_disk)" in lowered:
+            return "shader_state.envmap_missing_slots4_5.slot4_missing_on_disk_slot5_missing_on_disk"
         return "shader_state.envmap_missing_slots4_5"
     if "restore valid slot 4/5 textures for envmap or disable environment mapping for this block" in lowered:
         return "shader_state.envmap_missing_slots4_5.hint_restore_or_disable"
     if "restore valid slot 4/5 envmap textures, or disable both environment mapping and pom for this mixed block" in lowered:
         return "shader_state.envmap_pom_missing_env_slots.hint_restore_or_disable"
     if "shader type is envmap" in lowered and "slot 4 cubemap is unresolved" in lowered:
+        if "(slot4=empty)" in lowered:
+            return "shader_state.envmap_missing_slot4.empty"
+        if "(slot4=missing_on_disk)" in lowered:
+            return "shader_state.envmap_missing_slot4.missing_on_disk"
         return "shader_state.envmap_missing_slot4"
     if "shader type is envmap" in lowered and "slot 5 env-mask is unresolved" in lowered:
+        if "(slot5=empty)" in lowered:
+            return "shader_state.envmap_missing_slot5.empty"
+        if "(slot5=missing_on_disk)" in lowered:
+            return "shader_state.envmap_missing_slot5.missing_on_disk"
         return "shader_state.envmap_missing_slot5"
     if (
         "slsf1_environment_mapping is enabled" in lowered
@@ -5878,6 +5918,16 @@ def validate_nif_for_parallax(
             cubemap_path,
             texture_roots,
         )
+        slot4_state = (
+            "empty"
+            if not cubemap_path
+            else ("missing_on_disk" if cubemap_missing else "resolved")
+        )
+        slot5_state = (
+            "empty"
+            if not env_mask_path
+            else ("missing_on_disk" if env_mask_missing else "resolved")
+        )
         if (
             info.shader_type == SHADER_TYPE_ENVMAP
             and (not env_mask_path or env_mask_missing)
@@ -5885,7 +5935,7 @@ def validate_nif_for_parallax(
         ):
             _append_unique(
                 result.issues,
-                f"{bname}: shader type is EnvMap but both slot 4 cubemap and slot 5 env-mask are unresolved."
+                f"{bname}: shader type is EnvMap but both slot 4 cubemap and slot 5 env-mask are unresolved (slot4={slot4_state}, slot5={slot5_state})."
             )
             _append_unique(
                 result.suggestions,
@@ -5897,7 +5947,7 @@ def validate_nif_for_parallax(
         ):
             _append_unique(
                 result.issues,
-                f"{bname}: shader type is EnvMap but slot 4 cubemap is unresolved."
+                f"{bname}: shader type is EnvMap but slot 4 cubemap is unresolved (slot4={slot4_state})."
             )
             _append_unique(
                 result.suggestions,
@@ -5909,7 +5959,7 @@ def validate_nif_for_parallax(
         ):
             _append_unique(
                 result.issues,
-                f"{bname}: shader type is EnvMap but slot 5 env-mask is unresolved."
+                f"{bname}: shader type is EnvMap but slot 5 env-mask is unresolved (slot5={slot5_state})."
             )
             _append_unique(
                 result.suggestions,

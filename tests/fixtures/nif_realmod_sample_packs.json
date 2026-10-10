@@ -45,6 +45,30 @@
         "effects": 3,
         "clutter": 1
       },
+      "expected_family_max_prefix_counts": {
+        "architecture": {
+          "fallback_or_unknown.": 0,
+          "shader_state.envmap_missing_slots4_5.": 4,
+          "shader_state.parallax_envmap_missing_slots3_4_5.": 2,
+          "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.": 1
+        },
+        "effects": {
+          "fallback_or_unknown.": 0,
+          "shader_state.envmap_missing_slots4_5.": 5,
+          "shader_state.parallax_envmap_missing_slots3_4_5.": 4,
+          "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.": 3
+        },
+        "foliage": {
+          "fallback_or_unknown.": 0,
+          "shader_state.envmap_missing_slots4_5.": 1,
+          "shader_state.parallax_envmap_missing_slots3_4_5.": 1,
+          "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.": 1
+        },
+        "landscape": {
+          "fallback_or_unknown.": 0,
+          "shader_state.envmap_missing_slots4_5.": 1
+        }
+      },
       "required_summary_code_prefixes": [
         "path_slot_parallax.matches_diffuse.skyrim.",
         "path_slot_parallax.matches_normal.skyrim.",
@@ -1091,6 +1115,28 @@
         "architecture": 3,
         "effects": 3,
         "clutter": 2
+      },
+      "expected_family_max_prefix_counts": {
+        "architecture": {
+          "fallback_or_unknown.": 0,
+          "unsupported_header.profile_value_drift.unparsed.": 22,
+          "shader_state.envmap_missing_slots4_5.": 6,
+          "shader_state.parallax_envmap_missing_slots3_4_5.": 3,
+          "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.": 2
+        },
+        "effects": {
+          "fallback_or_unknown.": 0,
+          "unsupported_header.profile_value_drift.unparsed.": 19,
+          "shader_state.envmap_missing_slots4_5.": 3,
+          "shader_state.parallax_envmap_missing_slots3_4_5.": 2,
+          "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.": 1
+        },
+        "clutter": {
+          "fallback_or_unknown.": 0,
+          "unsupported_header.profile_value_drift.unparsed.": 13,
+          "shader_state.envmap_missing_slots4_5.": 2,
+          "shader_state.parallax_envmap_missing_slots3_4_5.": 1
+        }
       },
       "required_summary_code_prefixes": [
         "shader_state.envmap_missing_slots4_5.fallout.",
