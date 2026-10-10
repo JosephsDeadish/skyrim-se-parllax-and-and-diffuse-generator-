@@ -188,6 +188,18 @@ def _write_packaged_smoke_png(path: Path, size: int) -> None:
     path.write_bytes(png)
 
 
+def _write_packaged_smoke_dds(path: Path, size: int) -> None:
+    from PIL import Image
+
+    dimension = max(4, int(size))
+    dimension = (dimension + 3) // 4 * 4
+    Image.new("RGB", (dimension, dimension), (112, 128, 144)).save(
+        path,
+        format="DDS",
+        pixel_format="DXT5",
+    )
+
+
 def _packaged_smoke_scenarios() -> list[dict[str, object]]:
     """Return packaged-smoke scenarios with output + semantic assertions."""
     return [
@@ -634,6 +646,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             ],
             "input_size": 16,
             "input_count": 2,
+            "input_format": "dds",
             "checkpoint_resume": True,
             "min_outputs": 4,
             "required_suffixes": ("_d.dds", "_n.dds"),
@@ -715,17 +728,19 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
             scenario_args = [str(arg) for arg in (scenario.get("args", []) or [])]
             input_size = max(1, int(scenario.get("input_size", 2) or 2))
             input_count = max(1, int(scenario.get("input_count", 1) or 1))
+            input_format = str(scenario.get("input_format", "png")).strip().lower()
+            if input_format not in {"dds", "png"}:
+                raise SystemExit(f"Unsupported packaged smoke input format '{input_format}' in '{scenario_name}'.")
+            input_writer = _write_packaged_smoke_dds if input_format == "dds" else _write_packaged_smoke_png
+            input_suffix = f".{input_format}"
             if input_count > 1:
                 smoke_input = smoke_io / f"inputs_{scenario_name}"
                 smoke_input.mkdir(parents=True, exist_ok=True)
                 for input_index in range(input_count):
-                    _write_packaged_smoke_png(
-                        smoke_input / f"sample_{input_index + 1:02d}.png",
-                        input_size,
-                    )
+                    input_writer(smoke_input / f"sample_{input_index + 1:02d}{input_suffix}", input_size)
             else:
-                smoke_input = smoke_io / f"sample_{scenario_name}.png"
-                _write_packaged_smoke_png(smoke_input, input_size)
+                smoke_input = smoke_io / f"sample_{scenario_name}{input_suffix}"
+                input_writer(smoke_input, input_size)
             min_outputs = max(1, int(scenario.get("min_outputs", 1) or 1))
             required_suffixes = tuple(
                 str(suffix).strip().lower()

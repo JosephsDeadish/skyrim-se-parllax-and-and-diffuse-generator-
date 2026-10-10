@@ -394,6 +394,7 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         resume_scenario = scenario_by_name["fallout4_batch_checkpoint_resume"]
         self.assertEqual(resume_scenario.get("input_count"), 2)
         self.assertEqual(resume_scenario.get("input_size"), 16)
+        self.assertEqual(resume_scenario.get("input_format"), "dds")
         self.assertTrue(resume_scenario.get("checkpoint_resume"))
         self.assertEqual(
             resume_scenario.get("required_exact_output_family_counts"),
