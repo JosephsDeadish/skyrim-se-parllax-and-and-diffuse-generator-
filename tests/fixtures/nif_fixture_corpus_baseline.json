@@ -1,0 +1,45 @@
+{
+  "expected_total_cases": 77,
+  "expected_profile_counts": {
+    "skyrim": 36,
+    "fallout": 18,
+    "unknown": 23
+  },
+  "expected_family_case_counts": {
+    "core_drift_semantic_slot3_repeated": 1
+  },
+  "expected_max_fallback_groups": 0,
+  "required_summary_code_prefixes": [
+    "missing_parallax_flag.flag1_not_set.skyrim.",
+    "missing_parallax_flag.flag1_not_set.fallout.",
+    "path_slot_diffuse.wrong_suffix.skyrim.",
+    "path_slot_normal.wrong_suffix.skyrim.",
+    "path_slot_cubemap.wrong_suffix.skyrim.",
+    "path_slot_parallax.matches_diffuse.skyrim.",
+    "path_slot_parallax.matches_normal.skyrim.",
+    "path_slot_glow.wrong_suffix.skyrim.",
+    "path_slot_env_mask.generic_alias_suffix.skyrim.",
+    "flag_env_mapping.slot4_filled_without_flag.skyrim.",
+    "flag_env_mapping.slot5_filled_without_flag.skyrim.",
+    "shader_state.envmap_missing_slots4_5.",
+    "shader_state.envmap_missing_slot4.",
+    "shader_state.envmap_missing_slot5.",
+    "shader_state.envmap_pom_missing_env_slots.skyrim.",
+    "shader_state.envmap_glow_missing_slots2_4_5.",
+    "shader_state.parallax_envmap_missing_slots3_4_5.",
+    "shader_state.parallax_envmap_missing_slot3.",
+    "shader_state.parallax_envmap_missing_slot5.",
+    "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.skyrim.",
+    "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks.fallout.",
+    "missing_parallax_slot3.empty.payload_resolved_real_layout_drift.skyrim.",
+    "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.",
+    "shader_state.envmap_missing_slots4_5.",
+    "flag_env_mapping.slot5_filled_without_flag.fallout.",
+    "skip_single_pass.fallout.",
+    "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.",
+    "path_slot_parallax.matches_normal.fallout.",
+    "fallout_profile.experimental_notice.fallout.",
+    "unsupported_header.",
+    "shader_state.envmap_glow_missing_slots2_4_5."
+  ]
+}

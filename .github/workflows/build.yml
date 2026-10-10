@@ -20,19 +20,19 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run tests
+      - name: Run full unittest suite
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
-  build-exe:
-    name: Build Windows exe & upload zip
-    runs-on: windows-latest
+  large-batch-smoke:
+    name: Large-batch smoke checks (Ubuntu)
+    runs-on: ubuntu-latest
     environment: pr-build-approval
     needs: test
 
@@ -43,7 +43,103 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run large-batch smoke tests
+        run: |
+          python -m unittest -v \
+            tests.test_generate_textures.GenerateTexturesTests.test_compute_preview_refresh_delay_ms_throttles_for_huge_batches \
+            tests.test_generate_textures.GenerateTexturesTests.test_compute_deferred_preview_tile_interval_ms_increases_for_huge_batches \
+            tests.test_generate_textures.GenerateTexturesTests.test_should_update_live_batch_preview_throttles_dense_updates_for_huge_batches \
+            tests.test_generate_textures.GenerateTexturesTests.test_build_batch_bottleneck_hints_includes_large_run_resume_guidance \
+            tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_writes_checkpoint_file \
+            tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_resume_checkpoint_skips_completed_successes \
+            tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_recovers_interrupted_multiresolution_batch \
+            tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_recovers_failed_file_under_parallel_queue_pressure \
+            tests.test_generate_textures.GenerateTexturesTests.test_gui_processing_queue_smoke_done_event_reports_outputs_failures_and_autopatch
+
+  release-readiness:
+    name: Release validation gate artifacts (Ubuntu)
+    runs-on: ubuntu-latest
+    environment: pr-build-approval
+    needs:
+      - test
+      - large-batch-smoke
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download prior release-readiness artifacts (history seed)
+        uses: dawidd6/action-download-artifact@v6
+        continue-on-error: true
+        with:
+          workflow: build.yml
+          branch: ${{ github.event.repository.default_branch }}
+          name: release-readiness-artifacts
+          path: artifacts/previous_release_readiness
+          if_no_artifact_found: warn
+
+      - name: Ensure seeded parity-delta baseline artifacts
+        run: |
+          mkdir -p artifacts/previous_release_readiness
+          if [ ! -f artifacts/previous_release_readiness/nif_realmod_parity_delta_report.json ]; then
+            cp tests/fixtures/nif_realmod_parity_delta_seed.json artifacts/previous_release_readiness/nif_realmod_parity_delta_report.json
+          fi
+
+      - name: Pre-release validation gate + artifact generation
+        run: |
+          python scripts/pre_release_validation.py \
+            --repeat-validation-loops 4 \
+            --packaged-smoke-loops 3 \
+            --strict-localization-completeness \
+            --max-fallback-ratio-drift 0.03 \
+            --max-fallback-group-drift 1 \
+            --artifact-dir artifacts/release_readiness \
+            --history-file artifacts/release_readiness/nif_family_trend_history.json \
+            --seed-history-file artifacts/previous_release_readiness/nif_family_trend_history.json \
+            --seed-realmod-delta-file tests/fixtures/nif_realmod_parity_delta_seed.json \
+            --seed-realmod-delta-file artifacts/previous_release_readiness/nif_realmod_parity_delta_report.json
+
+      - name: Upload release-readiness artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-readiness-artifacts
+          path: artifacts/release_readiness
+          if-no-files-found: error
+
+  build-exe:
+    name: Build Windows exe & upload zip
+    runs-on: windows-latest
+    environment: pr-build-approval
+    needs:
+      - test
+      - large-batch-smoke
+      - release-readiness
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Install dependencies
         run: |
@@ -55,6 +151,58 @@ jobs:
 
       - name: Build executable with PyInstaller
         run: pyinstaller --onefile --windowed --collect-all numpy --add-data "nif_patcher.py;." --name generate_textures --icon assets\panda.ico generate_textures.py
+
+      - name: Smoke run packaged executable
+        run: .\dist\generate_textures.exe --help
+
+      - name: Smoke launch packaged Tk GUI
+        shell: pwsh
+        run: |
+          $existingIds = @(Get-Process -Name "generate_textures" -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+          $launcher = Start-Process -FilePath ".\dist\generate_textures.exe" -ArgumentList @("--gui", "--gui-backend", "tk") -PassThru
+          $deadline = (Get-Date).AddSeconds(20)
+          $windowProcess = $null
+          do {
+            $launchedProcesses = @(Get-Process -Name "generate_textures" -ErrorAction SilentlyContinue | Where-Object { $existingIds -notcontains $_.Id })
+            $windowProcess = $launchedProcesses | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+            if ($windowProcess) {
+              break
+            }
+            Start-Sleep -Seconds 1
+          } while ((Get-Date) -lt $deadline)
+          if (-not $windowProcess) {
+            $details = ($launchedProcesses | ForEach-Object { "PID=$($_.Id) Handle=$($_.MainWindowHandle) Title='$($_.MainWindowTitle)'" }) -join "; "
+            throw "Packaged Tk GUI did not create a main window. Launcher PID=$($launcher.Id). Processes: $details"
+          }
+          $launchedProcesses | Stop-Process -Force
+
+      - name: Validate Tk Advanced output visibility settings
+        run: python -m unittest -v tests.test_generate_textures.GenerateTexturesTests.test_tk_advanced_workflow_visibility_round_trips_saved_settings
+
+      - name: End-to-end packaged executable smoke generation
+        run: |
+          python - <<'PY'
+          import shutil
+          from pathlib import Path
+          from scripts.pre_release_validation import _run_packaged_executable_smoke
+
+          artifact_dir = Path("artifacts")
+          smoke_dist = artifact_dir / "packaging_smoke" / "dist"
+          smoke_dist.mkdir(parents=True, exist_ok=True)
+          shutil.copy2(
+              Path("dist") / "generate_textures.exe",
+              smoke_dist / "generate_textures_smoke.exe",
+          )
+          _run_packaged_executable_smoke(artifact_dir, loops=3)
+          PY
+        shell: bash
+
+      - name: Upload packaged smoke artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-smoke-artifacts
+          path: artifacts/packaging_smoke
+          if-no-files-found: error
 
       - name: Create application zip
         run: |

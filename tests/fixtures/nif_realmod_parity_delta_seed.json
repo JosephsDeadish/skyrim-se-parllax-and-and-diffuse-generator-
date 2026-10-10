@@ -1,0 +1,1083 @@
+{
+  "case_count": 32,
+  "cases": [
+    {
+      "case_id": "pack_skyrim_architecture_parallax_diffuse_reuse",
+      "detected_conflict_codes": [
+        "missing_parallax_flag.flag1_not_set.skyrim.legacy",
+        "path_slot_parallax.matches_diffuse.skyrim.legacy",
+        "path_slot_parallax.wrong_suffix.skyrim.legacy"
+      ],
+      "detected_conflict_families": [
+        "missing_parallax_flag.flag1_not_set",
+        "path_slot_parallax.matches_diffuse",
+        "path_slot_parallax.wrong_suffix"
+      ],
+      "fallback_used": false,
+      "family": "architecture",
+      "intended_difference_bucket": "none",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "skyrim_realmod_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "skyrim",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "set_slot3_parallax"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_skyrim_architecture_multishader_envmap",
+      "detected_conflict_codes": [
+        "missing_parallax_flag.flag1_not_set.skyrim.legacy",
+        "missing_parallax_slot3.empty.skyrim.legacy",
+        "path_slot_parallax.matches_diffuse.skyrim.legacy",
+        "path_slot_parallax.wrong_suffix.skyrim.legacy",
+        "shader_state.envmap_missing_slots4_5.skyrim.legacy"
+      ],
+      "detected_conflict_families": [
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "path_slot_parallax.matches_diffuse",
+        "path_slot_parallax.wrong_suffix",
+        "shader_state.envmap_missing_slots4_5"
+      ],
+      "fallback_used": false,
+      "family": "architecture",
+      "intended_difference_bucket": "none",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "skyrim_realmod_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "skyrim",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "set_slot3_parallax",
+        "set_slot4_cubemap_for_missing_envmap_slots4_5",
+        "set_slot5_env_mask_for_missing_envmap_slots4_5",
+        "enable_env_mapping_for_missing_envmap_slots4_5"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_skyrim_architecture_conflicting_per_block_workflows",
+      "detected_conflict_codes": [
+        "missing_parallax_flag.flag1_not_set.skyrim.legacy",
+        "missing_parallax_slot3.empty.skyrim.legacy",
+        "path_slot_parallax.matches_normal.skyrim.legacy",
+        "path_slot_parallax.wrong_suffix.skyrim.legacy",
+        "shader_state.envmap_missing_slot5.skyrim.legacy"
+      ],
+      "detected_conflict_families": [
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "path_slot_parallax.matches_normal",
+        "path_slot_parallax.wrong_suffix",
+        "shader_state.envmap_missing_slot5"
+      ],
+      "fallback_used": false,
+      "family": "architecture",
+      "intended_difference_bucket": "none",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "skyrim_realmod_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "skyrim",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "set_slot3_parallax",
+        "set_slot5_env_mask_for_missing_envmap_slot5",
+        "enable_env_mapping_for_missing_envmap_slot5"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_skyrim_clutter_envmap_slot4_missing",
+      "detected_conflict_codes": [
+        "missing_parallax_flag.flag1_not_set.skyrim.legacy",
+        "missing_parallax_slot3.empty.skyrim.legacy",
+        "shader_state.envmap_missing_slot4.skyrim.legacy"
+      ],
+      "detected_conflict_families": [
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "shader_state.envmap_missing_slot4"
+      ],
+      "fallback_used": false,
+      "family": "clutter",
+      "intended_difference_bucket": "none",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "skyrim_realmod_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "skyrim",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "set_slot3_parallax",
+        "set_slot4_cubemap_for_missing_envmap_slot4",
+        "enable_env_mapping_for_missing_envmap_slot4"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_skyrim_armor_envmap_slot5_missing",
+      "detected_conflict_codes": [
+        "missing_parallax_flag.flag1_not_set.skyrim.legacy",
+        "missing_parallax_slot3.empty.skyrim.legacy",
+        "shader_state.envmap_missing_slot5.skyrim.legacy"
+      ],
+      "detected_conflict_families": [
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "shader_state.envmap_missing_slot5"
+      ],
+      "fallback_used": false,
+      "family": "armor",
+      "intended_difference_bucket": "none",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "skyrim_realmod_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "skyrim",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "set_slot3_parallax",
+        "set_slot5_env_mask_for_missing_envmap_slot5",
+        "enable_env_mapping_for_missing_envmap_slot5"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_skyrim_landscape_envmask_alias",
+      "detected_conflict_codes": [
+        "flag_env_mapping.slot5_filled_without_flag.skyrim.legacy",
+        "missing_parallax_flag.flag1_not_set.skyrim.legacy",
+        "missing_parallax_slot3.empty.skyrim.legacy",
+        "path_slot_env_mask.generic_alias_suffix.skyrim.legacy"
+      ],
+      "detected_conflict_families": [
+        "flag_env_mapping.slot5_filled_without_flag",
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "path_slot_env_mask.generic_alias_suffix"
+      ],
+      "fallback_used": false,
+      "family": "landscape",
+      "intended_difference_bucket": "none",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "skyrim_realmod_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "skyrim",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "enable_env_mapping",
+        "set_slot3_parallax",
+        "set_slot5_env_mask"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_skyrim_foliage_env_slot4_wrong_suffix",
+      "detected_conflict_codes": [
+        "flag_env_mapping.slot4_filled_without_flag.skyrim.legacy",
+        "missing_parallax_flag.flag1_not_set.skyrim.legacy",
+        "missing_parallax_slot3.empty.skyrim.legacy",
+        "path_slot_cubemap.wrong_suffix.skyrim.legacy"
+      ],
+      "detected_conflict_families": [
+        "flag_env_mapping.slot4_filled_without_flag",
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "path_slot_cubemap.wrong_suffix"
+      ],
+      "fallback_used": false,
+      "family": "foliage",
+      "intended_difference_bucket": "none",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "skyrim_realmod_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "skyrim",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "enable_env_mapping",
+        "set_slot3_parallax",
+        "set_slot4_cubemap"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_skyrim_effects_glow_wrong_suffix",
+      "detected_conflict_codes": [
+        "flag_glow_map.slot2_filled_without_flag.skyrim.legacy",
+        "missing_parallax_flag.flag1_not_set.skyrim.legacy",
+        "missing_parallax_slot3.empty.skyrim.legacy",
+        "path_slot_glow.wrong_suffix.skyrim.legacy"
+      ],
+      "detected_conflict_families": [
+        "flag_glow_map.slot2_filled_without_flag",
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "path_slot_glow.wrong_suffix"
+      ],
+      "fallback_used": false,
+      "family": "effects",
+      "intended_difference_bucket": "none",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "skyrim_realmod_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "skyrim",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "enable_glow_map",
+        "set_slot3_parallax",
+        "set_slot2_glow"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_skyrim_effects_mixed_parallax_envmap_glow_unresolved",
+      "detected_conflict_codes": [
+        "flag_glow_map.flag_set_without_slot2.skyrim.legacy",
+        "missing_parallax_slot3.empty.skyrim.legacy",
+        "shader_state.envmap_glow_missing_slots2_4_5.skyrim.legacy",
+        "shader_state.envmap_missing_slots4_5.skyrim.legacy",
+        "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim.legacy",
+        "shader_state.parallax_envmap_missing_slots3_4_5.skyrim.legacy"
+      ],
+      "detected_conflict_families": [
+        "flag_glow_map.flag_set_without_slot2",
+        "missing_parallax_slot3.empty",
+        "shader_state.envmap_glow_missing_slots2_4_5",
+        "shader_state.envmap_missing_slots4_5",
+        "shader_state.parallax_envmap_glow_missing_slots2_3_4_5",
+        "shader_state.parallax_envmap_missing_slots3_4_5"
+      ],
+      "fallback_used": true,
+      "family": "effects",
+      "intended_difference_bucket": "safety_first",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "skyrim_realmod_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "skyrim",
+      "remediation_mode": "mixed_rebuild_and_disable",
+      "remediation_steps": [
+        "disable_glow_map_for_missing_slot2",
+        "set_slot3_parallax",
+        "set_slot4_cubemap_for_missing_envmap_slots4_5",
+        "set_slot5_env_mask_for_missing_envmap_slots4_5",
+        "enable_env_mapping_for_missing_envmap_slots4_5",
+        "set_slot2_glow_for_envmap_glow_mixed_unresolved",
+        "set_slot4_cubemap_for_envmap_glow_mixed_unresolved",
+        "set_slot5_env_mask_for_envmap_glow_mixed_unresolved",
+        "enable_env_mapping_for_envmap_glow_mixed_unresolved",
+        "enable_glow_map_for_envmap_glow_mixed_unresolved",
+        "disable_env_mapping_for_parallax_envmap_mixed_unresolved",
+        "disable_parallax_for_parallax_envmap_mixed_unresolved",
+        "disable_pom_for_parallax_envmap_mixed_unresolved",
+        "set_slot3_parallax_for_parallax_envmap_glow_mixed_unresolved",
+        "set_slot2_glow_for_parallax_envmap_glow_mixed_unresolved",
+        "set_slot4_cubemap_for_parallax_envmap_glow_mixed_unresolved",
+        "set_slot5_env_mask_for_parallax_envmap_glow_mixed_unresolved",
+        "enable_env_mapping_for_parallax_envmap_glow_mixed_unresolved"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_skyrim_effects_envmap_pom_and_crossblock_parallax_normal_reuse",
+      "detected_conflict_codes": [
+        "flag_pom.non_heightmap_shader.skyrim.legacy",
+        "missing_parallax_flag.flag1_not_set.skyrim.legacy",
+        "missing_parallax_slot3.empty.skyrim.legacy",
+        "path_slot_parallax.matches_normal.skyrim.legacy",
+        "path_slot_parallax.wrong_suffix.skyrim.legacy",
+        "shader_state.envmap_missing_slots4_5.skyrim.legacy",
+        "shader_state.envmap_pom_missing_env_slots.skyrim.legacy",
+        "shader_state.parallax_envmap_missing_slots3_4_5.skyrim.legacy"
+      ],
+      "detected_conflict_families": [
+        "flag_pom.non_heightmap_shader",
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "path_slot_parallax.matches_normal",
+        "path_slot_parallax.wrong_suffix",
+        "shader_state.envmap_missing_slots4_5",
+        "shader_state.envmap_pom_missing_env_slots",
+        "shader_state.parallax_envmap_missing_slots3_4_5"
+      ],
+      "fallback_used": true,
+      "family": "effects",
+      "intended_difference_bucket": "safety_first",
+      "intentional_strategy_difference": true,
+      "local_strategy": "disable_envmap_and_pom_safely_then_rebuild_slot3_when_guessable",
+      "pack_id": "skyrim_realmod_family_pack",
+      "pgpatcher_strategy": "disable_envmap_and_pom_when_env_slots_unresolved",
+      "profile": "skyrim",
+      "remediation_mode": "mixed_rebuild_and_disable",
+      "remediation_steps": [
+        "enable_parallax",
+        "set_slot3_parallax",
+        "disable_pom_for_non_heightmap_shader",
+        "set_slot4_cubemap_for_missing_envmap_slots4_5",
+        "set_slot5_env_mask_for_missing_envmap_slots4_5",
+        "enable_env_mapping_for_missing_envmap_slots4_5",
+        "disable_env_mapping_for_envmap_pom_mixed_unresolved",
+        "disable_pom_for_envmap_pom_mixed_unresolved",
+        "disable_env_mapping_for_parallax_envmap_mixed_unresolved",
+        "disable_parallax_for_parallax_envmap_mixed_unresolved",
+        "disable_pom_for_parallax_envmap_mixed_unresolved"
+      ],
+      "safety_difference_note": "Safety-first divergence: local strategy prefers guarded disable fallback when deterministic rebuild confidence is limited.",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_skyrim_architecture_real_multiblock_env_slot5_and_glow_wrong",
+      "detected_conflict_codes": [
+        "missing_parallax_flag.flag1_not_set.skyrim.real",
+        "missing_parallax_slot3.empty.skyrim.real",
+        "fallback_or_unknown.skyrim.real",
+        "flag_glow_map.slot2_filled_without_flag.skyrim.real",
+        "path_slot_glow.wrong_suffix.skyrim.real",
+        "shader_state.envmap_missing_slot5.skyrim.real"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "flag_glow_map.slot2_filled_without_flag",
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "path_slot_glow.wrong_suffix",
+        "shader_state.envmap_missing_slot5"
+      ],
+      "fallback_used": false,
+      "family": "architecture",
+      "intended_difference_bucket": "none",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "skyrim_realmod_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "skyrim",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "enable_glow_map",
+        "set_slot3_parallax",
+        "set_slot2_glow",
+        "set_slot5_env_mask_for_missing_envmap_slot5",
+        "enable_env_mapping_for_missing_envmap_slot5"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "real"
+    },
+    {
+      "case_id": "pack_skyrim_architecture_le_u16_envmask_alias",
+      "detected_conflict_codes": [
+        "flag_env_mapping.slot5_filled_without_flag.skyrim.legacy",
+        "missing_parallax_flag.flag1_not_set.skyrim.legacy",
+        "missing_parallax_slot3.empty.skyrim.legacy",
+        "path_slot_env_mask.generic_alias_suffix.skyrim.legacy"
+      ],
+      "detected_conflict_families": [
+        "flag_env_mapping.slot5_filled_without_flag",
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "path_slot_env_mask.generic_alias_suffix"
+      ],
+      "fallback_used": false,
+      "family": "architecture",
+      "intended_difference_bucket": "none",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "skyrim_realmod_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "skyrim",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "enable_env_mapping",
+        "set_slot3_parallax",
+        "set_slot5_env_mask"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_skyrim_clutter_vr_crlf_parallax_normal_reuse",
+      "detected_conflict_codes": [
+        "missing_parallax_flag.flag1_not_set.skyrim.legacy",
+        "path_slot_parallax.matches_normal.skyrim.legacy",
+        "path_slot_parallax.wrong_suffix.skyrim.legacy"
+      ],
+      "detected_conflict_families": [
+        "missing_parallax_flag.flag1_not_set",
+        "path_slot_parallax.matches_normal",
+        "path_slot_parallax.wrong_suffix"
+      ],
+      "fallback_used": false,
+      "family": "clutter",
+      "intended_difference_bucket": "none",
+      "intentional_strategy_difference": false,
+      "local_strategy": "rebuild_slot3_when_guessable_else_disable",
+      "pack_id": "skyrim_realmod_family_pack",
+      "pgpatcher_strategy": "rebuild_slot3_height",
+      "profile": "skyrim",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "set_slot3_parallax"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_skyrim_architecture_ae_real_crlf_shifted_envmap_glow_mixed",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.skyrim.real",
+        "flag_glow_map.flag_set_without_slot2.skyrim.real",
+        "missing_parallax_flag.flag1_not_set.skyrim.real",
+        "missing_parallax_slot3.empty.skyrim.real",
+        "shader_state.envmap_glow_missing_slots2_4_5.skyrim.real",
+        "shader_state.envmap_missing_slots4_5.skyrim.real"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "flag_glow_map.flag_set_without_slot2",
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "shader_state.envmap_glow_missing_slots2_4_5",
+        "shader_state.envmap_missing_slots4_5"
+      ],
+      "fallback_used": true,
+      "family": "architecture",
+      "intended_difference_bucket": "safety_first",
+      "intentional_strategy_difference": true,
+      "local_strategy": "rebuild_env_and_glow_when_guessable_else_disable",
+      "pack_id": "skyrim_realmod_family_pack",
+      "pgpatcher_strategy": "rebuild_env_and_glow_slots",
+      "profile": "skyrim",
+      "remediation_mode": "mixed_rebuild_and_disable",
+      "remediation_steps": [
+        "enable_parallax",
+        "disable_glow_map_for_missing_slot2",
+        "set_slot3_parallax",
+        "set_slot4_cubemap_for_missing_envmap_slots4_5",
+        "set_slot5_env_mask_for_missing_envmap_slots4_5",
+        "enable_env_mapping_for_missing_envmap_slots4_5",
+        "set_slot2_glow_for_envmap_glow_mixed_unresolved",
+        "set_slot4_cubemap_for_envmap_glow_mixed_unresolved",
+        "set_slot5_env_mask_for_envmap_glow_mixed_unresolved",
+        "enable_env_mapping_for_envmap_glow_mixed_unresolved",
+        "enable_glow_map_for_envmap_glow_mixed_unresolved"
+      ],
+      "safety_difference_note": "Safety-first divergence: local strategy prefers guarded disable fallback when deterministic rebuild confidence is limited.",
+      "shader_layout": "real"
+    },
+    {
+      "case_id": "pack_skyrim_architecture_aevr_real_crlf_u16_shifted_parallax_envmap_mixed",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.skyrim.real",
+        "missing_parallax_slot3.empty.skyrim.real",
+        "shader_state.envmap_missing_slots4_5.skyrim.real",
+        "shader_state.parallax_envmap_missing_slots3_4_5.skyrim.real"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "missing_parallax_slot3.empty",
+        "shader_state.envmap_missing_slots4_5",
+        "shader_state.parallax_envmap_missing_slots3_4_5"
+      ],
+      "fallback_used": true,
+      "family": "architecture",
+      "intended_difference_bucket": "safety_first",
+      "intentional_strategy_difference": false,
+      "local_strategy": "disable_conflicting_parallax_envmap_when_slots_missing",
+      "pack_id": "skyrim_realmod_family_pack",
+      "pgpatcher_strategy": "disable_conflicting_parallax_envmap_when_slots_missing",
+      "profile": "skyrim",
+      "remediation_mode": "mixed_rebuild_and_disable",
+      "remediation_steps": [
+        "set_slot3_parallax",
+        "set_slot4_cubemap_for_missing_envmap_slots4_5",
+        "set_slot5_env_mask_for_missing_envmap_slots4_5",
+        "enable_env_mapping_for_missing_envmap_slots4_5",
+        "disable_env_mapping_for_parallax_envmap_mixed_unresolved",
+        "disable_parallax_for_parallax_envmap_mixed_unresolved",
+        "disable_pom_for_parallax_envmap_mixed_unresolved"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "real"
+    },
+    {
+      "case_id": "pack_skyrim_effects_vr_parallax_envmap_glow_unresolved_no_diffuse",
+      "detected_conflict_codes": [
+        "flag_glow_map.flag_set_without_slot2.skyrim.legacy",
+        "flag_pom.non_heightmap_shader.skyrim.legacy",
+        "missing_parallax_slot3.empty.skyrim.legacy",
+        "shader_state.envmap_glow_missing_slots2_4_5.skyrim.legacy",
+        "shader_state.envmap_missing_slots4_5.skyrim.legacy",
+        "shader_state.envmap_pom_missing_env_slots.skyrim.legacy",
+        "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim.legacy",
+        "shader_state.parallax_envmap_missing_slots3_4_5.skyrim.legacy"
+      ],
+      "detected_conflict_families": [
+        "flag_glow_map.flag_set_without_slot2",
+        "flag_pom.non_heightmap_shader",
+        "missing_parallax_slot3.empty",
+        "shader_state.envmap_glow_missing_slots2_4_5",
+        "shader_state.envmap_missing_slots4_5",
+        "shader_state.envmap_pom_missing_env_slots",
+        "shader_state.parallax_envmap_glow_missing_slots2_3_4_5",
+        "shader_state.parallax_envmap_missing_slots3_4_5"
+      ],
+      "fallback_used": true,
+      "family": "effects",
+      "intended_difference_bucket": "safety_first",
+      "intentional_strategy_difference": false,
+      "local_strategy": "disable_conflicting_flags_when_no_safe_rebuild_source",
+      "pack_id": "skyrim_realmod_family_pack",
+      "pgpatcher_strategy": "disable_conflicting_flags_when_textures_missing",
+      "profile": "skyrim",
+      "remediation_mode": "disable",
+      "remediation_steps": [
+        "disable_glow_map_for_missing_slot2",
+        "disable_pom_for_non_heightmap_shader",
+        "disable_env_mapping_for_missing_slots4_5",
+        "disable_env_mapping_for_envmap_pom_mixed_unresolved",
+        "disable_pom_for_envmap_pom_mixed_unresolved",
+        "disable_env_mapping_for_envmap_glow_mixed_unresolved",
+        "disable_glow_map_for_envmap_glow_mixed_unresolved",
+        "disable_env_mapping_for_parallax_envmap_mixed_unresolved",
+        "disable_parallax_for_parallax_envmap_mixed_unresolved",
+        "disable_pom_for_parallax_envmap_mixed_unresolved",
+        "disable_parallax_for_parallax_envmap_glow_mixed_unresolved",
+        "disable_pom_for_parallax_envmap_glow_mixed_unresolved",
+        "disable_glow_map_for_parallax_envmap_glow_mixed_unresolved",
+        "disable_env_mapping_for_parallax_envmap_glow_mixed_unresolved"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_fallout_architecture_envmap_missing_slots",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.fallout.global",
+        "missing_parallax_flag.flag1_not_set.fallout.legacy",
+        "missing_parallax_slot3.empty.fallout.legacy",
+        "shader_state.envmap_missing_slots4_5.fallout.legacy"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "shader_state.envmap_missing_slots4_5"
+      ],
+      "fallback_used": false,
+      "family": "architecture",
+      "intended_difference_bucket": "guarded_fallout",
+      "intentional_strategy_difference": true,
+      "local_strategy": "guarded_rebuild_then_disable",
+      "pack_id": "fallout_guarded_family_pack",
+      "pgpatcher_strategy": "rebuild_env_slots_or_disable",
+      "profile": "fallout",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "set_slot3_parallax",
+        "set_slot4_cubemap_for_missing_envmap_slots4_5",
+        "set_slot5_env_mask_for_missing_envmap_slots4_5",
+        "enable_env_mapping_for_missing_envmap_slots4_5"
+      ],
+      "safety_difference_note": "Guarded Fallout divergence keeps higher-risk writes constrained unless safety gates are explicitly enabled.",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_fallout_architecture_real_shifted_envmap_glow_mixed",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.fallout.global",
+        "fallback_or_unknown.fallout.real",
+        "flag_glow_map.flag_set_without_slot2.fallout.real",
+        "missing_parallax_flag.flag1_not_set.fallout.real",
+        "missing_parallax_slot3.empty.fallout.real",
+        "shader_state.envmap_glow_missing_slots2_4_5.fallout.real",
+        "shader_state.envmap_missing_slots4_5.fallout.real"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "flag_glow_map.flag_set_without_slot2",
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "shader_state.envmap_glow_missing_slots2_4_5",
+        "shader_state.envmap_missing_slots4_5"
+      ],
+      "fallback_used": true,
+      "family": "architecture",
+      "intended_difference_bucket": "guarded_fallout",
+      "intentional_strategy_difference": true,
+      "local_strategy": "guarded_rebuild_when_guessable_else_disable",
+      "pack_id": "fallout_guarded_family_pack",
+      "pgpatcher_strategy": "guarded_env_glow_rebuild_then_disable",
+      "profile": "fallout",
+      "remediation_mode": "mixed_rebuild_and_disable",
+      "remediation_steps": [
+        "enable_parallax",
+        "disable_glow_map_for_missing_slot2",
+        "set_slot3_parallax",
+        "set_slot4_cubemap_for_missing_envmap_slots4_5",
+        "set_slot5_env_mask_for_missing_envmap_slots4_5",
+        "enable_env_mapping_for_missing_envmap_slots4_5",
+        "set_slot2_glow_for_envmap_glow_mixed_unresolved",
+        "set_slot4_cubemap_for_envmap_glow_mixed_unresolved",
+        "set_slot5_env_mask_for_envmap_glow_mixed_unresolved",
+        "enable_env_mapping_for_envmap_glow_mixed_unresolved",
+        "enable_glow_map_for_envmap_glow_mixed_unresolved"
+      ],
+      "safety_difference_note": "Guarded Fallout divergence keeps higher-risk writes constrained unless safety gates are explicitly enabled.",
+      "shader_layout": "real"
+    },
+    {
+      "case_id": "pack_fallout_architecture_aevr_real_crlf_u16_shifted_parallax_envmap_mixed",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.fallout.global",
+        "fallback_or_unknown.fallout.real",
+        "missing_parallax_slot3.empty.fallout.real",
+        "shader_state.envmap_missing_slots4_5.fallout.real",
+        "shader_state.parallax_envmap_missing_slots3_4_5.fallout.real"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "missing_parallax_slot3.empty",
+        "shader_state.envmap_missing_slots4_5",
+        "shader_state.parallax_envmap_missing_slots3_4_5"
+      ],
+      "fallback_used": true,
+      "family": "architecture",
+      "intended_difference_bucket": "guarded_fallout",
+      "intentional_strategy_difference": false,
+      "local_strategy": "guarded_disable_parallax_envmap_combo_when_slots_missing",
+      "pack_id": "fallout_guarded_family_pack",
+      "pgpatcher_strategy": "guarded_disable_parallax_envmap_combo_when_slots_missing",
+      "profile": "fallout",
+      "remediation_mode": "mixed_rebuild_and_disable",
+      "remediation_steps": [
+        "set_slot3_parallax",
+        "set_slot4_cubemap_for_missing_envmap_slots4_5",
+        "set_slot5_env_mask_for_missing_envmap_slots4_5",
+        "enable_env_mapping_for_missing_envmap_slots4_5",
+        "disable_env_mapping_for_parallax_envmap_mixed_unresolved",
+        "disable_parallax_for_parallax_envmap_mixed_unresolved",
+        "disable_pom_for_parallax_envmap_mixed_unresolved"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "real"
+    },
+    {
+      "case_id": "pack_fallout_effects_env_slot5_without_flag",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.fallout.global",
+        "flag_env_mapping.slot5_filled_without_flag.fallout.legacy",
+        "missing_parallax_flag.flag1_not_set.fallout.legacy",
+        "missing_parallax_slot3.empty.fallout.legacy"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "flag_env_mapping.slot5_filled_without_flag",
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty"
+      ],
+      "fallback_used": false,
+      "family": "effects",
+      "intended_difference_bucket": "guarded_fallout",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "fallout_guarded_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "fallout",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "enable_env_mapping",
+        "set_slot3_parallax"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_fallout_clutter_single_pass_skip",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.fallout.global",
+        "skip_single_pass.fallout.legacy"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "skip_single_pass"
+      ],
+      "fallback_used": false,
+      "family": "clutter",
+      "intended_difference_bucket": "guarded_fallout",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "fallout_guarded_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "fallout",
+      "remediation_mode": "manual_or_noop",
+      "remediation_steps": [
+        "No safe auto-remediation actions matched the selected conflict codes.",
+        "Use targeted patch options manually for unsupported conflict categories."
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_fallout_armor_envmap_slot4_missing",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.fallout.global",
+        "missing_parallax_flag.flag1_not_set.fallout.legacy",
+        "missing_parallax_slot3.empty.fallout.legacy",
+        "shader_state.envmap_missing_slot4.fallout.legacy"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "shader_state.envmap_missing_slot4"
+      ],
+      "fallback_used": false,
+      "family": "armor",
+      "intended_difference_bucket": "guarded_fallout",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "fallout_guarded_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "fallout",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "set_slot3_parallax",
+        "set_slot4_cubemap_for_missing_envmap_slot4",
+        "enable_env_mapping_for_missing_envmap_slot4"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_fallout_landscape_envmap_slot5_missing",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.fallout.global",
+        "missing_parallax_flag.flag1_not_set.fallout.legacy",
+        "missing_parallax_slot3.empty.fallout.legacy",
+        "shader_state.envmap_missing_slot5.fallout.legacy"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "shader_state.envmap_missing_slot5"
+      ],
+      "fallback_used": false,
+      "family": "landscape",
+      "intended_difference_bucket": "guarded_fallout",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "fallout_guarded_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "fallout",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "set_slot3_parallax",
+        "set_slot5_env_mask_for_missing_envmap_slot5",
+        "enable_env_mapping_for_missing_envmap_slot5"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_fallout_spec_strength_gate_profile",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.fallout.global",
+        "missing_parallax_flag.flag1_not_set.fallout.real",
+        "missing_parallax_slot3.empty.fallout.real"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty"
+      ],
+      "fallback_used": false,
+      "family": "spec_gate",
+      "intended_difference_bucket": "guarded_fallout",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "fallout_guarded_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "fallout",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "set_slot3_parallax"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "real"
+    },
+    {
+      "case_id": "pack_fallout_spec_color_gate_profile",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.fallout.global",
+        "flag_env_mapping.slot5_filled_without_flag.fallout.real",
+        "missing_parallax_flag.flag1_not_set.fallout.real",
+        "missing_parallax_slot3.empty.fallout.real"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "flag_env_mapping.slot5_filled_without_flag",
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty"
+      ],
+      "fallback_used": false,
+      "family": "spec_color_gate",
+      "intended_difference_bucket": "guarded_fallout",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "fallout_guarded_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "fallout",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "enable_env_mapping",
+        "set_slot3_parallax"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "real"
+    },
+    {
+      "case_id": "pack_fallout_env_scale_gate_profile",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.fallout.global",
+        "fallback_or_unknown.fallout.real",
+        "missing_parallax_flag.flag1_not_set.fallout.real",
+        "missing_parallax_slot3.empty.fallout.real",
+        "shader_state.envmap_missing_slot4.fallout.real"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "shader_state.envmap_missing_slot4"
+      ],
+      "fallback_used": false,
+      "family": "env_scale_gate",
+      "intended_difference_bucket": "guarded_fallout",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "fallout_guarded_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "fallout",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "set_slot3_parallax",
+        "set_slot4_cubemap_for_missing_envmap_slot4",
+        "enable_env_mapping_for_missing_envmap_slot4"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "real"
+    },
+    {
+      "case_id": "pack_fallout_fix_lighting_gate_profile",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.fallout.global",
+        "skip_single_pass.fallout.legacy"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "skip_single_pass"
+      ],
+      "fallback_used": false,
+      "family": "fix_lighting_gate",
+      "intended_difference_bucket": "guarded_fallout",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "fallout_guarded_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "fallout",
+      "remediation_mode": "manual_or_noop",
+      "remediation_steps": [
+        "No safe auto-remediation actions matched the selected conflict codes.",
+        "Use targeted patch options manually for unsupported conflict categories."
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "legacy"
+    },
+    {
+      "case_id": "pack_fallout_parallax_scale_gate_profile",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.fallout.global",
+        "fallback_or_unknown.fallout.real",
+        "missing_parallax_slot3.empty.fallout.real",
+        "shader_state.parallax_type_missing_slot3.fallout.real"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "missing_parallax_slot3.empty",
+        "shader_state.parallax_type_missing_slot3"
+      ],
+      "fallback_used": true,
+      "family": "parallax_scale_gate",
+      "intended_difference_bucket": "guarded_fallout",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "fallout_guarded_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "fallout",
+      "remediation_mode": "mixed_rebuild_and_disable",
+      "remediation_steps": [
+        "set_slot3_parallax",
+        "disable_parallax_for_missing_slot3"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "real"
+    },
+    {
+      "case_id": "pack_fallout_clutter_real_multiblock_env_slot4_and_parallax_diffuse",
+      "detected_conflict_codes": [
+        "missing_parallax_flag.flag1_not_set.fallout.real",
+        "fallback_or_unknown.fallout.global",
+        "fallback_or_unknown.fallout.real",
+        "missing_parallax_slot3.empty.fallout.real",
+        "path_slot_parallax.matches_diffuse.fallout.real",
+        "path_slot_parallax.wrong_suffix.fallout.real",
+        "shader_state.envmap_missing_slot4.fallout.real"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "missing_parallax_flag.flag1_not_set",
+        "missing_parallax_slot3.empty",
+        "path_slot_parallax.matches_diffuse",
+        "path_slot_parallax.wrong_suffix",
+        "shader_state.envmap_missing_slot4"
+      ],
+      "fallback_used": false,
+      "family": "clutter",
+      "intended_difference_bucket": "guarded_fallout",
+      "intentional_strategy_difference": false,
+      "local_strategy": "",
+      "pack_id": "fallout_guarded_family_pack",
+      "pgpatcher_strategy": "",
+      "profile": "fallout",
+      "remediation_mode": "rebuild",
+      "remediation_steps": [
+        "enable_parallax",
+        "set_slot3_parallax",
+        "set_slot4_cubemap_for_missing_envmap_slot4",
+        "enable_env_mapping_for_missing_envmap_slot4"
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "real"
+    },
+    {
+      "case_id": "pack_fallout_architecture_real_crlf_u16_shifted_env_alias_without_flag",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.unknown.global",
+        "unsupported_header.unknown.global"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "unsupported_header"
+      ],
+      "fallback_used": false,
+      "family": "architecture",
+      "intended_difference_bucket": "guarded_fallout",
+      "intentional_strategy_difference": true,
+      "local_strategy": "guarded_rebuild_then_disable",
+      "pack_id": "fallout_guarded_family_pack",
+      "pgpatcher_strategy": "guarded_env_alias_normalization",
+      "profile": "fallout",
+      "remediation_mode": "manual_or_noop",
+      "remediation_steps": [
+        "No safe auto-remediation actions matched the selected conflict codes.",
+        "Use targeted patch options manually for unsupported conflict categories."
+      ],
+      "safety_difference_note": "Guarded Fallout behavior prefers reversible normalization and explicit flag repair before disable fallback.",
+      "shader_layout": "real"
+    },
+    {
+      "case_id": "pack_fallout_architecture_real_crlf_u16_shifted_envmap_glow_slot5_missing",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.unknown.global",
+        "unsupported_header.unknown.global"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "unsupported_header"
+      ],
+      "fallback_used": false,
+      "family": "architecture",
+      "intended_difference_bucket": "guarded_fallout",
+      "intentional_strategy_difference": false,
+      "local_strategy": "guarded_noop_for_unsupported_header",
+      "pack_id": "fallout_guarded_family_pack",
+      "pgpatcher_strategy": "guarded_slot_restore_then_flag_disable",
+      "profile": "fallout",
+      "remediation_mode": "manual_or_noop",
+      "remediation_steps": [
+        "No safe auto-remediation actions matched the selected conflict codes.",
+        "Use targeted patch options manually for unsupported conflict categories."
+      ],
+      "safety_difference_note": "",
+      "shader_layout": "real"
+    },
+    {
+      "case_id": "pack_fallout_architecture_real_crlf_u16_shifted_multiblock_guarded_unsupported",
+      "detected_conflict_codes": [
+        "fallback_or_unknown.unknown.global",
+        "unsupported_header.unknown.global"
+      ],
+      "detected_conflict_families": [
+        "fallback_or_unknown",
+        "unsupported_header"
+      ],
+      "fallback_used": false,
+      "family": "architecture",
+      "intended_difference_bucket": "guarded_fallout",
+      "intentional_strategy_difference": true,
+      "local_strategy": "guarded_noop_for_unsupported_header",
+      "pack_id": "fallout_guarded_family_pack",
+      "pgpatcher_strategy": "guarded_crossblock_alias_repair",
+      "profile": "fallout",
+      "remediation_mode": "manual_or_noop",
+      "remediation_steps": [
+        "No safe auto-remediation actions matched the selected conflict codes.",
+        "Use targeted patch options manually for unsupported conflict categories."
+      ],
+      "safety_difference_note": "Guarded Fallout behavior keeps malformed shifted/u16/crlf exports non-destructive when header support confidence is low.",
+      "shader_layout": "real"
+    }
+  ],
+  "generated_at_utc": "2026-10-08T01:58:02.478268+00:00",
+  "intended_difference_bucket_counts": {
+    "guarded_fallout": 16,
+    "none": 11,
+    "safety_first": 5
+  }
+}

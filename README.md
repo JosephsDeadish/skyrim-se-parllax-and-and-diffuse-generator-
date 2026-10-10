@@ -1,6 +1,6 @@
 # skyrim-se-parllax-and-and-diffuse-generator-
 
-Current version: **0.5.5**
+Current version: **0.9**
 
 Texture generator that supports both GUI and command-line usage. It can generate:
 - a diffuse texture
@@ -44,6 +44,15 @@ When the tool is launched from **MO2** or **Vortex**, it now tries to detect the
 python generate_textures.py
 ```
 
+Tkinter remains the full-featured default UI.  
+An experimental Qt migration bootstrap can be launched with:
+
+```bash
+python generate_textures.py --gui --gui-backend qt
+```
+
+If Qt dependencies are missing, install `PySide6` first.
+
 This opens a desktop interface where you can:
 - select one input texture or an entire folder of source DDS textures
 - pick an output folder
@@ -83,11 +92,11 @@ Optional arguments:
 
 - positional input may also be a folder; folder mode scans subfolders, processes only original `.dds` source textures, and skips generated `_n`, `_p`, `_g`/legacy glow aliases, `_m`, packed `_rmaos`/`_orm` variants, `_s`, `_sk`, `_msn`, `_cm`, `_wt`, `_sm`, and common non-Skyrim authoring-suffix aliases such as `_ao`, `_roughness`, and `_metalness`
 
-- `--diffuse-name` (default: `<input_stem>`, e.g. `stonewall.dds`)
+- `--diffuse-name` (default: game-aware: Skyrim/Fallout 3/NV -> `<input_stem>`, Fallout 4/76 -> `<input_stem>_d`)
 - `--normal-name` (default: `<input_stem>_n`, e.g. `stonewall_n.dds`)
 - `--parallax-name` (default: `<input_stem>_p`, e.g. `stonewall_p.dds`)
 - `--glow-name` (default: `<input_stem>_g`, e.g. `stonewall_g.dds`)
-- `--environment-mask-name` (default: `<input_stem>_m`)
+- `--environment-mask-name` (default: game-aware: Skyrim/Fallout 3/NV -> `<input_stem>_m`, Fallout 4/76 -> `<input_stem>_s`)
 - `--rmaos-name` / `--ramos-name` (default: `<input_stem>_rmaos`)
 - `--complex-name` (default from format: `<input_stem>_msn` or `<input_stem>_cm`)
   - use `<input_stem>_c` here when a shader pack expects `_c.dds` naming
@@ -118,13 +127,38 @@ Optional arguments:
 - `--snow-mask-strength` (snow mask strength, 0.1–3.0; default: 1.0)
 - `--pbr-material` (shortcut for the app's Community Shaders Extended Materials packed output: enables complex material, forces `--complex-format cm`, and keeps compatible standard env/parallax modes; not an ENB workflow)
 - `--render-profile` (`auto`, `custom`, `vanilla`, `performance`, `vr`, `terrain`, `architecture`, `characters`, `community_shaders`, `truepbr`, `enb`)
+
+## Pre-release validation
+
+Run the full release gate locally before packaging or publishing:
+
+```bash
+python scripts/pre_release_validation.py
+```
+
+This gate runs:
+- full unittest suite (`tests/test_generate_textures.py` + `tests/test_nif_patcher.py` and related modules),
+- targeted NIF fixture/conflict stress checks,
+- Python compile checks,
+- a lightweight tracked-file secret scan.
+- repeated release-like loops when `--repeat-validation-loops <N>` is set (for example `2` for back-to-back stability runs),
+- local PyInstaller packaging smoke build plus packaged executable `--help` smoke execution,
+- localization sweep artifacts for current translation catalogs:
+  - `localization_coverage_report.json`
+  - `localization_coverage_report.md`
+  - optional strict mode via `--strict-localization-completeness` to fail if non-English catalogs are missing `en.json` keys.
+  - optional parity-fallback drift guard via `--max-fallback-ratio-drift` / `--max-fallback-group-drift` against prior seeded `nif_realmod_parity_delta_report.json` artifacts.
   - locked profiles (and `auto` in single-file mode) now auto-correct conflicting `--complex-format`, `--environment-mask-mode`, and `--parallax-mode` values, then print the applied guardrail changes to stderr
+- `--target-game` (`skyrim`, `fallout3`, `falloutnv`, `fallout4`, `fallout76`; default: `skyrim`)
+  - controls generated filename conventions (for example, Fallout 4/76 diffuse defaults to `_d.dds` and env-mask defaults to `_s.dds`)
 - `--batch-workers` (parallel workers for folder mode; `0` = automatic)
 - `--gui` (force GUI mode)
 
 ### Community Shaders quick start (`_cm` / `_c` / `_C`)
 
 This app supports the **Community Shaders Extended Materials** packed workflow via `_cm` output.
+
+Release-aligned note: Community Shaders `v1.9.1` release metadata lists **Extended Materials `1-4-0`** and **TruePBR `1-0-0`** in its compatibility table. Keep your installed CS plugin stack close to that baseline (or newer) when validating generated `_cm/_c/_C` and `_rmaos/_ramos` outputs.
 
 - In GUI:
   1. Set **Target renderer** to `community_shaders`
@@ -144,6 +178,9 @@ Some packs use `_c.dds` (or `_C.dds` on Windows) for the same role — set `--co
 ### Community Shaders TruePBR quick start (`_rmaos` / `_ramos` + JSON)
 
 This app now has a dedicated **TruePBR** renderer profile path for Community Shaders TruePBR workflows.
+
+For latest runtime compatibility checks, compare your installed CS plugin versions against the current release page:  
+https://github.com/community-shaders/skyrim-community-shaders/releases
 
 - In GUI:
   1. Set **Target renderer** to `truepbr`
@@ -286,6 +323,97 @@ When both Community Shaders and ENB markers are detected in mod-manager context,
 
 ### NIF Editor — Experimental Feature
 
-The **NIF Editor** (accessible from the toolbar button) lets you patch BSLightingShaderProperty flags and texture slots in Skyrim SE mesh files.
+The **NIF Editor** (accessible from the toolbar button) patches Skyrim-format BSLightingShaderProperty flags and texture slots for supported Skyrim LE/SE/AE/VR/CK variants. Fallout-era headers are now detected with an experimental profile path and should be treated as best-effort.
 **This is an experimental feature.** Always keep backups of your NIF files before patching.
 The **Auto-patch NIFs after generation** checkbox (off by default) triggers NIF patching automatically after each generation run.
+For safety, parallax auto-patching skips known-problem cases by default (Havok-attached meshes, skinned/alpha meshes, decal/anisotropic/soft-lighting variants, and single-pass shader blocks).
+For CLI runs, `nif_patcher.py --target-game auto|skyrim|fallout` now makes profile intent explicit. Fallout writes require `--experimental-fallout-write` and default to guarded flag/texture-slot patching.
+If you explicitly accept higher-risk Fallout writes, per-operation safety gates are available:
+`--fallout-allow-parallax-scale`, `--fallout-allow-fix-mesh-lighting`, `--fallout-allow-spec-strength`, `--fallout-allow-spec-color`, and `--fallout-allow-env-map-scale`.
+The NIF Editor now exposes matching controls (**NIF game profile** + **Enable experimental Fallout writes**) and per-operation Fallout safety gate checkboxes so GUI patch/remediation behavior aligns with CLI behavior.
+Validation can now emit a grouped conflict-resolution view with `--validate --conflict-report`, listing conflict categories plus suggested auto-fix actions per file.
+For larger mod-folder runs, add `--conflict-report-summary` to print a cross-file top-conflict summary, and use the NIF Editor scan view's batch summary row to quickly identify the highest-frequency conflict groups.
+You can also provide `--plugin-conflict-context <json>` (mesh path → plugin refs) to print plugin-aware conflict summaries, and `--auto-remediate` (optionally with `--auto-remediate-codes ...`) to apply safe best-effort fixes from detected conflict codes.
+The GUI now includes a language selector backed by `assets/translations/*.json` and a UI scale selector (0.75x–2.00x) for high-DPI display tuning.
+NIF scan runs also include retry/cancellation controls and a conflict-only incremental rerun action for faster follow-up passes after resolving issues.
+Plugin-aware conflict discovery now attempts lightweight plugin record parsing (record type + FormID + model-path subrecords) before raw mesh-string fallback so conflict summaries can carry real plugin-record metadata when available.
+NIF Editor conflict reruns now include conflict-only patch and conflict-only auto-remediation actions in addition to conflict-only scan reruns.
+Use `nif_patcher.py --compatibility-report` to print a current game/version support matrix (profiles, layouts, and guarded-operation policy).
+Use `nif_patcher.py --validate --conflict-report-summary --parity-delta-report <nif_or_folder>` to emit a markdown parity-gap table (conflict family, count, auto-remediation support level, suggested next action) for structured comparisons against external patchers such as PGPatcher.
+For repeatable parity-regression checks in CI/local runs, see `tests/fixtures/nif_parity_sample_matrix.json` and its corresponding `tests/test_nif_patcher.py` matrix assertions (including expected conflict-family prefixes and expected auto-remediation step coverage per scenario).
+For repeatable family-level trend baselines (architecture/clutter/armor/landscape/foliage/effects plus guarded Fallout sets), see `tests/fixtures/nif_realmod_sample_packs.json` and `TestRealModSamplePacks` in `tests/test_nif_patcher.py`.
+Each sample-pack baseline can now declare `expected_max_fallback_ratio` / `expected_max_fallback_groups` so future fixture additions fail fast if `fallback_or_unknown.*` classification drifts above the configured near-zero threshold.
+Real-sample pack baselines now also enforce **family-level strategy-alignment thresholds** (in addition to pass-ratio and remediation-coverage thresholds) to keep parity drift visible when local safety behavior intentionally diverges from external patcher strategies.
+Parity fixtures also include explicit **manual-review-required** families (for example `skip_single_pass` and `unsupported_header`) alongside auto-remediable families so parity checks track both automated and intentionally non-automated conflict classes.
+Intentional strategy-divergence rows now require explicit bucket/justification metadata (`expected_difference_bucket` + `safety_difference_note`) with per-family allowed-bucket checks in fixture-pack tests.
+Guarded Fallout parity fixtures now include deeper subsurface/anisotropic multi-flag cross-block variants plus additional architecture/effects/clutter mixed-state drift combinations (single-pass + env/glow/parallax alias interactions with offset/table-size/ref-skew), split into partial-recoverability vs guarded-noop tracking buckets.
+The CI release-readiness gate now roll-forwards `nif_family_trend_history.json` by seeding from the latest uploaded `release-readiness-artifacts` history when available, so trend timelines persist across workflow runs instead of resetting each run.
+The same release-readiness gate now emits `nif_parity_feature_report.json` and `nif_parity_feature_report.md` from the parity matrix, including per-case detected families, remediation steps, fallback usage, and intentional safety-first strategy-difference metadata for side-by-side parity triage.
+It also emits `nif_realmod_parity_delta_report.json` and `nif_realmod_parity_delta_report.md` for direct real-sample-pack side-by-side parity deltas, including intended-difference buckets (`safety_first`, `guarded_fallout`, `destructive_disabled`).
+Release-readiness parity sweeps now include `tests/fixtures/nif_realmod_sample_packs.json`, the larger long-tail pack `tests/fixtures/nif_external_broken_pack_delta_sweep.json`, the additional external follow-up pack `tests/fixtures/nif_external_broken_pack_delta_sweep_additional.json`, and the expanded long-tail sweep pack `tests/fixtures/nif_external_broken_pack_delta_sweep_large.json` by default.  
+When you want to add even more external broken-mod packs in the same report pipeline, pass one or more `--extra-realmod-pack-file <json>` arguments to `scripts/pre_release_validation.py` (same `packs[]` schema as `tests/fixtures/nif_realmod_sample_packs.json`).
+Release validation additionally supports a bucket-distribution drift gate against prior `nif_realmod_parity_delta_report.json` artifacts, so large parity strategy-bucket shifts are flagged before release cut.
+Release validation also emits `nif_realmod_fallback_drift_report.json` / `.md` and applies per-pack fallback drift gates (`--max-fallback-ratio-drift`, `--max-fallback-group-drift`) when prior parity-delta seeds are provided.
+The regression suite also includes a locked fixture corpus baseline at `tests/fixtures/nif_fixture_corpus*.json` for cross-profile/layout conflict-matrix stability checks, including truncated-header and shifted texture-set layout edge signatures.
+CLI folder batch runs now emit `batch_failure_report.json` and `batch_failure_report.csv` when any source files fail, with per-file action/conflict/error fields for triage.
+For long-running folder batches, use `--checkpoint-file <path>` to persist successful-file progress and `--resume-checkpoint` to skip already completed files after interruption/restart.
+
+### Large real-sample batch verification checklist (release readiness)
+
+Before publishing a release, run at least one real mod-scale verification pass:
+
+1. Prepare a representative sample set (minimum recommended: **500+ textures**, include some **4K/8K** sources).
+2. Run one pass in **start_fresh** mode and one pass in **resume** mode.
+3. Confirm checkpoint behavior:
+   - checkpoint file is created,
+   - resume skips completed entries,
+   - start_fresh clear/reset prompts are shown as expected.
+4. Confirm preview guardrails:
+   - lazy/staged preview remains responsive,
+   - manual pause and auto speed-off badges are clear,
+   - re-enable live preview works mid-run.
+5. Confirm output integrity:
+   - generated file count matches enabled outputs,
+   - `batch_failure_report.json/csv` is created if failures occur,
+   - NIF auto-patching (if enabled) reports accurate success/fail counts.
+6. Run pre-release validation gate:
+   - `python scripts/pre_release_validation.py`
+   - This runs the full test suite, conflict-stress checks, large-batch/queue verification checks, compile checks, and a tracked-file secret scan.
+   - By default it also performs a local PyInstaller smoke build and validates packaged CLI `--help` plus a tiny end-to-end sample generation output.
+7. Complete manual release-candidate verification:
+   - review uploaded `release-readiness-artifacts` from CI for unexpected parity/family drift,
+   - smoke-test representative mod sets in game (minimum: one Skyrim set and one guarded Fallout set),
+   - confirm no new visual regressions or patch-induced instability before publishing.
+
+### Known limits and operating guidance
+
+- Very large batches (1000+ sources) can become UI-heavy if live preview is forced on continuously; use Resume mode and keep lazy/staged preview enabled.
+- 8K-heavy runs may require lower worker counts and longer preview refresh intervals; this is expected to avoid memory spikes.
+- NIF Editor remains experimental, especially for Fallout-era profiles; keep backups and validate in game after patching.
+- TruePBR/Community Shaders/ENB outputs are workflow-specific; avoid mixing output families on the same mesh/material unless you explicitly know that pipeline is supported.
+
+### Consolidated compatibility matrix (game + workflow + profile)
+
+| Game/profile | Texture generation workflows | NIF patching mode | Recommended defaults |
+| --- | --- | --- | --- |
+| Skyrim LE/SE/AE/VR (auto/skyrim profile) | Vanilla (`_m`), ENB (`_msn` + optional POM), CS Extended Materials (`_cm/_c`), CS TruePBR (`_rmaos/_ramos` + JSON) | Supported | Start with a safe preset, keep lazy/staged preview on for large sets, use `resume` mode for 1000+ runs |
+| Fallout-era headers (fallout profile) | Texture generation outputs are available, but keep workflows separated per mesh/material | Guarded experimental patch mode only (`--experimental-fallout-write`) | Keep guarded mode, enable only required per-operation gates, validate in game after patching |
+| Unknown/unsupported headers | Texture generation unaffected | Validation-only guidance, patching may be blocked | Run `--validate --conflict-report` first and fix header/profile issues before patching |
+
+### Troubleshooting decision tree (common NIF patch failures)
+
+1. **Patch failed before write**
+   - Run `nif_patcher.py --validate --conflict-report <mesh_or_folder>`.
+   - If fallout-profile warnings appear, re-run with `--target-game fallout --experimental-fallout-write` and only necessary safety gates.
+2. **Parallax enabled but no in-game depth**
+   - Check slot 3 path and naming (`_p.dds`) and confirm it resolves on disk near the mesh.
+   - Review conflicts for `missing_parallax_slot3.*` or `shader_state.parallax_type_missing_slot3.*`.
+3. **EnvMap/reflective behavior missing or broken**
+   - Check slot 4 cubemap and slot 5 env-mask paths plus `SLSF1_Environment_Mapping`.
+   - Review `shader_state.envmap_missing_slot4.*`, `shader_state.envmap_missing_slot5.*`, and `flag_env_mapping.*` conflicts.
+4. **Glow/emissive not visible**
+   - Confirm slot 2 uses `_g.dds`-style emissive path and `SLSF2_Glow_Map` alignment.
+   - Review `flag_glow_map.*` and `path_slot_glow.*` conflicts.
+5. **Large batch run is too slow or reruns unexpectedly**
+   - Keep lazy/staged preview enabled, disable live batch preview, and use `resume` mode with checkpoint status checks.
+   - Use generated failure artifacts (`batch_failure_report.json/csv`) to isolate repeat offenders before rerun.

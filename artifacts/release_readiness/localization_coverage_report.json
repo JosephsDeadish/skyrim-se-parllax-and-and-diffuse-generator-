@@ -1,0 +1,95 @@
+{
+  "generated_at_utc": "2026-10-08T01:58:02.333179+00:00",
+  "languages": [
+    {
+      "coverage_ratio": 0.0476,
+      "extra_count": 6,
+      "extra_examples": [
+        "Cancel Process",
+        "Generate",
+        "Help",
+        "Language",
+        "Revert Process",
+        "UI scale"
+      ],
+      "language": "de",
+      "missing_count": 40,
+      "missing_examples": [
+        "Allow env-map-scale",
+        "Allow fix-mesh-lighting",
+        "Allow parallax-scale",
+        "Allow spec-color",
+        "Allow spec-strength",
+        "Auto-remediate conflict files only",
+        "Fallout safety gates:",
+        "Incremental rerun: auto-remediate only files that previously reported conflicts or failures.",
+        "Incremental rerun: patch only files that previously reported conflicts or failures.",
+        "Move right for stronger material definition.\nMove left for subtler output.",
+        "NIF Editor \u2014 Skyrim Texture Generator v{version}",
+        "No conflict-affected NIF files are currently tracked.",
+        "Patch conflicts only",
+        "Skyrim Texture Generator v{version}",
+        "Switched to {theme_name} mode.",
+        "\u2600 Light mode",
+        "\u2728 Generate a glow map. Bright pixels glow in the dark.\nPerfect for making your cave look like a disco.",
+        "\u2728 Turn it up for glorious shine, down for ancient weathered stone.\nLive value shown beside slider.",
+        "\ud83c\udf11 Right = stronger AO bake, left = subtle cavity hints.",
+        "\ud83c\udf19 Dark mode"
+      ],
+      "string_count": 8
+    },
+    {
+      "coverage_ratio": 1.0,
+      "extra_count": 0,
+      "extra_examples": [],
+      "language": "en",
+      "missing_count": 0,
+      "missing_examples": [],
+      "string_count": 42
+    },
+    {
+      "coverage_ratio": 0.0476,
+      "extra_count": 6,
+      "extra_examples": [
+        "Cancel Process",
+        "Generate",
+        "Help",
+        "Language",
+        "Revert Process",
+        "UI scale"
+      ],
+      "language": "es",
+      "missing_count": 40,
+      "missing_examples": [
+        "Allow env-map-scale",
+        "Allow fix-mesh-lighting",
+        "Allow parallax-scale",
+        "Allow spec-color",
+        "Allow spec-strength",
+        "Auto-remediate conflict files only",
+        "Fallout safety gates:",
+        "Incremental rerun: auto-remediate only files that previously reported conflicts or failures.",
+        "Incremental rerun: patch only files that previously reported conflicts or failures.",
+        "Move right for stronger material definition.\nMove left for subtler output.",
+        "NIF Editor \u2014 Skyrim Texture Generator v{version}",
+        "No conflict-affected NIF files are currently tracked.",
+        "Patch conflicts only",
+        "Skyrim Texture Generator v{version}",
+        "Switched to {theme_name} mode.",
+        "\u2600 Light mode",
+        "\u2728 Generate a glow map. Bright pixels glow in the dark.\nPerfect for making your cave look like a disco.",
+        "\u2728 Turn it up for glorious shine, down for ancient weathered stone.\nLive value shown beside slider.",
+        "\ud83c\udf11 Right = stronger AO bake, left = subtle cavity hints.",
+        "\ud83c\udf19 Dark mode"
+      ],
+      "string_count": 8
+    }
+  ],
+  "summary": {
+    "base_language": "en",
+    "base_string_count": 42,
+    "language_count": 3,
+    "languages_with_missing_strings": 2
+  },
+  "translations_dir": "/home/runner/work/skyrim-se-parllax-and-and-diffuse-generator-/skyrim-se-parllax-and-and-diffuse-generator-/assets/translations"
+}

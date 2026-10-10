@@ -1,0 +1,206 @@
+{
+  "packs": [
+    {
+      "id": "external_broken_additional_pack",
+      "expected_max_fallback_ratio": 0.0,
+      "cases": [
+        {
+          "id": "ext_additional_skyrim_envmap_slot5_missing",
+          "family": "external_additional",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_paths": [
+            "textures\\architecture\\stonewall.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\stone_e.dds",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_missing_slot5."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot5_env_mask_for_missing_envmap_slot5"
+          ],
+          "pgpatcher_strategy": "rebuild_envmask_path_from_material_context",
+          "local_strategy": "prefer_safe_guess_for_slot5_before_disable",
+          "expected_difference_bucket": "safety_first",
+          "intentional_strategy_difference": true,
+          "safety_difference_note": "Prefer deterministic slot-5 guess before disabling env mapping."
+        },
+        {
+          "id": "ext_additional_skyrim_parallax_reuse_with_env_alias",
+          "family": "external_additional",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "shader_type": 0,
+          "flags1": 2048,
+          "texture_paths": [
+            "textures\\architecture\\stonewall.dds",
+            "",
+            "",
+            "textures\\architecture\\stonewall.dds",
+            "",
+            "textures\\architecture\\stonewall_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "path_slot_parallax.matches_diffuse.skyrim.",
+            "path_slot_env_mask.generic_alias_suffix.skyrim."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot3_parallax",
+            "set_slot5_env_mask"
+          ],
+          "pgpatcher_strategy": "repack_and_reassign_alias_slots",
+          "local_strategy": "safe_slot_rewrite_to_canonical_suffixes",
+          "expected_difference_bucket": "safety_first",
+          "intentional_strategy_difference": true,
+          "safety_difference_note": "Canonical slot naming is preferred over ambiguous alias carry-through."
+        },
+        {
+          "id": "ext_additional_fallout_single_pass_guarded_manual",
+          "family": "external_additional",
+          "profile": "fallout",
+          "shader_layout": "legacy",
+          "user_version": 11,
+          "user_ver2": 130,
+          "flags1": 32,
+          "expected_prefixes": [
+            "skip_single_pass.fallout."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_singlepass_visual_parity_patch",
+          "local_strategy": "guarded_noop_for_singlepass_risk",
+          "expected_difference_bucket": "guarded_fallout",
+          "intentional_strategy_difference": true,
+          "safety_difference_note": "Single-pass Fallout blocks remain manual-review due to instability risk."
+        },
+        {
+          "id": "ext_additional_fallout_malformed_numblocks_signature_only_v2",
+          "family": "external_additional",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "num_blocks_delta": 4,
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift.signature_only.user_version_parse_failure."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_malformed_numblocks_reflow",
+          "local_strategy": "guarded_manual_review_for_signature_only_header_drift",
+          "expected_difference_bucket": "guarded_fallout",
+          "intentional_strategy_difference": true,
+          "safety_difference_note": "Malformed signature-only header drift remains manual-review/no-op for safety."
+        },
+        {
+          "id": "ext_additional_skyrim_real_crossblock_mixed_slot_stack_v2",
+          "family": "external_additional",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 268437632,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\architecture\\icicle\\icewall01.dds",
+            "",
+            "",
+            "",
+            "",
+            "textures\\architecture\\icicle\\icewall01_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.",
+            "path_slot_env_mask.generic_alias_suffix.skyrim."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot3_parallax_for_parallax_envmap_glow_mixed_unresolved",
+            "set_slot5_env_mask_for_parallax_envmap_glow_mixed_unresolved"
+          ],
+          "pgpatcher_strategy": "rebuild_mixed_slots_then_patch",
+          "local_strategy": "safe_guess_or_disable_for_mixed_slot_stack",
+          "expected_difference_bucket": "safety_first",
+          "intentional_strategy_difference": true,
+          "safety_difference_note": "Mixed-slot stacks prefer deterministic safe restoration before broad flag writes."
+        },
+        {
+          "id": "ext_additional_skyrim_heightmap_slot3_missing_on_disk_longtail",
+          "family": "external_additional",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 3,
+          "flags1": 2048,
+          "texture_paths": [
+            "textures\\architecture\\stonewall.dds",
+            "",
+            "",
+            "textures\\architecture\\missing_stonewall_p.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "missing_parallax_slot3.missing_on_disk.flag_set.skyrim.",
+            "shader_state.parallax_type_missing_slot3.slot3_missing_on_disk.skyrim."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot3_parallax",
+            "disable_parallax_for_missing_slot3"
+          ],
+          "pgpatcher_strategy": "restore_missing_slot3_when_path_is_stale",
+          "local_strategy": "classify_missing_on_disk_and_apply_safe_restore_or_disable",
+          "expected_difference_bucket": "safety_first",
+          "intentional_strategy_difference": true,
+          "safety_difference_note": "Prefer explicit missing-on-disk diagnostics and conservative remediation over silent slot reuse."
+        }
+      ]
+    }
+  ]
+}
