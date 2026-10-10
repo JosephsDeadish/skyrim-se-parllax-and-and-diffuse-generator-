@@ -231,6 +231,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "required_suffixes": ("_rmaos.dds", "_m.dds"),
             "required_sidecar_suffixes": ("_rmaos.json",),
             "required_sidecar_json_keys": ("parallax", "displacement_scale", "texture"),
+            "required_exact_suffix_counts": {"_rmaos.dds": 1, "_rmaos.json": 1},
             "forbidden_suffixes": ("_cm.dds", "_msn.dds"),
         },
         {
@@ -305,6 +306,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             ],
             "min_outputs": 6,
             "required_suffixes": ("_cm.dds", "_m.dds", "_wt.dds", "_sm.dds"),
+            "required_exact_suffix_counts": {"_wt.dds": 1, "_sm.dds": 1, "_cm.dds": 1},
             "forbidden_suffixes": ("_rmaos.dds", "_msn.dds"),
         },
         {
@@ -321,6 +323,12 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "required_suffixes": ("_rmaos.dds", "_ao.dds", "_rough.dds"),
             "required_sidecar_suffixes": ("_rmaos.json",),
             "required_sidecar_json_keys": ("parallax", "displacement_scale", "texture"),
+            "required_exact_suffix_counts": {
+                "_rmaos.dds": 1,
+                "_rmaos.json": 1,
+                "_ao.dds": 1,
+                "_rough.dds": 1,
+            },
             "forbidden_suffixes": ("_cm.dds", "_msn.dds"),
         },
         {
@@ -369,6 +377,14 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "required_suffixes": ("_rmaos.dds", "_wt.dds", "_sm.dds", "_ao.dds", "_rough.dds"),
             "required_sidecar_suffixes": ("_rmaos.json",),
             "required_sidecar_json_keys": ("parallax", "displacement_scale", "texture"),
+            "required_exact_suffix_counts": {
+                "_rmaos.dds": 1,
+                "_rmaos.json": 1,
+                "_wt.dds": 1,
+                "_sm.dds": 1,
+                "_ao.dds": 1,
+                "_rough.dds": 1,
+            },
             "forbidden_suffixes": ("_cm.dds", "_msn.dds"),
         },
         {
@@ -460,6 +476,19 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                 for key in (scenario.get("required_sidecar_json_keys", ()) or ())
                 if str(key).strip()
             )
+            required_exact_suffix_counts: dict[str, int] = {}
+            raw_exact_counts = scenario.get("required_exact_suffix_counts", {}) or {}
+            if isinstance(raw_exact_counts, Mapping):
+                for suffix, expected_count in raw_exact_counts.items():
+                    suffix_value = str(suffix).strip().lower()
+                    if not suffix_value:
+                        continue
+                    try:
+                        parsed_count = int(expected_count)
+                    except (TypeError, ValueError):
+                        continue
+                    if parsed_count >= 0:
+                        required_exact_suffix_counts[suffix_value] = parsed_count
             smoke_out = smoke_io / f"out_loop{loop_index}_{scenario_name}"
             smoke_out.mkdir(parents=True, exist_ok=True)
             run_completed = subprocess.run(
@@ -509,6 +538,15 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                         raise SystemExit(
                             f"Packaged executable smoke run for '{scenario_name}' is missing required sidecar suffix '{suffix}'. "
                             f"Produced files: {produced_all}"
+                        )
+            if required_exact_suffix_counts:
+                produced_all = [path.name.lower() for path in smoke_out.glob("*")]
+                for suffix, expected_count in required_exact_suffix_counts.items():
+                    actual_count = sum(1 for name in produced_all if name.endswith(suffix))
+                    if actual_count != expected_count:
+                        raise SystemExit(
+                            f"Packaged executable smoke run for '{scenario_name}' expected exactly {expected_count} "
+                            f"output file(s) with suffix '{suffix}' but found {actual_count}. Produced files: {produced_all}"
                         )
             if required_sidecar_json_keys:
                 sidecar_jsons = sorted(smoke_out.glob("*.json"))

@@ -4217,6 +4217,12 @@ def _classify_conflict_code(message: str) -> str:
         return base_code
     if "could not parse full header tables for this mesh" in lowered and "header-table drift" in lowered:
         return "unsupported_header.profile_value_drift.unparsed.header_table_drift"
+    if "header-table drift is present alongside user-version mismatch" in lowered:
+        return "unsupported_header.user_version_value_drift.header_table_drift"
+    if "malformed header-table drift detected without recoverable profile values" in lowered:
+        return "unsupported_header.profile_value_drift.unparsed.header_table_drift"
+    if "malformed header-table drift signature detected without stable profile values" in lowered:
+        return "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift"
     if "unsupported nif header/profile values" in lowered or "unexpected user version values" in lowered:
         return "unsupported_header"
     if "header prefix is not a skyrim/gamebryo 20.2.0.7 nif" in lowered:
@@ -4274,6 +4280,14 @@ def _classify_conflict_code(message: str) -> str:
         and "fallout patching is available in guarded experimental mode" in lowered
     ):
         return "fallout_profile.experimental_notice.nif_header"
+    if "full fallout profile support is still in progress" in lowered:
+        return "fallout_profile.experimental_notice.support_in_progress"
+    if "experimental fallout patch mode does not support:" in lowered:
+        return "fallout_profile.guarded_unsupported_ops"
+    if "force_shader_type_3 has no fallout safety-gate override" in lowered:
+        return "fallout_profile.guarded_unsupported_ops.force_shader_type_3"
+    if "enable the matching --fallout-allow-* safety gates only when you explicitly accept risk" in lowered:
+        return "fallout_profile.guarded_unsupported_ops.safety_gate_required"
     if "detected fallout-era profile" in lowered:
         return "fallout_profile.experimental_notice"
     if "fallout profile" in lowered or "experimental_fallout_write" in lowered:

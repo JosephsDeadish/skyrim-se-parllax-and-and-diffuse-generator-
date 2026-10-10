@@ -1642,6 +1642,29 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "lod_geometry.transition_only")
 
+    def test_classify_conflict_code_for_header_table_drift_user_version_mismatch(self) -> None:
+        code = _classify_conflict_code(
+            "Header-table drift is present alongside user-version mismatch; this mesh likely needs a cleaner re-export."
+        )
+        self.assertEqual(code, "unsupported_header.user_version_value_drift.header_table_drift")
+
+    def test_classify_conflict_code_for_header_table_drift_signature_only_unparsed(self) -> None:
+        code = _classify_conflict_code(
+            "Malformed header-table drift signature detected without stable profile values in this mesh."
+        )
+        self.assertEqual(code, "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift")
+
+    def test_classify_conflict_code_for_fallout_guarded_unsupported_ops(self) -> None:
+        code = _classify_conflict_code(
+            "Experimental Fallout patch mode does not support: force_shader_type_3. "
+            "Enable the matching --fallout-allow-* safety gates only when you explicitly accept risk."
+        )
+        self.assertEqual(code, "fallout_profile.guarded_unsupported_ops")
+
+    def test_classify_conflict_code_for_fallout_guarded_force_shader(self) -> None:
+        code = _classify_conflict_code("force_shader_type_3 has no Fallout safety-gate override for guarded mode.")
+        self.assertEqual(code, "fallout_profile.guarded_unsupported_ops.force_shader_type_3")
+
     def test_conflict_report_flags_envmap_shader_with_missing_slot5(self) -> None:
         textures_root = self.tmp / "textures" / "cubemaps"
         textures_root.mkdir(parents=True, exist_ok=True)

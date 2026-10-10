@@ -220,6 +220,20 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         }
         self.assertIn("parallax", truepbr_keys)
         self.assertIn("displacement_scale", truepbr_keys)
+        truepbr_exact_counts = {
+            str(key).lower(): int(value)
+            for key, value in dict(scenario_by_name["truepbr"].get("required_exact_suffix_counts", {})).items()
+        }
+        self.assertEqual(truepbr_exact_counts.get("_rmaos.dds"), 1)
+        self.assertEqual(truepbr_exact_counts.get("_rmaos.json"), 1)
+        truepbr_wet_snow_exact_counts = {
+            str(key).lower(): int(value)
+            for key, value in dict(
+                scenario_by_name["truepbr_wet_snow_combo"].get("required_exact_suffix_counts", {})
+            ).items()
+        }
+        self.assertEqual(truepbr_wet_snow_exact_counts.get("_wt.dds"), 1)
+        self.assertEqual(truepbr_wet_snow_exact_counts.get("_sm.dds"), 1)
 
 
 class TestPreReleaseValidationRepositoryHygiene(unittest.TestCase):
