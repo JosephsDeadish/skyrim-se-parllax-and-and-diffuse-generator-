@@ -4334,6 +4334,8 @@ class TestRealModSamplePacks(unittest.TestCase):
             family_expected_noop_cases: dict[str, int] = {}
             family_expected_auto_cases: dict[str, int] = {}
             family_prefix_counts: dict[str, dict[str, int]] = {}
+            family_fallback_conflict_groups: dict[str, int] = {}
+            family_total_conflict_groups: dict[str, int] = {}
             fallback_conflict_groups = 0
             total_conflict_groups = 0
             generic_unsupported_header_groups = 0
@@ -4361,6 +4363,8 @@ class TestRealModSamplePacks(unittest.TestCase):
                 family_expected_noop_cases.setdefault(family, 0)
                 family_expected_auto_cases.setdefault(family, 0)
                 family_prefix_counts.setdefault(family, {})
+                family_fallback_conflict_groups.setdefault(family, 0)
+                family_total_conflict_groups.setdefault(family, 0)
                 expected_prefixes = case.get("expected_prefixes", []) if isinstance(case, dict) else []
                 expected_absent_prefixes = case.get("expected_absent_prefixes", []) if isinstance(case, dict) else []
                 expected_remediation_steps = (
@@ -4438,9 +4442,14 @@ class TestRealModSamplePacks(unittest.TestCase):
                             if text.startswith(prefix):
                                 prefix_counts[prefix] = int(prefix_counts.get(prefix, 0)) + 1
                 total_conflict_groups += len(codes)
-                fallback_conflict_groups += sum(
+                case_fallback_conflict_groups = sum(
                     1 for code in codes if str(code).startswith("fallback_or_unknown.")
                 )
+                fallback_conflict_groups += case_fallback_conflict_groups
+                family_total_conflict_groups[family] = int(family_total_conflict_groups.get(family, 0)) + len(codes)
+                family_fallback_conflict_groups[family] = int(
+                    family_fallback_conflict_groups.get(family, 0)
+                ) + case_fallback_conflict_groups
                 generic_unsupported_header_groups += sum(
                     1
                     for code in codes
@@ -4551,6 +4560,41 @@ class TestRealModSamplePacks(unittest.TestCase):
                     f"(max_ratio={expected_max_fallback_ratio:.3f})"
                 ),
             )
+            expected_family_max_fallback_ratio = pack.get("expected_family_max_fallback_ratio", {})
+            self.assertIsInstance(expected_family_max_fallback_ratio, dict)
+            for family, max_ratio_raw in expected_family_max_fallback_ratio.items():
+                family_name = str(family)
+                max_ratio = float(max_ratio_raw)
+                observed_total = int(family_total_conflict_groups.get(family_name, 0))
+                observed_fallback = int(family_fallback_conflict_groups.get(family_name, 0))
+                self.assertGreater(
+                    observed_total,
+                    0,
+                    f"{pack_id}: family fallback-ratio threshold references unknown/empty family {family_name!r}",
+                )
+                observed_ratio = float(observed_fallback) / float(observed_total)
+                self.assertLessEqual(
+                    observed_ratio,
+                    max_ratio,
+                    (
+                        f"{pack_id}: family {family_name} fallback_or_unknown ratio {observed_ratio:.3f} "
+                        f"({observed_fallback}/{observed_total}) exceeds threshold {max_ratio:.3f}"
+                    ),
+                )
+            expected_family_max_fallback_groups = pack.get("expected_family_max_fallback_groups", {})
+            self.assertIsInstance(expected_family_max_fallback_groups, dict)
+            for family, max_groups_raw in expected_family_max_fallback_groups.items():
+                family_name = str(family)
+                max_groups = int(max_groups_raw)
+                observed_fallback = int(family_fallback_conflict_groups.get(family_name, 0))
+                self.assertLessEqual(
+                    observed_fallback,
+                    max_groups,
+                    (
+                        f"{pack_id}: family {family_name} fallback_or_unknown groups {observed_fallback} "
+                        f"exceed threshold {max_groups}"
+                    ),
+                )
             self.assertEqual(
                 generic_unsupported_header_groups,
                 0,

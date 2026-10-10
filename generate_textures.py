@@ -474,12 +474,12 @@ def build_batch_bottleneck_hints(
     hints: list[str] = []
     if total_sources >= 1000 and resumed_completed_count > 0:
         hints.append(
-            _tr("Large 1000+ run resumed: keep Resume mode on and switch to Start fresh only when you intentionally need a full rerun.")
+            _tr("Large 1000+ run resumed: keep Resume mode on and switch to Start fresh only when you intentionally need a full rerun (use the Resume dropdown near preview controls).")
         )
     if high_res_8k_count > 0 and avg_file_seconds > 1.5:
         hints.append(_tr("8K-heavy run detected; keep staged/lazy preview on and keep Resume mode enabled for safer restarts."))
     if total_sources >= 1000 and resumed_completed_count == 0:
-        hints.append(_tr("Large 1000+ run: switch checkpoint mode to Resume and keep live preview paused except for brief spot-checks."))
+        hints.append(_tr("Large 1000+ run: switch checkpoint mode to Resume and keep live preview paused except for brief spot-checks (use ‘Re-enable preview now’ only for quick checks)."))
     if max_source_dimension >= 8192 or max_source_megapixels >= 48.0:
         hints.append(_tr("Very large source textures detected; reduce worker count and keep live preview paused unless needed."))
     if total_sources >= 1000 and avg_file_seconds > 0.9:
