@@ -1378,6 +1378,30 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "workflow_mix.cs_slot5_generic_alias")
 
+    def test_conflict_classifier_maps_envmap_pom_plus_wording_variant(self) -> None:
+        code = _classify_conflict_code(
+            "Block 0: EnvMap + POM is active while required EnvMap textures are unresolved; restore slot 4/5 textures or disable both env mapping and POM for the block."
+        )
+        self.assertEqual(code, "shader_state.envmap_pom_missing_env_slots")
+
+    def test_conflict_classifier_maps_envmap_glow_plus_wording_variant(self) -> None:
+        code = _classify_conflict_code(
+            "Block 0: EnvMap + glow are active while slot 2 and EnvMap textures are unresolved; restore slot 2/4/5 textures or disable both env mapping and glow for the block."
+        )
+        self.assertEqual(code, "shader_state.envmap_glow_missing_slots2_4_5")
+
+    def test_conflict_classifier_maps_parallax_envmap_plus_wording_variant(self) -> None:
+        code = _classify_conflict_code(
+            "Block 1: Parallax/POM + env mapping are active while slot 3 and EnvMap textures are unresolved; restore slot 3/4/5 textures or disable both parallax/POM and env mapping for the block."
+        )
+        self.assertEqual(code, "shader_state.parallax_envmap_missing_slots3_4_5")
+
+    def test_conflict_classifier_maps_crossblock_drift_detected_wording_variant(self) -> None:
+        code = _classify_conflict_code(
+            "Cross-block texture-set reference drift detected with mixed slot conflicts; keep auto-fix conservative and review linked blocks manually before patching."
+        )
+        self.assertEqual(code, "shader_state.crossblock_texture_ref_drift_mixed_slots")
+
     def test_conflict_classifier_maps_subsurface_soft_lighting_only(self) -> None:
         code = _classify_conflict_code(
             "Block 2: subsurface-scattering lighting flags active (SLSF2_Soft_Lighting) — these are mutually exclusive with parallax"

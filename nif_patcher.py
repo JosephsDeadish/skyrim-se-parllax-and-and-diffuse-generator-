@@ -4515,13 +4515,21 @@ def _classify_conflict_code(message: str) -> str:
         return "shader_state.envmap_missing_slot5"
     if "envmap and pom are enabled" in lowered and "required envmap textures are unresolved" in lowered:
         return "shader_state.envmap_pom_missing_env_slots"
+    if "envmap + pom is active" in lowered and "required envmap textures are unresolved" in lowered:
+        return "shader_state.envmap_pom_missing_env_slots"
     if "envmap and glow are enabled" in lowered and "required slot 2 and envmap textures are unresolved" in lowered:
+        return "shader_state.envmap_glow_missing_slots2_4_5"
+    if "envmap + glow are active" in lowered and "slot 2 and envmap textures are unresolved" in lowered:
         return "shader_state.envmap_glow_missing_slots2_4_5"
     if "restore valid slot 2/4/5 textures, or disable both glow and environment mapping for this mixed block" in lowered:
         return "shader_state.envmap_glow_missing_slots2_4_5.hint_restore_or_disable"
     if "envmap and glow are enabled" in lowered and "slot 2 is unresolved while envmap slots are present" in lowered:
         return "shader_state.envmap_glow_missing_slot2"
+    if "envmap + glow are active" in lowered and "slot 2 is unresolved" in lowered:
+        return "shader_state.envmap_glow_missing_slot2"
     if "parallax/pom and env mapping are enabled" in lowered and "required slot 3 and envmap textures are unresolved" in lowered:
+        return "shader_state.parallax_envmap_missing_slots3_4_5"
+    if "parallax/pom + env mapping are active" in lowered and "slot 3 and envmap textures are unresolved" in lowered:
         return "shader_state.parallax_envmap_missing_slots3_4_5"
     if "restore valid slot 3/4/5 textures, or disable both parallax/pom and environment mapping for this mixed block" in lowered:
         return "shader_state.parallax_envmap_missing_slots3_4_5.hint_restore_or_disable"
@@ -4546,6 +4554,8 @@ def _classify_conflict_code(message: str) -> str:
         ("share texture set ref" in lowered or "shares texture set ref" in lowered)
         and "cross-block reference drift" in lowered
     ):
+        return "shader_state.crossblock_texture_ref_drift_mixed_slots"
+    if "cross-block texture-set reference drift detected" in lowered and "mixed slot conflicts" in lowered:
         return "shader_state.crossblock_texture_ref_drift_mixed_slots"
     if "slot 0 " in lowered:
         return "path_slot_diffuse"
