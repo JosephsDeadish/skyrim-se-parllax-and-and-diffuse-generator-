@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import struct
 import tempfile
 import unittest
 import unittest.mock
@@ -16,6 +17,7 @@ from scripts.pre_release_validation import (
     _load_prior_bucket_distribution,
     _load_realmod_pack_payload,
     _packaged_smoke_scenarios,
+    _read_packaged_smoke_dds_dimensions,
     _resolve_seed_realmod_delta_files,
     _run_repository_hygiene_scan,
     _resolve_packaged_smoke_binary,
@@ -339,6 +341,16 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
     def test_resolve_packaged_smoke_binary_raises_when_missing(self) -> None:
         with self.assertRaises(SystemExit):
             _resolve_packaged_smoke_binary(self.tmp)
+
+    def test_read_packaged_smoke_dds_dimensions(self) -> None:
+        dds_path = self.tmp / "sample.dds"
+        dds_path.write_bytes(
+            b"DDS "
+            + struct.pack("<I", 124)
+            + bytes(4)
+            + struct.pack("<II", 96, 128)
+        )
+        self.assertEqual(_read_packaged_smoke_dds_dimensions(dds_path), (128, 96))
 
     def test_packaged_smoke_scenarios_define_required_outputs(self) -> None:
         scenarios = _packaged_smoke_scenarios()

@@ -200,6 +200,21 @@ def _write_packaged_smoke_dds(path: Path, size: int) -> None:
     )
 
 
+def _read_packaged_smoke_dds_dimensions(path: Path) -> tuple[int, int]:
+    with path.open("rb") as dds_file:
+        header = dds_file.read(20)
+    if (
+        len(header) < 20
+        or header[:4] != b"DDS "
+        or struct.unpack_from("<I", header, 4)[0] != 124
+    ):
+        raise ValueError(f"'{path.name}' does not contain a valid DDS header.")
+    height, width = struct.unpack_from("<II", header, 12)
+    if width < 1 or height < 1:
+        raise ValueError(f"'{path.name}' has invalid DDS dimensions ({width}, {height}).")
+    return width, height
+
+
 def _packaged_smoke_scenarios() -> list[dict[str, object]]:
     """Return packaged-smoke scenarios with output + semantic assertions."""
     return [
@@ -784,8 +799,6 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
     smoke_io.mkdir(parents=True, exist_ok=True)
     loops = max(1, int(loops))
     scenarios = _packaged_smoke_scenarios()
-    from PIL import Image
-
     for loop_index in range(1, loops + 1):
         for scenario in scenarios:
             scenario_name = str(scenario.get("name", "scenario")).strip() or "scenario"
@@ -894,12 +907,18 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                     raise SystemExit(
                         f"Packaged executable smoke run for '{scenario_name}' produced empty output file '{output_path.name}'."
                     )
-                with Image.open(output_path) as output_image:
-                    if output_image.size != (input_size, input_size):
-                        raise SystemExit(
-                            f"Packaged executable smoke run for '{scenario_name}' produced "
-                            f"'{output_path.name}' at {output_image.size}; expected {(input_size, input_size)}."
-                        )
+                try:
+                    output_dimensions = _read_packaged_smoke_dds_dimensions(output_path)
+                except ValueError as exc:
+                    raise SystemExit(
+                        f"Packaged executable smoke run for '{scenario_name}' produced an invalid "
+                        f"DDS output: {exc}"
+                    ) from exc
+                if output_dimensions != (input_size, input_size):
+                    raise SystemExit(
+                        f"Packaged executable smoke run for '{scenario_name}' produced "
+                        f"'{output_path.name}' at {output_dimensions}; expected {(input_size, input_size)}."
+                    )
             produced_names = [path.name.lower() for path in produced_dds]
             specialized_suffixes = (
                 "_n.dds",
