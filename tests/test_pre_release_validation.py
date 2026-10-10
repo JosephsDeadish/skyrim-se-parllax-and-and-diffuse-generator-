@@ -365,6 +365,8 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
             "enb_no_parallax_glow",
             "community_shaders_aux_wet_only",
             "truepbr_no_parallax",
+            "vanilla_glow_env_combo",
+            "community_shaders_no_parallax_wet_snow",
         ):
             self.assertIn(expected, scenario_by_name)
             entry = scenario_by_name[expected]

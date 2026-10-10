@@ -1138,9 +1138,9 @@
         "parallax_scale_gate": 0.0
       },
       "expected_family_case_counts": {
-        "architecture": 32,
+        "architecture": 33,
         "effects": 30,
-        "clutter": 22,
+        "clutter": 23,
         "armor": 1,
         "landscape": 1,
         "spec_gate": 1,
@@ -1167,7 +1167,7 @@
         "clutter": 0.15
       },
       "expected_family_min_strategy_alignment_ratio": {
-        "architecture": 0.18,
+        "architecture": 0.17,
         "effects": 0.35,
         "clutter": 0.375
       },
@@ -1189,7 +1189,7 @@
       "expected_family_max_prefix_counts": {
         "architecture": {
           "fallback_or_unknown.": 0,
-          "unsupported_header.profile_value_drift.unparsed.": 22,
+          "unsupported_header.profile_value_drift.unparsed.": 23,
           "shader_state.envmap_missing_slots4_5.": 6,
           "shader_state.parallax_envmap_missing_slots3_4_5.": 3,
           "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.": 2
@@ -1203,7 +1203,7 @@
         },
         "clutter": {
           "fallback_or_unknown.": 0,
-          "unsupported_header.profile_value_drift.unparsed.": 13,
+          "unsupported_header.profile_value_drift.unparsed.": 14,
           "shader_state.envmap_missing_slots4_5.": 2,
           "shader_state.parallax_envmap_missing_slots3_4_5.": 1
         }
@@ -4740,6 +4740,107 @@
             "set_slot3_parallax_for_repeated_real_layout_drift",
             "enable_parallax_for_repeated_real_layout_drift"
           ]
+        },
+        {
+          "id": "pack_fallout_architecture_real_crossblock_multidrift_manual_review_tail_v10",
+          "family": "architecture",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 160,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\architecture\\vault\\reactorframe.dds",
+            "textures\\architecture\\vault\\reactorframe_n.dds",
+            "",
+            "",
+            "textures\\cubemaps\\reactorframe_e.dds",
+            "textures\\architecture\\vault\\reactorframe_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 1,
+          "extra_shader_texture_set_refs": [
+            141
+          ],
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 13
+            },
+            {
+              "ordinal": 3,
+              "delta": -9
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_crossblock_repair_when_table_drift_is_partial",
+          "local_strategy": "guarded_noop_for_crossblock_multidrift_manual_review_tail",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "partial_recoverability_guarded",
+          "safety_difference_note": "Additional architecture manual-review tail: cross-block texture-set ref skew plus table drift remains deterministic guarded no-op."
+        },
+        {
+          "id": "pack_fallout_clutter_real_env_alias_multidrift_manual_review_tail_v10",
+          "family": "clutter",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 0,
+          "flags1": 32,
+          "texture_paths": [
+            "textures\\clutter\\industrial\\relaycore.dds",
+            "",
+            "",
+            "textures\\clutter\\industrial\\relaycore_n.dds",
+            "",
+            "textures\\clutter\\industrial\\relaycore_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "num_blocks_delta": 1,
+          "extra_shader_texture_set_refs": [
+            155
+          ],
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 1,
+              "delta": 12
+            },
+            {
+              "ordinal": 3,
+              "delta": -7
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_singlepass_env_alias_repair_with_partial_index_recovery",
+          "local_strategy": "guarded_noop_for_env_alias_multidrift_manual_review_tail",
+          "intentional_strategy_difference": true,
+          "expected_difference_bucket": "guarded_fallout",
+          "safety_difference_note": "Additional clutter manual-review tail: single-pass env-alias + multidrift signatures stay no-op in guarded Fallout mode."
         },
         {
           "id": "pack_fallout_effects_real_repeated_payload_slot3_drift_combo_v9",

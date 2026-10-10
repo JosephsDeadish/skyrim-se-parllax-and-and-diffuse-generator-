@@ -1521,6 +1521,18 @@ class TestValidateNifForParallax(unittest.TestCase):
         )
         self.assertEqual(code, "fallout_profile.guarded_noop_layout_policy_exhausted")
 
+    def test_conflict_classifier_maps_fallout_guarded_noop_manual_review_hint_for_layout_policy(self) -> None:
+        code = _classify_conflict_code(
+            "No supported shader layouts are available for profile 'fallout'; skipping all shader blocks. Keep no-op/manual-review for this mesh."
+        )
+        self.assertEqual(code, "fallout_profile.guarded_noop_layout_policy_exhausted.hint_manual_review")
+
+    def test_conflict_classifier_maps_fallout_guarded_noop_manual_review_hint_for_no_compatible_blocks(self) -> None:
+        code = _classify_conflict_code(
+            "No Fallout-compatible BSLightingShaderProperty blocks found for experimental patch mode. Keep this mesh as no-op/manual-review."
+        )
+        self.assertEqual(code, "fallout_profile.guarded_noop_no_compatible_blocks.hint_manual_review")
+
     def test_fallout_profile_value_drift_subcodes_keep_guarded_manual_review_actions(self) -> None:
         actions = _actions_for_conflict_code(
             "unsupported_header.profile_value_drift.u11_u2155.fallout_signature_drift"
@@ -1528,6 +1540,24 @@ class TestValidateNifForParallax(unittest.TestCase):
         joined = " ".join(actions).lower()
         self.assertIn("no-op", joined)
         self.assertIn("manual-review", joined)
+
+    def test_conflict_classifier_maps_header_table_drift_manual_review_hint(self) -> None:
+        code = _classify_conflict_code(
+            "Header-table drift is present alongside user-version mismatch; keep manual-review/no-op and re-export before patching."
+        )
+        self.assertEqual(code, "unsupported_header.user_version_value_drift.header_table_drift.hint_manual_review_noop")
+
+    def test_conflict_classifier_maps_unparsed_header_drift_manual_review_hint(self) -> None:
+        code = _classify_conflict_code(
+            "Malformed header-table drift detected without recoverable profile values; keep this mesh in guarded/manual-review and re-export before patching."
+        )
+        self.assertEqual(code, "unsupported_header.profile_value_drift.unparsed.header_table_drift.hint_manual_review_noop")
+
+    def test_conflict_classifier_maps_signature_only_header_drift_manual_review_hint(self) -> None:
+        code = _classify_conflict_code(
+            "Malformed header-table drift signature detected without stable profile values; keep manual-review/no-op and re-export before patching."
+        )
+        self.assertEqual(code, "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift.hint_manual_review_noop")
 
     def test_conflict_classifier_maps_cs_slot5_cm_vs_enb_workflow_mix_notice(self) -> None:
         code = _classify_conflict_code(

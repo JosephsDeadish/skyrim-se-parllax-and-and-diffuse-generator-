@@ -4426,10 +4426,25 @@ def _classify_conflict_code(message: str) -> str:
         if "stream-header fields were shifted from expected skyrim offsets" in lowered:
             return "unsupported_header.profile_value_drift.unparsed.header_field_alignment_drift.stream_header_shift"
         return "unsupported_header.profile_value_drift.unparsed.header_field_alignment_drift"
+    if (
+        "header-table drift is present alongside user-version mismatch" in lowered
+        and "manual-review/no-op" in lowered
+    ):
+        return "unsupported_header.user_version_value_drift.header_table_drift.hint_manual_review_noop"
     if "header-table drift is present alongside user-version mismatch" in lowered:
         return "unsupported_header.user_version_value_drift.header_table_drift"
+    if (
+        "malformed header-table drift detected without recoverable profile values" in lowered
+        and ("manual-review/no-op" in lowered or "guarded/manual-review" in lowered)
+    ):
+        return "unsupported_header.profile_value_drift.unparsed.header_table_drift.hint_manual_review_noop"
     if "malformed header-table drift detected without recoverable profile values" in lowered:
         return "unsupported_header.profile_value_drift.unparsed.header_table_drift"
+    if (
+        "malformed header-table drift signature detected without stable profile values" in lowered
+        and "manual-review/no-op" in lowered
+    ):
+        return "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift.hint_manual_review_noop"
     if "malformed header-table drift signature detected without stable profile values" in lowered:
         return "unsupported_header.profile_value_drift.unparsed.signature_only.header_table_drift"
     if lowered.startswith("pre-write header validation failed: unsupported nif header/profile values"):
@@ -4515,8 +4530,19 @@ def _classify_conflict_code(message: str) -> str:
         return "fallout_profile.experimental_notice"
     if "fallout profile" in lowered or "experimental_fallout_write" in lowered:
         return "fallout_profile"
+    if (
+        "no fallout-compatible bslightingshaderproperty blocks found for experimental patch mode" in lowered
+        and "manual-review" in lowered
+    ):
+        return "fallout_profile.guarded_noop_no_compatible_blocks.hint_manual_review"
     if "no fallout-compatible bslightingshaderproperty blocks found for experimental patch mode" in lowered:
         return "fallout_profile.guarded_noop_no_compatible_blocks"
+    if (
+        "no supported shader layouts are available for profile" in lowered
+        and "skipping all shader blocks" in lowered
+        and "manual-review" in lowered
+    ):
+        return "fallout_profile.guarded_noop_layout_policy_exhausted.hint_manual_review"
     if "no supported shader layouts are available for profile" in lowered and "skipping all shader blocks" in lowered:
         return "fallout_profile.guarded_noop_layout_policy_exhausted"
     if "raw shader_type 0x" in lowered and "resolved to" in lowered and "method=semantic" in lowered:

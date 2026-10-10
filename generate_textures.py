@@ -9067,7 +9067,7 @@ if GUI_AVAILABLE:
                     else:
                         widget.pack_forget()
                 for widget in simplified_optional_preview_widgets:
-                    if simplified:
+                    if simplified or not show_advanced:
                         widget.pack_forget()
                     elif not widget.winfo_manager():
                         widget.pack(**_simplified_optional_preview_pack_layout[widget])
@@ -11548,7 +11548,8 @@ if GUI_AVAILABLE:
                             "You queued {count} textures.\n\n"
                             "Resume mode is strongly recommended for 1000+ runs.\n"
                             "It saves progress so crashes/restarts do not force a full rerun,\n"
-                            "and keeps queue behavior safer for long unattended processing.\n\n"
+                            "and keeps queue behavior safer for long unattended processing.\n"
+                            "If you stay in start-fresh mode and the run is interrupted, reruns will repeat completed files.\n\n"
                             "Enable Resume mode now?"
                         ).format(count=len(self.selected_inputs)),
                         parent=self.root,
@@ -11838,8 +11839,11 @@ if GUI_AVAILABLE:
                     perf_note += f" Resume mode skipped {resumed_completed_count} file(s) from checkpoint."
                 if checkpoint_path.exists():
                     perf_note += f" Checkpoint file: {checkpoint_path.name}."
+                perf_note += f" Checkpoint mode: {self.batch_resume_mode_var.get()}."
                 if is_huge_batch:
                     perf_note += " Huge-run queue pacing is active to keep the UI responsive."
+                    if self.batch_resume_mode_var.get() != "resume":
+                        perf_note += " Resume mode is recommended to avoid duplicate work after interruptions."
                 if self.show_batch_preview_var.get():
                     self.status_var.set(
                         f"Queued {len(self.selected_inputs)} source texture(s). "
