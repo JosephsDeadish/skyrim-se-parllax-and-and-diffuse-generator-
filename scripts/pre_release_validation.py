@@ -703,6 +703,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "input_count": 2,
             "input_format": "dds",
             "checkpoint_resume": True,
+            "interruption_resume": True,
             "min_outputs": 4,
             "required_suffixes": ("_d.dds", "_n.dds"),
             "required_exact_suffix_counts": {"_d.dds": 2, "_n.dds": 2},
@@ -815,6 +816,10 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                 smoke_input.mkdir(parents=True, exist_ok=True)
                 for input_index in range(input_count):
                     input_writer(smoke_input / f"sample_{input_index + 1:02d}{input_suffix}", input_size)
+                if bool(scenario.get("interruption_resume", False)):
+                    (smoke_input / f"sample_{input_count:02d}{input_suffix}").write_bytes(
+                        b"synthetic interrupted-run input"
+                    )
             else:
                 smoke_input = smoke_io / f"sample_{scenario_name}{input_suffix}"
                 input_writer(smoke_input, input_size)
@@ -880,19 +885,73 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
             if bool(scenario.get("checkpoint_resume", False)):
                 checkpoint_path = smoke_io / f"checkpoint_loop{loop_index}_{scenario_name}.json"
                 invocation_args.extend(("--checkpoint-file", str(checkpoint_path)))
+            if bool(scenario.get("interruption_resume", False)):
+                invocation_args.extend(("--batch-workers", "1"))
+            run_args = [
+                str(binary),
+                str(smoke_input),
+                "--output-dir",
+                str(smoke_out),
+                *invocation_args,
+            ]
             run_completed = subprocess.run(
-                [
-                    str(binary),
-                    str(smoke_input),
-                    "--output-dir",
-                    str(smoke_out),
-                    *invocation_args,
-                ],
+                run_args,
                 cwd=REPO_ROOT,
                 capture_output=True,
                 text=True,
             )
-            if run_completed.returncode != 0:
+            if bool(scenario.get("interruption_resume", False)):
+                if run_completed.returncode == 0:
+                    raise SystemExit(
+                        f"Packaged executable smoke for '{scenario_name}' unexpectedly accepted "
+                        "the deliberately invalid final input."
+                    )
+                if checkpoint_path is None:
+                    raise SystemExit(
+                        f"Packaged executable smoke for '{scenario_name}' requires a checkpoint file."
+                    )
+                try:
+                    interrupted_checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+                    completed_files = interrupted_checkpoint.get("completed_success_files", [])
+                except (OSError, json.JSONDecodeError) as exc:
+                    raise SystemExit(
+                        f"Packaged executable smoke interruption for '{scenario_name}' left an invalid "
+                        f"checkpoint: {exc}"
+                    ) from exc
+                if len(completed_files) != input_count - 1:
+                    raise SystemExit(
+                        f"Packaged executable smoke interruption for '{scenario_name}' checkpointed "
+                        f"{len(completed_files)} successful inputs; expected {input_count - 1}."
+                    )
+                repaired_input = smoke_input / f"sample_{input_count:02d}{input_suffix}"
+                input_writer(repaired_input, input_size)
+                resumed_initial = subprocess.run(
+                    [*run_args, "--resume-checkpoint"],
+                    cwd=REPO_ROOT,
+                    capture_output=True,
+                    text=True,
+                )
+                if resumed_initial.returncode != 0:
+                    print(resumed_initial.stdout)
+                    print(resumed_initial.stderr)
+                    raise SystemExit(resumed_initial.returncode)
+                try:
+                    resumed_checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError) as exc:
+                    raise SystemExit(
+                        f"Packaged executable smoke resume for '{scenario_name}' left an invalid "
+                        f"checkpoint: {exc}"
+                    ) from exc
+                if (
+                    int(resumed_checkpoint.get("resumed_completed_count", -1)) != input_count - 1
+                    or int(resumed_checkpoint.get("completed_success_count", -1)) != input_count
+                ):
+                    raise SystemExit(
+                        f"Packaged executable smoke resume for '{scenario_name}' reported checkpoint "
+                        f"state {resumed_checkpoint!r}; expected {input_count - 1} resumed and "
+                        f"{input_count} completed inputs."
+                    )
+            elif run_completed.returncode != 0:
                 print(run_completed.stdout)
                 print(run_completed.stderr)
                 raise SystemExit(run_completed.returncode)

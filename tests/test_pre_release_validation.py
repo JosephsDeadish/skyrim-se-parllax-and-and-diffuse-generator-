@@ -410,6 +410,7 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         self.assertEqual(resume_scenario.get("input_size"), 32)
         self.assertEqual(resume_scenario.get("input_format"), "dds")
         self.assertTrue(resume_scenario.get("checkpoint_resume"))
+        self.assertTrue(resume_scenario.get("interruption_resume"))
         self.assertEqual(
             resume_scenario.get("required_exact_output_family_counts"),
             {"diffuse": 2, "normal": 2},
