@@ -431,6 +431,8 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         self.assertEqual(fallout76_scenario.get("input_size"), 64)
         self.assertEqual(fallout76_scenario.get("input_format"), "dds")
         self.assertTrue(fallout76_scenario.get("checkpoint_resume"))
+        self.assertTrue(fallout76_scenario.get("interruption_resume"))
+        self.assertEqual(fallout76_scenario.get("interruption_index"), 3)
         self.assertEqual(
             fallout76_scenario.get("required_exact_suffix_counts"),
             {"_d.dds": 6, "_n.dds": 6, "_s.dds": 6},

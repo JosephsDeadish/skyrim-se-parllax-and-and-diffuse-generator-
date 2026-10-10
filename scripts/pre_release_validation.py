@@ -734,6 +734,8 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "input_count": 6,
             "input_format": "dds",
             "checkpoint_resume": True,
+            "interruption_resume": True,
+            "interruption_index": 3,
             "min_outputs": 18,
             "required_suffixes": ("_d.dds", "_n.dds", "_s.dds"),
             "required_exact_suffix_counts": {"_d.dds": 6, "_n.dds": 6, "_s.dds": 6},
@@ -817,6 +819,12 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                 scenario.get("input_dimensions", int(scenario.get("input_size", 2) or 2))
             )
             input_count = max(1, int(scenario.get("input_count", 1) or 1))
+            interruption_index = int(scenario.get("interruption_index", input_count) or input_count)
+            if not 1 <= interruption_index <= input_count:
+                raise SystemExit(
+                    f"Invalid interruption input index {interruption_index} for '{scenario_name}' "
+                    f"with {input_count} input(s)."
+                )
             input_format = str(scenario.get("input_format", "png")).strip().lower()
             if input_format not in {"dds", "png"}:
                 raise SystemExit(f"Unsupported packaged smoke input format '{input_format}' in '{scenario_name}'.")
@@ -828,7 +836,7 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                 for input_index in range(input_count):
                     input_writer(smoke_input / f"sample_{input_index + 1:02d}{input_suffix}", input_dimensions)
                 if bool(scenario.get("interruption_resume", False)):
-                    (smoke_input / f"sample_{input_count:02d}{input_suffix}").write_bytes(
+                    (smoke_input / f"sample_{interruption_index:02d}{input_suffix}").write_bytes(
                         b"synthetic interrupted-run input"
                     )
             else:
@@ -915,7 +923,7 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                 if run_completed.returncode == 0:
                     raise SystemExit(
                         f"Packaged executable smoke for '{scenario_name}' unexpectedly accepted "
-                        "the deliberately invalid final input."
+                        "the deliberately invalid input."
                     )
                 if checkpoint_path is None:
                     raise SystemExit(
@@ -929,12 +937,21 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                         f"Packaged executable smoke interruption for '{scenario_name}' left an invalid "
                         f"checkpoint: {exc}"
                     ) from exc
-                if len(completed_files) != input_count - 1:
+                expected_completed_count = input_count - 1
+                expected_completed_files = {
+                    str((smoke_input / f"sample_{index:02d}{input_suffix}").resolve())
+                    for index in range(1, input_count + 1)
+                    if index != interruption_index
+                }
+                if (
+                    len(completed_files) != expected_completed_count
+                    or set(completed_files) != expected_completed_files
+                ):
                     raise SystemExit(
                         f"Packaged executable smoke interruption for '{scenario_name}' checkpointed "
-                        f"{len(completed_files)} successful inputs; expected {input_count - 1}."
+                        f"{completed_files!r}; expected every valid input except the failed one."
                     )
-                repaired_input = smoke_input / f"sample_{input_count:02d}{input_suffix}"
+                repaired_input = smoke_input / f"sample_{interruption_index:02d}{input_suffix}"
                 input_writer(repaired_input, input_dimensions)
                 resumed_initial = subprocess.run(
                     [*run_args, "--resume-checkpoint"],
@@ -954,12 +971,12 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                         f"checkpoint: {exc}"
                     ) from exc
                 if (
-                    int(resumed_checkpoint.get("resumed_completed_count", -1)) != input_count - 1
+                    int(resumed_checkpoint.get("resumed_completed_count", -1)) != expected_completed_count
                     or int(resumed_checkpoint.get("completed_success_count", -1)) != input_count
                 ):
                     raise SystemExit(
                         f"Packaged executable smoke resume for '{scenario_name}' reported checkpoint "
-                        f"state {resumed_checkpoint!r}; expected {input_count - 1} resumed and "
+                        f"state {resumed_checkpoint!r}; expected {expected_completed_count} resumed and "
                         f"{input_count} completed inputs."
                     )
             elif run_completed.returncode != 0:
