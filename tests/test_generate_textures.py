@@ -1,4 +1,5 @@
 import json
+import os
 import queue
 import sys
 import tempfile
@@ -333,6 +334,12 @@ def _shield_art_image() -> Image.Image:
 
 
 class GenerateTexturesTests(unittest.TestCase):
+    def _skip_unavailable_tk_display(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_apply_persisted_gui_state"):
+            self.skipTest("Tk GUI is unavailable in this environment.")
+        if sys.platform not in {"win32", "darwin"} and not os.environ.get("DISPLAY"):
+            self.skipTest("Tk GUI tests require a display.")
+
     def test_app_version_is_0_9(self) -> None:
         self.assertEqual(APP_VERSION, "0.9")
 
@@ -457,8 +464,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertAlmostEqual(float(loaded["specular_strength"]), 2.3)
 
     def test_tk_advanced_workflow_visibility_round_trips_saved_settings(self) -> None:
-        if not hasattr(TextureGeneratorGUI, "_apply_persisted_gui_state"):
-            self.skipTest("Tk GUI is unavailable in this environment.")
+        self._skip_unavailable_tk_display()
 
         def find_label_frame(root, title: str):
             pending = list(root.winfo_children())
@@ -4343,9 +4349,15 @@ class GenerateTexturesTests(unittest.TestCase):
                     0,
                 )
 
-            cancelled_event = worker.processing_queue.get_nowait()
+            interrupted_events = []
+            while not worker.processing_queue.empty():
+                interrupted_events.append(worker.processing_queue.get_nowait())
+            self.assertEqual(
+                [event_type for event_type, _payload in interrupted_events],
+                ["progress"] * interrupted_after + ["cancelled"],
+            )
+            cancelled_event = interrupted_events[-1]
             self.assertEqual(cancelled_event[0], "cancelled")
-            self.assertTrue(worker.processing_queue.empty())
             cancelled_results, cancellation_telemetry = cancelled_event[1]
             self.assertEqual(first_attempts, [f"source_{index:02d}" for index in range(interrupted_after)])
             self.assertEqual(len(cancelled_results), interrupted_after)
