@@ -162,6 +162,9 @@ class TestPreReleaseValidationRealmodPayload(unittest.TestCase):
         self.assertTrue(
             any(str(pack.get("id", "")) == "external_broken_additional_pack" for pack in packs if isinstance(pack, dict))
         )
+        self.assertTrue(
+            any(str(pack.get("id", "")) == "external_broken_large_pack" for pack in packs if isinstance(pack, dict))
+        )
         self.assertTrue(any(str(pack.get("id", "")) == "external_pack" for pack in packs if isinstance(pack, dict)))
 
 
@@ -402,6 +405,15 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         }
         self.assertEqual(truepbr_exact_counts.get("_rmaos.dds"), 1)
         self.assertEqual(truepbr_exact_counts.get("_rmaos.json"), 1)
+        truepbr_family_counts = {
+            str(key).lower(): int(value)
+            for key, value in dict(
+                scenario_by_name["truepbr"].get("required_exact_output_family_counts", {})
+            ).items()
+        }
+        self.assertEqual(truepbr_family_counts.get("diffuse"), 1)
+        self.assertEqual(truepbr_family_counts.get("normal"), 1)
+        self.assertEqual(truepbr_family_counts.get("rmaos"), 1)
         truepbr_wet_snow_exact_counts = {
             str(key).lower(): int(value)
             for key, value in dict(
@@ -410,6 +422,17 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         }
         self.assertEqual(truepbr_wet_snow_exact_counts.get("_wt.dds"), 1)
         self.assertEqual(truepbr_wet_snow_exact_counts.get("_sm.dds"), 1)
+        truepbr_wet_snow_family_counts = {
+            str(key).lower(): int(value)
+            for key, value in dict(
+                scenario_by_name["truepbr_wet_snow_combo"].get("required_exact_output_family_counts", {})
+            ).items()
+        }
+        self.assertEqual(truepbr_wet_snow_family_counts.get("rmaos"), 1)
+        self.assertEqual(truepbr_wet_snow_family_counts.get("wetness"), 1)
+        self.assertEqual(truepbr_wet_snow_family_counts.get("snow"), 1)
+        self.assertFalse(scenario_by_name["vanilla"].get("required_sidecar_suffixes"))
+        self.assertFalse(scenario_by_name["enb"].get("required_sidecar_suffixes"))
 
 
 class TestPreReleaseValidationRepositoryHygiene(unittest.TestCase):

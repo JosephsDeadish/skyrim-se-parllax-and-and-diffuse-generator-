@@ -9705,11 +9705,15 @@ if GUI_AVAILABLE:
             mode = str(self.batch_resume_mode_var.get() or "start_fresh").strip().lower()
             if mode == "resume":
                 self.batch_resume_hint_var.set(
-                    "Checkpoint mode: Resume (recommended for long/1000+ runs) — continue from checkpoint and skip completed files."
+                    self._tr(
+                        "Checkpoint mode: Resume (recommended for long/1000+ runs) — continue from checkpoint and skip completed files."
+                    )
                 )
             else:
                 self.batch_resume_hint_var.set(
-                    "Checkpoint mode: Start fresh — rerun all selected files and ignore previous checkpoint progress."
+                    self._tr(
+                        "Checkpoint mode: Start fresh — rerun all selected files and ignore previous checkpoint progress."
+                    )
                 )
 
         def _load_batch_checkpoint_completed_files(self, checkpoint_path: Path) -> set[str]:
@@ -10181,9 +10185,17 @@ if GUI_AVAILABLE:
                 and not bool(getattr(self, "_queue_backlog_notice_emitted", False))
             ):
                 self.status_var.set(
-                    "Queue pacing active: event backlog is high, so GUI updates are intentionally throttled for stability."
+                    self._tr(
+                        "Queue pacing active: event backlog is high, so GUI updates are intentionally throttled for stability."
+                    )
                 )
                 self._queue_backlog_notice_emitted = True
+            if self.is_processing and queue_backlog >= 512:
+                self.batch_perf_hint_var.set(
+                    self._tr(
+                        "Queue backlog is very high; keep live preview off and avoid rapid preview navigation until the queue drains."
+                    )
+                )
             max_events_per_poll = compute_processing_queue_event_budget(
                 queue_backlog=queue_backlog,
                 total_sources=max(0, len(getattr(self, "selected_inputs", []) or [])),

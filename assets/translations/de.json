@@ -58,6 +58,9 @@
     "Large 1000+ run: switch checkpoint mode to Resume and keep live preview paused except for brief spot-checks.": "Großer Lauf (1000+): Checkpoint-Modus auf Fortsetzen stellen und Live-Vorschau pausiert lassen, außer für kurze Stichproben.",
     "Queue pacing is active to keep the UI responsive on this huge run; brief status-update delays are expected.": "Queue-Taktung ist aktiv, um die Oberfläche bei diesem sehr großen Lauf reaktionsfähig zu halten; kurze Verzögerungen bei Status-Updates sind erwartbar.",
     "Huge-run mode: checkpoint safety prompts, safer resume decisions, and queue pacing are enabled for smoother long runs.": "Großlauf-Modus: Checkpoint-Sicherheitsabfragen, sicherere Fortsetzen-Entscheidungen und Queue-Taktung sind für stabilere lange Läufe aktiviert.",
-    "Large-run guidance: keep Resume mode enabled and leave live preview paused except for quick spot-checks.": "Hinweis für große Läufe: Fortsetzen-Modus aktiv lassen und Live-Vorschau pausiert halten, außer für kurze Stichproben."
+    "Large-run guidance: keep Resume mode enabled and leave live preview paused except for quick spot-checks.": "Hinweis für große Läufe: Fortsetzen-Modus aktiv lassen und Live-Vorschau pausiert halten, außer für kurze Stichproben.",
+    "Checkpoint mode: Resume (recommended for long/1000+ runs) — continue from checkpoint and skip completed files.": "Checkpoint-Modus: Fortsetzen (empfohlen für lange/1000+ Läufe) — mit dem Checkpoint fortfahren und bereits abgeschlossene Dateien überspringen.",
+    "Checkpoint mode: Start fresh — rerun all selected files and ignore previous checkpoint progress.": "Checkpoint-Modus: Neu starten — alle ausgewählten Dateien erneut verarbeiten und bisherigen Checkpoint-Fortschritt ignorieren.",
+    "Queue backlog is very high; keep live preview off and avoid rapid preview navigation until the queue drains.": "Der Queue-Rückstau ist sehr hoch; Live-Vorschau deaktiviert lassen und schnelle Vorschau-Navigation vermeiden, bis die Queue abgearbeitet ist."
   }
 }

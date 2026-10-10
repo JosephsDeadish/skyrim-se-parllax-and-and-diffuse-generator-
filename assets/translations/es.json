@@ -58,6 +58,9 @@
     "Large 1000+ run: switch checkpoint mode to Resume and keep live preview paused except for brief spot-checks.": "Ejecución grande (1000+): cambia el modo de punto de control a Reanudar y mantén la vista previa en vivo pausada salvo para comprobaciones breves.",
     "Queue pacing is active to keep the UI responsive on this huge run; brief status-update delays are expected.": "El ritmo de cola está activo para mantener la interfaz receptiva en esta ejecución enorme; se esperan pequeños retrasos en las actualizaciones de estado.",
     "Huge-run mode: checkpoint safety prompts, safer resume decisions, and queue pacing are enabled for smoother long runs.": "Modo de ejecución enorme: se activan avisos de seguridad de punto de control, decisiones de reanudación más seguras y ritmo de cola para ejecuciones largas más estables.",
-    "Large-run guidance: keep Resume mode enabled and leave live preview paused except for quick spot-checks.": "Guía para ejecuciones grandes: mantén activado Reanudar y deja la vista previa en vivo pausada salvo para comprobaciones rápidas."
+    "Large-run guidance: keep Resume mode enabled and leave live preview paused except for quick spot-checks.": "Guía para ejecuciones grandes: mantén activado Reanudar y deja la vista previa en vivo pausada salvo para comprobaciones rápidas.",
+    "Checkpoint mode: Resume (recommended for long/1000+ runs) — continue from checkpoint and skip completed files.": "Modo de punto de control: Reanudar (recomendado para ejecuciones largas/de 1000+) — continúa desde el punto de control y omite archivos ya completados.",
+    "Checkpoint mode: Start fresh — rerun all selected files and ignore previous checkpoint progress.": "Modo de punto de control: Iniciar desde cero — vuelve a ejecutar todos los archivos seleccionados e ignora el progreso anterior del punto de control.",
+    "Queue backlog is very high; keep live preview off and avoid rapid preview navigation until the queue drains.": "El retraso de la cola es muy alto; mantén desactivada la vista previa en vivo y evita navegar rápidamente por la vista previa hasta que la cola se vacíe."
   }
 }

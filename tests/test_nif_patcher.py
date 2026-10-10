@@ -76,6 +76,9 @@ _FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP = _FIXTURE_DIR / "nif_external_broken_
 _FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP_ADDITIONAL = (
     _FIXTURE_DIR / "nif_external_broken_pack_delta_sweep_additional.json"
 )
+_FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP_LARGE = (
+    _FIXTURE_DIR / "nif_external_broken_pack_delta_sweep_large.json"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -4390,6 +4393,45 @@ class TestExternalBrokenPackDeltaSweep(unittest.TestCase):
                 code.startswith("missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift.skyrim.")
                 for code in codes
             ),
+            codes,
+        )
+        self.assertFalse(any(code.startswith("fallback_or_unknown.") for code in codes), codes)
+
+    def test_large_external_pack_envmap_glow_case_stays_out_of_fallback(self) -> None:
+        payload = _load_fixture_corpus_payload(_FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP_LARGE)
+        packs = payload.get("packs", [])
+        self.assertIsInstance(packs, list)
+        self.assertGreater(len(packs), 0)
+        pack = next(
+            (
+                entry
+                for entry in packs
+                if isinstance(entry, dict)
+                and str(entry.get("id", "")).strip() == "external_broken_large_pack"
+            ),
+            None,
+        )
+        self.assertIsNotNone(pack)
+        assert isinstance(pack, dict)
+        cases = pack.get("cases", [])
+        self.assertIsInstance(cases, list)
+        target_case = next(
+            (
+                case
+                for case in cases
+                if isinstance(case, dict)
+                and str(case.get("id", "")).strip() == "ext_large_skyrim_envmap_glow_slots2_4_5_unresolved"
+            ),
+            None,
+        )
+        self.assertIsNotNone(target_case)
+        assert isinstance(target_case, dict)
+        corpus = _materialize_fixture_corpus(self.tmp, {"cases": [target_case]})
+        self.assertEqual(len(corpus), 1)
+        validation = validate_nif_for_parallax(corpus[0])
+        codes = [group.code for group in validation.conflict_report]
+        self.assertTrue(
+            any(code.startswith("shader_state.envmap_glow_missing_slots2_4_5.") for code in codes),
             codes,
         )
         self.assertFalse(any(code.startswith("fallback_or_unknown.") for code in codes), codes)

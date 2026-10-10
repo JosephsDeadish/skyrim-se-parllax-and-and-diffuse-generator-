@@ -55,6 +55,9 @@
     "Large 1000+ run: switch checkpoint mode to Resume and keep live preview paused except for brief spot-checks.": "Large 1000+ run: switch checkpoint mode to Resume and keep live preview paused except for brief spot-checks.",
     "Queue pacing is active to keep the UI responsive on this huge run; brief status-update delays are expected.": "Queue pacing is active to keep the UI responsive on this huge run; brief status-update delays are expected.",
     "Huge-run mode: checkpoint safety prompts, safer resume decisions, and queue pacing are enabled for smoother long runs.": "Huge-run mode: checkpoint safety prompts, safer resume decisions, and queue pacing are enabled for smoother long runs.",
-    "Large-run guidance: keep Resume mode enabled and leave live preview paused except for quick spot-checks.": "Large-run guidance: keep Resume mode enabled and leave live preview paused except for quick spot-checks."
+    "Large-run guidance: keep Resume mode enabled and leave live preview paused except for quick spot-checks.": "Large-run guidance: keep Resume mode enabled and leave live preview paused except for quick spot-checks.",
+    "Checkpoint mode: Resume (recommended for long/1000+ runs) — continue from checkpoint and skip completed files.": "Checkpoint mode: Resume (recommended for long/1000+ runs) — continue from checkpoint and skip completed files.",
+    "Checkpoint mode: Start fresh — rerun all selected files and ignore previous checkpoint progress.": "Checkpoint mode: Start fresh — rerun all selected files and ignore previous checkpoint progress.",
+    "Queue backlog is very high; keep live preview off and avoid rapid preview navigation until the queue drains.": "Queue backlog is very high; keep live preview off and avoid rapid preview navigation until the queue drains."
   }
 }

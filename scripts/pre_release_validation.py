@@ -243,6 +243,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
                 "texture": "string_nonempty",
             },
             "required_exact_suffix_counts": {"_rmaos.dds": 1, "_rmaos.json": 1},
+            "required_exact_output_family_counts": {"diffuse": 1, "normal": 1, "rmaos": 1},
             "forbidden_suffixes": ("_cm.dds", "_msn.dds"),
             "required_output_families": ("diffuse", "normal", "rmaos"),
             "forbidden_output_families": ("complex_cm", "complex_msn"),
@@ -371,6 +372,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
                 "_ao.dds": 1,
                 "_rough.dds": 1,
             },
+            "required_exact_output_family_counts": {"diffuse": 1, "normal": 1, "rmaos": 1, "ao": 1, "roughness": 1},
             "forbidden_suffixes": ("_cm.dds", "_msn.dds"),
             "required_output_families": ("diffuse", "normal", "rmaos", "ao", "roughness"),
             "forbidden_output_families": ("complex_cm", "complex_msn"),
@@ -436,6 +438,15 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
                 "_sm.dds": 1,
                 "_ao.dds": 1,
                 "_rough.dds": 1,
+            },
+            "required_exact_output_family_counts": {
+                "diffuse": 1,
+                "normal": 1,
+                "rmaos": 1,
+                "wetness": 1,
+                "snow": 1,
+                "ao": 1,
+                "roughness": 1,
             },
             "forbidden_suffixes": ("_cm.dds", "_msn.dds"),
             "required_output_families": ("diffuse", "normal", "rmaos", "wetness", "snow", "ao", "roughness"),
@@ -515,6 +526,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
                 "texture": "string_nonempty",
             },
             "required_exact_suffix_counts": {"_rmaos.dds": 1, "_rmaos.json": 1},
+            "required_exact_output_family_counts": {"diffuse": 1, "normal": 1, "rmaos": 1},
             "forbidden_suffixes": ("_p.dds", "_cm.dds", "_msn.dds"),
             "required_output_families": ("diffuse", "normal", "rmaos"),
             "forbidden_output_families": ("parallax", "complex_cm", "complex_msn"),
@@ -531,6 +543,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "required_exact_suffix_counts": {
                 ".dds": 1,
             },
+            "required_exact_output_family_counts": {"diffuse": 1},
             "forbidden_suffixes": (
                 "_n.dds",
                 "_p.dds",
@@ -637,6 +650,19 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                         continue
                     if parsed_count >= 0:
                         required_exact_suffix_counts[suffix_value] = parsed_count
+            required_exact_output_family_counts: dict[str, int] = {}
+            raw_exact_family_counts = scenario.get("required_exact_output_family_counts", {}) or {}
+            if isinstance(raw_exact_family_counts, Mapping):
+                for family_name, expected_count in raw_exact_family_counts.items():
+                    family_key = str(family_name).strip().lower()
+                    if not family_key:
+                        continue
+                    try:
+                        parsed_count = int(expected_count)
+                    except (TypeError, ValueError):
+                        continue
+                    if parsed_count >= 0:
+                        required_exact_output_family_counts[family_key] = parsed_count
             smoke_out = smoke_io / f"out_loop{loop_index}_{scenario_name}"
             smoke_out.mkdir(parents=True, exist_ok=True)
             run_completed = subprocess.run(
@@ -683,33 +709,47 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                 "_rough.dds",
             )
             produced_families: set[str] = set()
+            produced_family_counts: dict[str, int] = {}
             for name in produced_names:
                 if name.endswith("_n.dds"):
                     produced_families.add("normal")
+                    produced_family_counts["normal"] = int(produced_family_counts.get("normal", 0)) + 1
                 elif name.endswith("_p.dds"):
                     produced_families.add("parallax")
+                    produced_family_counts["parallax"] = int(produced_family_counts.get("parallax", 0)) + 1
                 elif name.endswith("_g.dds"):
                     produced_families.add("glow")
+                    produced_family_counts["glow"] = int(produced_family_counts.get("glow", 0)) + 1
                 elif name.endswith("_rmaos.dds") or name.endswith("_ramos.dds"):
                     produced_families.add("rmaos")
+                    produced_family_counts["rmaos"] = int(produced_family_counts.get("rmaos", 0)) + 1
                 elif name.endswith("_cm.dds") or name.endswith("_c.dds"):
                     produced_families.add("complex_cm")
+                    produced_family_counts["complex_cm"] = int(produced_family_counts.get("complex_cm", 0)) + 1
                 elif name.endswith("_msn.dds"):
                     produced_families.add("complex_msn")
+                    produced_family_counts["complex_msn"] = int(produced_family_counts.get("complex_msn", 0)) + 1
                 elif name.endswith("_m.dds"):
                     produced_families.add("env_mask")
+                    produced_family_counts["env_mask"] = int(produced_family_counts.get("env_mask", 0)) + 1
                 elif name.endswith("_wt.dds"):
                     produced_families.add("wetness")
+                    produced_family_counts["wetness"] = int(produced_family_counts.get("wetness", 0)) + 1
                 elif name.endswith("_sm.dds"):
                     produced_families.add("snow")
+                    produced_family_counts["snow"] = int(produced_family_counts.get("snow", 0)) + 1
                 elif name.endswith("_ao.dds"):
                     produced_families.add("ao")
+                    produced_family_counts["ao"] = int(produced_family_counts.get("ao", 0)) + 1
                 elif name.endswith("_rough.dds"):
                     produced_families.add("roughness")
+                    produced_family_counts["roughness"] = int(produced_family_counts.get("roughness", 0)) + 1
                 elif name.endswith(".dds") and not name.endswith(specialized_suffixes):
                     produced_families.add("diffuse")
+                    produced_family_counts["diffuse"] = int(produced_family_counts.get("diffuse", 0)) + 1
                 elif name.endswith("_d.dds"):
                     produced_families.add("diffuse")
+                    produced_family_counts["diffuse"] = int(produced_family_counts.get("diffuse", 0)) + 1
             required_output_families = tuple(
                 str(value).strip().lower()
                 for value in (scenario.get("required_output_families", ()) or ())
@@ -744,6 +784,14 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                         f"Packaged executable smoke run for '{scenario_name}' produced forbidden output family "
                         f"'{family}'. Produced families: {sorted(produced_families)}"
                     )
+            for family, expected_count in required_exact_output_family_counts.items():
+                actual_count = int(produced_family_counts.get(family, 0))
+                if actual_count != expected_count:
+                    raise SystemExit(
+                        f"Packaged executable smoke run for '{scenario_name}' expected exactly {expected_count} "
+                        f"output file(s) for family '{family}' but found {actual_count}. "
+                        f"Produced family counts: {produced_family_counts}"
+                    )
             if required_sidecar_suffixes:
                 produced_all = [path.name.lower() for path in smoke_out.rglob("*") if path.is_file()]
                 for suffix in required_sidecar_suffixes:
@@ -752,6 +800,13 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                             f"Packaged executable smoke run for '{scenario_name}' is missing required sidecar suffix '{suffix}'. "
                             f"Produced files: {produced_all}"
                         )
+            produced_all_for_sidecars = [path.name.lower() for path in smoke_out.rglob("*") if path.is_file()]
+            if "rmaos" not in required_output_families:
+                if any(name.endswith("_rmaos.json") or name.endswith("_ramos.json") for name in produced_all_for_sidecars):
+                    raise SystemExit(
+                        f"Packaged executable smoke run for '{scenario_name}' produced unexpected TruePBR JSON sidecar(s). "
+                        f"Produced files: {produced_all_for_sidecars}"
+                    )
             if required_exact_suffix_counts:
                 produced_all = [path.name.lower() for path in smoke_out.rglob("*") if path.is_file()]
                 for suffix, expected_count in required_exact_suffix_counts.items():
@@ -1171,6 +1226,7 @@ def _load_realmod_pack_payload(
     from tests.test_nif_patcher import (
         _FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP,
         _FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP_ADDITIONAL,
+        _FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP_LARGE,
         _FIXTURE_REALMOD_SAMPLE_PACKS,
         _load_fixture_corpus_payload,
     )
@@ -1181,6 +1237,7 @@ def _load_realmod_pack_payload(
     for external_fixture in (
         _FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP,
         _FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP_ADDITIONAL,
+        _FIXTURE_EXTERNAL_BROKEN_PACK_DELTA_SWEEP_LARGE,
     ):
         external_payload = _load_fixture_corpus_payload(external_fixture)
         external_packs = external_payload.get("packs", [])
