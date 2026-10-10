@@ -9,9 +9,11 @@ from pathlib import Path
 from scripts.pre_release_validation import (
     _DEFAULT_REALMOD_DELTA_SEED,
     _assert_realmod_fallback_drift_within_limit,
+    _assert_bucket_distribution_drift_within_limit,
     _append_trend_history,
     _build_realmod_fallback_drift_report,
     _collect_localization_coverage,
+    _load_prior_bucket_distribution,
     _load_realmod_pack_payload,
     _packaged_smoke_scenarios,
     _resolve_seed_realmod_delta_files,
@@ -240,6 +242,46 @@ class TestPreReleaseValidationFallbackDrift(unittest.TestCase):
             max_fallback_group_drift=0,
         )
 
+    def test_fallback_drift_prefers_usable_seed_with_cases_when_newer_seed_is_incomplete(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            newer = tmp / "newer_seed.json"
+            older = tmp / "older_seed.json"
+            newer.write_text(json.dumps({"generated_at_utc": "2026-01-03T00:00:00Z"}), encoding="utf-8")
+            older.write_text(
+                json.dumps(
+                    {
+                        "cases": [
+                            {
+                                "pack_id": "pack_alpha",
+                                "detected_conflict_codes": [
+                                    "fallback_or_unknown.skyrim.legacy",
+                                    "path_slot_parallax.wrong_suffix.skyrim.legacy",
+                                ],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            current_report = {
+                "packs": [
+                    {
+                        "pack_id": "pack_alpha",
+                        "total_conflict_groups": 4,
+                        "fallback_or_unknown_groups": 1,
+                    }
+                ]
+            }
+            report = _build_realmod_fallback_drift_report(
+                current_fallback_guard_report=current_report,
+                seed_realmod_delta_files=[newer, older],
+            )
+            self.assertTrue(bool(report.get("baseline_found", False)))
+            rows = report.get("packs", [])
+            self.assertIsInstance(rows, list)
+            self.assertTrue(any(bool(row.get("has_prior_baseline", False)) for row in rows if isinstance(row, dict)))
+
 
 class TestPreReleaseValidationSeedResolution(unittest.TestCase):
     def test_seed_realmod_delta_resolution_includes_repo_default_seed(self) -> None:
@@ -255,6 +297,24 @@ class TestPreReleaseValidationSeedResolution(unittest.TestCase):
             sum(1 for path in resolved if path == _DEFAULT_REALMOD_DELTA_SEED),
             1,
         )
+
+    def test_load_prior_bucket_distribution_prefers_seed_with_bucket_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            newer = tmp / "newer_seed.json"
+            older = tmp / "older_seed.json"
+            newer.write_text(json.dumps({"generated_at_utc": "2026-01-04T00:00:00Z"}), encoding="utf-8")
+            older.write_text(
+                json.dumps({"intended_difference_bucket_counts": {"none": 6, "safety_first": 2}}),
+                encoding="utf-8",
+            )
+            distribution = _load_prior_bucket_distribution([newer, older])
+            self.assertGreater(distribution.get("none", 0.0), 0.0)
+            _assert_bucket_distribution_drift_within_limit(
+                current_report={"intended_difference_bucket_counts": {"none": 3, "safety_first": 1}},
+                baseline_distribution=distribution,
+                max_drift_ratio=1.0,
+            )
 
 
 class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):

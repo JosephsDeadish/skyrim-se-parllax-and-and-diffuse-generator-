@@ -1175,7 +1175,7 @@ class TestValidateNifForParallax(unittest.TestCase):
         code = _classify_conflict_code(
             "Cannot read NIF: [Errno 13] Permission denied: '/mods/meshes/bad.nif'"
         )
-        self.assertEqual(code, "unsupported_header.read_failure")
+        self.assertEqual(code, "unsupported_header.read_failure.permission_denied")
 
     def test_conflict_classifier_maps_no_patchable_shader_blocks_patch_notice(self) -> None:
         code = _classify_conflict_code(
@@ -1241,7 +1241,19 @@ class TestValidateNifForParallax(unittest.TestCase):
         code = _classify_conflict_code(
             "Block 1: raw shader_type 0x00000880 resolved to Default via real_payload_default (RESOLVED, confidence=0.92, method=payload)."
         )
-        self.assertEqual(code, "unknown_shader_type.payload_resolved")
+        self.assertEqual(code, "unknown_shader_type.payload_resolved.default")
+
+    def test_conflict_classifier_maps_payload_shader_resolution_envmap_subcode(self) -> None:
+        code = _classify_conflict_code(
+            "Block 6: raw shader_type 0x00000081 resolved to Environment Map via real_payload_envmap (RESOLVED, confidence=0.89, method=payload)."
+        )
+        self.assertEqual(code, "unknown_shader_type.payload_resolved.envmap")
+
+    def test_conflict_classifier_maps_envmap_flag_set_slot5_empty_hint(self) -> None:
+        code = _classify_conflict_code(
+            "Block 2: SLSF1_Environment_Mapping is enabled but slot 5 is empty; add an _m.dds mask or disable the flag."
+        )
+        self.assertEqual(code, "shader_state.envmap_missing_slot5.flag_set_slot5_empty")
 
     def test_conflict_classifier_maps_default_fallback_unresolved_shader_resolution_notes(self) -> None:
         code = _classify_conflict_code(

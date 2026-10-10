@@ -93,6 +93,13 @@ jobs:
           path: artifacts/previous_release_readiness
           if_no_artifact_found: warn
 
+      - name: Ensure seeded parity-delta baseline artifacts
+        run: |
+          mkdir -p artifacts/previous_release_readiness
+          if [ ! -f artifacts/previous_release_readiness/nif_realmod_parity_delta_report.json ]; then
+            cp tests/fixtures/nif_realmod_parity_delta_seed.json artifacts/previous_release_readiness/nif_realmod_parity_delta_report.json
+          fi
+
       - name: Pre-release validation gate + artifact generation
         run: |
           python scripts/pre_release_validation.py \

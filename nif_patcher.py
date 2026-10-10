@@ -4272,6 +4272,12 @@ def _classify_conflict_code(message: str) -> str:
     if "recorded block size" in lowered and "expected type-0 size" in lowered:
         return "unsupported_header.shader_block_size_mismatch"
     if lowered.startswith("cannot read nif:"):
+        if "errno 2" in lowered or "no such file or directory" in lowered:
+            return "unsupported_header.read_failure.not_found"
+        if "errno 13" in lowered or "permission denied" in lowered:
+            return "unsupported_header.read_failure.permission_denied"
+        if "is a directory" in lowered:
+            return "unsupported_header.read_failure.is_directory"
         return "unsupported_header.read_failure"
     if "recovered shader-block scan using tolerant num_extra parsing" in lowered:
         return "unsupported_header.num_extra_recovery"
@@ -4391,6 +4397,12 @@ def _classify_conflict_code(message: str) -> str:
             return "unknown_shader_type.semantic_resolved.heightmap"
         return "unknown_shader_type.semantic_resolved"
     if "raw shader_type 0x" in lowered and "resolved to" in lowered and "method=payload" in lowered:
+        if "resolved to environment map" in lowered or "resolved to envmap" in lowered:
+            return "unknown_shader_type.payload_resolved.envmap"
+        if "resolved to default" in lowered:
+            return "unknown_shader_type.payload_resolved.default"
+        if "resolved to heightmap" in lowered or "resolved to parallax" in lowered:
+            return "unknown_shader_type.payload_resolved.heightmap"
         return "unknown_shader_type.payload_resolved"
     if "raw shader_type 0x" in lowered and "resolved to" in lowered and "method=fallback" in lowered:
         if "unresolved" in lowered:
@@ -4562,6 +4574,12 @@ def _classify_conflict_code(message: str) -> str:
         return "shader_state.envmap_missing_slot4"
     if "shader type is envmap" in lowered and "slot 5 env-mask is unresolved" in lowered:
         return "shader_state.envmap_missing_slot5"
+    if (
+        "slsf1_environment_mapping is enabled" in lowered
+        and "slot 5 is empty" in lowered
+        and "add an _m.dds mask or disable the flag" in lowered
+    ):
+        return "shader_state.envmap_missing_slot5.flag_set_slot5_empty"
     if "envmap and pom are enabled" in lowered and "required envmap textures are unresolved" in lowered:
         return "shader_state.envmap_pom_missing_env_slots"
     if "envmap + pom is active" in lowered and "required envmap textures are unresolved" in lowered:
@@ -4729,7 +4747,7 @@ def _build_conflict_report(
             )
         if (
             has_missing_slot3_empty
-            and "unknown_shader_type.payload_resolved" in block_codes
+            and any(code.startswith("unknown_shader_type.payload_resolved") for code in block_codes)
         ):
             payload_slot3_real_layout_combo_counts[(profile, layout)] = (
                 payload_slot3_real_layout_combo_counts.get((profile, layout), 0) + 1
@@ -5129,7 +5147,7 @@ def build_auto_remediation_patch_options(
         or (
             has_real_layout_conflict
             and any(code.startswith("missing_parallax_slot3.empty") for code in base_codes)
-            and "unknown_shader_type.payload_resolved" in base_codes
+            and any(code.startswith("unknown_shader_type.payload_resolved") for code in base_codes)
         )
     )
     has_default_fallback_slot3_real_layout_combo = (

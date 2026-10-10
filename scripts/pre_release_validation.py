@@ -1646,11 +1646,14 @@ def _assert_realmod_fallback_guard(report: dict[str, object]) -> None:
     )
 
 
-def _load_latest_seed_report(seed_files: list[Path] | None) -> dict[str, object]:
+def _load_latest_seed_report(
+    seed_files: list[Path] | None,
+    *,
+    required_top_level_keys: tuple[str, ...] = (),
+) -> dict[str, object]:
     if not seed_files:
         return {}
-    latest_payload: dict[str, object] | None = None
-    latest_mtime = -1.0
+    candidates: list[tuple[float, dict[str, object]]] = []
     for seed in seed_files:
         if seed is None or not seed.exists():
             continue
@@ -1661,10 +1664,16 @@ def _load_latest_seed_report(seed_files: list[Path] | None) -> dict[str, object]
             continue
         if not isinstance(payload, dict):
             continue
-        if mtime > latest_mtime:
-            latest_payload = payload
-            latest_mtime = mtime
-    return latest_payload or {}
+        candidates.append((mtime, payload))
+    if not candidates:
+        return {}
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    if required_top_level_keys:
+        required = tuple(str(key).strip() for key in required_top_level_keys if str(key).strip())
+        for _, payload in candidates:
+            if all(key in payload for key in required):
+                return payload
+    return candidates[0][1]
 
 
 def _resolve_seed_realmod_delta_files(seed_files: list[Path] | None) -> list[Path]:
@@ -1701,7 +1710,10 @@ def _build_realmod_fallback_drift_report(
         pack_id = str(row.get("pack_id", "pack")).strip() or "pack"
         current_by_pack[pack_id] = row
 
-    prior_delta_report = _load_latest_seed_report(seed_realmod_delta_files)
+    prior_delta_report = _load_latest_seed_report(
+        seed_realmod_delta_files,
+        required_top_level_keys=("cases",),
+    )
     prior_by_pack: dict[str, dict[str, object]] = {}
     if prior_delta_report:
         prior_fallback_report = _build_realmod_fallback_guard_report(
@@ -1844,7 +1856,10 @@ def _normalize_bucket_distribution(
 def _load_prior_bucket_distribution(
     seed_files: list[Path] | None,
 ) -> dict[str, float]:
-    latest_payload = _load_latest_seed_report(seed_files)
+    latest_payload = _load_latest_seed_report(
+        seed_files,
+        required_top_level_keys=("intended_difference_bucket_counts",),
+    )
     if not latest_payload:
         return {}
     return _normalize_bucket_distribution(
