@@ -733,6 +733,23 @@ class GenerateTexturesTests(unittest.TestCase):
                 with self.subTest(theme=theme["bg"], color=key):
                     self.assertGreaterEqual(contrast, 4.5)
 
+    def test_tk_muted_and_status_styles_follow_light_and_dark_themes(self) -> None:
+        self._skip_unavailable_tk_display()
+        gui = TextureGeneratorGUI()
+        try:
+            style = gui.root.tk.call
+            gui.dark_mode_var.set(False)
+            gui._apply_theme()
+            self.assertEqual(style("ttk::style", "lookup", "Muted.TLabel", "-foreground"), _LIGHT_THEME["muted_fg"])
+            self.assertEqual(style("ttk::style", "lookup", "Status.Error.TLabel", "-foreground"), _LIGHT_THEME["error_fg"])
+
+            gui.dark_mode_var.set(True)
+            gui._apply_theme()
+            self.assertEqual(style("ttk::style", "lookup", "Muted.TLabel", "-foreground"), _DARK_THEME["muted_fg"])
+            self.assertEqual(style("ttk::style", "lookup", "Status.Error.TLabel", "-foreground"), _DARK_THEME["error_fg"])
+        finally:
+            gui.root.destroy()
+
     def test_normalize_gui_state_turns_off_individual_auto_flags_when_master_off(self) -> None:
         normalized = _normalize_gui_state(
             {
