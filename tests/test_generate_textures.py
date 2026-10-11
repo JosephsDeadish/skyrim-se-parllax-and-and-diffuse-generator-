@@ -53,6 +53,7 @@ from generate_textures import (
     _normalize_gui_state,
     _merge_qt_generation_gui_state,
     _qt_profile_output_defaults,
+    _apply_qt_profile_output_defaults,
     _describe_qt_profile_guidance,
     _qt_preview_channel_options,
     _DARK_THEME,
@@ -929,6 +930,43 @@ class GenerateTexturesTests(unittest.TestCase):
 
         self.assertFalse(any(_qt_profile_output_defaults("custom").values()))
         self.assertTrue(_qt_profile_output_defaults("vanilla")["include_diffuse"])
+
+    def test_qt_profile_output_defaults_preserve_unrelated_optional_maps(self) -> None:
+        current = {
+            "include_diffuse": True,
+            "include_normal": True,
+            "include_parallax": False,
+            "include_glow": False,
+            "include_environment_mask": False,
+            "include_rmaos": False,
+            "include_complex": False,
+            "include_wetness_mask": True,
+            "include_snow_mask": True,
+            "include_ao": True,
+            "include_roughness": True,
+        }
+        applied = _apply_qt_profile_output_defaults(
+            current,
+            _qt_profile_output_defaults("community_shaders"),
+        )
+        self.assertTrue(applied["include_wetness_mask"])
+        self.assertTrue(applied["include_snow_mask"])
+        self.assertTrue(applied["include_ao"])
+        self.assertTrue(applied["include_roughness"])
+        self.assertTrue(applied["include_complex"])
+        self.assertFalse(applied["include_environment_mask"])
+        self.assertFalse(applied["include_rmaos"])
+
+    def test_qt_profile_output_defaults_resolve_conflicting_slot_five_maps(self) -> None:
+        applied = _apply_qt_profile_output_defaults(
+            {
+                "include_environment_mask": True,
+                "include_rmaos": False,
+            },
+            {"include_environment_mask": True, "include_rmaos": True},
+        )
+        self.assertTrue(applied["include_environment_mask"])
+        self.assertFalse(applied["include_rmaos"])
 
     def test_qt_profile_guidance_documents_recommended_outputs_and_terrain_scope(self) -> None:
         terrain_guidance = _describe_qt_profile_guidance("terrain").lower()

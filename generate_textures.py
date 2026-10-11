@@ -14797,6 +14797,27 @@ def _qt_profile_output_defaults(profile: str) -> dict[str, bool]:
     return {key: bool(value) for key, value in defaults.items()}
 
 
+def _apply_qt_profile_output_defaults(
+    current: Mapping[str, bool],
+    defaults: Mapping[str, bool],
+) -> dict[str, bool]:
+    result = dict(current)
+    renderer_output_keys = {
+        "include_diffuse",
+        "include_normal",
+        "include_parallax",
+        "include_glow",
+        "include_environment_mask",
+        "include_rmaos",
+        "include_complex",
+    }
+    for key in renderer_output_keys.intersection(defaults):
+        result[key] = bool(defaults[key])
+    if result.get("include_environment_mask") and result.get("include_rmaos"):
+        result["include_rmaos"] = False
+    return result
+
+
 def _describe_qt_profile_guidance(profile: str) -> str:
     normalized_profile = _normalize_render_profile(profile)
     profile_label = _RENDER_PROFILE_LABELS.get(
@@ -15215,7 +15236,7 @@ def _launch_qt_migration_gui() -> None:
     )
     apply_profile_outputs_button = QtWidgets.QPushButton("Apply profile map defaults")
     apply_profile_outputs_button.setToolTip(
-        "Replace the current map selections with this profile's recommended outputs."
+        "Apply renderer map defaults while keeping wetness, snow, AO, and roughness selections."
     )
     controls_layout.addWidget(apply_profile_outputs_button, 1, 2)
     profile_guidance_label = QtWidgets.QLabel()
@@ -15608,7 +15629,26 @@ def _launch_qt_migration_gui() -> None:
             render_profile_combo.setCurrentIndex(profile_index)
 
     def _apply_profile_output_defaults() -> None:
-        defaults = _qt_profile_output_defaults(render_profile_combo.currentText())
+        current = {
+            key: control.isChecked()
+            for key, control in {
+                "include_diffuse": include_diffuse_check,
+                "include_normal": include_normal_check,
+                "include_parallax": include_parallax_check,
+                "include_glow": include_glow_check,
+                "include_environment_mask": include_environment_mask_check,
+                "include_rmaos": include_rmaos_check,
+                "include_complex": include_complex_check,
+                "include_wetness_mask": include_wetness_mask_check,
+                "include_snow_mask": include_snow_mask_check,
+                "include_ao": include_ao_check,
+                "include_roughness": include_roughness_check,
+            }.items()
+        }
+        defaults = _apply_qt_profile_output_defaults(
+            current,
+            _qt_profile_output_defaults(render_profile_combo.currentText()),
+        )
         output_controls = {
             "include_diffuse": include_diffuse_check,
             "include_normal": include_normal_check,
