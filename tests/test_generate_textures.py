@@ -856,6 +856,8 @@ class GenerateTexturesTests(unittest.TestCase):
                 include_ao=True,
                 include_roughness=True,
                 render_profile="terrain",
+                dark_mode=True,
+                ui_scale=1.3,
             )
 
         self.assertEqual(merged["input_path"], str(input_path))
@@ -875,6 +877,8 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(merged["include_roughness"]))
         self.assertEqual(merged["qt_render_profile"], "terrain")
         self.assertEqual(merged["render_profile"], "custom")
+        self.assertTrue(bool(merged["dark_mode"]))
+        self.assertAlmostEqual(float(merged["ui_scale"]), 1.3)
         self.assertEqual(merged["batch_resume_mode"], "resume")
         self.assertEqual(merged["batch_checkpoint_path"], str(Path(temp_dir) / "checkpoint.json"))
 

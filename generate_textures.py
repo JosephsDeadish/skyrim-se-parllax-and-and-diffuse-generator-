@@ -918,6 +918,8 @@ def _merge_qt_generation_gui_state(
     include_ao: bool | None = None,
     include_roughness: bool | None = None,
     render_profile: str | None = None,
+    dark_mode: bool | None = None,
+    ui_scale: float | None = None,
 ) -> dict[str, object]:
     merged = dict(state)
     merged.update(
@@ -944,6 +946,10 @@ def _merge_qt_generation_gui_state(
     merged.update({key: value for key, value in optional_outputs.items() if value is not None})
     if render_profile is not None:
         merged["qt_render_profile"] = render_profile
+    if dark_mode is not None:
+        merged["dark_mode"] = dark_mode
+    if ui_scale is not None:
+        merged["ui_scale"] = ui_scale
     return _normalize_gui_state(merged)
 
 
@@ -15046,11 +15052,30 @@ def _launch_qt_migration_gui() -> None:
     window = QtWidgets.QMainWindow()
     window.setWindowTitle(f"Skyrim Texture Generator {APP_VERSION} — Qt migration preview")
     window.resize(920, 620)
+    base_app_font = QtGui.QFont(app.font())
 
     root = QtWidgets.QWidget(window)
     layout = QtWidgets.QVBoxLayout(root)
     layout.setContentsMargins(14, 14, 14, 14)
     layout.setSpacing(10)
+
+    appearance_row = QtWidgets.QHBoxLayout()
+    theme_check = QtWidgets.QCheckBox("Dark theme")
+    theme_check.setChecked(bool(qt_saved_state["dark_mode"]))
+    appearance_row.addWidget(theme_check)
+    appearance_row.addWidget(QtWidgets.QLabel("UI scale"))
+    ui_scale_combo = QtWidgets.QComboBox()
+    ui_scale_combo.addItems(["0.9", "1.0", "1.15", "1.3", "1.5"])
+    saved_scale = float(qt_saved_state["ui_scale"])
+    scale_index = ui_scale_combo.findText(f"{saved_scale:g}")
+    if scale_index < 0:
+        ui_scale_combo.addItem(f"{saved_scale:g}")
+        scale_index = ui_scale_combo.count() - 1
+    ui_scale_combo.setCurrentIndex(scale_index)
+    ui_scale_combo.setToolTip("Increase text size for high-DPI screens or smaller windows.")
+    appearance_row.addWidget(ui_scale_combo)
+    appearance_row.addStretch(1)
+    layout.addLayout(appearance_row)
 
     banner = QtWidgets.QLabel(
         "Qt migration bootstrap is now available.\n"
@@ -15353,6 +15378,40 @@ def _launch_qt_migration_gui() -> None:
             return
         event_log.appendPlainText(message.rstrip())
 
+    def _apply_qt_appearance(*_: object) -> None:
+        scale = float(ui_scale_combo.currentText())
+        scaled_font = QtGui.QFont(base_app_font)
+        base_point_size = base_app_font.pointSizeF()
+        if base_point_size <= 0:
+            base_point_size = 10.0
+        scaled_font.setPointSizeF(max(1.0, base_point_size * scale))
+        app.setFont(scaled_font)
+        palette = QtGui.QPalette()
+        if theme_check.isChecked():
+            palette.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor("#20242b"))
+            palette.setColor(QtGui.QPalette.ColorRole.WindowText, QtGui.QColor("#f1f3f5"))
+            palette.setColor(QtGui.QPalette.ColorRole.Base, QtGui.QColor("#15191f"))
+            palette.setColor(QtGui.QPalette.ColorRole.AlternateBase, QtGui.QColor("#292e36"))
+            palette.setColor(QtGui.QPalette.ColorRole.Text, QtGui.QColor("#f1f3f5"))
+            palette.setColor(QtGui.QPalette.ColorRole.Button, QtGui.QColor("#303640"))
+            palette.setColor(QtGui.QPalette.ColorRole.ButtonText, QtGui.QColor("#f1f3f5"))
+            palette.setColor(QtGui.QPalette.ColorRole.Highlight, QtGui.QColor("#3574b8"))
+            palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, QtGui.QColor("#ffffff"))
+            palette.setColor(QtGui.QPalette.ColorRole.PlaceholderText, QtGui.QColor("#b2bac5"))
+        else:
+            palette.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor("#f5f6f8"))
+            palette.setColor(QtGui.QPalette.ColorRole.WindowText, QtGui.QColor("#20242b"))
+            palette.setColor(QtGui.QPalette.ColorRole.Base, QtGui.QColor("#ffffff"))
+            palette.setColor(QtGui.QPalette.ColorRole.AlternateBase, QtGui.QColor("#eef1f5"))
+            palette.setColor(QtGui.QPalette.ColorRole.Text, QtGui.QColor("#20242b"))
+            palette.setColor(QtGui.QPalette.ColorRole.Button, QtGui.QColor("#e8ebf0"))
+            palette.setColor(QtGui.QPalette.ColorRole.ButtonText, QtGui.QColor("#20242b"))
+            palette.setColor(QtGui.QPalette.ColorRole.Highlight, QtGui.QColor("#2463a6"))
+            palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, QtGui.QColor("#ffffff"))
+            palette.setColor(QtGui.QPalette.ColorRole.PlaceholderText, QtGui.QColor("#657080"))
+        app.setPalette(palette)
+        _persist_qt_gui_state()
+
     def _show_selected_qt_preview(*_: object) -> None:
         item = preview_results_list.currentItem()
         if item is None:
@@ -15439,6 +15498,8 @@ def _launch_qt_migration_gui() -> None:
             include_ao=include_ao_check.isChecked(),
             include_roughness=include_roughness_check.isChecked(),
             render_profile=render_profile_combo.currentText(),
+            dark_mode=theme_check.isChecked(),
+            ui_scale=float(ui_scale_combo.currentText()),
         )
         save_gui_state(state)
 
@@ -15761,6 +15822,8 @@ def _launch_qt_migration_gui() -> None:
     resume_preview_button.clicked.connect(_resume_preview)
     render_deferred_button.clicked.connect(_render_deferred_now)
     use_profile_recommendation_button.clicked.connect(_apply_profile_recommendation)
+    theme_check.toggled.connect(_apply_qt_appearance)
+    ui_scale_combo.currentTextChanged.connect(_apply_qt_appearance)
     resume_mode_combo.currentIndexChanged.connect(_update_resume_hint)
     input_path_edit.textChanged.connect(_refresh_checkpoint_health)
     input_path_edit.textChanged.connect(_update_profile_recommendation)
@@ -15787,6 +15850,7 @@ def _launch_qt_migration_gui() -> None:
     _refresh_preview_state_badge()
     _refresh_checkpoint_health()
     window.setCentralWidget(root)
+    _apply_qt_appearance()
     window.show()
     app.exec()
 
