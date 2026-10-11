@@ -3,6 +3,7 @@ import os
 import queue
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -556,6 +557,54 @@ class GenerateTexturesTests(unittest.TestCase):
                 ["Patch setup", "Texture slots", "Disable / clear", "Help"],
             )
             self.assertEqual(str(gui.root.grab_current()), str(editor))
+            path_label = None
+            scan_button = None
+            results_tree = None
+            pending = list(editor.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TLabel" and widget.cget("text") == "Path:":
+                    path_label = widget
+                elif widget.winfo_class() == "TButton" and widget.cget("text") == "Scan NIFs":
+                    scan_button = widget
+                elif widget.winfo_class() == "Treeview":
+                    results_tree = widget
+                pending.extend(widget.winfo_children())
+            self.assertIsNotNone(path_label)
+            self.assertIsNotNone(scan_button)
+            self.assertIsNotNone(results_tree)
+            path_entries = [
+                widget for widget in path_label.master.winfo_children()
+                if widget.winfo_class() == "TEntry"
+            ]
+            self.assertEqual(len(path_entries), 1)
+            with tempfile.TemporaryDirectory() as temp_dir:
+                nif_path = Path(temp_dir) / "scan_failure.nif"
+                nif_path.write_bytes(b"fixture")
+                gui.root.setvar(str(path_entries[0].cget("textvariable")), str(nif_path))
+                with mock.patch(
+                    "generate_textures.discover_plugin_conflict_context_from_manager",
+                    side_effect=RuntimeError("simulated startup failure"),
+                ):
+                    scan_button.invoke()
+                    deadline = time.monotonic() + 5.0
+                    while scan_button.instate(("disabled",)) and time.monotonic() < deadline:
+                        gui.root.update()
+                        time.sleep(0.01)
+                    gui.root.update()
+                self.assertFalse(scan_button.instate(("disabled",)))
+                result_values = [
+                    results_tree.item(item_id, "values")
+                    for item_id in results_tree.get_children()
+                ]
+                self.assertTrue(
+                    any(
+                        values[0] == "FAIL"
+                        and values[1] == "NIF Editor"
+                        and "simulated startup failure" in values[2]
+                        for values in result_values
+                    )
+                )
             close_buttons = []
             pending = list(editor.winfo_children())
             while pending:

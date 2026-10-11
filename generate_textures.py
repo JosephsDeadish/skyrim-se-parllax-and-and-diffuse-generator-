@@ -13268,6 +13268,27 @@ if GUI_AVAILABLE:
                     except Exception:
                         return
 
+                def _start_nif_editor_worker(target: Callable[[], None], operation: str) -> None:
+                    def _run() -> None:
+                        try:
+                            target()
+                        except Exception as exc:
+                            _safe_add_row("FAIL", "NIF Editor", f"{operation} failed: {exc}")
+                            _safe_status(f"{operation} failed. See the results for details.")
+                        finally:
+                            _queue_ui_update(_finish_op)
+
+                    try:
+                        threading.Thread(
+                            target=_run,
+                            name=f"NifEditor-{operation.replace(' ', '')}",
+                            daemon=True,
+                        ).start()
+                    except Exception as exc:
+                        _safe_add_row("FAIL", "NIF Editor", f"Could not start {operation.lower()}: {exc}")
+                        _safe_status(f"Could not start {operation.lower()}.")
+                        _finish_op()
+
                 def _safe_add_row(status: str, file_name: str, details: str) -> None:
                     _queue_ui_update(lambda s=status, fn=file_name, d=details: _add_result_row(s, fn, d))
 
@@ -13466,9 +13487,8 @@ if GUI_AVAILABLE:
                             _safe_status("Scan cancelled by user.")
                         else:
                             _safe_status(f"Phase 1/4 complete: scanned {len(nifs)} NIF file(s).")
-                        win.after(0, _finish_op)
 
-                    threading.Thread(target=_worker, daemon=True).start()
+                    _start_nif_editor_worker(_worker, "Scan")
 
                 def _rerun_conflict_scan() -> None:
                     conflict_nifs = _resolve_conflict_nifs()
@@ -13590,9 +13610,8 @@ if GUI_AVAILABLE:
                             )
                         else:
                             _safe_status(f"Phase 2/4 complete — {ok} patched, {skip} skipped, {fail} failed.")
-                        win.after(0, _finish_op)
 
-                    threading.Thread(target=_auto_fix_worker, daemon=True).start()
+                    _start_nif_editor_worker(_auto_fix_worker, "Auto-remediation")
 
                 def _rerun_conflict_patch() -> None:
                     conflict_nifs = _resolve_conflict_nifs()
@@ -13786,9 +13805,8 @@ if GUI_AVAILABLE:
                             _safe_status(f"Patch cancelled — {ok} patched, {skip} skipped, {fail} failed before stop.")
                         else:
                             _safe_status(f"Phase 3/4 complete — {ok} patched, {skip} skipped, {fail} failed.")
-                        win.after(0, _finish_op)
 
-                    threading.Thread(target=_patch_worker, daemon=True).start()
+                    _start_nif_editor_worker(_patch_worker, "Patch")
 
                 def _run_unpatch() -> None:
                     nifs = _resolve_nifs()
@@ -13913,9 +13931,8 @@ if GUI_AVAILABLE:
                             )
                         else:
                             _safe_status(f"Phase 4/4 complete — {ok} unpatched, {skip} skipped, {fail} failed.")
-                        win.after(0, _finish_op)
 
-                    threading.Thread(target=_unpatch_worker, daemon=True).start()
+                    _start_nif_editor_worker(_unpatch_worker, "Unpatch")
 
                 def _run_restore_backups() -> None:
                     nifs = _resolve_nifs()
@@ -13962,9 +13979,8 @@ if GUI_AVAILABLE:
                             _safe_status(f"Restore cancelled — {ok} restored, {skip} skipped, {fail} failed before stop.")
                         else:
                             _safe_status(f"Restore complete — {ok} restored, {skip} skipped, {fail} failed.")
-                        win.after(0, _finish_op)
 
-                    threading.Thread(target=_restore_worker, daemon=True).start()
+                    _start_nif_editor_worker(_restore_worker, "Restore")
 
                 scan_button = ttk.Button(btn_frame, text="Scan NIFs", command=_scan_nifs)
                 op_row1 = ttk.Frame(btn_frame)
