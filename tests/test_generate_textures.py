@@ -535,7 +535,6 @@ class GenerateTexturesTests(unittest.TestCase):
                 return_value=load_gui_state(Path("/missing/gui-state.json")),
             ):
                 gui = TextureGeneratorGUI()
-            gui.root.withdraw()
             gui._open_nif_editor()
             gui.root.update()
             editors = [
