@@ -15166,6 +15166,15 @@ def _qt_resume_completed_files(
     return {entry for entry in raw_completed if isinstance(entry, str)}
 
 
+def _qt_resume_mode_guidance(mode: str) -> str:
+    if str(mode or "").strip().lower() == "resume":
+        return (
+            "Resume skips checkpointed files only when the input, output folder, and generation settings match. "
+            "For a mismatch or older checkpoint, choose Start fresh."
+        )
+    return "Start fresh ignores prior checkpoint entries."
+
+
 def _launch_qt_migration_gui() -> None:
     if not QT_GUI_AVAILABLE or QtWidgets is None or QtCore is None:
         install_hint = "Install PySide6 (pip install PySide6) to use the Qt migration UI."
@@ -16135,11 +16144,7 @@ def _launch_qt_migration_gui() -> None:
         _show_selected_qt_preview()
 
     def _update_resume_hint() -> None:
-        mode = resume_mode_combo.currentText().strip().lower()
-        if mode == "resume":
-            resume_mode_hint.setText("Resume skips files already recorded in checkpoint.")
-        else:
-            resume_mode_hint.setText("Start fresh ignores prior checkpoint entries.")
+        resume_mode_hint.setText(_qt_resume_mode_guidance(resume_mode_combo.currentText()))
 
     def _update_profile_recommendation() -> None:
         input_text = input_path_edit.text().strip()

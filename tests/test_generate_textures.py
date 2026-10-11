@@ -59,6 +59,7 @@ from generate_textures import (
     _qt_render_profile_modes,
     _qt_checkpoint_generation_options,
     _qt_resume_completed_files,
+    _qt_resume_mode_guidance,
     _qt_truepbr_material_overrides,
     _apply_qt_profile_output_defaults,
     _QT_OUTPUT_GROUPS,
@@ -1023,6 +1024,17 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(
             _qt_checkpoint_generation_options(options),
             {"include_normal": True, "normal_strength": 2.0},
+        )
+
+    def test_qt_resume_mode_guidance_explains_checkpoint_matching(self) -> None:
+        resume_guidance = _qt_resume_mode_guidance("resume").lower()
+        self.assertIn("input", resume_guidance)
+        self.assertIn("output folder", resume_guidance)
+        self.assertIn("generation settings", resume_guidance)
+        self.assertIn("start fresh", resume_guidance)
+        self.assertEqual(
+            _qt_resume_mode_guidance("start_fresh"),
+            "Start fresh ignores prior checkpoint entries.",
         )
 
     def test_qt_resume_checkpoint_requires_matching_roots_and_generation_settings(self) -> None:
