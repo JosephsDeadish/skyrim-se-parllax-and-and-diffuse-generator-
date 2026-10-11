@@ -360,7 +360,7 @@ Release validation additionally supports a bucket-distribution drift gate agains
 Release validation also emits `nif_realmod_fallback_drift_report.json` / `.md` and applies per-pack fallback drift gates (`--max-fallback-ratio-drift`, `--max-fallback-group-drift`) when prior parity-delta seeds are provided.
 The regression suite also includes a locked fixture corpus baseline at `tests/fixtures/nif_fixture_corpus*.json` for cross-profile/layout conflict-matrix stability checks, including truncated-header and shifted texture-set layout edge signatures.
 CLI folder batch runs now emit `batch_failure_report.json` and `batch_failure_report.csv` when any source files fail, with per-file action/conflict/error fields for triage.
-For long-running folder batches, use `--checkpoint-file <path>` to persist successful-file progress and `--resume-checkpoint` to skip already completed files after interruption/restart.
+For long-running folder batches, use `--checkpoint-file <path>` to persist successful-file progress and `--resume-checkpoint` to skip already completed files after interruption/restart. New checkpoints record the output folder and generation settings; resuming with different values is rejected to avoid silently mixing outputs from different configurations. Older checkpoints without this metadata remain resumable.
 
 ### Large real-sample batch verification checklist (release readiness)
 
