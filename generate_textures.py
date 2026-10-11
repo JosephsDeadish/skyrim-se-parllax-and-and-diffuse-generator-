@@ -1165,6 +1165,11 @@ def _choose_qt_input_path(
     return True
 
 
+def _configure_qt_field_label(label: Any, text: str, control: Any) -> None:
+    label.setText(text)
+    label.setBuddy(control)
+
+
 def _bind_tk_main_window_shortcuts(
     root: Any,
     *,
@@ -15473,10 +15478,11 @@ def _launch_qt_migration_gui() -> None:
     generation_layout.setSpacing(10)
 
     input_row = QtWidgets.QHBoxLayout()
-    input_label = QtWidgets.QLabel("Input file or folder")
+    input_label = QtWidgets.QLabel()
     input_row.addWidget(input_label)
     input_path_edit = QtWidgets.QLineEdit()
     input_path_edit.setPlaceholderText("Choose a texture file or a folder of textures")
+    _configure_qt_field_label(input_label, "&Input file or folder", input_path_edit)
     input_row.addWidget(input_path_edit, 1)
     browse_input_button = QtWidgets.QPushButton("File…")
     browse_input_button.setShortcut("Ctrl+O")
@@ -15489,10 +15495,11 @@ def _launch_qt_migration_gui() -> None:
     generation_layout.addLayout(input_row)
 
     output_row = QtWidgets.QHBoxLayout()
-    output_label = QtWidgets.QLabel("Output folder (optional)")
+    output_label = QtWidgets.QLabel()
     output_row.addWidget(output_label)
     output_dir_edit = QtWidgets.QLineEdit()
     output_dir_edit.setPlaceholderText("Leave blank to save beside the source")
+    _configure_qt_field_label(output_label, "&Output folder (optional)", output_dir_edit)
     output_row.addWidget(output_dir_edit, 1)
     browse_output_button = QtWidgets.QPushButton("Browse…")
     browse_output_button.setToolTip("Choose where generated maps will be saved.")
@@ -15503,9 +15510,11 @@ def _launch_qt_migration_gui() -> None:
     controls_layout = QtWidgets.QGridLayout(controls_group)
     controls_layout.setHorizontalSpacing(14)
     controls_layout.setVerticalSpacing(8)
-    controls_layout.addWidget(QtWidgets.QLabel("Target renderer"), 0, 0)
+    renderer_label = QtWidgets.QLabel()
     render_profile_combo = QtWidgets.QComboBox()
     render_profile_combo.addItems(_QT_RENDER_PROFILE_VALUES)
+    _configure_qt_field_label(renderer_label, "&Target renderer", render_profile_combo)
+    controls_layout.addWidget(renderer_label, 0, 0)
     controls_layout.addWidget(render_profile_combo, 0, 1)
     controls_layout.addWidget(
         QtWidgets.QLabel("Choose one primary workflow. Map names and channels depend on the target."),
@@ -15695,11 +15704,17 @@ def _launch_qt_migration_gui() -> None:
     parallax_mode_combo = QtWidgets.QComboBox()
     parallax_mode_combo.addItem("Standard height", "standard")
     parallax_mode_combo.addItem("Occlusion (ENB/POM)", "occlusion")
-    controls_layout.addWidget(QtWidgets.QLabel("Complex material format"), mode_row, 0)
+    complex_format_label = QtWidgets.QLabel()
+    _configure_qt_field_label(complex_format_label, "Complex material &format", complex_format_combo)
+    controls_layout.addWidget(complex_format_label, mode_row, 0)
     controls_layout.addWidget(complex_format_combo, mode_row, 1)
-    controls_layout.addWidget(QtWidgets.QLabel("Environment mask mode"), mode_row + 1, 0)
+    env_mask_mode_label = QtWidgets.QLabel()
+    _configure_qt_field_label(env_mask_mode_label, "&Environment mask mode", env_mask_mode_combo)
+    controls_layout.addWidget(env_mask_mode_label, mode_row + 1, 0)
     controls_layout.addWidget(env_mask_mode_combo, mode_row + 1, 1)
-    controls_layout.addWidget(QtWidgets.QLabel("Parallax mode"), mode_row + 2, 0)
+    parallax_mode_label = QtWidgets.QLabel()
+    _configure_qt_field_label(parallax_mode_label, "&Parallax mode", parallax_mode_combo)
+    controls_layout.addWidget(parallax_mode_label, mode_row + 2, 0)
     controls_layout.addWidget(parallax_mode_combo, mode_row + 2, 1)
     mode_controls_hint = QtWidgets.QLabel()
     mode_controls_hint.setWordWrap(True)

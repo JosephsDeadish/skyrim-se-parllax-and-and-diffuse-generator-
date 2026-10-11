@@ -30,6 +30,7 @@ from generate_textures import (
     _make_debounced_callback,
     _make_latest_progress_update_enqueuer,
     _connect_qt_worker_thread_lifecycle,
+    _configure_qt_field_label,
     _nif_editor_result_matches_filters,
     _slice_nif_editor_result_page,
     _load_qt_preview_png,
@@ -720,6 +721,23 @@ def _shield_art_image() -> Image.Image:
 
 
 class GenerateTexturesTests(unittest.TestCase):
+    def test_qt_field_label_adds_mnemonic_and_focus_buddy(self) -> None:
+        class FakeLabel:
+            text = ""
+            buddy = None
+
+            def setText(self, text: str) -> None:
+                self.text = text
+
+            def setBuddy(self, control: object) -> None:
+                self.buddy = control
+
+        label = FakeLabel()
+        control = object()
+        _configure_qt_field_label(label, "&Input file or folder", control)
+        self.assertEqual(label.text, "&Input file or folder")
+        self.assertIs(label.buddy, control)
+
     def test_qt_output_groups_cover_each_map_choice_once(self) -> None:
         flattened = [key for _, keys in _QT_OUTPUT_GROUPS for key in keys]
         self.assertEqual(len(flattened), 11)
