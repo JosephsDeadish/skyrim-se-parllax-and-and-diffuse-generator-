@@ -14129,6 +14129,7 @@ if GUI_AVAILABLE:
                         rerun_auto_fix_conflicts_button,
                         unpatch_button,
                         restore_button,
+                        clear_button,
                     ]
                 )
                 self._add_tooltip(scan_button, "Read-only analysis pass. No file changes are written.")
