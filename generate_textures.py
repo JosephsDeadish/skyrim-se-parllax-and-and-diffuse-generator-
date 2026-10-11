@@ -6405,6 +6405,25 @@ def _should_refresh_qt_nif_scan_page(
     return normalized_row_count > 0 and normalized_row_count % normalized_page_size == 0
 
 
+def _format_qt_nif_scan_page_summary(
+    rows: Sequence[Mapping[str, str]],
+    page_index: int,
+    page_count: int,
+) -> str:
+    status_counts = {status: 0 for status in ("OK", "WARN", "SKIP", "FAIL")}
+    for row in rows:
+        status = str(row.get("status", "") or "").strip().upper()
+        if status in status_counts:
+            status_counts[status] += 1
+    status_summary = ", ".join(
+        f"{status} {count}"
+        for status, count in status_counts.items()
+        if count
+    )
+    summary = f"Page {int(page_index) + 1} of {max(1, int(page_count))} · {len(rows)} result(s)"
+    return f"{summary} · {status_summary}" if status_summary else summary
+
+
 def _set_nif_editor_controls_active(
     controls: Sequence[Any],
     saved_states: dict[Any, str],
@@ -16366,7 +16385,11 @@ def _launch_qt_migration_gui() -> None:
             nif_scan_results.setCurrentItem(current_item)
         _show_selected_nif_scan_detail(current_item)
         nif_scan_page_label.setText(
-            f"Page {nif_scan_page_index + 1} of {page_count} · {len(filtered_rows)} result(s)"
+            _format_qt_nif_scan_page_summary(
+                filtered_rows,
+                nif_scan_page_index,
+                page_count,
+            )
         )
         nif_scan_previous_button.setEnabled(nif_scan_page_index > 0)
         nif_scan_next_button.setEnabled(nif_scan_page_index + 1 < page_count)

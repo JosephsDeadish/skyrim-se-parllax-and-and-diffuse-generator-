@@ -45,6 +45,7 @@ from generate_textures import (
     _set_nif_editor_controls_active,
     _format_nif_result_row_details,
     _should_refresh_qt_nif_scan_page,
+    _format_qt_nif_scan_page_summary,
     _preview_qt_nif_auto_remediation,
     discover_plugin_conflict_context_from_manager,
     discover_ui_languages,
@@ -615,6 +616,30 @@ class TestNifEditorTargetResolution(unittest.TestCase):
 
 
 class TestQtNifValidationScan(unittest.TestCase):
+    def test_scan_page_summary_counts_filtered_statuses(self) -> None:
+        summary = _format_qt_nif_scan_page_summary(
+            [
+                {"status": "OK"},
+                {"status": "warn"},
+                {"status": "WARN"},
+                {"status": "SKIP"},
+                {"status": "FAIL"},
+                {"status": "UNKNOWN"},
+            ],
+            1,
+            3,
+        )
+        self.assertEqual(
+            summary,
+            "Page 2 of 3 · 6 result(s) · OK 1, WARN 2, SKIP 1, FAIL 1",
+        )
+
+    def test_scan_page_summary_handles_empty_filtered_results(self) -> None:
+        self.assertEqual(
+            _format_qt_nif_scan_page_summary([], 0, 0),
+            "Page 1 of 1 · 0 result(s)",
+        )
+
     def test_scan_page_refresh_cadence_matches_page_size(self) -> None:
         self.assertFalse(_should_refresh_qt_nif_scan_page(0))
         self.assertFalse(_should_refresh_qt_nif_scan_page(25))
