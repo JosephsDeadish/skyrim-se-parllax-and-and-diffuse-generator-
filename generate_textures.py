@@ -6164,6 +6164,56 @@ def _format_qt_nif_scan_detail(row: Mapping[str, str] | None) -> str:
     )
 
 
+def _preview_qt_nif_auto_remediation(nif_path: str | os.PathLike[str]) -> str:
+    if not NIF_PATCHER_AVAILABLE:
+        raise RuntimeError("NIF patcher is unavailable.")
+    path = Path(nif_path)
+    validation = validate_nif_for_parallax(path)
+    conflict_groups = tuple(getattr(validation, "conflict_report", ()) or ())
+    conflict_codes = tuple(
+        sorted(
+            {
+                str(getattr(group, "code", "") or "").strip()
+                for group in conflict_groups
+                if str(getattr(group, "code", "") or "").strip()
+            }
+        )
+    )
+    if not conflict_codes:
+        return f"No conflict-code remediation is available for {path.name}."
+
+    result, remediation_steps = auto_remediate_nif_conflicts(
+        path,
+        list(conflict_codes),
+        target_game="auto",
+        experimental_fallout_write=False,
+        allow_destructive=False,
+        backup=False,
+        dry_run=True,
+    )
+    lines = [
+        f"Read-only remediation preview for: {path}",
+        "No NIF file was written.",
+        "",
+    ]
+    lines.extend(f"Conflict: {code}" for code in conflict_codes)
+    if remediation_steps:
+        lines.extend(("", "Proposed safe steps:"))
+        lines.extend(f"• {step}" for step in remediation_steps)
+    if result is None:
+        lines.append("No non-destructive automatic remediation is available.")
+        return "\n".join(lines)
+
+    message = str(getattr(result, "message", "") or "").strip()
+    if message:
+        lines.extend(("", message))
+    result_warnings = tuple(getattr(result, "warnings", ()) or ())
+    result_errors = tuple(getattr(result, "errors", ()) or ())
+    lines.extend(f"Warning: {warning}" for warning in result_warnings)
+    lines.extend(f"Error: {error}" for error in result_errors)
+    return "\n".join(lines)
+
+
 def _drain_nif_editor_ui_updates(
     updates: queue.Queue[Callable[[], None]],
     *,
@@ -15638,6 +15688,21 @@ def _launch_qt_migration_gui() -> None:
             except Exception as exc:
                 self.failed.emit(str(exc))
 
+    class _QtNifRemediationPreviewWorker(QtCore.QObject):
+        finished = QtCore.Signal(str)
+        failed = QtCore.Signal(str)
+
+        def __init__(self, nif_path: str) -> None:
+            super().__init__()
+            self._nif_path = nif_path
+
+        @QtCore.Slot()
+        def run(self) -> None:
+            try:
+                self.finished.emit(_preview_qt_nif_auto_remediation(self._nif_path))
+            except Exception as exc:
+                self.failed.emit(str(exc))
+
     app = QtWidgets.QApplication.instance()
     if app is None:
         app = QtWidgets.QApplication(sys.argv)
@@ -15770,6 +15835,15 @@ def _launch_qt_migration_gui() -> None:
     nif_scan_export_button.setEnabled(False)
     nif_scan_filter_row.addWidget(nif_scan_export_button)
     nif_scan_layout.addLayout(nif_scan_filter_row)
+    nif_scan_remediation_row = QtWidgets.QHBoxLayout()
+    nif_scan_remediation_preview_button = QtWidgets.QPushButton("Preview safe fixes")
+    nif_scan_remediation_preview_button.setToolTip(
+        "Show non-destructive auto-remediation steps for the selected NIF without writing it."
+    )
+    nif_scan_remediation_preview_button.setEnabled(False)
+    nif_scan_remediation_row.addWidget(nif_scan_remediation_preview_button)
+    nif_scan_remediation_row.addStretch(1)
+    nif_scan_layout.addLayout(nif_scan_remediation_row)
     nif_scan_results = QtWidgets.QTreeWidget()
     nif_scan_results.setColumnCount(3)
     nif_scan_results.setHeaderLabels(["Status", "NIF file", "Diagnostics"])
@@ -16237,6 +16311,8 @@ def _launch_qt_migration_gui() -> None:
     qt_worker: _QtGenerationWorker | None = None
     nif_scan_thread: QtCore.QThread | None = None
     nif_scan_worker: _QtNifScanWorker | None = None
+    nif_remediation_preview_thread: QtCore.QThread | None = None
+    nif_remediation_preview_worker: _QtNifRemediationPreviewWorker | None = None
     nif_scan_rows: list[dict[str, str]] = []
     nif_scan_page_index = 0
     preview_manual_paused = False
@@ -16291,6 +16367,13 @@ def _launch_qt_migration_gui() -> None:
         nif_scan_detail_view.setPlainText(
             _format_qt_nif_scan_detail(row if isinstance(row, dict) else None)
         )
+        nif_scan_remediation_preview_button.setEnabled(
+            NIF_PATCHER_AVAILABLE
+            and nif_scan_thread is None
+            and nif_remediation_preview_thread is None
+            and isinstance(row, dict)
+            and bool(row.get("preview"))
+        )
 
     def _add_nif_scan_result(row: object) -> None:
         if not isinstance(row, dict):
@@ -16316,6 +16399,50 @@ def _launch_qt_migration_gui() -> None:
         nif_scan_path_edit.setEnabled(not running)
         nif_scan_browse_button.setEnabled(not running)
         nif_scan_export_button.setEnabled(not running and bool(_filtered_nif_scan_rows()))
+        if running:
+            nif_scan_remediation_preview_button.setEnabled(False)
+        else:
+            _show_selected_nif_scan_detail(nif_scan_results.currentItem())
+
+    def _preview_selected_nif_remediation() -> None:
+        nonlocal nif_remediation_preview_thread, nif_remediation_preview_worker
+        if nif_scan_thread is not None or nif_remediation_preview_thread is not None:
+            return
+        item = nif_scan_results.currentItem()
+        row = item.data(0, QtCore.Qt.ItemDataRole.UserRole) if item else None
+        if not isinstance(row, dict) or not row.get("preview"):
+            return
+        nif_remediation_preview_button.setEnabled(False)
+        nif_scan_status_label.setText(f"Previewing safe remediation for {row.get('file_name', 'selected NIF')}…")
+        nif_remediation_preview_thread = QtCore.QThread(window)
+        nif_remediation_preview_worker = _QtNifRemediationPreviewWorker(str(row["preview"]))
+        nif_remediation_preview_worker.moveToThread(nif_remediation_preview_thread)
+        nif_remediation_preview_thread.started.connect(nif_remediation_preview_worker.run)
+        nif_remediation_preview_worker.finished.connect(
+            lambda preview: nif_scan_detail_view.setPlainText(
+                _format_qt_nif_scan_detail(row) + "\n\n" + str(preview)
+            )
+        )
+        nif_remediation_preview_worker.finished.connect(
+            lambda _preview: nif_scan_status_label.setText("Safe remediation preview complete; no file was written.")
+        )
+        nif_remediation_preview_worker.failed.connect(
+            lambda message: nif_scan_status_label.setText(f"Remediation preview failed: {message}")
+        )
+        nif_remediation_preview_worker.finished.connect(nif_remediation_preview_thread.quit)
+        nif_remediation_preview_worker.failed.connect(nif_remediation_preview_thread.quit)
+        nif_remediation_preview_thread.finished.connect(nif_remediation_preview_worker.deleteLater)
+
+        def _cleanup_nif_remediation_preview() -> None:
+            nonlocal nif_remediation_preview_thread, nif_remediation_preview_worker
+            if nif_remediation_preview_thread is not None:
+                nif_remediation_preview_thread.deleteLater()
+            nif_remediation_preview_thread = None
+            nif_remediation_preview_worker = None
+            _show_selected_nif_scan_detail(nif_scan_results.currentItem())
+
+        nif_remediation_preview_thread.finished.connect(_cleanup_nif_remediation_preview)
+        nif_remediation_preview_thread.start()
 
     def _finish_nif_scan(cancelled: bool) -> None:
         _render_nif_scan_page()
@@ -16710,6 +16837,8 @@ def _launch_qt_migration_gui() -> None:
 
     def _start_nif_scan() -> None:
         nonlocal nif_scan_thread, nif_scan_worker, nif_scan_page_index
+        if nif_remediation_preview_thread is not None:
+            return
         nif_paths, error = resolve_nif_editor_targets(
             nif_scan_path_edit.text(),
             str(nif_scan_mode_combo.currentData() or ""),
@@ -17044,6 +17173,7 @@ def _launch_qt_migration_gui() -> None:
     nif_scan_browse_button.clicked.connect(_browse_nif_scan_target)
     nif_scan_start_button.clicked.connect(_start_nif_scan)
     nif_scan_cancel_button.clicked.connect(_cancel_nif_scan)
+    nif_scan_remediation_preview_button.clicked.connect(_preview_selected_nif_remediation)
     nif_scan_export_button.clicked.connect(_export_nif_scan_csv)
     nif_scan_filter_edit.textChanged.connect(_reset_nif_scan_page)
     nif_scan_status_filter.currentTextChanged.connect(_reset_nif_scan_page)

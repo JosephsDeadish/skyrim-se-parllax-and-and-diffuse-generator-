@@ -10,6 +10,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
@@ -43,6 +44,7 @@ from generate_textures import (
     _should_render_nif_editor_results,
     _set_nif_editor_controls_active,
     _format_nif_result_row_details,
+    _preview_qt_nif_auto_remediation,
     discover_plugin_conflict_context_from_manager,
     discover_ui_languages,
     extract_mesh_paths_from_plugin_bytes,
@@ -612,6 +614,86 @@ class TestNifEditorTargetResolution(unittest.TestCase):
 
 
 class TestQtNifValidationScan(unittest.TestCase):
+    def test_remediation_preview_reports_non_destructive_steps_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"fixture")
+            validation = SimpleNamespace(
+                conflict_report=[
+                    SimpleNamespace(code="shader_state.envmap_missing_slot5"),
+                    SimpleNamespace(code="shader_state.envmap_missing_slot5"),
+                ]
+            )
+            patch_result = SimpleNamespace(
+                message="Dry run complete.",
+                warnings=["No texture path could be guessed."],
+                errors=[],
+            )
+            with (
+                mock.patch("generate_textures.NIF_PATCHER_AVAILABLE", True),
+                mock.patch("generate_textures.validate_nif_for_parallax", return_value=validation),
+                mock.patch(
+                    "generate_textures.auto_remediate_nif_conflicts",
+                    return_value=(patch_result, ("Would disable environment mapping.",)),
+                ) as remediate,
+            ):
+                preview = _preview_qt_nif_auto_remediation(nif_path)
+
+        self.assertIn("Read-only remediation preview", preview)
+        self.assertIn("No NIF file was written.", preview)
+        self.assertIn("shader_state.envmap_missing_slot5", preview)
+        self.assertEqual(preview.count("Conflict:"), 1)
+        self.assertIn("Would disable environment mapping.", preview)
+        self.assertIn("Dry run complete.", preview)
+        remediate.assert_called_once_with(
+            nif_path,
+            ["shader_state.envmap_missing_slot5"],
+            target_game="auto",
+            experimental_fallout_write=False,
+            allow_destructive=False,
+            backup=False,
+            dry_run=True,
+        )
+
+    def test_remediation_preview_reports_when_no_conflicts_exist(self) -> None:
+        with (
+            mock.patch("generate_textures.NIF_PATCHER_AVAILABLE", True),
+            mock.patch(
+                "generate_textures.validate_nif_for_parallax",
+                return_value=SimpleNamespace(conflict_report=[]),
+            ),
+            mock.patch("generate_textures.auto_remediate_nif_conflicts") as remediate,
+        ):
+            preview = _preview_qt_nif_auto_remediation("mesh.nif")
+
+        self.assertIn("No conflict-code remediation is available", preview)
+        remediate.assert_not_called()
+
+    def test_remediation_preview_reports_when_no_safe_steps_are_proposed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            with (
+                mock.patch("generate_textures.NIF_PATCHER_AVAILABLE", True),
+                mock.patch(
+                    "generate_textures.validate_nif_for_parallax",
+                    return_value=SimpleNamespace(
+                        conflict_report=[SimpleNamespace(code="shader_state.unknown")]
+                    ),
+                ),
+                mock.patch(
+                    "generate_textures.auto_remediate_nif_conflicts",
+                    return_value=(None, ()),
+                ),
+            ):
+                preview = _preview_qt_nif_auto_remediation(nif_path)
+
+        self.assertIn("No non-destructive automatic remediation is available.", preview)
+
+    def test_remediation_preview_requires_nif_patcher(self) -> None:
+        with mock.patch("generate_textures.NIF_PATCHER_AVAILABLE", False):
+            with self.assertRaisesRegex(RuntimeError, "NIF patcher is unavailable"):
+                _preview_qt_nif_auto_remediation("mesh.nif")
+
     def test_scan_selected_result_details_include_full_path_and_diagnostics(self) -> None:
         details = _format_qt_nif_scan_detail(
             {
