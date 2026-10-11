@@ -6823,7 +6823,7 @@ class GenerateTexturesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             input_path = temp_path / "brick.png"
-            for source_size in ((4, 4), (16, 8), (32, 32)):
+            for source_size in ((1, 1), (4, 4), (16, 8), (17, 9), (32, 32)):
                 Image.new("RGB", source_size, color=(60, 100, 140)).save(input_path)
                 for case_name, options, expected_names in cases:
                     saved_image_sizes: dict[str, tuple[int, int]] = {}
