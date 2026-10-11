@@ -5,6 +5,7 @@ import concurrent.futures
 import csv
 import gc
 import importlib
+import io
 import json
 import math
 import os
@@ -43,12 +44,13 @@ except Exception:
     GUI_AVAILABLE = False
 
 try:
-    from PySide6 import QtCore, QtWidgets
+    from PySide6 import QtCore, QtGui, QtWidgets
 
     QT_GUI_AVAILABLE = True
     QT_GUI_IMPORT_ERROR = ""
 except Exception as exc:
     QtCore = None
+    QtGui = None
     QtWidgets = None
     QT_GUI_AVAILABLE = False
     QT_GUI_IMPORT_ERROR = str(exc)
@@ -923,6 +925,16 @@ def _merge_qt_generation_gui_state(
         }
     )
     return _normalize_gui_state(merged)
+
+
+def _load_qt_preview_png(path: str | os.PathLike[str], *, max_dimension: int = 768) -> bytes:
+    preview_limit = max(1, int(max_dimension))
+    with Image.open(path) as image:
+        preview = image.copy()
+    preview.thumbnail((preview_limit, preview_limit), Image.Resampling.LANCZOS)
+    buffer = io.BytesIO()
+    preview.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def discover_ui_languages(translations_dir: Path = UI_TRANSLATIONS_DIR) -> tuple[str, ...]:
@@ -14987,7 +14999,13 @@ def _launch_qt_migration_gui() -> None:
 
     preview_results_label = QtWidgets.QLabel("Latest generated outputs")
     preview_layout.addWidget(preview_results_label)
+    preview_image_label = QtWidgets.QLabel("Select a generated output to preview it.")
+    preview_image_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+    preview_image_label.setMinimumHeight(240)
+    preview_image_label.setStyleSheet("QLabel { border: 1px solid palette(mid); }")
+    preview_layout.addWidget(preview_image_label)
     preview_results_list = QtWidgets.QListWidget()
+    preview_results_list.setMaximumHeight(180)
     preview_layout.addWidget(preview_results_list, 1)
     tabs.addTab(preview_tab, "Preview")
 
@@ -15068,6 +15086,30 @@ def _launch_qt_migration_gui() -> None:
         if not message.strip():
             return
         event_log.appendPlainText(message.rstrip())
+
+    def _show_selected_qt_preview(*_: object) -> None:
+        item = preview_results_list.currentItem()
+        if item is None:
+            preview_image_label.setPixmap(QtGui.QPixmap())
+            preview_image_label.setText("Select a generated output to preview it.")
+            return
+        image_path = str(item.data(QtCore.Qt.ItemDataRole.UserRole) or "")
+        try:
+            image_data = _load_qt_preview_png(image_path)
+            pixmap = QtGui.QPixmap()
+            if not pixmap.loadFromData(image_data, "PNG"):
+                raise ValueError("Qt could not decode the generated preview image.")
+            preview_image_label.setText("")
+            preview_image_label.setPixmap(
+                pixmap.scaled(
+                    preview_image_label.size(),
+                    QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                    QtCore.Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+        except Exception as exc:
+            preview_image_label.setPixmap(QtGui.QPixmap())
+            preview_image_label.setText(f"Preview unavailable: {exc}")
 
     def _update_resume_hint() -> None:
         mode = resume_mode_combo.currentText().strip().lower()
@@ -15254,9 +15296,14 @@ def _launch_qt_migration_gui() -> None:
                 source = str(payload.get("source", "") or "")
                 outputs = payload.get("outputs", {})
                 if isinstance(outputs, dict):
-                    preview_results_list.clear()
                     for key, path in sorted(outputs.items()):
-                        preview_results_list.addItem(f"{key}: {path}")
+                        item = QtWidgets.QListWidgetItem(f"{key}: {path}")
+                        item.setData(QtCore.Qt.ItemDataRole.UserRole, str(path))
+                        preview_results_list.addItem(item)
+                    while preview_results_list.count() > 200:
+                        preview_results_list.takeItem(0)
+                    if preview_results_list.count():
+                        preview_results_list.setCurrentRow(preview_results_list.count() - 1)
                     _append_event_log(f"[done] {Path(source).name}: wrote {len(outputs)} output(s)")
             elif event_name == "file_error" and isinstance(payload, dict):
                 source = str(payload.get("source", "") or "")
@@ -15392,6 +15439,7 @@ def _launch_qt_migration_gui() -> None:
         include_environment_mask_check,
     ):
         option_check.toggled.connect(_persist_qt_gui_state)
+    preview_results_list.currentItemChanged.connect(_show_selected_qt_preview)
 
     _update_resume_hint()
     _refresh_preview_state_badge()

@@ -1,4 +1,5 @@
 import json
+import io
 import os
 import queue
 import sys
@@ -29,6 +30,7 @@ from generate_textures import (
     _make_latest_progress_update_enqueuer,
     _nif_editor_result_matches_filters,
     _slice_nif_editor_result_page,
+    _load_qt_preview_png,
     _should_render_nif_editor_results,
     _set_nif_editor_controls_active,
     _format_nif_result_row_details,
@@ -737,6 +739,17 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(merged["include_environment_mask"]))
         self.assertEqual(merged["batch_resume_mode"], "resume")
         self.assertEqual(merged["batch_checkpoint_path"], str(Path(temp_dir) / "checkpoint.json"))
+
+    def test_qt_preview_loader_decodes_and_bounds_image_dimensions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = Path(temp_dir) / "source.png"
+            Image.new("RGB", (1600, 800), color=(120, 80, 40)).save(source_path)
+
+            preview_bytes = _load_qt_preview_png(source_path, max_dimension=256)
+
+        with Image.open(io.BytesIO(preview_bytes)) as preview:
+            self.assertEqual(preview.format, "PNG")
+            self.assertEqual(preview.size, (256, 128))
 
     def test_save_gui_state_round_trips_expected_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
