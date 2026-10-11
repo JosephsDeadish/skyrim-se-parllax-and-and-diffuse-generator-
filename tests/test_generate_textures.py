@@ -44,6 +44,7 @@ from generate_textures import (
     _should_render_nif_editor_results,
     _set_nif_editor_controls_active,
     _format_nif_result_row_details,
+    _should_refresh_qt_nif_scan_page,
     _preview_qt_nif_auto_remediation,
     discover_plugin_conflict_context_from_manager,
     discover_ui_languages,
@@ -614,6 +615,14 @@ class TestNifEditorTargetResolution(unittest.TestCase):
 
 
 class TestQtNifValidationScan(unittest.TestCase):
+    def test_scan_page_refresh_cadence_matches_page_size(self) -> None:
+        self.assertFalse(_should_refresh_qt_nif_scan_page(0))
+        self.assertFalse(_should_refresh_qt_nif_scan_page(25))
+        self.assertFalse(_should_refresh_qt_nif_scan_page(199))
+        self.assertTrue(_should_refresh_qt_nif_scan_page(200))
+        self.assertTrue(_should_refresh_qt_nif_scan_page(400))
+        self.assertTrue(_should_refresh_qt_nif_scan_page(8, page_size=4))
+
     def test_remediation_preview_reports_non_destructive_steps_without_writing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             nif_path = Path(temp_dir) / "mesh.nif"

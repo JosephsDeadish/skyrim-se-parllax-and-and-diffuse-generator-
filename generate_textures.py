@@ -6395,6 +6395,16 @@ def _slice_nif_editor_result_page(
     return list(rows[start : start + normalized_page_size]), current_page, page_count
 
 
+def _should_refresh_qt_nif_scan_page(
+    row_count: int,
+    *,
+    page_size: int = _NIF_EDITOR_RESULT_PAGE_SIZE,
+) -> bool:
+    normalized_page_size = max(1, int(page_size))
+    normalized_row_count = max(0, int(row_count))
+    return normalized_row_count > 0 and normalized_row_count % normalized_page_size == 0
+
+
 def _set_nif_editor_controls_active(
     controls: Sequence[Any],
     saved_states: dict[Any, str],
@@ -16379,7 +16389,7 @@ def _launch_qt_migration_gui() -> None:
         if not isinstance(row, dict):
             return
         nif_scan_rows.append({str(key): str(value) for key, value in row.items()})
-        if len(nif_scan_rows) % 25 == 0:
+        if _should_refresh_qt_nif_scan_page(len(nif_scan_rows)):
             _render_nif_scan_page()
 
     def _reset_nif_scan_page(*_: object) -> None:
