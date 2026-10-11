@@ -956,6 +956,10 @@ def _merge_qt_generation_gui_state(
     environment_mask_strength: float | None = None,
     rmaos_strength: float | None = None,
     complex_strength: float | None = None,
+    wetness_mask_strength: float | None = None,
+    snow_mask_strength: float | None = None,
+    ao_strength: float | None = None,
+    roughness_strength: float | None = None,
     truepbr_sidecar_overrides_enabled: bool | None = None,
     truepbr_sidecar_parallax: bool | None = None,
     truepbr_sidecar_displacement_scale: float | None = None,
@@ -1002,6 +1006,10 @@ def _merge_qt_generation_gui_state(
         ("environment_mask_strength", environment_mask_strength),
         ("rmaos_strength", rmaos_strength),
         ("complex_strength", complex_strength),
+        ("wetness_mask_strength", wetness_mask_strength),
+        ("snow_mask_strength", snow_mask_strength),
+        ("ao_strength", ao_strength),
+        ("roughness_strength", roughness_strength),
         ("truepbr_sidecar_overrides_enabled", truepbr_sidecar_overrides_enabled),
         ("truepbr_sidecar_parallax", truepbr_sidecar_parallax),
         ("truepbr_sidecar_displacement_scale", truepbr_sidecar_displacement_scale),
@@ -15051,6 +15059,10 @@ def _launch_qt_migration_gui() -> None:
                 environment_mask_strength = float(self._options.get("environment_mask_strength", 1.2))
                 rmaos_strength = float(self._options.get("rmaos_strength", 1.2))
                 complex_strength = float(self._options.get("complex_strength", 1.15))
+                wetness_mask_strength = float(self._options.get("wetness_mask_strength", 1.0))
+                snow_mask_strength = float(self._options.get("snow_mask_strength", 1.0))
+                ao_strength = float(self._options.get("ao_strength", 1.2))
+                roughness_strength = float(self._options.get("roughness_strength", 1.0))
                 truepbr_material_overrides = _qt_truepbr_material_overrides(
                     bool(self._options.get("truepbr_sidecar_overrides_enabled", False)),
                     parallax=bool(self._options.get("truepbr_sidecar_parallax", True)),
@@ -15177,6 +15189,10 @@ def _launch_qt_migration_gui() -> None:
                                 environment_mask_strength=environment_mask_strength,
                                 rmaos_strength=rmaos_strength,
                                 complex_strength=complex_strength,
+                                wetness_mask_strength=wetness_mask_strength,
+                                snow_mask_strength=snow_mask_strength,
+                                ao_strength=ao_strength,
+                                roughness_strength=roughness_strength,
                                 truepbr_material_overrides=truepbr_material_overrides,
                                 render_profile=render_profile,
                             )
@@ -15251,6 +15267,10 @@ def _launch_qt_migration_gui() -> None:
                     environment_mask_strength=environment_mask_strength,
                     rmaos_strength=rmaos_strength,
                     complex_strength=complex_strength,
+                    wetness_mask_strength=wetness_mask_strength,
+                    snow_mask_strength=snow_mask_strength,
+                    ao_strength=ao_strength,
+                    roughness_strength=roughness_strength,
                     truepbr_material_overrides=truepbr_material_overrides,
                     render_profile=render_profile,
                 )
@@ -15457,6 +15477,10 @@ def _launch_qt_migration_gui() -> None:
         ("environment_mask_strength", "Environment mask strength", 0.1, 12.0, 1.2),
         ("rmaos_strength", "TruePBR RMAOS strength", 0.1, 12.0, 1.2),
         ("complex_strength", "Complex material strength", 0.1, 12.0, 1.15),
+        ("wetness_mask_strength", "Wetness mask strength", 0.1, 3.0, 1.0),
+        ("snow_mask_strength", "Dynamic snow mask strength", 0.1, 3.0, 1.0),
+        ("ao_strength", "Standalone AO strength", 0.1, 12.0, 1.2),
+        ("roughness_strength", "Standalone roughness strength", 0.1, 12.0, 1.0),
     )
     for key, label, minimum, maximum, default in advanced_strength_specs:
         if key == "glow_threshold":
@@ -15957,6 +15981,10 @@ def _launch_qt_migration_gui() -> None:
             environment_mask_strength=float(advanced_strength_controls["environment_mask_strength"].value()),
             rmaos_strength=float(advanced_strength_controls["rmaos_strength"].value()),
             complex_strength=float(advanced_strength_controls["complex_strength"].value()),
+            wetness_mask_strength=float(advanced_strength_controls["wetness_mask_strength"].value()),
+            snow_mask_strength=float(advanced_strength_controls["snow_mask_strength"].value()),
+            ao_strength=float(advanced_strength_controls["ao_strength"].value()),
+            roughness_strength=float(advanced_strength_controls["roughness_strength"].value()),
             truepbr_sidecar_overrides_enabled=truepbr_overrides_enabled_check.isChecked(),
             truepbr_sidecar_parallax=truepbr_parallax_check.isChecked(),
             truepbr_sidecar_displacement_scale=truepbr_displacement_scale.value(),
@@ -16184,6 +16212,10 @@ def _launch_qt_migration_gui() -> None:
             "environment_mask_strength": float(advanced_strength_controls["environment_mask_strength"].value()),
             "rmaos_strength": float(advanced_strength_controls["rmaos_strength"].value()),
             "complex_strength": float(advanced_strength_controls["complex_strength"].value()),
+            "wetness_mask_strength": float(advanced_strength_controls["wetness_mask_strength"].value()),
+            "snow_mask_strength": float(advanced_strength_controls["snow_mask_strength"].value()),
+            "ao_strength": float(advanced_strength_controls["ao_strength"].value()),
+            "roughness_strength": float(advanced_strength_controls["roughness_strength"].value()),
             "truepbr_sidecar_overrides_enabled": truepbr_overrides_enabled_check.isChecked(),
             "truepbr_sidecar_parallax": truepbr_parallax_check.isChecked(),
             "truepbr_sidecar_displacement_scale": truepbr_displacement_scale.value(),

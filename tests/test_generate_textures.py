@@ -871,6 +871,10 @@ class GenerateTexturesTests(unittest.TestCase):
                 environment_mask_strength=1.8,
                 rmaos_strength=2.1,
                 complex_strength=1.7,
+                wetness_mask_strength=1.3,
+                snow_mask_strength=0.8,
+                ao_strength=2.2,
+                roughness_strength=1.4,
                 truepbr_sidecar_overrides_enabled=True,
                 truepbr_sidecar_parallax=False,
                 truepbr_sidecar_displacement_scale=0.14,
@@ -906,6 +910,10 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(merged["environment_mask_strength"], 1.8)
         self.assertEqual(merged["rmaos_strength"], 2.1)
         self.assertEqual(merged["complex_strength"], 1.7)
+        self.assertAlmostEqual(merged["wetness_mask_strength"], 1.3)
+        self.assertAlmostEqual(merged["snow_mask_strength"], 0.8)
+        self.assertAlmostEqual(merged["ao_strength"], 2.2)
+        self.assertAlmostEqual(merged["roughness_strength"], 1.4)
         self.assertTrue(merged["truepbr_sidecar_overrides_enabled"])
         self.assertFalse(merged["truepbr_sidecar_parallax"])
         self.assertAlmostEqual(merged["truepbr_sidecar_displacement_scale"], 0.14)
@@ -6650,6 +6658,40 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertAlmostEqual(payload["displacement_scale"], 0.35)
             self.assertAlmostEqual(payload["specular_level"], 0.08)
             self.assertAlmostEqual(payload["roughness_scale"], 0.7)
+
+    def test_run_with_options_routes_optional_map_strengths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "stone.png"
+            _sample_image().save(input_path)
+            generated_map = Image.new("L", (8, 8), color=127)
+            with (
+                mock.patch("generate_textures.generate_wetness_mask", return_value=generated_map) as wetness,
+                mock.patch("generate_textures.generate_snow_mask", return_value=generated_map) as snow,
+                mock.patch("generate_textures.generate_ambient_occlusion", return_value=generated_map) as ao,
+                mock.patch("generate_textures.generate_roughness", return_value=generated_map) as roughness,
+                mock.patch(
+                    "generate_textures._save_with_dds_fallback",
+                    side_effect=lambda _image, path, **_kwargs: path,
+                ),
+            ):
+                run_with_options(
+                    input_file=input_path,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_wetness_mask=True,
+                    include_snow_mask=True,
+                    include_ao=True,
+                    include_roughness=True,
+                    wetness_mask_strength=1.3,
+                    snow_mask_strength=0.8,
+                    ao_strength=2.2,
+                    roughness_strength=1.4,
+                )
+            self.assertEqual(wetness.call_args.kwargs["strength"], 1.3)
+            self.assertEqual(snow.call_args.kwargs["strength"], 0.8)
+            self.assertEqual(ao.call_args.kwargs["strength"], 2.2)
+            self.assertEqual(roughness.call_args.kwargs["strength"], 1.4)
 
     def test_run_with_options_rmaos_writes_sidecar_next_to_textures_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
