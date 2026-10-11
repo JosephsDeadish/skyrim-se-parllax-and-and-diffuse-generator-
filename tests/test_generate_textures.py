@@ -32,6 +32,7 @@ from generate_textures import (
     _nif_editor_result_matches_filters,
     _slice_nif_editor_result_page,
     _load_qt_preview_png,
+    _recommend_qt_render_profile,
     _bind_tk_main_window_shortcuts,
     _describe_qt_output_channels,
     _should_render_nif_editor_results,
@@ -876,6 +877,23 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(merged["render_profile"], "custom")
         self.assertEqual(merged["batch_resume_mode"], "resume")
         self.assertEqual(merged["batch_checkpoint_path"], str(Path(temp_dir) / "checkpoint.json"))
+
+    def test_qt_profile_recommendation_uses_existing_filename_and_path_hints(self) -> None:
+        self.assertEqual(
+            _recommend_qt_render_profile("mods/PBRNifPatcher/textures/architecture/stone.dds"),
+            "truepbr",
+        )
+        self.assertEqual(
+            _recommend_qt_render_profile("textures/architecture/stone_cm.dds"),
+            "community_shaders",
+        )
+
+    def test_qt_profile_recommendation_is_not_collapsed_for_batch_folders(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder = Path(temp_dir) / "textures"
+            folder.mkdir()
+            self.assertIsNone(_recommend_qt_render_profile(str(folder)))
+        self.assertIsNone(_recommend_qt_render_profile(""))
 
     def test_qt_preview_loader_decodes_and_bounds_image_dimensions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

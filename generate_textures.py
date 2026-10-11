@@ -14740,6 +14740,23 @@ def _launch_tk_gui() -> None:
         raise
 
 
+def _recommend_qt_render_profile(input_text: str) -> str | None:
+    normalized_input = input_text.strip()
+    if not normalized_input:
+        return None
+    input_path = Path(normalized_input).expanduser()
+    if input_path.is_dir():
+        return None
+    role_info = identify_skyrim_texture_role(input_path)
+    return recommend_render_profile(
+        input_path,
+        detected_role=role_info["role"] if role_info is not None else None,
+        detected_suffix=role_info["suffix"] if role_info is not None else None,
+        material_type=classify_material_type(input_path),
+        workflow_profile=detect_workflow_profile(input_path),
+    )
+
+
 def _launch_qt_migration_gui() -> None:
     if not QT_GUI_AVAILABLE or QtWidgets is None or QtCore is None:
         install_hint = "Install PySide6 (pip install PySide6) to use the Qt migration UI."
@@ -15111,6 +15128,15 @@ def _launch_qt_migration_gui() -> None:
         1,
         2,
     )
+    profile_recommendation_label = QtWidgets.QLabel("Select a texture file to see a renderer suggestion.")
+    profile_recommendation_label.setWordWrap(True)
+    controls_layout.addWidget(profile_recommendation_label, 2, 0, 1, 2)
+    use_profile_recommendation_button = QtWidgets.QPushButton("Use suggestion")
+    use_profile_recommendation_button.setEnabled(False)
+    use_profile_recommendation_button.setToolTip(
+        "Apply the suggested profile to this generation session; the suggestion never changes your selection automatically."
+    )
+    controls_layout.addWidget(use_profile_recommendation_button, 2, 2)
     include_diffuse_check = QtWidgets.QCheckBox("Diffuse")
     include_diffuse_check.setChecked(True)
     include_normal_check = QtWidgets.QCheckBox("Normal")
@@ -15139,14 +15165,14 @@ def _launch_qt_migration_gui() -> None:
         include_roughness_check,
     )
     for index, control in enumerate(output_checks):
-        controls_layout.addWidget(control, 2 + index // 2, index % 2)
+        controls_layout.addWidget(control, 3 + index // 2, index % 2)
     workflow_note = QtWidgets.QLabel(
         "Vanilla/ENB _m and TruePBR _rmaos are separate Slot 5 workflows. "
         "Community Shaders _cm is Extended Materials, not TruePBR. "
         "_wt/_sm are shader-specific; terrain selection does not generate layered landscape sets."
     )
     workflow_note.setWordWrap(True)
-    controls_layout.addWidget(workflow_note, 2 + (len(output_checks) + 1) // 2, 0, 1, 2)
+    controls_layout.addWidget(workflow_note, 3 + (len(output_checks) + 1) // 2, 0, 1, 2)
     generation_layout.addWidget(controls_group)
 
     action_row = QtWidgets.QHBoxLayout()
@@ -15371,6 +15397,30 @@ def _launch_qt_migration_gui() -> None:
         else:
             resume_mode_hint.setText("Start fresh ignores prior checkpoint entries.")
 
+    def _update_profile_recommendation() -> None:
+        input_text = input_path_edit.text().strip()
+        if input_text and Path(input_text).expanduser().is_dir():
+            profile_recommendation_label.setText(
+                "Folder input: choose a profile explicitly; a single suggestion may not fit every texture."
+            )
+            use_profile_recommendation_button.setEnabled(False)
+            return
+        suggested_profile = _recommend_qt_render_profile(input_text)
+        if suggested_profile is None:
+            profile_recommendation_label.setText("Select a texture file to see a renderer suggestion.")
+            use_profile_recommendation_button.setEnabled(False)
+            return
+        profile_label = _RENDER_PROFILE_LABELS.get(
+            suggested_profile,
+            suggested_profile.replace("_", " ").title(),
+        )
+        profile_recommendation_label.setText(
+            f"Suggested for this file: {profile_label}. This is a filename/path heuristic; confirm your installed renderer."
+        )
+        use_profile_recommendation_button.setEnabled(
+            qt_worker_thread is None and render_profile_combo.findText(suggested_profile) >= 0
+        )
+
     def _persist_qt_gui_state(*_: object) -> None:
         state = _merge_qt_generation_gui_state(
             load_gui_state(),
@@ -15392,6 +15442,14 @@ def _launch_qt_migration_gui() -> None:
             render_profile=render_profile_combo.currentText(),
         )
         save_gui_state(state)
+
+    def _apply_profile_recommendation() -> None:
+        suggested_profile = _recommend_qt_render_profile(input_path_edit.text())
+        if suggested_profile is None:
+            return
+        profile_index = render_profile_combo.findText(suggested_profile)
+        if profile_index >= 0:
+            render_profile_combo.setCurrentIndex(profile_index)
 
     def _effective_checkpoint_path() -> Path:
         text = checkpoint_path_edit.text().strip()
@@ -15490,6 +15548,12 @@ def _launch_qt_migration_gui() -> None:
         resume_mode_combo.setEnabled(not running)
         checkpoint_path_edit.setEnabled(not running)
         render_profile_combo.setEnabled(not running)
+        suggested_profile = _recommend_qt_render_profile(input_path_edit.text())
+        use_profile_recommendation_button.setEnabled(
+            not running
+            and suggested_profile is not None
+            and render_profile_combo.findText(suggested_profile) >= 0
+        )
         for option_check in output_checks:
             option_check.setEnabled(not running)
 
@@ -15697,8 +15761,10 @@ def _launch_qt_migration_gui() -> None:
     pause_preview_button.clicked.connect(_pause_preview)
     resume_preview_button.clicked.connect(_resume_preview)
     render_deferred_button.clicked.connect(_render_deferred_now)
+    use_profile_recommendation_button.clicked.connect(_apply_profile_recommendation)
     resume_mode_combo.currentIndexChanged.connect(_update_resume_hint)
     input_path_edit.textChanged.connect(_refresh_checkpoint_health)
+    input_path_edit.textChanged.connect(_update_profile_recommendation)
     output_dir_edit.textChanged.connect(_refresh_checkpoint_health)
     checkpoint_path_edit.textChanged.connect(_refresh_checkpoint_health)
     input_path_edit.textChanged.connect(_persist_qt_gui_state)
@@ -15718,6 +15784,7 @@ def _launch_qt_migration_gui() -> None:
     preview_channel_combo.currentTextChanged.connect(_show_selected_qt_preview)
 
     _update_resume_hint()
+    _update_profile_recommendation()
     _refresh_preview_state_badge()
     _refresh_checkpoint_health()
     window.setCentralWidget(root)
