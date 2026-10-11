@@ -12175,6 +12175,12 @@ if GUI_AVAILABLE:
 
                 browse_nif_button = ttk.Button(row1, text="Browse…", command=_browse_nif)
                 browse_nif_button.pack(side="left")
+                nif_target_controls_ref = [
+                    single_nif_radio,
+                    folder_nif_radio,
+                    nif_path_entry,
+                    browse_nif_button,
+                ]
                 self._add_tooltip(path_label, "Select the NIF file/folder to scan or patch.")
                 self._add_tooltip(nif_path_entry, "Paste the full path to one .nif file or a mesh folder.")
                 self._add_tooltip(browse_nif_button, "Pick a NIF file or mesh folder with the file/folder dialog.")
@@ -13269,10 +13275,11 @@ if GUI_AVAILABLE:
                 _cancel_requested = [False]
                 _close_when_idle = [False]
                 _action_buttons_ref: list[Any] = []  # populated after button creation
+                _target_controls_ref = nif_target_controls_ref
 
                 def _set_ops_active(active: bool) -> None:
                     state = tk.NORMAL if active else tk.DISABLED
-                    for _btn in _action_buttons_ref:
+                    for _btn in (*_action_buttons_ref, *_target_controls_ref):
                         try:
                             _btn.configure(state=state)
                         except Exception:
