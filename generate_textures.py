@@ -203,6 +203,8 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "simplified_main_layout": True,
     "show_advanced_generation_controls": False,
     "show_advanced_workflow_outputs": False,
+    "qt_show_advanced_map_strengths": False,
+    "qt_show_truepbr_sidecar_settings": False,
     "batch_resume_mode": "start_fresh",
     "batch_checkpoint_path": "",
     "auto_patch_nifs": False,
@@ -763,6 +765,8 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         "simplified_main_layout",
         "show_advanced_generation_controls",
         "show_advanced_workflow_outputs",
+        "qt_show_advanced_map_strengths",
+        "qt_show_truepbr_sidecar_settings",
         "emboss_mode",
         "relief_mode",
         "include_diffuse",
@@ -967,6 +971,8 @@ def _merge_qt_generation_gui_state(
     truepbr_sidecar_roughness_scale: float | None = None,
     dark_mode: bool | None = None,
     ui_scale: float | None = None,
+    show_advanced_map_strengths: bool | None = None,
+    show_truepbr_sidecar_settings: bool | None = None,
 ) -> dict[str, object]:
     merged = dict(state)
     merged.update(
@@ -1022,6 +1028,12 @@ def _merge_qt_generation_gui_state(
         merged["dark_mode"] = dark_mode
     if ui_scale is not None:
         merged["ui_scale"] = ui_scale
+    for key, value in (
+        ("qt_show_advanced_map_strengths", show_advanced_map_strengths),
+        ("qt_show_truepbr_sidecar_settings", show_truepbr_sidecar_settings),
+    ):
+        if value is not None:
+            merged[key] = value
     return _normalize_gui_state(merged)
 
 
@@ -15570,6 +15582,7 @@ def _launch_qt_migration_gui() -> None:
     controls_layout.addWidget(workflow_note, output_group_row, 0, 1, 3)
     advanced_controls_toggle = QtWidgets.QToolButton()
     advanced_controls_toggle.setText("Advanced map strengths")
+    advanced_controls_toggle.setChecked(bool(qt_saved_state["qt_show_advanced_map_strengths"]))
     advanced_controls_toggle.setCheckable(True)
     advanced_controls_toggle.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
     advanced_controls_toggle.setArrowType(QtCore.Qt.ArrowType.RightArrow)
@@ -15601,7 +15614,7 @@ def _launch_qt_migration_gui() -> None:
             strength_control.setValue(float(qt_saved_state.get(key, default)))
         advanced_strength_controls[key] = strength_control
         advanced_controls_form.addRow(label, strength_control)
-    advanced_controls_panel.setVisible(False)
+    advanced_controls_panel.setVisible(advanced_controls_toggle.isChecked())
 
     def _toggle_advanced_strength_controls(expanded: bool) -> None:
         advanced_controls_panel.setVisible(expanded)
@@ -15610,9 +15623,11 @@ def _launch_qt_migration_gui() -> None:
         )
 
     advanced_controls_toggle.toggled.connect(_toggle_advanced_strength_controls)
+    advanced_controls_toggle.toggled.connect(_persist_qt_gui_state)
 
     truepbr_settings_toggle = QtWidgets.QToolButton()
     truepbr_settings_toggle.setText("TruePBR material settings (sidecar)")
+    truepbr_settings_toggle.setChecked(bool(qt_saved_state["qt_show_truepbr_sidecar_settings"]))
     truepbr_settings_toggle.setCheckable(True)
     truepbr_settings_toggle.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
     truepbr_settings_toggle.setArrowType(QtCore.Qt.ArrowType.RightArrow)
@@ -15648,7 +15663,7 @@ def _launch_qt_migration_gui() -> None:
     )
     truepbr_settings_note.setWordWrap(True)
     truepbr_settings_form.addRow(truepbr_settings_note)
-    truepbr_settings_panel.setVisible(False)
+    truepbr_settings_panel.setVisible(truepbr_settings_toggle.isChecked())
 
     def _toggle_truepbr_settings(expanded: bool) -> None:
         truepbr_settings_panel.setVisible(expanded)
@@ -15666,6 +15681,7 @@ def _launch_qt_migration_gui() -> None:
             control.setEnabled(enabled)
 
     truepbr_settings_toggle.toggled.connect(_toggle_truepbr_settings)
+    truepbr_settings_toggle.toggled.connect(_persist_qt_gui_state)
     truepbr_overrides_enabled_check.toggled.connect(_set_truepbr_override_controls_enabled)
     _set_truepbr_override_controls_enabled(truepbr_overrides_enabled_check.isChecked())
 
@@ -16105,6 +16121,8 @@ def _launch_qt_migration_gui() -> None:
             truepbr_sidecar_roughness_scale=truepbr_roughness_scale.value(),
             dark_mode=theme_check.isChecked(),
             ui_scale=float(ui_scale_combo.currentText()),
+            show_advanced_map_strengths=advanced_controls_toggle.isChecked(),
+            show_truepbr_sidecar_settings=truepbr_settings_toggle.isChecked(),
         )
         save_gui_state(state)
 

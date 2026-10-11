@@ -898,6 +898,8 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(bool(state["dark_mode"]))
         self.assertTrue(bool(state["simplified_main_layout"]))
         self.assertTrue(bool(state["auto_suggestions"]))
+        self.assertFalse(bool(state["qt_show_advanced_map_strengths"]))
+        self.assertFalse(bool(state["qt_show_truepbr_sidecar_settings"]))
 
     def test_qt_generation_settings_merge_with_shared_gui_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -941,12 +943,16 @@ class GenerateTexturesTests(unittest.TestCase):
                 truepbr_sidecar_roughness_scale=1.3,
                 dark_mode=True,
                 ui_scale=1.3,
+                show_advanced_map_strengths=True,
+                show_truepbr_sidecar_settings=False,
             )
 
         self.assertEqual(merged["input_path"], str(input_path))
         self.assertEqual(merged["output_path"], str(Path(temp_dir) / "out"))
         self.assertTrue(bool(merged["dark_mode"]))
         self.assertTrue(bool(merged["show_advanced_workflow_outputs"]))
+        self.assertTrue(bool(merged["qt_show_advanced_map_strengths"]))
+        self.assertFalse(bool(merged["qt_show_truepbr_sidecar_settings"]))
         self.assertFalse(bool(merged["include_diffuse"]))
         self.assertTrue(bool(merged["include_normal"]))
         self.assertFalse(bool(merged["include_parallax"]))
