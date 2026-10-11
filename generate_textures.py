@@ -13268,6 +13268,8 @@ if GUI_AVAILABLE:
                 _is_running = [False]
                 _cancel_requested = [False]
                 _close_when_idle = [False]
+                _ui_update_queue: queue.Queue[Callable[[], None]] = queue.Queue()
+                _ui_update_poll_active = [True]
                 _action_buttons_ref: list[Any] = []  # populated after button creation
                 _control_classes = {
                     "Button",
@@ -13353,12 +13355,30 @@ if GUI_AVAILABLE:
                     _request_cancel_nif_editor_ops()
 
                 def _queue_ui_update(callback: Callable[[], None]) -> None:
+                    _ui_update_queue.put(callback)
+
+                def _poll_ui_updates() -> None:
                     try:
                         if not win.winfo_exists():
+                            _ui_update_poll_active[0] = False
                             return
-                        win.after(0, callback)
                     except Exception:
+                        _ui_update_poll_active[0] = False
                         return
+                    for _ in range(100):
+                        try:
+                            callback = _ui_update_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                        try:
+                            callback()
+                        except Exception as exc:
+                            status_var.set(f"NIF Editor UI update failed: {exc}")
+                    if _ui_update_poll_active[0]:
+                        try:
+                            win.after(25, _poll_ui_updates)
+                        except Exception:
+                            _ui_update_poll_active[0] = False
 
                 def _start_nif_editor_worker(target: Callable[[], None], operation: str) -> None:
                     def _run() -> None:
@@ -13389,6 +13409,8 @@ if GUI_AVAILABLE:
 
                 def _safe_progress(val: float) -> None:
                     _queue_ui_update(lambda v=val: progress_var.set(v))
+
+                win.after(25, _poll_ui_updates)
 
                 # ---- end threading helpers -------------------------------------------
 
