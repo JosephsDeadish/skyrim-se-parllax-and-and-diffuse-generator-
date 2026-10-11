@@ -6707,6 +6707,99 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("BC7", "DXT5", "DXT3"))
             self.assertEqual(save_mock.call_args.args[1].name, "brick_rmaos.dds")
 
+    def test_run_with_options_renderer_output_matrix_has_exact_keys_and_paths(self) -> None:
+        cases = (
+            (
+                "vanilla-core",
+                {
+                    "include_diffuse": True,
+                    "include_normal": True,
+                    "include_parallax": True,
+                    "render_profile": "vanilla",
+                },
+                {
+                    "diffuse": "brick.dds",
+                    "normal": "brick_n.dds",
+                    "parallax": "brick_p.dds",
+                },
+            ),
+            (
+                "enb-complex",
+                {
+                    "include_diffuse": False,
+                    "include_normal": False,
+                    "include_parallax": False,
+                    "include_environment_mask": True,
+                    "include_complex": True,
+                    "env_mask_mode": "complex",
+                    "complex_format": "msn",
+                    "render_profile": "enb",
+                },
+                {
+                    "environment_mask": "brick_m.dds",
+                    "complex_material": "brick_msn.dds",
+                },
+            ),
+            (
+                "truepbr-plus-core-and-ao",
+                {
+                    "include_diffuse": True,
+                    "include_normal": True,
+                    "include_parallax": False,
+                    "include_glow": True,
+                    "include_rmaos": True,
+                    "include_ao": True,
+                    "render_profile": "truepbr",
+                },
+                {
+                    "diffuse": "brick.dds",
+                    "normal": "brick_n.dds",
+                    "glow": "brick_g.dds",
+                    "rmaos": "brick_rmaos.dds",
+                    "ao": "brick_ao.dds",
+                    "rmaos_json": "brick_rmaos.json",
+                },
+            ),
+            (
+                "optional-feature-maps",
+                {
+                    "include_diffuse": False,
+                    "include_normal": False,
+                    "include_parallax": False,
+                    "include_wetness_mask": True,
+                    "include_snow_mask": True,
+                    "include_ao": True,
+                    "include_roughness": True,
+                },
+                {
+                    "wetness_mask": "brick_wt.dds",
+                    "snow_mask": "brick_sm.dds",
+                    "ao": "brick_ao.dds",
+                    "roughness": "brick_rough.dds",
+                },
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            _sample_image().save(input_path)
+            for case_name, options, expected_names in cases:
+                with self.subTest(case=case_name), mock.patch(
+                    "generate_textures._save_with_dds_fallback",
+                    side_effect=lambda _image, path, **_kwargs: path,
+                ):
+                    outputs = run_with_options(
+                        input_file=input_path,
+                        output_dir=temp_path / case_name,
+                        **options,
+                    )
+                self.assertEqual(set(outputs), set(expected_names), case_name)
+                self.assertEqual(
+                    {key: Path(path).name for key, path in outputs.items()},
+                    expected_names,
+                    case_name,
+                )
+
     def test_run_with_options_rejects_env_mask_with_rmaos_combination(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
