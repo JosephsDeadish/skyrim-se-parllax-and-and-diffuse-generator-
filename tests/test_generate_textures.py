@@ -53,6 +53,7 @@ from generate_textures import (
     _normalize_gui_state,
     _merge_qt_generation_gui_state,
     _qt_profile_output_defaults,
+    _describe_qt_profile_guidance,
     _qt_preview_channel_options,
     _DARK_THEME,
     _LIGHT_THEME,
@@ -928,6 +929,16 @@ class GenerateTexturesTests(unittest.TestCase):
 
         self.assertFalse(any(_qt_profile_output_defaults("custom").values()))
         self.assertTrue(_qt_profile_output_defaults("vanilla")["include_diffuse"])
+
+    def test_qt_profile_guidance_documents_recommended_outputs_and_terrain_scope(self) -> None:
+        terrain_guidance = _describe_qt_profile_guidance("terrain").lower()
+        self.assertIn("<stem>_p.dds", terrain_guidance)
+        self.assertIn("does not build tiled landscape layers", terrain_guidance)
+        self.assertIn("profile selection does not change checked outputs", terrain_guidance)
+
+        truepbr_guidance = _describe_qt_profile_guidance("truepbr").lower()
+        self.assertIn("<stem>_rmaos.dds", truepbr_guidance)
+        self.assertIn("apply profile map defaults", truepbr_guidance)
 
     def test_qt_preview_loader_decodes_and_bounds_image_dimensions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

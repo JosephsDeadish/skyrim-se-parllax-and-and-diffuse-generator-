@@ -14797,6 +14797,25 @@ def _qt_profile_output_defaults(profile: str) -> dict[str, bool]:
     return {key: bool(value) for key, value in defaults.items()}
 
 
+def _describe_qt_profile_guidance(profile: str) -> str:
+    normalized_profile = _normalize_render_profile(profile)
+    profile_label = _RENDER_PROFILE_LABELS.get(
+        normalized_profile,
+        normalized_profile.replace("_", " ").title(),
+    )
+    guidance = (
+        f"{profile_label}: {describe_render_profile_files_to_create(normalized_profile)} "
+        f"{describe_render_profile_default_outputs(normalized_profile)}"
+    )
+    if normalized_profile == "terrain":
+        guidance += (
+            " Terrain mode generates maps for individual textures; it does not build tiled landscape "
+            "layers or Community Shaders terrain feature sets."
+        )
+    guidance += " Profile selection does not change checked outputs; use Apply profile map defaults to do that."
+    return guidance
+
+
 def _launch_qt_migration_gui() -> None:
     if not QT_GUI_AVAILABLE or QtWidgets is None or QtCore is None:
         install_hint = "Install PySide6 (pip install PySide6) to use the Qt migration UI."
@@ -15192,13 +15211,16 @@ def _launch_qt_migration_gui() -> None:
         1,
         0,
         1,
-        2,
+        3,
     )
     apply_profile_outputs_button = QtWidgets.QPushButton("Apply profile map defaults")
     apply_profile_outputs_button.setToolTip(
         "Replace the current map selections with this profile's recommended outputs."
     )
     controls_layout.addWidget(apply_profile_outputs_button, 1, 2)
+    profile_guidance_label = QtWidgets.QLabel()
+    profile_guidance_label.setWordWrap(True)
+    controls_layout.addWidget(profile_guidance_label, 3, 0, 1, 3)
     profile_recommendation_label = QtWidgets.QLabel("Select a texture file to see a renderer suggestion.")
     profile_recommendation_label.setWordWrap(True)
     controls_layout.addWidget(profile_recommendation_label, 2, 0, 1, 2)
@@ -15236,14 +15258,14 @@ def _launch_qt_migration_gui() -> None:
         include_roughness_check,
     )
     for index, control in enumerate(output_checks):
-        controls_layout.addWidget(control, 3 + index // 2, index % 2)
+        controls_layout.addWidget(control, 4 + index // 2, index % 2)
     workflow_note = QtWidgets.QLabel(
         "Vanilla/ENB _m and TruePBR _rmaos are separate Slot 5 workflows. "
         "Community Shaders _cm is Extended Materials, not TruePBR. "
         "_wt/_sm are shader-specific; terrain selection does not generate layered landscape sets."
     )
     workflow_note.setWordWrap(True)
-    controls_layout.addWidget(workflow_note, 3 + (len(output_checks) + 1) // 2, 0, 1, 2)
+    controls_layout.addWidget(workflow_note, 4 + (len(output_checks) + 1) // 2, 0, 1, 3)
     generation_layout.addWidget(controls_group)
 
     action_row = QtWidgets.QHBoxLayout()
@@ -15546,6 +15568,9 @@ def _launch_qt_migration_gui() -> None:
         use_profile_recommendation_button.setEnabled(
             qt_worker_thread is None and render_profile_combo.findText(suggested_profile) >= 0
         )
+
+    def _update_profile_guidance(*_: object) -> None:
+        profile_guidance_label.setText(_describe_qt_profile_guidance(render_profile_combo.currentText()))
 
     def _persist_qt_gui_state(*_: object) -> None:
         state = _merge_qt_generation_gui_state(
@@ -15934,6 +15959,7 @@ def _launch_qt_migration_gui() -> None:
         lambda checked: include_environment_mask_check.setChecked(False) if checked else None
     )
     render_profile_combo.currentTextChanged.connect(_persist_qt_gui_state)
+    render_profile_combo.currentTextChanged.connect(_update_profile_guidance)
     for option_check in output_checks:
         option_check.toggled.connect(_persist_qt_gui_state)
     preview_results_list.currentItemChanged.connect(_update_qt_preview_channels)
@@ -15941,6 +15967,7 @@ def _launch_qt_migration_gui() -> None:
 
     _update_resume_hint()
     _update_profile_recommendation()
+    _update_profile_guidance()
     _refresh_preview_state_badge()
     _refresh_checkpoint_health()
     window.setCentralWidget(root)
