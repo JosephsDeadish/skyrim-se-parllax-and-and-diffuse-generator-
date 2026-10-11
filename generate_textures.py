@@ -13300,7 +13300,6 @@ if GUI_AVAILABLE:
 
                 def _set_ops_active(active: bool) -> None:
                     state = tk.NORMAL if active else tk.DISABLED
-                    controls = (*_action_buttons_ref, *_operation_controls_ref)
                     if active:
                         for _control, _previous_state in _operation_control_states.items():
                             try:
