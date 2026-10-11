@@ -1245,6 +1245,23 @@ def compute_effective_ui_scale(*, pixels_per_inch: float, user_scale: float) -> 
     return max(0.8, min(2.5, baseline * user_scale))
 
 
+def _compute_qt_initial_window_size(
+    available_width: int,
+    available_height: int,
+    *,
+    preferred_width: int = 1080,
+    preferred_height: int = 760,
+    margin: int = 48,
+) -> tuple[int, int]:
+    safe_margin = max(0, int(margin))
+    usable_width = max(1, int(available_width) - 2 * safe_margin)
+    usable_height = max(1, int(available_height) - 2 * safe_margin)
+    return (
+        min(max(1, int(preferred_width)), usable_width),
+        min(max(1, int(preferred_height)), usable_height),
+    )
+
+
 @dataclass(frozen=True)
 class ModManagerContext:
     manager: str | None = None
@@ -15364,7 +15381,17 @@ def _launch_qt_migration_gui() -> None:
 
     window = QtWidgets.QMainWindow()
     window.setWindowTitle(f"Skyrim Texture Generator {APP_VERSION} — Qt migration preview")
-    window.resize(920, 620)
+    screen = app.primaryScreen()
+    if screen is None:
+        window.resize(920, 620)
+    else:
+        available_geometry = screen.availableGeometry()
+        window.resize(
+            *_compute_qt_initial_window_size(
+                available_geometry.width(),
+                available_geometry.height(),
+            )
+        )
     base_app_font = QtGui.QFont(app.font())
 
     root = QtWidgets.QWidget(window)

@@ -20,6 +20,7 @@ from generate_textures import (
     _create_panda_icon_image,
     _map_parallax_strength_to_nif_scale,
     _compute_tooltip_position,
+    _compute_qt_initial_window_size,
     _candidate_nif_patcher_search_dirs,
     compute_effective_ui_scale,
     _compute_nif_editor_controls_pane_height,
@@ -1600,6 +1601,12 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertAlmostEqual(compute_effective_ui_scale(pixels_per_inch=40, user_scale=0.1), 0.8)
         self.assertAlmostEqual(compute_effective_ui_scale(pixels_per_inch=800, user_scale=5), 2.5)
         self.assertAlmostEqual(compute_effective_ui_scale(pixels_per_inch=96, user_scale=1.25), 1.25)
+
+    def test_qt_initial_window_size_fits_screen_with_safe_margins(self) -> None:
+        self.assertEqual(_compute_qt_initial_window_size(1920, 1080), (1080, 760))
+        self.assertEqual(_compute_qt_initial_window_size(1280, 720), (1080, 624))
+        self.assertEqual(_compute_qt_initial_window_size(800, 600), (704, 504))
+        self.assertEqual(_compute_qt_initial_window_size(40, 30), (1, 1))
 
     def test_extract_mesh_paths_from_plugin_bytes_parses_nif_paths(self) -> None:
         blob = (
