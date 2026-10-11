@@ -58,11 +58,12 @@ This opens a desktop interface where you can:
 - pick an output folder
 - see detected MO2/Vortex context and loaded-mod texture folders when launched through a mod manager
 - use a **Use different output folder** toggle to switch between writing beside the input or writing to a custom location
-- choose diffuse/normal/parallax/glow/environment mask/RMAOS/complex material outputs
-- preview the **Before** source image and the currently selected output types (diffuse/normal/parallax/glow/environment mask/RMAOS/complex)
-- tune normal/parallax/glow/environment mask/RMAOS/complex/specular strengths
+- choose core maps (diffuse/normal/parallax/glow) plus renderer-specific and standalone outputs (environment mask, TruePBR RMAOS, complex material, wetness/snow masks, AO, and roughness)
+- preview generated maps and inspect individual image channels; TruePBR RMAOS previews label RGBA meanings and warn when alpha is missing
+- tune map-pixel strengths separately from the Qt TruePBR material-sidecar overrides, which are opt-in and do not create Community Shaders `PBRTextureSets` landscape JSON
 - choose the **Env mask mode**: `standard` (greyscale, vanilla Skyrim SE) or `complex` (RGBA packed, renderer-specific)
 - choose the **Target renderer** profile (**default: `custom`**) — includes `custom`, `vanilla`, `community_shaders`, `truepbr`, and `enb`
+- use the Terrain profile for individual texture maps; it does not build tiled landscape layers or terrain feature sets
 - generation applies renderer guardrails before processing so locked/auto-detected profiles automatically realign complex format, env mask mode, and parallax mode when they conflict
 - toggle **Emboss depth** for edge-ridge normal generation on flat printed assets (books/cards/scrolls/posters)
 - choose **Parallax mode**: `standard` (vanilla / Community Shaders Extended Materials) or `occlusion (ENB/POM)` for smoother ENBSeries POM heightmaps
