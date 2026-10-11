@@ -25,6 +25,7 @@ from generate_textures import (
     _compute_nif_editor_result_details_height,
     _drain_nif_editor_ui_updates,
     _make_batched_nif_result_enqueuer,
+    _make_debounced_callback,
     _make_latest_progress_update_enqueuer,
     _nif_editor_result_matches_filters,
     _can_append_nif_editor_result_incrementally,
@@ -228,6 +229,47 @@ class TestNifEditorLayoutSizing(unittest.TestCase):
 
 
 class TestNifEditorUiUpdateQueue(unittest.TestCase):
+    def test_debounced_callback_runs_only_after_latest_request(self) -> None:
+        scheduled: dict[int, tuple[int, object]] = {}
+        callbacks: dict[int, object] = {}
+        cancelled: list[int] = []
+        calls: list[str] = []
+        next_id = [0]
+
+        def _schedule(delay_ms: int, callback: object) -> int:
+            next_id[0] += 1
+            scheduled[next_id[0]] = (delay_ms, callback)
+            callbacks[next_id[0]] = callback
+            return next_id[0]
+
+        def _cancel(token: object) -> None:
+            cancelled.append(int(token))
+            scheduled.pop(int(token), None)
+
+        request, cancel_pending = _make_debounced_callback(
+            _schedule,
+            _cancel,
+            lambda: calls.append("render"),
+            delay_ms=120,
+        )
+
+        request()
+        request()
+
+        self.assertEqual(cancelled, [1])
+        self.assertEqual(list(scheduled), [2])
+        self.assertEqual(scheduled[2][0], 120)
+        self.assertEqual(calls, [])
+        callbacks[1]()  # type: ignore[operator]
+        self.assertEqual(calls, [])
+        callbacks[2]()  # type: ignore[operator]
+        self.assertEqual(calls, ["render"])
+
+        request()
+        cancel_pending()
+        self.assertEqual(len(cancelled), 2)
+        self.assertEqual(scheduled, {})
+
     def test_result_updates_batch_with_bounded_ui_work_and_defer_completion(self) -> None:
         updates: queue.Queue = queue.Queue()
         applied: list[tuple[str, str, str, int]] = []

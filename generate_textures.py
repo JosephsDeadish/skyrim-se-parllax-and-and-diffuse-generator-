@@ -5740,6 +5740,41 @@ def _drain_nif_editor_ui_updates(
     return drained
 
 
+def _make_debounced_callback(
+    schedule: Callable[[int, Callable[[], None]], object],
+    cancel: Callable[[object], None],
+    callback: Callable[[], None],
+    *,
+    delay_ms: int = 120,
+) -> tuple[Callable[[], None], Callable[[], None]]:
+    pending_token: list[object | None] = [None]
+    generation = [0]
+
+    def cancel_pending() -> None:
+        generation[0] += 1
+        token = pending_token[0]
+        pending_token[0] = None
+        if token is not None:
+            try:
+                cancel(token)
+            except Exception:
+                pass
+
+    def request() -> None:
+        cancel_pending()
+        scheduled_generation = generation[0]
+
+        def run_if_current() -> None:
+            if generation[0] != scheduled_generation:
+                return
+            pending_token[0] = None
+            callback()
+
+        pending_token[0] = schedule(max(0, delay_ms), run_if_current)
+
+    return request, cancel_pending
+
+
 def _make_latest_progress_update_enqueuer(
     updates: queue.Queue[Callable[[], None]],
     apply: Callable[[float], None],
@@ -13337,6 +13372,7 @@ if GUI_AVAILABLE:
                     _safe_add_row("WARN", "Batch summary", f"{label}\n" + "\n".join(lines))
 
                 def _clear_log() -> None:
+                    _cancel_results_tree_render()
                     for item in results_tree.get_children():
                         results_tree.delete(item)
                     full_row_details.clear()
@@ -13430,9 +13466,15 @@ if GUI_AVAILABLE:
 
                 results_tree.bind("<<TreeviewSelect>>", _on_result_selected)
                 results_tree.bind("<Button-3>", _show_tree_context_menu)
-                result_filter_var.trace_add("write", _render_results_tree)
-                result_status_filter_var.trace_add("write", _render_results_tree)
-                result_sort_var.trace_add("write", _render_results_tree)
+                _schedule_results_tree_render, _cancel_results_tree_render = _make_debounced_callback(
+                    win.after,
+                    win.after_cancel,
+                    _render_results_tree,
+                    delay_ms=120,
+                )
+                result_filter_var.trace_add("write", _schedule_results_tree_render)
+                result_status_filter_var.trace_add("write", _schedule_results_tree_render)
+                result_sort_var.trace_add("write", _schedule_results_tree_render)
 
                 # ---- Threading helpers -----------------------------------------------
                 # Scan/patch/restore operations run in daemon threads so the UI stays
