@@ -1058,18 +1058,32 @@ def _load_qt_preview_png(
     return buffer.getvalue()
 
 
-def _qt_preview_channel_options(path: str | os.PathLike[str]) -> tuple[tuple[str, str | None], ...]:
+def _qt_preview_channel_options(
+    path: str | os.PathLike[str],
+    output_key: str = "",
+) -> tuple[tuple[str, str | None], ...]:
     with Image.open(path) as image:
         bands = image.getbands()
+    channel_labels = {
+        "rmaos": {
+            "R": "R — Roughness",
+            "G": "G — Metallic",
+            "B": "B — Ambient occlusion",
+            "A": "A — Non-metal reflectance",
+        }
+    }.get(str(output_key or "").strip().lower(), {})
     if "L" in bands and not any(channel in bands for channel in ("R", "G", "B")):
         options = [("Composite", None), ("Grayscale", "L")]
         if "A" in bands:
-            options.append(("Alpha channel", "A"))
+            options.append((channel_labels.get("A", "Alpha channel"), "A"))
         return tuple(options)
     options: list[tuple[str, str | None]] = [("Composite", None)]
-    options.extend((f"{channel} channel", channel) for channel in ("R", "G", "B"))
+    options.extend(
+        (channel_labels.get(channel, f"{channel} channel"), channel)
+        for channel in ("R", "G", "B")
+    )
     if "A" in bands:
-        options.append(("Alpha channel", "A"))
+        options.append((channel_labels.get("A", "Alpha channel"), "A"))
     return tuple(options)
 
 
@@ -15877,10 +15891,15 @@ def _launch_qt_migration_gui() -> None:
     def _update_qt_preview_channels(*_: object) -> None:
         item = preview_results_list.currentItem()
         image_path = str(item.data(QtCore.Qt.ItemDataRole.UserRole) or "") if item else ""
+        output_key = str(item.data(QtCore.Qt.ItemDataRole.UserRole + 1) or "") if item else ""
         preview_channel_combo.blockSignals(True)
         try:
             preview_channel_combo.clear()
-            options = _qt_preview_channel_options(image_path) if image_path else (("Composite", None),)
+            options = (
+                _qt_preview_channel_options(image_path, output_key)
+                if image_path
+                else (("Composite", None),)
+            )
             for label, channel in options:
                 preview_channel_combo.addItem(label, channel)
         except Exception:

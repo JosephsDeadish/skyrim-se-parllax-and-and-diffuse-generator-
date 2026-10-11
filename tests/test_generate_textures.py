@@ -1128,12 +1128,26 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertIn("Validation passed", valid_message)
             self.assertIn("4 × 3 px", valid_message)
             self.assertIn("R, G, B, A", valid_message)
+            self.assertEqual(
+                _qt_preview_channel_options(rgba_path, "rmaos"),
+                (
+                    ("Composite", None),
+                    ("R — Roughness", "R"),
+                    ("G — Metallic", "G"),
+                    ("B — Ambient occlusion", "B"),
+                    ("A — Non-metal reflectance", "A"),
+                ),
+            )
 
             rgb_path = Path(temp_dir) / "rmaos_without_alpha.png"
             Image.new("RGB", (4, 3), (10, 20, 30)).save(rgb_path)
             warning_message = _inspect_qt_output_image(rgb_path, "rmaos")
             self.assertIn("Validation warning", warning_message)
             self.assertIn("should contain RGBA channels", warning_message)
+            self.assertNotIn(
+                ("A — Non-metal reflectance", "A"),
+                _qt_preview_channel_options(rgb_path, "rmaos"),
+            )
 
     def test_qt_output_inspection_does_not_impose_rgba_on_grayscale_masks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
