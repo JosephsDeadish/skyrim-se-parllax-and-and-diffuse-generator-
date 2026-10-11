@@ -13422,6 +13422,9 @@ if GUI_AVAILABLE:
                         return
                     self.nif_retry_count_var.set(int(retry_count_var.get()))
                     self._save_persisted_gui_state()
+                    retries_per_file = max(0, min(3, int(retry_count_var.get())))
+                    include_conflict_report = conflict_report_var.get()
+                    include_conflict_examples = conflict_examples_var.get()
                     _is_running[0] = True
                     _cancel_requested[0] = False
                     _set_ops_active(False)
@@ -13434,7 +13437,6 @@ if GUI_AVAILABLE:
                         latest_validation_codes.clear()
                         latest_conflict_files.clear()
                         plugin_context = discover_plugin_conflict_context_from_manager(nifs, self.manager_context)
-                        retries_per_file = max(0, min(3, int(retry_count_var.get())))
                         for index, nif in enumerate(nifs, start=1):
                             if _cancel_requested[0]:
                                 break
@@ -13475,7 +13477,7 @@ if GUI_AVAILABLE:
                                 if validation.suggestions:
                                     combined_detail_lines.append("Suggestions:")
                                     combined_detail_lines.extend(f"- {text}" for text in validation.suggestions)
-                                if conflict_report_var.get() and getattr(validation, "conflict_report", None):
+                                if include_conflict_report and getattr(validation, "conflict_report", None):
                                     combined_detail_lines.append("Conflict-resolution report:")
                                     for group in validation.conflict_report[:6]:
                                         code = getattr(group, "code", "unknown")
@@ -13485,7 +13487,7 @@ if GUI_AVAILABLE:
                                         combined_detail_lines.append(
                                             f"- {code}: {count} (profile={profile}, layout={layout})"
                                         )
-                                        if conflict_examples_var.get():
+                                        if include_conflict_examples:
                                             for example in tuple(getattr(group, "examples", ())[:2]):
                                                 combined_detail_lines.append(f"    example: {example}")
                                         for action in tuple(getattr(group, "suggested_actions", ())[:2]):
@@ -13536,7 +13538,7 @@ if GUI_AVAILABLE:
                                     f"Phase 1/4 (scan): {index}/{len(nifs)} file(s) processed; "
                                     f"{len(latest_conflict_files)} with conflicts/issues."
                                 )
-                        if conflict_report_var.get() and validations_for_summary:
+                        if include_conflict_report and validations_for_summary:
                             grouped_conflicts = summarize_validation_conflicts(validations_for_summary)
                             if grouped_conflicts:
                                 summary_lines = []
@@ -13607,6 +13609,19 @@ if GUI_AVAILABLE:
                         return
                     self.nif_retry_count_var.set(int(retry_count_var.get()))
                     self._save_persisted_gui_state()
+                    retries_per_file = max(0, min(3, int(retry_count_var.get())))
+                    remediation_options = {
+                        "target_game": target_game_var.get(),
+                        "experimental_fallout_write": experimental_fallout_write_var.get(),
+                        "fallout_allow_parallax_scale": fallout_allow_parallax_scale_var.get(),
+                        "fallout_allow_fix_mesh_lighting": fallout_allow_fix_mesh_lighting_var.get(),
+                        "fallout_allow_spec_strength": fallout_allow_spec_strength_var.get(),
+                        "fallout_allow_spec_color": fallout_allow_spec_color_var.get(),
+                        "fallout_allow_env_map_scale": fallout_allow_env_map_scale_var.get(),
+                        "backup": backup_var.get(),
+                        "dry_run": dry_run_var.get(),
+                        "dry_run_diff": dry_run_diff_var.get(),
+                    }
                     _is_running[0] = True
                     _cancel_requested[0] = False
                     _set_ops_active(False)
@@ -13617,7 +13632,6 @@ if GUI_AVAILABLE:
                     def _auto_fix_worker(nif_list=nifs) -> None:
                         ok = skip = fail = 0
                         failure_groups: dict[str, int] = {}
-                        retries_per_file = max(0, min(3, int(retry_count_var.get())))
                         for index, nif in enumerate(nif_list, start=1):
                             if _cancel_requested[0]:
                                 break
@@ -13638,17 +13652,8 @@ if GUI_AVAILABLE:
                                         result, steps = auto_remediate_nif_conflicts(
                                             nif,
                                             codes,
-                                            target_game=target_game_var.get(),
-                                            experimental_fallout_write=experimental_fallout_write_var.get(),
-                                            fallout_allow_parallax_scale=fallout_allow_parallax_scale_var.get(),
-                                            fallout_allow_fix_mesh_lighting=fallout_allow_fix_mesh_lighting_var.get(),
-                                            fallout_allow_spec_strength=fallout_allow_spec_strength_var.get(),
-                                            fallout_allow_spec_color=fallout_allow_spec_color_var.get(),
-                                            fallout_allow_env_map_scale=fallout_allow_env_map_scale_var.get(),
                                             allow_destructive=False,
-                                            backup=backup_var.get(),
-                                            dry_run=dry_run_var.get(),
-                                            dry_run_diff=dry_run_diff_var.get(),
+                                            **remediation_options,
                                         )
                                         if attempt > 0:
                                             _safe_add_row("WARN", nif.name, f"Auto-remediation succeeded after retry {attempt}/{retries_per_file}.")
@@ -13809,6 +13814,7 @@ if GUI_AVAILABLE:
                         fallout_allow_spec_color=fallout_allow_spec_color_var.get(),
                         fallout_allow_env_map_scale=fallout_allow_env_map_scale_var.get(),
                     )
+                    retries_per_file = max(0, min(3, int(retry_count_var.get())))
                     _is_running[0] = True
                     _cancel_requested[0] = False
                     _set_ops_active(False)
@@ -13821,7 +13827,6 @@ if GUI_AVAILABLE:
                         ok = skip = fail = 0
                         failure_groups: dict[str, int] = {}
                         status_interval = 25
-                        retries_per_file = max(0, min(3, int(retry_count_var.get())))
                         for index, nif in enumerate(nif_list, start=1):
                             if _cancel_requested[0]:
                                 break
@@ -13944,6 +13949,7 @@ if GUI_AVAILABLE:
                         fallout_allow_spec_color=fallout_allow_spec_color_var.get(),
                         fallout_allow_env_map_scale=fallout_allow_env_map_scale_var.get(),
                     )
+                    retries_per_file = max(0, min(3, int(retry_count_var.get())))
                     _is_running[0] = True
                     _cancel_requested[0] = False
                     _set_ops_active(False)
@@ -13956,7 +13962,6 @@ if GUI_AVAILABLE:
                         ok = skip = fail = 0
                         failure_groups: dict[str, int] = {}
                         status_interval = 25
-                        retries_per_file = max(0, min(3, int(retry_count_var.get())))
                         for index, nif in enumerate(nif_list, start=1):
                             if _cancel_requested[0]:
                                 break
