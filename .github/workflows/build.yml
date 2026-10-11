@@ -195,7 +195,7 @@ jobs:
             @{ Name = "light-small"; Dark = $false; Scale = 0.9; Width = 800; Height = 600 },
             @{ Name = "dark-large"; Dark = $true; Scale = 1.5; Width = 960; Height = 700 },
             @{ Name = "light-medium"; Dark = $false; Scale = 1.15; Width = 900; Height = 660 },
-            @{ Name = "dark-200-percent"; Dark = $true; Scale = 2.0; Width = 1100; Height = 700 }
+            @{ Name = "dark-200-percent"; Dark = $true; Scale = 2.0; Width = 960; Height = 700 }
           )
           $backends = @(
             @{ Name = "Tk"; ProcessName = "generate_textures"; Path = ".\dist\generate_textures.exe"; Backend = "tk"; StartupTimeout = 60 },
