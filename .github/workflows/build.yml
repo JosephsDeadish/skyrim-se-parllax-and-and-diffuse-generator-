@@ -181,21 +181,8 @@ jobs:
             public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int width, int height, uint flags);
             [DllImport("user32.dll", SetLastError = true)]
             public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
-            public static void CaptureWindow(IntPtr hWnd, string path) {
-              RECT rect;
-              if (!GetWindowRect(hWnd, out rect)) throw new InvalidOperationException("Could not read window bounds for screenshot.");
-              int width = rect.Right - rect.Left;
-              int height = rect.Bottom - rect.Top;
-              using (System.Drawing.Bitmap bitmap = new System.Drawing.Bitmap(width, height)) {
-                using (System.Drawing.Graphics graphics = System.Drawing.Graphics.FromImage(bitmap)) {
-                  graphics.CopyFromScreen(rect.Left, rect.Top, 0, 0, bitmap.Size);
-                }
-                bitmap.Save(path, System.Drawing.Imaging.ImageFormat.Png);
-              }
-            }
           }
           "@
-          Add-Type -AssemblyName System.Drawing
           $statePath = Join-Path $HOME ".skyrim_texture_generator_gui_state.json"
           $qtScreenshotDir = Join-Path $PWD "artifacts/qt_gui_window_smoke"
           New-Item -ItemType Directory -Force -Path $qtScreenshotDir | Out-Null
@@ -248,7 +235,9 @@ jobs:
                   throw "Packaged $($backend.Name) GUI '$($case.Name)' window bounds were ${actualWidth}x${actualHeight}; expected $($case.Width)x$($case.Height)."
                 }
                 if ($backend.Backend -eq "qt") {
-                  [WindowSmoke]::CaptureWindow($handle, (Join-Path $qtScreenshotDir "$($case.Name).png"))
+                  $screenshotPath = Join-Path $qtScreenshotDir "$($case.Name).png"
+                  python -c "import sys; from PIL import ImageGrab; ImageGrab.grab(bbox=tuple(map(int, sys.argv[1:5]))).save(sys.argv[5])" $rect.Left $rect.Top $rect.Right $rect.Bottom $screenshotPath
+                  if ($LASTEXITCODE -ne 0) { throw "Could not capture packaged Qt GUI '$($case.Name)' screenshot." }
                 }
                 Write-Host "Packaged $($backend.Name) GUI '$($case.Name)' started: $($case.Width)x$($case.Height), scale $($case.Scale), dark=$($case.Dark)."
               }
