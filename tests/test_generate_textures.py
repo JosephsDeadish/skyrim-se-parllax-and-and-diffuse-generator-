@@ -56,6 +56,7 @@ from generate_textures import (
     _qt_render_profile_modes,
     _qt_truepbr_material_overrides,
     _apply_qt_profile_output_defaults,
+    _QT_OUTPUT_GROUPS,
     _describe_qt_profile_guidance,
     _qt_preview_channel_options,
     _inspect_qt_output_image,
@@ -717,6 +718,29 @@ def _shield_art_image() -> Image.Image:
 
 
 class GenerateTexturesTests(unittest.TestCase):
+    def test_qt_output_groups_cover_each_map_choice_once(self) -> None:
+        flattened = [key for _, keys in _QT_OUTPUT_GROUPS for key in keys]
+        self.assertEqual(len(flattened), 11)
+        self.assertEqual(len(flattened), len(set(flattened)))
+        self.assertEqual(
+            set(flattened),
+            {
+                "diffuse",
+                "normal",
+                "parallax",
+                "glow",
+                "environment_mask",
+                "rmaos",
+                "complex",
+                "wetness_mask",
+                "snow_mask",
+                "ao",
+                "roughness",
+            },
+        )
+        self.assertEqual(_QT_OUTPUT_GROUPS[0][0], "Core maps")
+        self.assertIn("standalone", _QT_OUTPUT_GROUPS[1][0].lower())
+
     def _skip_unavailable_tk_display(self) -> None:
         if not hasattr(TextureGeneratorGUI, "_apply_persisted_gui_state"):
             self.skipTest("Tk GUI is unavailable in this environment.")

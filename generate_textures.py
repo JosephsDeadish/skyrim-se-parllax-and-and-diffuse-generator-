@@ -2490,6 +2490,21 @@ _RENDER_PROFILE_GUI_VALUES: tuple[str, ...] = (
 _QT_RENDER_PROFILE_VALUES: tuple[str, ...] = tuple(
     value for value in _RENDER_PROFILE_CLI_VALUES if value != "auto"
 )
+_QT_OUTPUT_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Core maps", ("diffuse", "normal", "parallax", "glow")),
+    (
+        "Renderer-specific and standalone maps",
+        (
+            "environment_mask",
+            "rmaos",
+            "complex",
+            "wetness_mask",
+            "snow_mask",
+            "ao",
+            "roughness",
+        ),
+    ),
+)
 
 _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     "custom": (
@@ -15473,28 +15488,41 @@ def _launch_qt_migration_gui() -> None:
     include_snow_mask_check = QtWidgets.QCheckBox("Dynamic snow mask (_sm)")
     include_ao_check = QtWidgets.QCheckBox("Standalone AO (_ao)")
     include_roughness_check = QtWidgets.QCheckBox("Standalone roughness (_rough)")
-    output_checks = (
-        include_diffuse_check,
-        include_normal_check,
-        include_parallax_check,
-        include_glow_check,
-        include_environment_mask_check,
-        include_rmaos_check,
-        include_complex_check,
-        include_wetness_mask_check,
-        include_snow_mask_check,
-        include_ao_check,
-        include_roughness_check,
+    output_controls = {
+        "diffuse": include_diffuse_check,
+        "normal": include_normal_check,
+        "parallax": include_parallax_check,
+        "glow": include_glow_check,
+        "environment_mask": include_environment_mask_check,
+        "rmaos": include_rmaos_check,
+        "complex": include_complex_check,
+        "wetness_mask": include_wetness_mask_check,
+        "snow_mask": include_snow_mask_check,
+        "ao": include_ao_check,
+        "roughness": include_roughness_check,
+    }
+    output_checks = tuple(
+        output_controls[key]
+        for _, output_keys in _QT_OUTPUT_GROUPS
+        for key in output_keys
     )
-    for index, control in enumerate(output_checks):
-        controls_layout.addWidget(control, 4 + index // 2, index % 2)
+    output_group_row = 4
+    for group_label, output_keys in _QT_OUTPUT_GROUPS:
+        output_group = QtWidgets.QGroupBox(group_label)
+        output_group_layout = QtWidgets.QGridLayout(output_group)
+        output_group_layout.setHorizontalSpacing(14)
+        output_group_layout.setVerticalSpacing(4)
+        for index, key in enumerate(output_keys):
+            output_group_layout.addWidget(output_controls[key], index // 2, index % 2)
+        controls_layout.addWidget(output_group, output_group_row, 0, 1, 3)
+        output_group_row += 1
     workflow_note = QtWidgets.QLabel(
         "Vanilla/ENB _m and TruePBR _rmaos are separate Slot 5 workflows. "
         "Community Shaders _cm is Extended Materials, not TruePBR. "
         "_wt/_sm are shader-specific; terrain selection does not generate layered landscape sets."
     )
     workflow_note.setWordWrap(True)
-    controls_layout.addWidget(workflow_note, 4 + (len(output_checks) + 1) // 2, 0, 1, 3)
+    controls_layout.addWidget(workflow_note, output_group_row, 0, 1, 3)
     advanced_controls_toggle = QtWidgets.QToolButton()
     advanced_controls_toggle.setText("Advanced map strengths")
     advanced_controls_toggle.setCheckable(True)
