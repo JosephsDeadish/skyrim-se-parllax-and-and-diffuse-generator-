@@ -15754,7 +15754,7 @@ def _launch_qt_migration_gui() -> None:
     truepbr_overrides_enabled_check.toggled.connect(_set_truepbr_override_controls_enabled)
     _set_truepbr_override_controls_enabled(truepbr_overrides_enabled_check.isChecked())
 
-    mode_row = 4 + (len(output_checks) + 1) // 2 + 1
+    mode_row = output_group_row + 1
     complex_format_combo = QtWidgets.QComboBox()
     complex_format_combo.addItem("ENB complex (_msn)", "msn")
     complex_format_combo.addItem("Community Shaders (_cm)", "cm")
