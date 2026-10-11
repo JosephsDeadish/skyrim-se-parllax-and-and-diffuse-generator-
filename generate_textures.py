@@ -14767,6 +14767,17 @@ def _recommend_qt_render_profile(
     )
 
 
+def _qt_profile_output_defaults(profile: str) -> dict[str, bool]:
+    normalized_profile = _normalize_render_profile(profile)
+    if normalized_profile == "auto":
+        normalized_profile = "vanilla"
+    defaults = _RENDER_PROFILE_OUTPUT_DEFAULTS.get(
+        normalized_profile,
+        _RENDER_PROFILE_OUTPUT_DEFAULTS["vanilla"],
+    )
+    return {key: bool(value) for key, value in defaults.items()}
+
+
 def _launch_qt_migration_gui() -> None:
     if not QT_GUI_AVAILABLE or QtWidgets is None or QtCore is None:
         install_hint = "Install PySide6 (pip install PySide6) to use the Qt migration UI."
@@ -15164,6 +15175,11 @@ def _launch_qt_migration_gui() -> None:
         1,
         2,
     )
+    apply_profile_outputs_button = QtWidgets.QPushButton("Apply profile map defaults")
+    apply_profile_outputs_button.setToolTip(
+        "Replace the current map selections with this profile's recommended outputs."
+    )
+    controls_layout.addWidget(apply_profile_outputs_button, 1, 2)
     profile_recommendation_label = QtWidgets.QLabel("Select a texture file to see a renderer suggestion.")
     profile_recommendation_label.setWordWrap(True)
     controls_layout.addWidget(profile_recommendation_label, 2, 0, 1, 2)
@@ -15529,6 +15545,24 @@ def _launch_qt_migration_gui() -> None:
         if profile_index >= 0:
             render_profile_combo.setCurrentIndex(profile_index)
 
+    def _apply_profile_output_defaults() -> None:
+        defaults = _qt_profile_output_defaults(render_profile_combo.currentText())
+        output_controls = {
+            "include_diffuse": include_diffuse_check,
+            "include_normal": include_normal_check,
+            "include_parallax": include_parallax_check,
+            "include_glow": include_glow_check,
+            "include_environment_mask": include_environment_mask_check,
+            "include_rmaos": include_rmaos_check,
+            "include_complex": include_complex_check,
+            "include_wetness_mask": include_wetness_mask_check,
+            "include_snow_mask": include_snow_mask_check,
+            "include_ao": include_ao_check,
+            "include_roughness": include_roughness_check,
+        }
+        for key, control in output_controls.items():
+            control.setChecked(defaults.get(key, False))
+
     def _effective_checkpoint_path() -> Path:
         text = checkpoint_path_edit.text().strip()
         if text:
@@ -15619,6 +15653,7 @@ def _launch_qt_migration_gui() -> None:
     def _set_running_state(running: bool) -> None:
         generate_button.setEnabled(not running)
         cancel_button.setEnabled(running)
+        apply_profile_outputs_button.setEnabled(not running)
         browse_input_button.setEnabled(not running)
         browse_output_button.setEnabled(not running)
         browse_checkpoint_button.setEnabled(not running)
@@ -15843,6 +15878,7 @@ def _launch_qt_migration_gui() -> None:
     resume_preview_button.clicked.connect(_resume_preview)
     render_deferred_button.clicked.connect(_render_deferred_now)
     use_profile_recommendation_button.clicked.connect(_apply_profile_recommendation)
+    apply_profile_outputs_button.clicked.connect(_apply_profile_output_defaults)
     theme_check.toggled.connect(_apply_qt_appearance)
     ui_scale_combo.currentTextChanged.connect(_apply_qt_appearance)
     resume_mode_combo.currentIndexChanged.connect(_update_resume_hint)

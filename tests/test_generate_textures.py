@@ -52,6 +52,7 @@ from generate_textures import (
     _run_cli,
     _normalize_gui_state,
     _merge_qt_generation_gui_state,
+    _qt_profile_output_defaults,
     _DARK_THEME,
     _LIGHT_THEME,
     _resolve_batch_workers,
@@ -912,6 +913,20 @@ class GenerateTexturesTests(unittest.TestCase):
             ),
             "community_shaders",
         )
+
+    def test_qt_profile_output_defaults_match_renderer_workflows(self) -> None:
+        truepbr = _qt_profile_output_defaults("truepbr")
+        self.assertTrue(truepbr["include_rmaos"])
+        self.assertFalse(truepbr["include_environment_mask"])
+        self.assertFalse(truepbr["include_complex"])
+
+        community_shaders = _qt_profile_output_defaults("community_shaders")
+        self.assertTrue(community_shaders["include_complex"])
+        self.assertFalse(community_shaders["include_rmaos"])
+        self.assertFalse(community_shaders["include_environment_mask"])
+
+        self.assertFalse(any(_qt_profile_output_defaults("custom").values()))
+        self.assertTrue(_qt_profile_output_defaults("vanilla")["include_diffuse"])
 
     def test_qt_preview_loader_decodes_and_bounds_image_dimensions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
