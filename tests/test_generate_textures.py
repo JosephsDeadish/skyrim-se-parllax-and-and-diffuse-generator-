@@ -864,6 +864,12 @@ class GenerateTexturesTests(unittest.TestCase):
                 complex_format="cm",
                 env_mask_mode="complex",
                 parallax_mode="occlusion",
+                normal_strength=3.25,
+                parallax_strength=2.5,
+                glow_threshold=140,
+                environment_mask_strength=1.8,
+                rmaos_strength=2.1,
+                complex_strength=1.7,
                 dark_mode=True,
                 ui_scale=1.3,
             )
@@ -888,6 +894,12 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(merged["complex_format"], "cm")
         self.assertEqual(merged["env_mask_mode"], "complex")
         self.assertEqual(merged["parallax_mode"], "occlusion (ENB/POM)")
+        self.assertEqual(merged["normal_strength"], 3.25)
+        self.assertEqual(merged["parallax_strength"], 2.5)
+        self.assertEqual(merged["glow_threshold"], 140)
+        self.assertEqual(merged["environment_mask_strength"], 1.8)
+        self.assertEqual(merged["rmaos_strength"], 2.1)
+        self.assertEqual(merged["complex_strength"], 1.7)
         self.assertTrue(bool(merged["dark_mode"]))
         self.assertAlmostEqual(float(merged["ui_scale"]), 1.3)
         self.assertEqual(merged["batch_resume_mode"], "resume")

@@ -921,6 +921,12 @@ def _merge_qt_generation_gui_state(
     complex_format: str | None = None,
     env_mask_mode: str | None = None,
     parallax_mode: str | None = None,
+    normal_strength: float | None = None,
+    parallax_strength: float | None = None,
+    glow_threshold: int | None = None,
+    environment_mask_strength: float | None = None,
+    rmaos_strength: float | None = None,
+    complex_strength: float | None = None,
     dark_mode: bool | None = None,
     ui_scale: float | None = None,
 ) -> dict[str, object]:
@@ -955,6 +961,16 @@ def _merge_qt_generation_gui_state(
         merged["env_mask_mode"] = env_mask_mode
     if parallax_mode is not None:
         merged["parallax_mode"] = parallax_mode
+    for key, value in (
+        ("normal_strength", normal_strength),
+        ("parallax_strength", parallax_strength),
+        ("glow_threshold", glow_threshold),
+        ("environment_mask_strength", environment_mask_strength),
+        ("rmaos_strength", rmaos_strength),
+        ("complex_strength", complex_strength),
+    ):
+        if value is not None:
+            merged[key] = value
     if dark_mode is not None:
         merged["dark_mode"] = dark_mode
     if ui_scale is not None:
@@ -14950,6 +14966,12 @@ def _launch_qt_migration_gui() -> None:
                 complex_format = str(self._options.get("complex_format", "msn") or "msn")
                 env_mask_mode = str(self._options.get("env_mask_mode", "standard") or "standard")
                 parallax_mode = str(self._options.get("parallax_mode", "standard") or "standard")
+                normal_strength = float(self._options.get("normal_strength", 2.0))
+                parallax_strength = float(self._options.get("parallax_strength", 1.35))
+                glow_threshold = int(self._options.get("glow_threshold", 190))
+                environment_mask_strength = float(self._options.get("environment_mask_strength", 1.2))
+                rmaos_strength = float(self._options.get("rmaos_strength", 1.2))
+                complex_strength = float(self._options.get("complex_strength", 1.15))
                 resume_mode = str(self._options.get("resume_mode", "start_fresh") or "start_fresh").strip().lower()
                 continue_on_error = bool(self._options.get("continue_on_error", True))
                 checkpoint_override = str(self._options.get("checkpoint_path", "") or "")
@@ -15063,6 +15085,12 @@ def _launch_qt_migration_gui() -> None:
                                 complex_format=complex_format,
                                 env_mask_mode=env_mask_mode,
                                 parallax_mode=parallax_mode,
+                                normal_strength=normal_strength,
+                                parallax_strength=parallax_strength,
+                                glow_threshold=glow_threshold,
+                                environment_mask_strength=environment_mask_strength,
+                                rmaos_strength=rmaos_strength,
+                                complex_strength=complex_strength,
                                 render_profile=render_profile,
                             )
                             output_payload = {name: str(path) for name, path in outputs.items()}
@@ -15130,6 +15158,12 @@ def _launch_qt_migration_gui() -> None:
                     complex_format=complex_format,
                     env_mask_mode=env_mask_mode,
                     parallax_mode=parallax_mode,
+                    normal_strength=normal_strength,
+                    parallax_strength=parallax_strength,
+                    glow_threshold=glow_threshold,
+                    environment_mask_strength=environment_mask_strength,
+                    rmaos_strength=rmaos_strength,
+                    complex_strength=complex_strength,
                     render_profile=render_profile,
                 )
                 output_payload = {name: str(path) for name, path in outputs.items()}
@@ -15320,6 +15354,45 @@ def _launch_qt_migration_gui() -> None:
     )
     workflow_note.setWordWrap(True)
     controls_layout.addWidget(workflow_note, 4 + (len(output_checks) + 1) // 2, 0, 1, 3)
+    advanced_controls_toggle = QtWidgets.QToolButton()
+    advanced_controls_toggle.setText("Advanced map strengths")
+    advanced_controls_toggle.setCheckable(True)
+    advanced_controls_toggle.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+    advanced_controls_toggle.setArrowType(QtCore.Qt.ArrowType.RightArrow)
+    advanced_controls_panel = QtWidgets.QWidget()
+    advanced_controls_form = QtWidgets.QFormLayout(advanced_controls_panel)
+    advanced_strength_controls: dict[str, object] = {}
+    advanced_strength_specs = (
+        ("normal_strength", "Normal strength", 0.1, 12.0, 2.0),
+        ("parallax_strength", "Parallax height strength", 0.1, 10.0, 1.35),
+        ("glow_threshold", "Glow threshold", 0, 255, 190),
+        ("environment_mask_strength", "Environment mask strength", 0.1, 12.0, 1.2),
+        ("rmaos_strength", "TruePBR RMAOS strength", 0.1, 12.0, 1.2),
+        ("complex_strength", "Complex material strength", 0.1, 12.0, 1.15),
+    )
+    for key, label, minimum, maximum, default in advanced_strength_specs:
+        if key == "glow_threshold":
+            strength_control = QtWidgets.QSpinBox()
+            strength_control.setRange(int(minimum), int(maximum))
+            strength_control.setValue(int(qt_saved_state.get(key, default)))
+        else:
+            strength_control = QtWidgets.QDoubleSpinBox()
+            strength_control.setRange(float(minimum), float(maximum))
+            strength_control.setDecimals(2)
+            strength_control.setSingleStep(0.1)
+            strength_control.setValue(float(qt_saved_state.get(key, default)))
+        advanced_strength_controls[key] = strength_control
+        advanced_controls_form.addRow(label, strength_control)
+    advanced_controls_panel.setVisible(False)
+
+    def _toggle_advanced_strength_controls(expanded: bool) -> None:
+        advanced_controls_panel.setVisible(expanded)
+        advanced_controls_toggle.setArrowType(
+            QtCore.Qt.ArrowType.DownArrow if expanded else QtCore.Qt.ArrowType.RightArrow
+        )
+
+    advanced_controls_toggle.toggled.connect(_toggle_advanced_strength_controls)
+
     mode_row = 4 + (len(output_checks) + 1) // 2 + 1
     complex_format_combo = QtWidgets.QComboBox()
     complex_format_combo.addItem("ENB complex (_msn)", "msn")
@@ -15342,6 +15415,8 @@ def _launch_qt_migration_gui() -> None:
     for control in (complex_format_combo, env_mask_mode_combo, parallax_mode_combo):
         control.setToolTip("Renderer presets select compatible modes. Custom mode exposes manual choices.")
     generation_layout.addWidget(controls_group)
+    generation_layout.addWidget(advanced_controls_toggle)
+    generation_layout.addWidget(advanced_controls_panel)
 
     action_row = QtWidgets.QHBoxLayout()
     generate_button = QtWidgets.QPushButton("Generate")
@@ -15728,6 +15803,12 @@ def _launch_qt_migration_gui() -> None:
             complex_format=str(complex_format_combo.currentData() or "msn"),
             env_mask_mode=str(env_mask_mode_combo.currentData() or "standard"),
             parallax_mode=str(parallax_mode_combo.currentData() or "standard"),
+            normal_strength=float(advanced_strength_controls["normal_strength"].value()),
+            parallax_strength=float(advanced_strength_controls["parallax_strength"].value()),
+            glow_threshold=int(advanced_strength_controls["glow_threshold"].value()),
+            environment_mask_strength=float(advanced_strength_controls["environment_mask_strength"].value()),
+            rmaos_strength=float(advanced_strength_controls["rmaos_strength"].value()),
+            complex_strength=float(advanced_strength_controls["complex_strength"].value()),
             dark_mode=theme_check.isChecked(),
             ui_scale=float(ui_scale_combo.currentText()),
         )
@@ -15895,6 +15976,8 @@ def _launch_qt_migration_gui() -> None:
         )
         for option_check in output_checks:
             option_check.setEnabled(not running)
+        for strength_control in advanced_strength_controls.values():
+            strength_control.setEnabled(not running)
 
     def _start_generation() -> None:
         nonlocal qt_worker_thread, qt_worker, preview_manual_paused, preview_auto_speed_off
@@ -15938,6 +16021,12 @@ def _launch_qt_migration_gui() -> None:
             "complex_format": str(complex_format_combo.currentData() or "msn"),
             "env_mask_mode": str(env_mask_mode_combo.currentData() or "standard"),
             "parallax_mode": str(parallax_mode_combo.currentData() or "standard"),
+            "normal_strength": float(advanced_strength_controls["normal_strength"].value()),
+            "parallax_strength": float(advanced_strength_controls["parallax_strength"].value()),
+            "glow_threshold": int(advanced_strength_controls["glow_threshold"].value()),
+            "environment_mask_strength": float(advanced_strength_controls["environment_mask_strength"].value()),
+            "rmaos_strength": float(advanced_strength_controls["rmaos_strength"].value()),
+            "complex_strength": float(advanced_strength_controls["complex_strength"].value()),
             "resume_mode": resume_mode_combo.currentText().strip(),
             "checkpoint_path": checkpoint_path_edit.text().strip(),
             "continue_on_error": continue_on_error_check.isChecked(),
@@ -16128,6 +16217,8 @@ def _launch_qt_migration_gui() -> None:
     render_profile_combo.currentTextChanged.connect(_update_qt_render_modes)
     for mode_control in (complex_format_combo, env_mask_mode_combo, parallax_mode_combo):
         mode_control.currentIndexChanged.connect(_persist_qt_gui_state)
+    for strength_control in advanced_strength_controls.values():
+        strength_control.valueChanged.connect(_persist_qt_gui_state)
     for output_control in (include_complex_check, include_environment_mask_check, include_parallax_check):
         output_control.toggled.connect(lambda _checked: _update_qt_render_modes(apply_profile=False))
     for option_check in output_checks:
