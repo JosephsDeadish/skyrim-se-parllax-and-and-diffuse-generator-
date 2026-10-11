@@ -5982,6 +5982,109 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(resumed_telemetry["failed_files"], 0)
             self.assertEqual(resumed_telemetry["resumed_completed_count"], input_count - 1)
 
+    def test_run_batch_with_options_resumes_truepbr_feature_map_combination(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "out"
+            checkpoint = root / "checkpoint.json"
+            input_dir.mkdir()
+            source_sizes = {
+                "01_good": (12, 10),
+                "02_repair": (16, 12),
+            }
+            for stem, size in source_sizes.items():
+                Image.new("RGB", size, color=(60, 100, 140)).save(
+                    input_dir / f"{stem}.dds",
+                    format="DDS",
+                    pixel_format="DXT5",
+                )
+            repair_path = input_dir / "02_repair.dds"
+            repair_path.write_bytes(b"corrupt source DDS")
+            options = {
+                "input_path": input_dir,
+                "output_dir": output_dir,
+                "include_diffuse": True,
+                "include_normal": True,
+                "include_parallax": False,
+                "include_glow": True,
+                "include_environment_mask": False,
+                "include_rmaos": True,
+                "include_complex": False,
+                "render_profile": "truepbr",
+                "include_wetness_mask": True,
+                "include_snow_mask": True,
+                "include_ao": True,
+                "include_roughness": True,
+                "continue_on_error": True,
+                "batch_workers": 1,
+                "checkpoint_file": checkpoint,
+            }
+            errors: list[str] = []
+            initial_outputs = run_batch_with_options(
+                **options,
+                error_callback=lambda _index, _total, path, _error: errors.append(path.name),
+            )
+            self.assertEqual(errors, [repair_path.name])
+            self.assertEqual([path.name for path in initial_outputs], ["01_good.dds"])
+            initial_maps = initial_outputs[input_dir / "01_good.dds"]
+            self.assertEqual(
+                set(initial_maps),
+                {
+                    "diffuse",
+                    "normal",
+                    "glow",
+                    "rmaos",
+                    "rmaos_json",
+                    "wetness_mask",
+                    "snow_mask",
+                    "ao",
+                    "roughness",
+                },
+            )
+            checkpoint_after_failure = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(checkpoint_after_failure["completed_success_count"], 1)
+            self.assertEqual(
+                checkpoint_after_failure["generation_options"]["include_rmaos"],
+                True,
+            )
+            self.assertEqual(
+                checkpoint_after_failure["generation_options"]["include_wetness_mask"],
+                True,
+            )
+            self.assertNotIn(str(repair_path.resolve()), checkpoint_after_failure["completed_success_files"])
+
+            Image.new("RGB", source_sizes["02_repair"], color=(60, 100, 140)).save(
+                repair_path,
+                format="DDS",
+                pixel_format="DXT5",
+            )
+            resumed_outputs = run_batch_with_options(
+                **options,
+                resume_from_checkpoint=True,
+            )
+            self.assertEqual([path.name for path in resumed_outputs], ["02_repair.dds"])
+            resumed_maps = resumed_outputs[repair_path]
+            self.assertEqual(set(resumed_maps), set(initial_maps))
+            self.assertEqual(
+                {key: Path(path).name for key, path in resumed_maps.items()},
+                {
+                    "diffuse": "02_repair.dds",
+                    "normal": "02_repair_n.dds",
+                    "glow": "02_repair_g.dds",
+                    "rmaos": "02_repair_rmaos.dds",
+                    "rmaos_json": "02_repair_rmaos.json",
+                    "wetness_mask": "02_repair_wt.dds",
+                    "snow_mask": "02_repair_sm.dds",
+                    "ao": "02_repair_ao.dds",
+                    "roughness": "02_repair_rough.dds",
+                },
+            )
+            self.assertTrue(Path(resumed_maps["rmaos_json"]).is_file())
+            final_checkpoint = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(final_checkpoint["resumed_completed_count"], 1)
+            self.assertEqual(final_checkpoint["completed_success_count"], 2)
+
     def test_run_batch_with_options_writes_batch_telemetry_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
