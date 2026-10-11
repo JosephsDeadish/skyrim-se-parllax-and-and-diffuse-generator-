@@ -9609,6 +9609,38 @@ class TestQtNifEditorRunner(unittest.TestCase):
         self.assertTrue(scan_nif(path)[0].has_parallax_flag)
         self.assertEqual(path.with_suffix(".nif.bak").read_bytes(), original)
 
+    def test_backup_failures_refuse_actual_runner_writes_and_continue(self) -> None:
+        denied = self.make_nif("denied.nif")
+        directory = self.make_nif("directory.nif")
+        corrupt = self.make_nif("corrupt.nif")
+        good = self.make_nif("good.nif")
+        originals = {path: path.read_bytes() for path in (denied, directory, corrupt, good)}
+        directory.with_suffix(".nif.bak").mkdir()
+        corrupt.with_suffix(".nif.bak").write_bytes(b"invalid backup")
+        denied_backup = denied.with_suffix(".nif.bak")
+        real_open = Path.open
+
+        def failing_open(path, *args, **kwargs):
+            if path == denied_backup:
+                raise PermissionError("Backup cannot be created")
+            return real_open(path, *args, **kwargs)
+
+        options = self.options(diffuse_texture_path="textures\\edited.dds", backup=False, dry_run=True)
+        with mock.patch.object(Path, "open", failing_open):
+            dry_summary = self.run_operation([denied, directory, corrupt, good], options)
+            self.assertEqual(dry_summary["success"], 4, dry_summary)
+            self.assertTrue(all(path.read_bytes() == data for path, data in originals.items()))
+            options.dry_run = False
+            summary = self.run_operation([denied, directory, corrupt, good], options)
+        self.assertEqual((summary["failed"], summary["success"]), (3, 1), summary)
+        for path in (denied, directory, corrupt):
+            self.assertEqual(path.read_bytes(), originals[path])
+        self.assertTrue(directory.with_suffix(".nif.bak").is_dir())
+        self.assertEqual(corrupt.with_suffix(".nif.bak").read_bytes(), b"invalid backup")
+        self.assertFalse(denied_backup.exists())
+        self.assertNotEqual(good.read_bytes(), originals[good])
+        self.assertEqual(good.with_suffix(".nif.bak").read_bytes(), originals[good])
+
     def test_per_file_failure_continue_and_between_file_cancellation(self) -> None:
         bad = self.root / "broken.nif"
         bad.write_bytes(b"broken")

@@ -580,6 +580,8 @@ class NifPatchOptions:
         Relative path for slot 4 (cube map for environment reflections).
     backup:
         Write a ``.nif.bak`` copy of the original before overwriting.
+        Refuse writes if creation fails or an existing backup is not a
+        readable, structurally valid regular NIF file. Existing backups are preserved.
     dry_run:
         Analyse what would change but do not write any files.
     disable_parallax:
@@ -3636,17 +3638,44 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
 
     if opts.backup:
         backup_path = nif_path.with_suffix(".nif.bak")
-        if backup_path.exists():
+        created_backup = False
+        try:
+            try:
+                with backup_path.open("xb") as backup_file:
+                    created_backup = True
+                    backup_file.write(original_data)
+            except FileExistsError:
+                pass
+            if backup_path.is_symlink() or not backup_path.is_file():
+                raise OSError("Backup must be a regular file, not a directory or symbolic link.")
+            if backup_path.samefile(nif_path):
+                raise OSError("Backup refers to the mesh itself and cannot preserve the original.")
+            backup_data = backup_path.read_bytes()
+            if created_backup and backup_data != original_data:
+                raise OSError("Backup content does not match the original mesh.")
+            backup_errors = _validate_patched_bytes_before_write(
+                backup_data,
+                allowed_profiles=allowed_profiles,
+                unknown_shader_type_map=opts.unknown_shader_type_map,
+            )
+            if backup_errors:
+                raise ValueError("Backup is not a usable NIF: " + backup_errors[0])
+        except (OSError, ValueError) as exc:
+            result.message = f"Backup failed — refusing to write patched file: {exc}"
+            result.errors.append(result.message)
+            if created_backup:
+                try:
+                    backup_path.unlink()
+                except OSError as cleanup_exc:
+                    result.warnings.append(f"Could not remove incomplete backup: {cleanup_exc}")
+            return result
+        if created_backup:
+            result.backup_path = backup_path
+        else:
             result.warnings.append(
                 f"Backup skipped — '{backup_path.name}' already exists. "
                 "Delete or rename it first to create a fresh backup."
             )
-        else:
-            try:
-                backup_path.write_bytes(original_data)
-                result.backup_path = backup_path
-            except OSError as exc:
-                result.errors.append(f"Backup failed (continuing): {exc}")
 
     try:
         nif_path.write_bytes(new_data)

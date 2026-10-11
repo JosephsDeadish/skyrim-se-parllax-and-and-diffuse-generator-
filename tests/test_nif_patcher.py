@@ -6536,7 +6536,7 @@ class TestBackupOverwriteProtection(unittest.TestCase):
         and adds a warning instead of silently overwriting the original backup."""
         nif = _write_nif(self.tmp)
         backup_path = nif.with_suffix(".nif.bak")
-        sentinel = b"original backup sentinel"
+        sentinel = nif.read_bytes()
         backup_path.write_bytes(sentinel)
 
         result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=True))
@@ -6559,10 +6559,122 @@ class TestBackupOverwriteProtection(unittest.TestCase):
     def test_patch_still_writes_nif_when_backup_skipped(self) -> None:
         """Skipping the backup must not prevent the NIF itself from being patched."""
         nif = _write_nif(self.tmp)
-        nif.with_suffix(".nif.bak").write_bytes(b"old backup")
+        nif.with_suffix(".nif.bak").write_bytes(nif.read_bytes())
         patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=True))
         infos = scan_nif(nif)
         self.assertTrue(infos[0].has_parallax_flag)
+
+    def test_backup_creation_failure_refuses_patch(self) -> None:
+        nif = _write_nif(self.tmp)
+        original = nif.read_bytes()
+        backup = nif.with_suffix(".nif.bak")
+        real_open = Path.open
+        for error in (PermissionError("Permission denied"), OSError(28, "No space left on device")):
+            with self.subTest(error=error):
+                def failing_open(path, *args, **kwargs):
+                    if path == backup:
+                        raise error
+                    return real_open(path, *args, **kwargs)
+
+                with mock.patch.object(Path, "open", failing_open):
+                    result = patch_nif(nif, NifPatchOptions(enable_parallax=True))
+                self.assertFalse(result.success)
+                self.assertIn("refusing to write", result.message)
+                self.assertEqual(nif.read_bytes(), original)
+                self.assertFalse(backup.exists())
+
+    def test_partial_backup_write_failure_removes_incomplete_backup(self) -> None:
+        nif = _write_nif(self.tmp)
+        original = nif.read_bytes()
+        backup = nif.with_suffix(".nif.bak")
+        real_open = Path.open
+
+        class FailingBackup:
+            def __init__(self, file):
+                self.file = file
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                self.file.close()
+
+            def write(self, data):
+                self.file.write(data[:16])
+                raise OSError(28, "No space left on device")
+
+        def failing_open(path, *args, **kwargs):
+            file = real_open(path, *args, **kwargs)
+            return FailingBackup(file) if path == backup and args == ("xb",) else file
+
+        with mock.patch.object(Path, "open", failing_open):
+            result = patch_nif(nif, NifPatchOptions(enable_parallax=True))
+        self.assertFalse(result.success)
+        self.assertEqual(nif.read_bytes(), original)
+        self.assertFalse(backup.exists())
+
+    def test_unusable_existing_backup_refuses_patch_and_preserves_backup(self) -> None:
+        nif = _write_nif(self.tmp)
+        original = nif.read_bytes()
+        backup = nif.with_suffix(".nif.bak")
+        for kind in ("directory", "corrupt", "truncated"):
+            with self.subTest(kind=kind):
+                if kind == "directory":
+                    backup.mkdir()
+                else:
+                    backup.write_bytes(b"not a NIF" if kind == "corrupt" else original[:-32])
+                before = None if kind == "directory" else backup.read_bytes()
+                result = patch_nif(nif, NifPatchOptions(enable_parallax=True))
+                self.assertFalse(result.success, result)
+                self.assertIn("refusing to write", result.message)
+                self.assertEqual(nif.read_bytes(), original)
+                if kind == "directory":
+                    self.assertTrue(backup.is_dir())
+                    backup.rmdir()
+                else:
+                    self.assertEqual(backup.read_bytes(), before)
+                    backup.unlink()
+
+    def test_unreadable_existing_backup_refuses_patch(self) -> None:
+        nif = _write_nif(self.tmp)
+        original = nif.read_bytes()
+        backup = nif.with_suffix(".nif.bak")
+        backup.write_bytes(original)
+        real_read = Path.read_bytes
+
+        def failing_read(path):
+            if path == backup:
+                raise PermissionError("Backup is unreadable")
+            return real_read(path)
+
+        with mock.patch.object(Path, "read_bytes", failing_read):
+            result = patch_nif(nif, NifPatchOptions(enable_parallax=True))
+        self.assertFalse(result.success)
+        self.assertEqual(nif.read_bytes(), original)
+        self.assertEqual(backup.read_bytes(), original)
+
+    def test_backup_hardlink_to_mesh_refuses_patch(self) -> None:
+        nif = _write_nif(self.tmp)
+        original = nif.read_bytes()
+        backup = nif.with_suffix(".nif.bak")
+        backup.hardlink_to(nif)
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True))
+        self.assertFalse(result.success)
+        self.assertEqual(nif.read_bytes(), original)
+        self.assertEqual(backup.read_bytes(), original)
+
+    def test_dry_run_does_not_create_or_validate_backup(self) -> None:
+        nif = _write_nif(self.tmp)
+        original = nif.read_bytes()
+        backup = nif.with_suffix(".nif.bak")
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, dry_run=True))
+        self.assertTrue(result.success)
+        self.assertFalse(backup.exists())
+        backup.mkdir()
+        result = patch_nif(nif, NifPatchOptions(enable_parallax=True, dry_run=True))
+        self.assertTrue(result.success)
+        self.assertTrue(backup.is_dir())
+        self.assertEqual(nif.read_bytes(), original)
 
     def test_result_has_warnings_field(self) -> None:
         """NifPatchResult must expose a 'warnings' list."""
