@@ -260,6 +260,7 @@ class TestNifEditorUiUpdateQueue(unittest.TestCase):
         self.assertEqual(list(scheduled), [2])
         self.assertEqual(scheduled[2][0], 120)
         self.assertEqual(calls, [])
+        scheduled.pop(2)
         callbacks[1]()  # type: ignore[operator]
         self.assertEqual(calls, [])
         callbacks[2]()  # type: ignore[operator]
