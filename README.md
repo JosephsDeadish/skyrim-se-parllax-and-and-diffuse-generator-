@@ -319,7 +319,7 @@ Batch folder mode scans subfolders and automatically skips generated variants (`
 |----------|---------------|-------|
 | **Vanilla Skyrim SE** | diffuse + `_n` | Add `_m` (greyscale) for reflective materials; add `_p` for parallax meshes |
 | **Community Shaders (Extended Materials)** | diffuse + `_n` + `_p` + `_cm` (or `_c` / `_C`) | `_cm`/`_c`/`_C`: R=Env reflection, G=Glossiness, B=Metallic, A=Height / mode-control alpha |
-| **Community Shaders TruePBR** | diffuse + `_n` + `_rmaos` (+ optional `_p`) | JSON-driven workflow; channel interpretation can vary by TruePBR config |
+| **Community Shaders TruePBR** | diffuse + `_n` + `_rmaos` (+ optional `_p`) | This app writes R=roughness, G=metallic, B=AO, A=non-metal reflectance; JSON-driven material settings are separate. Verify compatibility with your installed shader/config version. |
 | **ENBSeries complex (this app preset)** | diffuse + `_msn` + `_p` + `_m` | `_msn`: R=Nx, G=Ny, B=Nz, A=Spec; `_m` (complex preset): R=Reflection, G=Glossiness, B=Metalness, A=Height |
 
 Community Shaders Extended Materials and ENB complex material are separate workflows. Pick one target renderer **per mesh/material**, instead of trying to mix `_cm/_c` and ENB `_msn/_m` on the same asset.
