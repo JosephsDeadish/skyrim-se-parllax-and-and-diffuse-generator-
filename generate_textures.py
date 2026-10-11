@@ -6151,6 +6151,19 @@ def _write_qt_nif_scan_csv(
     return len(rows)
 
 
+def _format_qt_nif_scan_detail(row: Mapping[str, str] | None) -> str:
+    if not row:
+        return "Select a scan result to view its full path and diagnostics."
+    return "\n".join(
+        (
+            f"Status: {str(row.get('status', '') or 'UNKNOWN')}",
+            f"File: {str(row.get('preview', '') or row.get('file_name', '') or '(unknown)')}",
+            "",
+            str(row.get("details", "") or "No diagnostic details."),
+        )
+    )
+
+
 def _drain_nif_editor_ui_updates(
     updates: queue.Queue[Callable[[], None]],
     *,
@@ -15767,6 +15780,13 @@ def _launch_qt_migration_gui() -> None:
     nif_scan_results.setColumnWidth(0, 70)
     nif_scan_results.setColumnWidth(1, 220)
     nif_scan_layout.addWidget(nif_scan_results, 1)
+    nif_scan_detail_label = QtWidgets.QLabel("Selected result details")
+    nif_scan_layout.addWidget(nif_scan_detail_label)
+    nif_scan_detail_view = QtWidgets.QPlainTextEdit()
+    nif_scan_detail_view.setReadOnly(True)
+    nif_scan_detail_view.setPlaceholderText("Select a scan result to view its full path and diagnostics.")
+    nif_scan_detail_view.setMaximumHeight(150)
+    nif_scan_layout.addWidget(nif_scan_detail_view)
     nif_scan_page_row = QtWidgets.QHBoxLayout()
     nif_scan_previous_button = QtWidgets.QPushButton("Previous")
     nif_scan_page_label = QtWidgets.QLabel("Page 1 of 1")
@@ -16252,13 +16272,25 @@ def _launch_qt_migration_gui() -> None:
             )
             item.setToolTip(1, row["preview"])
             item.setToolTip(2, row["details"])
+            item.setData(0, QtCore.Qt.ItemDataRole.UserRole, row)
             nif_scan_results.addTopLevelItem(item)
+        current_item = nif_scan_results.currentItem()
+        if current_item is None and nif_scan_results.topLevelItemCount():
+            current_item = nif_scan_results.topLevelItem(0)
+            nif_scan_results.setCurrentItem(current_item)
+        _show_selected_nif_scan_detail(current_item)
         nif_scan_page_label.setText(
             f"Page {nif_scan_page_index + 1} of {page_count} · {len(filtered_rows)} result(s)"
         )
         nif_scan_previous_button.setEnabled(nif_scan_page_index > 0)
         nif_scan_next_button.setEnabled(nif_scan_page_index + 1 < page_count)
         nif_scan_export_button.setEnabled(nif_scan_thread is None and bool(filtered_rows))
+
+    def _show_selected_nif_scan_detail(item: object) -> None:
+        row = item.data(0, QtCore.Qt.ItemDataRole.UserRole) if item else None
+        nif_scan_detail_view.setPlainText(
+            _format_qt_nif_scan_detail(row if isinstance(row, dict) else None)
+        )
 
     def _add_nif_scan_result(row: object) -> None:
         if not isinstance(row, dict):
@@ -16693,6 +16725,7 @@ def _launch_qt_migration_gui() -> None:
         nif_scan_rows.clear()
         nif_scan_page_index = 0
         nif_scan_results.clear()
+        nif_scan_detail_view.setPlainText(_format_qt_nif_scan_detail(None))
         nif_scan_progress.setValue(0)
         nif_scan_status_label.setText(f"Starting read-only scan of {len(nif_paths)} NIF file(s)…")
         _set_nif_scan_running(True)
@@ -17014,6 +17047,9 @@ def _launch_qt_migration_gui() -> None:
     nif_scan_export_button.clicked.connect(_export_nif_scan_csv)
     nif_scan_filter_edit.textChanged.connect(_reset_nif_scan_page)
     nif_scan_status_filter.currentTextChanged.connect(_reset_nif_scan_page)
+    nif_scan_results.currentItemChanged.connect(
+        lambda item, _previous: _show_selected_nif_scan_detail(item)
+    )
     nif_scan_previous_button.clicked.connect(lambda: _change_nif_scan_page(-1))
     nif_scan_next_button.clicked.connect(lambda: _change_nif_scan_page(1))
     clear_checkpoint_button.clicked.connect(_clear_checkpoint)

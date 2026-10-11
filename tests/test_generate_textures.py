@@ -137,6 +137,7 @@ from generate_textures import (
     resolve_nif_editor_targets,
     _scan_nif_validation_rows,
     _write_qt_nif_scan_csv,
+    _format_qt_nif_scan_detail,
     resolve_env_mask_complex_workflow,
     resolve_nif_editor_patch_options_for_target,
     load_gui_state,
@@ -611,6 +612,22 @@ class TestNifEditorTargetResolution(unittest.TestCase):
 
 
 class TestQtNifValidationScan(unittest.TestCase):
+    def test_scan_selected_result_details_include_full_path_and_diagnostics(self) -> None:
+        details = _format_qt_nif_scan_detail(
+            {
+                "status": "WARN",
+                "file_name": "mesh.nif",
+                "preview": "C:/mods/example/meshes/mesh.nif",
+                "details": "Issue: missing texture slot\nConflict: shader_state.flag",
+            }
+        )
+        self.assertIn("Status: WARN", details)
+        self.assertIn("C:/mods/example/meshes/mesh.nif", details)
+        self.assertIn("Issue: missing texture slot\nConflict: shader_state.flag", details)
+
+    def test_scan_selected_result_details_have_empty_selection_guidance(self) -> None:
+        self.assertIn("Select a scan result", _format_qt_nif_scan_detail(None))
+
     def test_scan_csv_export_round_trips_full_diagnostics_and_paths(self) -> None:
         rows = [
             {
