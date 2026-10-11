@@ -12021,20 +12021,20 @@ if GUI_AVAILABLE:
                 return
 
             win = tk.Toplevel(self.root)
-            win.title(self._tr("NIF Editor — Skyrim Texture Generator v{version}").format(version=APP_VERSION))
-            screen_width = max(1024, int(win.winfo_screenwidth()))
-            screen_height = max(720, int(win.winfo_screenheight()))
-            initial_width = min(1680, max(1180, int(screen_width * 0.9)))
-            initial_height = min(1120, max(820, int(screen_height * 0.88)))
-            min_width = max(900, min(initial_width, 980))
-            min_height = max(680, min(initial_height, 720))
-            pos_x = max(0, (screen_width - initial_width) // 2)
-            pos_y = max(0, (screen_height - initial_height) // 2)
-            win.geometry(f"{initial_width}x{initial_height}+{pos_x}+{pos_y}")
-            win.minsize(min_width, min_height)
-            win.resizable(True, True)
-            win.grab_set()
             try:
+                win.title(self._tr("NIF Editor — Skyrim Texture Generator v{version}").format(version=APP_VERSION))
+                screen_width = max(1024, int(win.winfo_screenwidth()))
+                screen_height = max(720, int(win.winfo_screenheight()))
+                initial_width = min(1680, max(1180, int(screen_width * 0.9)))
+                initial_height = min(1120, max(820, int(screen_height * 0.88)))
+                min_width = max(900, min(initial_width, 980))
+                min_height = max(680, min(initial_height, 720))
+                pos_x = max(0, (screen_width - initial_width) // 2)
+                pos_y = max(0, (screen_height - initial_height) // 2)
+                win.geometry(f"{initial_width}x{initial_height}+{pos_x}+{pos_y}")
+                win.minsize(min_width, min_height)
+                win.resizable(True, True)
+                win.grab_set()
                 dark = self.dark_mode_var.get()
                 bg = _DARK_THEME["bg"] if dark else _LIGHT_THEME["bg"]
                 fg = _DARK_THEME["fg"] if dark else _LIGHT_THEME["fg"]
