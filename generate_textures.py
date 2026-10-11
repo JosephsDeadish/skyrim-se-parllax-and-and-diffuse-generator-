@@ -12149,11 +12149,27 @@ if GUI_AVAILABLE:
                 def _browse_nif() -> None:
                     if nif_scan_mode.get() == "folder":
                         selected = filedialog.askdirectory(title="Select mesh folder")
+                        if selected and not Path(selected).expanduser().is_dir():
+                            messagebox.showerror(
+                                "Invalid mesh folder",
+                                "Choose an existing folder containing NIF files.",
+                                parent=win,
+                            )
+                            return
                     else:
                         selected = filedialog.askopenfilename(
                             title="Select NIF file",
                             filetypes=[("NIF files", "*.nif"), ("All files", "*.*")],
                         )
+                        if selected:
+                            selected_path = Path(selected).expanduser()
+                            if not selected_path.is_file() or selected_path.suffix.lower() != ".nif":
+                                messagebox.showerror(
+                                    "Invalid NIF file",
+                                    "Choose an existing .nif file.",
+                                    parent=win,
+                                )
+                                return
                     if selected:
                         nif_path_var.set(selected)
 
@@ -12526,9 +12542,17 @@ if GUI_AVAILABLE:
                 enable_pom_var.trace_add("write", _on_pom_toggled)
 
                 def _on_nif_target_changed(*_: object) -> None:
+                    latest_validation_codes.clear()
+                    latest_conflict_files.clear()
+                    _clear_log()
                     if _normalize_render_profile(renderer_profile_var.get()) == "auto":
                         _apply_renderer_defaults()
                     _update_checkbox_warnings()
+                    if nif_path_var.get().strip():
+                        _, target_error = resolve_nif_editor_targets(nif_path_var.get(), nif_scan_mode.get())
+                        status_var.set(
+                            target_error or "NIF target changed. Scan again before using conflict-only actions."
+                        )
 
                 def _sync_target_game_controls(*_: object) -> None:
                     selected_game = (target_game_var.get() or "auto").strip().lower()
@@ -12566,8 +12590,6 @@ if GUI_AVAILABLE:
                     ):
                         gate_check.configure(state=gate_state)
 
-                nif_path_var.trace_add("write", _on_nif_target_changed)
-                nif_scan_mode.trace_add("write", _on_nif_target_changed)
                 for watch_var in (
                     enable_parallax_var,
                     enable_pom_var,
@@ -13151,6 +13173,13 @@ if GUI_AVAILABLE:
                     status_var.set("Results cleared.")
                     progress_var.set(0.0)
 
+                def _show_no_nifs(default_message: str) -> None:
+                    _, target_error = resolve_nif_editor_targets(nif_path_var.get(), nif_scan_mode.get())
+                    _add_result_row("WARN", "—", target_error or default_message)
+
+                nif_path_var.trace_add("write", _on_nif_target_changed)
+                nif_scan_mode.trace_add("write", _on_nif_target_changed)
+
                 def _on_result_selected(_event: object | None = None) -> None:
                     selected = results_tree.selection()
                     if not selected:
@@ -13344,7 +13373,7 @@ if GUI_AVAILABLE:
                     if not preserve_log:
                         _clear_log()
                     if not nifs:
-                        _add_result_row("WARN", "—", "No NIF files found.")
+                        _show_no_nifs("No NIF files found.")
                         return
                     if _is_running[0]:
                         status_var.set("Another operation is in progress. Please wait.")
@@ -13529,7 +13558,7 @@ if GUI_AVAILABLE:
                     if not preserve_log:
                         _clear_log()
                     if not nifs:
-                        _add_result_row("WARN", "—", "No NIF files found at the selected path.")
+                        _show_no_nifs("No NIF files found at the selected path.")
                         return
                     if _is_running[0]:
                         status_var.set("Another operation is in progress. Please wait.")
@@ -13645,7 +13674,7 @@ if GUI_AVAILABLE:
                     if not preserve_log:
                         _clear_log()
                     if not nifs:
-                        _add_result_row("WARN", "—", "No NIF files found at the selected path.")
+                        _show_no_nifs("No NIF files found at the selected path.")
                         return
                     warnings_to_confirm = get_nif_patch_option_warnings(
                         selected_profile=str(renderer_profile_var.get() or "auto"),
@@ -13828,7 +13857,7 @@ if GUI_AVAILABLE:
                     nifs = _resolve_nifs()
                     _clear_log()
                     if not nifs:
-                        _add_result_row("WARN", "—", "No NIF files found at the selected path.")
+                        _show_no_nifs("No NIF files found at the selected path.")
                         return
                     selected_unpatch_actions = [
                         disable_parallax_var.get(),
@@ -13954,7 +13983,7 @@ if GUI_AVAILABLE:
                     nifs = _resolve_nifs()
                     _clear_log()
                     if not nifs:
-                        _add_result_row("WARN", "—", "No NIF files found at the selected path.")
+                        _show_no_nifs("No NIF files found at the selected path.")
                         return
                     proceed = messagebox.askyesno(
                         "Restore from backups",
