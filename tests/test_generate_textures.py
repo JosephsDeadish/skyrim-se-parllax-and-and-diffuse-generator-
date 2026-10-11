@@ -5528,6 +5528,39 @@ class GenerateTexturesTests(unittest.TestCase):
                     **{**baseline_options, "resume_from_checkpoint": True},
                 )
 
+    def test_run_batch_with_options_rejects_corrupt_resume_checkpoint_without_overwriting(self) -> None:
+        malformed_checkpoints = (
+            ("invalid-json", b'{"completed_success_files": ['),
+            ("non-object-json", b"[]"),
+            ("invalid-completed-list", b'{"completed_success_files": ["valid", 3]}'),
+            ("wrong-completed-type", b'{"completed_success_files": "valid"}'),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            input_dir.mkdir()
+            _sample_image().save(input_dir / "a.dds", format="DDS", pixel_format="DXT5")
+            for case_name, checkpoint_contents in malformed_checkpoints:
+                with self.subTest(case=case_name):
+                    checkpoint = temp_path / f"{case_name}.json"
+                    checkpoint.write_bytes(checkpoint_contents)
+                    with mock.patch("generate_textures.run_with_options") as generate_mock:
+                        with self.assertRaisesRegex(ValueError, "Checkpoint"):
+                            run_batch_with_options(
+                                input_path=input_dir,
+                                output_dir=temp_path / "out",
+                                include_diffuse=True,
+                                include_normal=False,
+                                include_parallax=False,
+                                include_glow=False,
+                                include_environment_mask=False,
+                                include_complex=False,
+                                checkpoint_file=checkpoint,
+                                resume_from_checkpoint=True,
+                            )
+                    generate_mock.assert_not_called()
+                    self.assertEqual(checkpoint.read_bytes(), checkpoint_contents)
+
     def test_run_batch_with_options_resume_checkpoint_skips_completed_successes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)

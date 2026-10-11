@@ -8146,24 +8146,28 @@ def run_batch_with_options(
     if checkpoint_file is not None and resume_from_checkpoint and checkpoint_file.exists():
         try:
             payload = json.loads(checkpoint_file.read_text(encoding="utf-8"))
-        except Exception:
-            payload = {}
-        if isinstance(payload, dict):
-            checkpoint_input_root = str(payload.get("input_root", "") or "").strip()
-            if checkpoint_input_root and checkpoint_input_root != _checkpoint_key(input_path):
-                raise ValueError("Checkpoint input path differs; start fresh or use the original input.")
-            checkpoint_output_root = str(payload.get("output_root", "") or "").strip()
-            if checkpoint_output_root and checkpoint_output_root != _checkpoint_key(effective_output_root):
-                raise ValueError("Checkpoint output folder differs; start fresh or use the original output folder.")
-            checkpoint_options = payload.get("generation_options")
-            if checkpoint_options is not None:
-                if not isinstance(checkpoint_options, dict):
-                    raise ValueError("Checkpoint generation settings are invalid; start fresh.")
-                if checkpoint_options != generation_options:
-                    raise ValueError("Checkpoint generation settings differ; start fresh or use the original settings.")
-            raw_completed = payload.get("completed_success_files", [])
-            if isinstance(raw_completed, list):
-                completed_success_files = {str(entry) for entry in raw_completed if isinstance(entry, str)}
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                "Checkpoint could not be read; start fresh or repair the checkpoint before resuming."
+            ) from exc
+        if not isinstance(payload, dict):
+            raise ValueError("Checkpoint data is invalid; start fresh or repair the checkpoint before resuming.")
+        checkpoint_input_root = str(payload.get("input_root", "") or "").strip()
+        if checkpoint_input_root and checkpoint_input_root != _checkpoint_key(input_path):
+            raise ValueError("Checkpoint input path differs; start fresh or use the original input.")
+        checkpoint_output_root = str(payload.get("output_root", "") or "").strip()
+        if checkpoint_output_root and checkpoint_output_root != _checkpoint_key(effective_output_root):
+            raise ValueError("Checkpoint output folder differs; start fresh or use the original output folder.")
+        checkpoint_options = payload.get("generation_options")
+        if checkpoint_options is not None:
+            if not isinstance(checkpoint_options, dict):
+                raise ValueError("Checkpoint generation settings are invalid; start fresh.")
+            if checkpoint_options != generation_options:
+                raise ValueError("Checkpoint generation settings differ; start fresh or use the original settings.")
+        raw_completed = payload.get("completed_success_files", [])
+        if not isinstance(raw_completed, list) or any(not isinstance(entry, str) for entry in raw_completed):
+            raise ValueError("Checkpoint completed-file list is invalid; start fresh or repair the checkpoint.")
+        completed_success_files = set(raw_completed)
         resumed_completed_count = len(completed_success_files)
         input_files = [path for path in input_files if _checkpoint_key(path) not in completed_success_files]
 
