@@ -45,6 +45,7 @@ from generate_textures import (
     _RENDER_PROFILE_GUI_VALUES,
     _run_cli,
     _normalize_gui_state,
+    _merge_qt_generation_gui_state,
     _resolve_batch_workers,
     _summarize_batch_texture_dimensions,
     _visible_preview_output_keys,
@@ -707,6 +708,35 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(bool(state["dark_mode"]))
         self.assertTrue(bool(state["simplified_main_layout"]))
         self.assertTrue(bool(state["auto_suggestions"]))
+
+    def test_qt_generation_settings_merge_with_shared_gui_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "source.dds"
+            input_path.write_bytes(b"source")
+            merged = _merge_qt_generation_gui_state(
+                {"dark_mode": True, "show_advanced_workflow_outputs": True},
+                input_path=str(input_path),
+                output_path=str(Path(temp_dir) / "out"),
+                include_diffuse=False,
+                include_normal=True,
+                include_parallax=False,
+                include_glow=True,
+                include_environment_mask=True,
+                resume_mode="resume",
+                checkpoint_path=str(Path(temp_dir) / "checkpoint.json"),
+            )
+
+        self.assertEqual(merged["input_path"], str(input_path))
+        self.assertEqual(merged["output_path"], str(Path(temp_dir) / "out"))
+        self.assertTrue(bool(merged["dark_mode"]))
+        self.assertTrue(bool(merged["show_advanced_workflow_outputs"]))
+        self.assertFalse(bool(merged["include_diffuse"]))
+        self.assertTrue(bool(merged["include_normal"]))
+        self.assertFalse(bool(merged["include_parallax"]))
+        self.assertTrue(bool(merged["include_glow"]))
+        self.assertTrue(bool(merged["include_environment_mask"]))
+        self.assertEqual(merged["batch_resume_mode"], "resume")
+        self.assertEqual(merged["batch_checkpoint_path"], str(Path(temp_dir) / "checkpoint.json"))
 
     def test_save_gui_state_round_trips_expected_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -895,6 +895,36 @@ def save_gui_state(state: Mapping[str, object], state_file: Path = GUI_STATE_FIL
         pass
 
 
+def _merge_qt_generation_gui_state(
+    state: Mapping[str, object],
+    *,
+    input_path: str,
+    output_path: str,
+    include_diffuse: bool,
+    include_normal: bool,
+    include_parallax: bool,
+    include_glow: bool,
+    include_environment_mask: bool,
+    resume_mode: str,
+    checkpoint_path: str,
+) -> dict[str, object]:
+    merged = dict(state)
+    merged.update(
+        {
+            "input_path": input_path,
+            "output_path": output_path,
+            "include_diffuse": include_diffuse,
+            "include_normal": include_normal,
+            "include_parallax": include_parallax,
+            "include_glow": include_glow,
+            "include_environment_mask": include_environment_mask,
+            "batch_resume_mode": resume_mode,
+            "batch_checkpoint_path": checkpoint_path,
+        }
+    )
+    return _normalize_gui_state(merged)
+
+
 def discover_ui_languages(translations_dir: Path = UI_TRANSLATIONS_DIR) -> tuple[str, ...]:
     if not translations_dir.exists():
         return ("en",)
@@ -14815,6 +14845,7 @@ def _launch_qt_migration_gui() -> None:
     app = QtWidgets.QApplication.instance()
     if app is None:
         app = QtWidgets.QApplication(sys.argv)
+    qt_saved_state = load_gui_state()
 
     window = QtWidgets.QMainWindow()
     window.setWindowTitle(f"Skyrim Texture Generator {APP_VERSION} — Qt migration preview")
@@ -14986,6 +15017,17 @@ def _launch_qt_migration_gui() -> None:
     continue_on_error_check = QtWidgets.QCheckBox("Continue batch on per-file errors")
     continue_on_error_check.setChecked(True)
     batch_layout.addWidget(continue_on_error_check)
+    input_path_edit.setText(str(qt_saved_state["input_path"]))
+    output_dir_edit.setText(str(qt_saved_state["output_path"]))
+    include_diffuse_check.setChecked(bool(qt_saved_state["include_diffuse"]))
+    include_normal_check.setChecked(bool(qt_saved_state["include_normal"]))
+    include_parallax_check.setChecked(bool(qt_saved_state["include_parallax"]))
+    include_glow_check.setChecked(bool(qt_saved_state["include_glow"]))
+    include_environment_mask_check.setChecked(bool(qt_saved_state["include_environment_mask"]))
+    resume_index = resume_mode_combo.findText(str(qt_saved_state["batch_resume_mode"]))
+    if resume_index >= 0:
+        resume_mode_combo.setCurrentIndex(resume_index)
+    checkpoint_path_edit.setText(str(qt_saved_state["batch_checkpoint_path"]))
     checkpoint_health_label = QtWidgets.QLabel("Checkpoint: pending")
     batch_layout.addWidget(checkpoint_health_label)
     queue_hint_label = QtWidgets.QLabel("Queue behavior: Qt signal-driven progress updates.")
@@ -15033,6 +15075,21 @@ def _launch_qt_migration_gui() -> None:
             resume_mode_hint.setText("Resume skips files already recorded in checkpoint.")
         else:
             resume_mode_hint.setText("Start fresh ignores prior checkpoint entries.")
+
+    def _persist_qt_gui_state(*_: object) -> None:
+        state = _merge_qt_generation_gui_state(
+            load_gui_state(),
+            input_path=input_path_edit.text(),
+            output_path=output_dir_edit.text(),
+            include_diffuse=include_diffuse_check.isChecked(),
+            include_normal=include_normal_check.isChecked(),
+            include_parallax=include_parallax_check.isChecked(),
+            include_glow=include_glow_check.isChecked(),
+            include_environment_mask=include_environment_mask_check.isChecked(),
+            resume_mode=resume_mode_combo.currentText(),
+            checkpoint_path=checkpoint_path_edit.text(),
+        )
+        save_gui_state(state)
 
     def _effective_checkpoint_path() -> Path:
         text = checkpoint_path_edit.text().strip()
@@ -15323,6 +15380,18 @@ def _launch_qt_migration_gui() -> None:
     input_path_edit.textChanged.connect(_refresh_checkpoint_health)
     output_dir_edit.textChanged.connect(_refresh_checkpoint_health)
     checkpoint_path_edit.textChanged.connect(_refresh_checkpoint_health)
+    input_path_edit.textChanged.connect(_persist_qt_gui_state)
+    output_dir_edit.textChanged.connect(_persist_qt_gui_state)
+    checkpoint_path_edit.textChanged.connect(_persist_qt_gui_state)
+    resume_mode_combo.currentTextChanged.connect(_persist_qt_gui_state)
+    for option_check in (
+        include_diffuse_check,
+        include_normal_check,
+        include_parallax_check,
+        include_glow_check,
+        include_environment_mask_check,
+    ):
+        option_check.toggled.connect(_persist_qt_gui_state)
 
     _update_resume_hint()
     _refresh_preview_state_badge()
