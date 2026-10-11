@@ -24,6 +24,7 @@ from generate_textures import (
     _compute_nif_editor_controls_pane_height,
     _compute_nif_editor_result_details_height,
     _drain_nif_editor_ui_updates,
+    _set_nif_editor_controls_active,
     _format_nif_result_row_details,
     discover_plugin_conflict_context_from_manager,
     discover_ui_languages,
@@ -260,6 +261,35 @@ class TestNifEditorUiUpdateQueue(unittest.TestCase):
         self.assertEqual(drained, 2)
         self.assertEqual(errors, ["callback failed"])
         self.assertEqual(completed, ["later"])
+
+
+class TestNifEditorOperationControlStates(unittest.TestCase):
+    class FakeControl:
+        def __init__(self, state: str) -> None:
+            self.state = state
+
+        def cget(self, option: str) -> str:
+            if option != "state":
+                raise ValueError(option)
+            return self.state
+
+        def configure(self, *, state: str) -> None:
+            self.state = state
+
+    def test_disables_controls_and_restores_each_original_state(self) -> None:
+        controls = [
+            self.FakeControl("normal"),
+            self.FakeControl("readonly"),
+            self.FakeControl("disabled"),
+        ]
+        saved_states: dict[object, str] = {}
+
+        _set_nif_editor_controls_active(controls, saved_states, active=False)
+        self.assertEqual([control.state for control in controls], ["disabled"] * 3)
+
+        _set_nif_editor_controls_active(controls, saved_states, active=True)
+        self.assertEqual([control.state for control in controls], ["normal", "readonly", "disabled"])
+        self.assertEqual(saved_states, {})
 
 
 class TestNifEditorTargetResolution(unittest.TestCase):

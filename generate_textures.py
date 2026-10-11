@@ -5740,6 +5740,28 @@ def _drain_nif_editor_ui_updates(
     return drained
 
 
+def _set_nif_editor_controls_active(
+    controls: Sequence[Any],
+    saved_states: dict[Any, str],
+    *,
+    active: bool,
+) -> None:
+    if active:
+        for control, previous_state in saved_states.items():
+            try:
+                control.configure(state=previous_state)
+            except Exception:
+                pass
+        saved_states.clear()
+        return
+    for control in controls:
+        try:
+            saved_states[control] = str(control.cget("state"))
+            control.configure(state="disabled")
+        except Exception:
+            continue
+
+
 def resolve_nif_editor_patch_options_for_target(
     nif_path: Path,
     base_options: NifPatchOptions,
@@ -13326,20 +13348,11 @@ if GUI_AVAILABLE:
 
                 def _set_ops_active(active: bool) -> None:
                     state = tk.NORMAL if active else tk.DISABLED
-                    if active:
-                        for _control, _previous_state in _operation_control_states.items():
-                            try:
-                                _control.configure(state=_previous_state)
-                            except Exception:
-                                pass
-                        _operation_control_states.clear()
-                    else:
-                        for _control in _operation_controls_ref:
-                            try:
-                                _operation_control_states[_control] = str(_control.cget("state"))
-                                _control.configure(state=state)
-                            except Exception:
-                                continue
+                    _set_nif_editor_controls_active(
+                        _operation_controls_ref,
+                        _operation_control_states,
+                        active=active,
+                    )
                     for _btn in _action_buttons_ref:
                         try:
                             _btn.configure(state=state)
