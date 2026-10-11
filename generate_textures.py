@@ -14753,7 +14753,6 @@ def _recommend_qt_render_profile(input_text: str) -> str | None:
         detected_role=role_info["role"] if role_info is not None else None,
         detected_suffix=role_info["suffix"] if role_info is not None else None,
         material_type=classify_material_type(input_path),
-        workflow_profile=detect_workflow_profile(input_path),
     )
 
 
