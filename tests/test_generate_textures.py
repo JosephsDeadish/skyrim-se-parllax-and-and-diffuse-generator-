@@ -32,6 +32,7 @@ from generate_textures import (
     _nif_editor_result_matches_filters,
     _slice_nif_editor_result_page,
     _load_qt_preview_png,
+    _bind_tk_main_window_shortcuts,
     _should_render_nif_editor_results,
     _set_nif_editor_controls_active,
     _format_nif_result_row_details,
@@ -715,6 +716,45 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_app_version_is_0_9(self) -> None:
         self.assertEqual(APP_VERSION, "0.9")
+
+    def test_tk_main_shortcuts_dispatch_actions_and_cancel_only_during_processing(self) -> None:
+        class FakeRoot:
+            def __init__(self) -> None:
+                self.bindings = {}
+
+            def bind(self, sequence, callback, add=None) -> None:
+                self.bindings[sequence] = callback
+
+        root = FakeRoot()
+        calls = []
+        processing = [False]
+        _bind_tk_main_window_shortcuts(
+            root,
+            open_file=lambda: calls.append("file"),
+            open_folder=lambda: calls.append("folder"),
+            generate=lambda: calls.append("generate"),
+            cancel=lambda: calls.append("cancel"),
+            is_processing=lambda: processing[0],
+        )
+        self.assertEqual(set(root.bindings), {
+            "<Control-o>",
+            "<Control-Shift-o>",
+            "<Control-Return>",
+            "<Escape>",
+        })
+        for sequence, expected_action in (
+            ("<Control-o>", "file"),
+            ("<Control-Shift-o>", "folder"),
+            ("<Control-Return>", "generate"),
+        ):
+            self.assertEqual(root.bindings[sequence](object()), "break")
+            self.assertEqual(calls[-1], expected_action)
+
+        self.assertEqual(root.bindings["<Escape>"](object()), "break")
+        self.assertNotIn("cancel", calls)
+        processing[0] = True
+        self.assertEqual(root.bindings["<Escape>"](object()), "break")
+        self.assertEqual(calls[-1], "cancel")
 
     def test_theme_text_colors_meet_wcag_aa_contrast(self) -> None:
         def relative_luminance(color: str) -> float:

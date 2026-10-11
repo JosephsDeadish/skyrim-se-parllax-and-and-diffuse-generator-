@@ -948,6 +948,37 @@ def _connect_qt_worker_thread_lifecycle(
     thread.finished.connect(cleanup)
 
 
+def _bind_tk_main_window_shortcuts(
+    root: Any,
+    *,
+    open_file: Callable[[], None],
+    open_folder: Callable[[], None],
+    generate: Callable[[], None],
+    cancel: Callable[[], None],
+    is_processing: Callable[[], bool],
+) -> None:
+    def _invoke(callback: Callable[[], None]) -> Callable[[object], str]:
+        def _handle(_event: object) -> str:
+            callback()
+            return "break"
+
+        return _handle
+
+    def _cancel_if_processing(_event: object) -> str:
+        if is_processing():
+            cancel()
+            return "break"
+        return "break"
+
+    for sequence, callback in (
+        ("<Control-o>", open_file),
+        ("<Control-Shift-o>", open_folder),
+        ("<Control-Return>", generate),
+    ):
+        root.bind(sequence, _invoke(callback), add="+")
+    root.bind("<Escape>", _cancel_if_processing, add="+")
+
+
 def discover_ui_languages(translations_dir: Path = UI_TRANSLATIONS_DIR) -> tuple[str, ...]:
     if not translations_dir.exists():
         return ("en",)
@@ -8352,7 +8383,7 @@ if GUI_AVAILABLE:
             self.ui_scale_combo.bind("<<ComboboxSelected>>", self._on_ui_scale_changed)
             _simplified_layout_check = ttk.Checkbutton(
                 top_controls_row,
-                text="Simplified layout",
+                text="Basic view",
                 variable=self.simplified_main_layout_var,
             )
             _simplified_layout_check.pack(side=tk.LEFT, padx=(8, 8))
@@ -8363,8 +8394,8 @@ if GUI_AVAILABLE:
             self._add_tooltip(self.ui_scale_combo, "Increase this on 4K/high-DPI displays if controls look too small.")
             self._add_tooltip(
                 _simplified_layout_check,
-                "Basic mode hides advanced output/setup sections for a cleaner beginner layout.\n"
-                "Disable this to expose full Advanced controls.",
+                "Checked: Basic view with core outputs and fewer controls.\n"
+                "Uncheck for Advanced view, then enable the advanced output groups you need.",
             )
             self._add_tooltip(_target_game_label, "Select Skyrim or Fallout naming mode for generated texture filenames.")
             self._add_tooltip(
@@ -8392,13 +8423,16 @@ if GUI_AVAILABLE:
             self._add_tooltip(_input_label, "Enter a DDS file path or select a file/folder below.")
             _input_entry = ttk.Entry(file_frame, textvariable=self.input_var, width=80)
             _input_entry.grid(row=0, column=1, padx=6, pady=4, sticky=tk.EW)
-            self._add_tooltip(_input_entry, "Source texture path. Use File/Folder buttons if drag-and-drop is unavailable.")
+            self._add_tooltip(
+                _input_entry,
+                "Source texture path. Use File/Folder buttons or Ctrl+O / Ctrl+Shift+O if drag-and-drop is unavailable.",
+            )
             self.input_file_button = ttk.Button(file_frame, text="File", command=self._pick_input)
             self.input_file_button.grid(row=0, column=2, padx=4, pady=4)
-            self._add_tooltip(self.input_file_button, "Open one DDS/PNG/JPG texture file.")
+            self._add_tooltip(self.input_file_button, "Open one DDS/PNG/JPG texture file (Ctrl+O).")
             self.input_folder_button = ttk.Button(file_frame, text="Folder", command=self._pick_input_folder)
             self.input_folder_button.grid(row=0, column=3, padx=4, pady=4)
-            self._add_tooltip(self.input_folder_button, "Select a texture folder for batch processing.")
+            self._add_tooltip(self.input_folder_button, "Select a texture folder for batch processing (Ctrl+Shift+O).")
             self.detected_mod_button = ttk.Button(file_frame, text="Loaded Mod", command=self._pick_detected_mod_folder)
             self.detected_mod_button.grid(row=0, column=4, padx=4, pady=4)
             self._add_tooltip(self.detected_mod_button, "Use the detected MO2/Vortex mod texture folder when available.")
@@ -9030,10 +9064,13 @@ if GUI_AVAILABLE:
             actions.pack(fill=tk.X)
             self.generate_button = ttk.Button(actions, text="Generate", command=self._generate)
             self.generate_button.pack(side=tk.LEFT)
-            self._add_tooltip(self.generate_button, "Start texture generation for the selected input and output settings.")
+            self._add_tooltip(
+                self.generate_button,
+                "Start texture generation for the selected input and output settings (Ctrl+Enter).",
+            )
             self.cancel_button = ttk.Button(actions, text="Cancel Process", command=self._cancel_processing, state=tk.DISABLED)
             self.cancel_button.pack(side=tk.LEFT, padx=(6, 0))
-            self._add_tooltip(self.cancel_button, "Stop the current batch after the active file finishes.")
+            self._add_tooltip(self.cancel_button, "Stop the current batch after the active file finishes (Escape).")
             self.revert_button = ttk.Button(actions, text="Revert Process", command=self._revert_last_generation, state=tk.DISABLED)
             self.revert_button.pack(side=tk.LEFT, padx=(6, 0))
             self._add_tooltip(self.revert_button, "↩ Restore files from the most recent generation run.\nDisabled until a generation run has something to undo.")
@@ -9446,6 +9483,14 @@ if GUI_AVAILABLE:
             self._update_preview_navigation_state()
 
             self.root.protocol("WM_DELETE_WINDOW", self._on_window_close)
+            _bind_tk_main_window_shortcuts(
+                self.root,
+                open_file=self._pick_input,
+                open_folder=self._pick_input_folder,
+                generate=self._generate,
+                cancel=self._cancel_processing,
+                is_processing=lambda: bool(self.is_processing),
+            )
             self._apply_theme()
             self._on_render_profile_changed()
             self._restore_startup_selection()
