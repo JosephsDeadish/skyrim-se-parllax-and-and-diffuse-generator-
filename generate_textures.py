@@ -1139,6 +1139,20 @@ def _connect_qt_worker_thread_lifecycle(
     thread.finished.connect(cleanup)
 
 
+def _choose_qt_input_path(
+    *,
+    select_file: Callable[[], str],
+    select_folder: Callable[[], str],
+    set_path: Callable[[str], None],
+    folder: bool = False,
+) -> bool:
+    selected_path = select_folder() if folder else select_file()
+    if not selected_path:
+        return False
+    set_path(str(selected_path))
+    return True
+
+
 def _bind_tk_main_window_shortcuts(
     root: Any,
     *,
@@ -15425,10 +15439,14 @@ def _launch_qt_migration_gui() -> None:
     input_path_edit = QtWidgets.QLineEdit()
     input_path_edit.setPlaceholderText("Choose a texture file or a folder of textures")
     input_row.addWidget(input_path_edit, 1)
-    browse_input_button = QtWidgets.QPushButton("Browse…")
+    browse_input_button = QtWidgets.QPushButton("File…")
     browse_input_button.setShortcut("Ctrl+O")
-    browse_input_button.setToolTip("Choose an input file or folder (Ctrl+O).")
+    browse_input_button.setToolTip("Choose one input texture file (Ctrl+O).")
     input_row.addWidget(browse_input_button)
+    browse_input_folder_button = QtWidgets.QPushButton("Folder…")
+    browse_input_folder_button.setShortcut("Ctrl+Shift+O")
+    browse_input_folder_button.setToolTip("Choose a folder for batch texture processing (Ctrl+Shift+O).")
+    input_row.addWidget(browse_input_folder_button)
     generation_layout.addLayout(input_row)
 
     output_row = QtWidgets.QHBoxLayout()
@@ -16157,20 +16175,28 @@ def _launch_qt_migration_gui() -> None:
         preview_mode_badge.setText("Preview state: active")
 
     def _browse_input() -> None:
-        chosen_file, _ = QtWidgets.QFileDialog.getOpenFileName(
-            window,
-            "Select input texture",
-            str(Path.home()),
-            "DDS and images (*.dds *.png *.jpg *.jpeg *.tga *.bmp *.webp);;All files (*)",
+        _choose_qt_input_path(
+            select_file=lambda: QtWidgets.QFileDialog.getOpenFileName(
+                window,
+                "Select input texture",
+                str(Path.home()),
+                "DDS and images (*.dds *.png *.jpg *.jpeg *.tga *.bmp *.webp);;All files (*)",
+            )[0],
+            select_folder=lambda: "",
+            set_path=input_path_edit.setText,
         )
-        if chosen_file:
-            input_path_edit.setText(chosen_file)
-            _refresh_checkpoint_health()
-            return
-        chosen_dir = QtWidgets.QFileDialog.getExistingDirectory(window, "Select input folder", str(Path.home()))
-        if chosen_dir:
-            input_path_edit.setText(chosen_dir)
-            _refresh_checkpoint_health()
+
+    def _browse_input_folder() -> None:
+        _choose_qt_input_path(
+            select_file=lambda: "",
+            select_folder=lambda: QtWidgets.QFileDialog.getExistingDirectory(
+                window,
+                "Select input folder",
+                str(Path.home()),
+            ),
+            set_path=input_path_edit.setText,
+            folder=True,
+        )
 
     def _browse_output() -> None:
         chosen_dir = QtWidgets.QFileDialog.getExistingDirectory(window, "Select output folder", str(Path.home()))
@@ -16203,6 +16229,7 @@ def _launch_qt_migration_gui() -> None:
         cancel_button.setEnabled(running)
         apply_profile_outputs_button.setEnabled(not running)
         browse_input_button.setEnabled(not running)
+        browse_input_folder_button.setEnabled(not running)
         browse_output_button.setEnabled(not running)
         browse_checkpoint_button.setEnabled(not running)
         clear_checkpoint_button.setEnabled(not running)
@@ -16446,6 +16473,7 @@ def _launch_qt_migration_gui() -> None:
 
     launch_tk_button.clicked.connect(_open_legacy_tk)
     browse_input_button.clicked.connect(_browse_input)
+    browse_input_folder_button.clicked.connect(_browse_input_folder)
     browse_output_button.clicked.connect(_browse_output)
     browse_checkpoint_button.clicked.connect(_browse_checkpoint)
     clear_checkpoint_button.clicked.connect(_clear_checkpoint)

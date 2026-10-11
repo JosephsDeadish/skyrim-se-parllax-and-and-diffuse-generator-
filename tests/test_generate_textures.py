@@ -35,6 +35,7 @@ from generate_textures import (
     _recommend_qt_render_profile,
     _bind_tk_main_window_shortcuts,
     _describe_qt_output_channels,
+    _choose_qt_input_path,
     _should_render_nif_editor_results,
     _set_nif_editor_controls_active,
     _format_nif_result_row_details,
@@ -740,6 +741,38 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         self.assertEqual(_QT_OUTPUT_GROUPS[0][0], "Core maps")
         self.assertIn("standalone", _QT_OUTPUT_GROUPS[1][0].lower())
+
+    def test_qt_input_picker_routes_file_and_folder_actions_and_preserves_cancel(self) -> None:
+        selections = []
+        applied = []
+
+        result = _choose_qt_input_path(
+            select_file=lambda: selections.append("file") or "/textures/a.dds",
+            select_folder=lambda: selections.append("folder") or "/textures/batch",
+            set_path=applied.append,
+        )
+        self.assertTrue(result)
+        self.assertEqual(selections, ["file"])
+        self.assertEqual(applied, ["/textures/a.dds"])
+
+        result = _choose_qt_input_path(
+            select_file=lambda: selections.append("unexpected file") or "",
+            select_folder=lambda: selections.append("folder") or "/textures/batch",
+            set_path=applied.append,
+            folder=True,
+        )
+        self.assertTrue(result)
+        self.assertEqual(selections[-1], "folder")
+        self.assertEqual(applied[-1], "/textures/batch")
+
+        result = _choose_qt_input_path(
+            select_file=lambda: "",
+            select_folder=lambda: "",
+            set_path=applied.append,
+            folder=True,
+        )
+        self.assertFalse(result)
+        self.assertEqual(applied, ["/textures/a.dds", "/textures/batch"])
 
     def _skip_unavailable_tk_display(self) -> None:
         if not hasattr(TextureGeneratorGUI, "_apply_persisted_gui_state"):
