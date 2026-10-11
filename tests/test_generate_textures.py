@@ -24,6 +24,8 @@ from generate_textures import (
     _compute_nif_editor_controls_pane_height,
     _compute_nif_editor_result_details_height,
     _drain_nif_editor_ui_updates,
+    _nif_editor_result_matches_filters,
+    _can_append_nif_editor_result_incrementally,
     _should_render_nif_editor_results,
     _set_nif_editor_controls_active,
     _format_nif_result_row_details,
@@ -292,6 +294,48 @@ class TestNifEditorUiUpdateQueue(unittest.TestCase):
                 seconds_since_render=1.0,
             )
         )
+
+    def test_result_filters_match_status_and_search_fields(self) -> None:
+        row = {
+            "status": "WARN",
+            "file_name": "stone01.nif",
+            "details": "Missing parallax",
+            "preview": "needs patch",
+        }
+        self.assertTrue(
+            _nif_editor_result_matches_filters(
+                row,
+                keyword="STONE01",
+                status_filter="ALL",
+            )
+        )
+        self.assertTrue(
+            _nif_editor_result_matches_filters(
+                row,
+                keyword="parallax",
+                status_filter="WARN",
+            )
+        )
+        self.assertFalse(
+            _nif_editor_result_matches_filters(
+                row,
+                keyword="",
+                status_filter="FAIL",
+            )
+        )
+        self.assertFalse(
+            _nif_editor_result_matches_filters(
+                row,
+                keyword="absent",
+                status_filter="ALL",
+            )
+        )
+
+    def test_only_newest_sort_supports_incremental_append(self) -> None:
+        self.assertTrue(_can_append_nif_editor_result_incrementally("Newest"))
+        self.assertTrue(_can_append_nif_editor_result_incrementally(" newest "))
+        self.assertFalse(_can_append_nif_editor_result_incrementally("Status"))
+        self.assertFalse(_can_append_nif_editor_result_incrementally("File"))
 
 
 class TestNifEditorOperationControlStates(unittest.TestCase):

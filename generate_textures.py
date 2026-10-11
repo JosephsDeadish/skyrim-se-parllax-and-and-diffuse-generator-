@@ -5750,6 +5750,26 @@ def _should_render_nif_editor_results(
     return dirty and (queue_empty or seconds_since_render >= minimum_interval)
 
 
+def _nif_editor_result_matches_filters(
+    row: Mapping[str, str],
+    *,
+    keyword: str,
+    status_filter: str,
+) -> bool:
+    if status_filter != "ALL" and row["status"].upper() != status_filter:
+        return False
+    if not keyword:
+        return True
+    return any(
+        keyword in row[key].lower()
+        for key in ("status", "file_name", "details", "preview")
+    )
+
+
+def _can_append_nif_editor_result_incrementally(sort_mode: str) -> bool:
+    return sort_mode.strip().lower() == "newest"
+
+
 def _set_nif_editor_controls_active(
     controls: Sequence[Any],
     saved_states: dict[Any, str],
@@ -13140,18 +13160,15 @@ if GUI_AVAILABLE:
                 def _filtered_rows() -> list[dict[str, str]]:
                     keyword = (result_filter_var.get() or "").strip().lower()
                     status_filter = (result_status_filter_var.get() or "All").strip().upper()
-                    rows = all_result_rows
-                    if status_filter != "ALL":
-                        rows = [row for row in rows if row["status"].upper() == status_filter]
-                    if keyword:
-                        rows = [
-                            row
-                            for row in rows
-                            if keyword in row["status"].lower()
-                            or keyword in row["file_name"].lower()
-                            or keyword in row["details"].lower()
-                            or keyword in row["preview"].lower()
-                        ]
+                    rows = [
+                        row
+                        for row in all_result_rows
+                        if _nif_editor_result_matches_filters(
+                            row,
+                            keyword=keyword,
+                            status_filter=status_filter,
+                        )
+                    ]
                     sort_mode = (result_sort_var.get() or "Newest").strip().lower()
                     if sort_mode == "status":
                         rows = sorted(rows, key=lambda row: (_status_sort_rank(row["status"]), row["file_name"].lower()))
@@ -13172,21 +13189,35 @@ if GUI_AVAILABLE:
                         results_tree.selection_set(last)
                         results_tree.focus(last)
                         results_tree.yview_moveto(1.0)
+                    _results_tree_pending_focus[0] = None
                     _results_tree_dirty[0] = False
                     _last_result_tree_render[0] = time.monotonic()
 
                 def _append_result_row(status: str, file_name: str, details: str) -> None:
                     normalized_details = _normalize_nif_result_details(details)
                     row_preview = _format_nif_result_row_details(normalized_details)
-                    all_result_rows.append(
-                        {
-                            "status": status,
-                            "file_name": file_name,
-                            "details": normalized_details,
-                            "preview": row_preview,
-                        }
-                    )
-                    _results_tree_dirty[0] = True
+                    row = {
+                        "status": status,
+                        "file_name": file_name,
+                        "details": normalized_details,
+                        "preview": row_preview,
+                    }
+                    all_result_rows.append(row)
+                    if _can_append_nif_editor_result_incrementally(result_sort_var.get()):
+                        if _nif_editor_result_matches_filters(
+                            row,
+                            keyword=(result_filter_var.get() or "").strip().lower(),
+                            status_filter=(result_status_filter_var.get() or "All").strip().upper(),
+                        ):
+                            item_id = results_tree.insert(
+                                "",
+                                "end",
+                                values=(row["status"], row["file_name"], row["preview"]),
+                            )
+                            full_row_details[str(item_id)] = row["details"]
+                            _results_tree_pending_focus[0] = str(item_id)
+                    else:
+                        _results_tree_dirty[0] = True
                     status_var.set(f"{status}: {file_name} — {row_preview}")
 
                 def _add_result_row(status: str, file_name: str, details: str) -> None:
@@ -13334,6 +13365,7 @@ if GUI_AVAILABLE:
                 _ui_update_poll_active = [True]
                 _results_tree_dirty = [False]
                 _last_result_tree_render = [0.0]
+                _results_tree_pending_focus: list[str | None] = [None]
                 _action_buttons_ref: list[Any] = []  # populated after button creation
                 _control_classes = {
                     "Button",
@@ -13424,6 +13456,15 @@ if GUI_AVAILABLE:
                         _ui_update_queue,
                         on_error=lambda exc: status_var.set(f"NIF Editor UI update failed: {exc}"),
                     )
+                    pending_focus = _results_tree_pending_focus[0]
+                    if pending_focus:
+                        try:
+                            results_tree.selection_set(pending_focus)
+                            results_tree.focus(pending_focus)
+                            results_tree.yview_moveto(1.0)
+                        except Exception:
+                            pass
+                        _results_tree_pending_focus[0] = None
                     queue_empty = _ui_update_queue.empty()
                     if _should_render_nif_editor_results(
                         dirty=_results_tree_dirty[0],
