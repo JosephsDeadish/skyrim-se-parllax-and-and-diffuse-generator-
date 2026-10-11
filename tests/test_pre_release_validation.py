@@ -36,7 +36,7 @@ from scripts.pre_release_validation import (
 
 class TestRealisticBatchAcceptance(unittest.TestCase):
     def setUp(self) -> None:
-        self._td = tempfile.TemporaryDirectory(dir=REPO_ROOT)
+        self._td = tempfile.TemporaryDirectory()
         self.root = Path(self._td.name)
         self.calls: list[list[str]] = []
         self.inventory = {name: (16, 16) for name in _realistic_batch_inventory(12)}
