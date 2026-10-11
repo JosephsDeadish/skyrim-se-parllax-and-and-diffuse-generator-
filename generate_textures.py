@@ -937,6 +937,17 @@ def _load_qt_preview_png(path: str | os.PathLike[str], *, max_dimension: int = 7
     return buffer.getvalue()
 
 
+def _connect_qt_worker_thread_lifecycle(
+    worker: Any,
+    thread: Any,
+    cleanup: Callable[[], None],
+) -> None:
+    worker.finished.connect(thread.quit)
+    worker.failed.connect(thread.quit)
+    thread.finished.connect(worker.deleteLater)
+    thread.finished.connect(cleanup)
+
+
 def discover_ui_languages(translations_dir: Path = UI_TRANSLATIONS_DIR) -> tuple[str, ...]:
     if not translations_dir.exists():
         return ("en",)
@@ -15312,11 +15323,6 @@ def _launch_qt_migration_gui() -> None:
 
         def _cleanup_worker() -> None:
             nonlocal qt_worker_thread, qt_worker
-            if qt_worker is not None:
-                try:
-                    qt_worker.deleteLater()
-                except Exception:
-                    pass
             if qt_worker_thread is not None:
                 try:
                     qt_worker_thread.deleteLater()
@@ -15329,7 +15335,6 @@ def _launch_qt_migration_gui() -> None:
 
         def _on_finished(summary: object) -> None:
             nonlocal preview_auto_speed_off
-            _set_running_state(False)
             progress_bar.setValue(100)
             payload = summary if isinstance(summary, dict) else {}
             cancelled = bool(payload.get("cancelled", False))
@@ -15355,17 +15360,16 @@ def _launch_qt_migration_gui() -> None:
             _append_event_log(status_label.text())
             if failed > 0:
                 _append_event_log("[summary] review event log entries tagged [error] for failed files.")
-            _cleanup_worker()
 
         def _on_failed(message: str) -> None:
             QtWidgets.QMessageBox.critical(window, "Generation failed", message)
             _append_event_log(f"[fatal] {message}")
-            _cleanup_worker()
 
         qt_worker.progress.connect(_on_progress)
         qt_worker.event.connect(_on_event)
         qt_worker.finished.connect(_on_finished)
         qt_worker.failed.connect(_on_failed)
+        _connect_qt_worker_thread_lifecycle(qt_worker, qt_worker_thread, _cleanup_worker)
         qt_worker_thread.started.connect(qt_worker.run)
         qt_worker_thread.start()
         _set_running_state(True)

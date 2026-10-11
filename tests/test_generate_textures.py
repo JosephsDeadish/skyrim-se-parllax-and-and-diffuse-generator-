@@ -28,6 +28,7 @@ from generate_textures import (
     _make_batched_nif_result_enqueuer,
     _make_debounced_callback,
     _make_latest_progress_update_enqueuer,
+    _connect_qt_worker_thread_lifecycle,
     _nif_editor_result_matches_filters,
     _slice_nif_editor_result_page,
     _load_qt_preview_png,
@@ -232,6 +233,50 @@ class TestNifEditorLayoutSizing(unittest.TestCase):
 
 
 class TestNifEditorUiUpdateQueue(unittest.TestCase):
+    def test_qt_worker_completion_and_failure_stop_thread_before_cleanup(self) -> None:
+        class FakeSignal:
+            def __init__(self) -> None:
+                self.callbacks: list[object] = []
+
+            def connect(self, callback: object) -> None:
+                self.callbacks.append(callback)
+
+            def emit(self) -> None:
+                for callback in self.callbacks:
+                    callback()  # type: ignore[operator]
+
+        class FakeWorker:
+            def __init__(self) -> None:
+                self.finished = FakeSignal()
+                self.failed = FakeSignal()
+                self.deleted = False
+
+            def deleteLater(self) -> None:
+                self.deleted = True
+
+        class FakeThread:
+            def __init__(self) -> None:
+                self.finished = FakeSignal()
+                self.quit_requests = 0
+
+            def quit(self) -> None:
+                self.quit_requests += 1
+
+        worker = FakeWorker()
+        thread = FakeThread()
+        cleanup: list[str] = []
+        _connect_qt_worker_thread_lifecycle(worker, thread, lambda: cleanup.append("finished"))
+
+        worker.finished.emit()
+        worker.failed.emit()
+        self.assertEqual(thread.quit_requests, 2)
+        self.assertFalse(worker.deleted)
+        self.assertEqual(cleanup, [])
+
+        thread.finished.emit()
+        self.assertTrue(worker.deleted)
+        self.assertEqual(cleanup, ["finished"])
+
     def test_debounced_callback_runs_only_after_latest_request(self) -> None:
         scheduled: dict[int, tuple[int, object]] = {}
         callbacks: dict[int, object] = {}
