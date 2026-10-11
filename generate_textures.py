@@ -15120,6 +15120,52 @@ def _describe_qt_profile_guidance(profile: str) -> str:
     return guidance
 
 
+def _qt_checkpoint_generation_options(options: Mapping[str, object]) -> dict[str, object]:
+    non_generation_keys = {
+        "input_path",
+        "output_dir",
+        "checkpoint_path",
+        "resume_mode",
+        "lazy_preview",
+        "force_full_preview",
+    }
+    return {
+        key: options[key]
+        for key in sorted(options)
+        if key not in non_generation_keys
+    }
+
+
+def _qt_resume_completed_files(
+    payload: object,
+    *,
+    input_root: Path,
+    output_dir: Path | None,
+    generation_options: Mapping[str, object],
+) -> set[str]:
+    if not isinstance(payload, dict):
+        raise ValueError("Checkpoint is invalid; start fresh or choose a valid Qt checkpoint.")
+    expected_input_root = str(input_root.resolve())
+    checkpoint_input_root = str(payload.get("input_root", "") or "").strip()
+    if checkpoint_input_root != expected_input_root:
+        raise ValueError("Checkpoint input path differs; start fresh or use the original input.")
+    expected_output_root = str(output_dir.resolve()) if output_dir is not None else ""
+    checkpoint_output_root = str(payload.get("output_root", "") or "").strip()
+    if checkpoint_output_root != expected_output_root:
+        raise ValueError("Checkpoint output folder differs; start fresh or use the original output folder.")
+    checkpoint_options = payload.get("generation_options")
+    if not isinstance(checkpoint_options, dict):
+        raise ValueError(
+            "Checkpoint has no valid generation settings snapshot; start fresh instead of resuming it."
+        )
+    if checkpoint_options != dict(generation_options):
+        raise ValueError("Checkpoint generation settings differ; start fresh or use the original settings.")
+    raw_completed = payload.get("completed_success_files", [])
+    if not isinstance(raw_completed, list):
+        raise ValueError("Checkpoint completed-file list is invalid; start fresh.")
+    return {entry for entry in raw_completed if isinstance(entry, str)}
+
+
 def _launch_qt_migration_gui() -> None:
     if not QT_GUI_AVAILABLE or QtWidgets is None or QtCore is None:
         install_hint = "Install PySide6 (pip install PySide6) to use the Qt migration UI."
@@ -15151,19 +15197,26 @@ def _launch_qt_migration_gui() -> None:
                 return input_path / ".skyrim_texture_generator_batch_checkpoint.json"
             return input_path.parent / ".skyrim_texture_generator_batch_checkpoint.json"
 
-        def _load_completed_set(self, checkpoint_path: Path) -> set[str]:
+        def _load_completed_set(
+            self,
+            checkpoint_path: Path,
+            *,
+            input_root: Path,
+            output_dir: Path | None,
+            generation_options: Mapping[str, object],
+        ) -> set[str]:
             if not checkpoint_path.exists():
                 return set()
             try:
                 raw = json.loads(checkpoint_path.read_text(encoding="utf-8"))
-            except Exception:
-                return set()
-            if not isinstance(raw, dict):
-                return set()
-            completed = raw.get("completed_success_files", [])
-            if not isinstance(completed, list):
-                return set()
-            return {str(value) for value in completed if isinstance(value, str)}
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError("Checkpoint could not be read; start fresh or choose a valid checkpoint.") from exc
+            return _qt_resume_completed_files(
+                raw,
+                input_root=input_root,
+                output_dir=output_dir,
+                generation_options=generation_options,
+            )
 
         def _write_checkpoint_state(
             self,
@@ -15174,6 +15227,7 @@ def _launch_qt_migration_gui() -> None:
             input_root: Path,
             output_dir: Path | None,
             total_files_considered: int,
+            generation_options: Mapping[str, object],
         ) -> None:
             checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
             payload = {
@@ -15185,6 +15239,7 @@ def _launch_qt_migration_gui() -> None:
                 "completed_success_count": len(completed_success_files),
                 "resumed_completed_count": int(resumed_completed_count),
                 "completed_success_files": sorted(completed_success_files),
+                "generation_options": dict(generation_options),
             }
             checkpoint_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -15229,6 +15284,7 @@ def _launch_qt_migration_gui() -> None:
                 resume_mode = str(self._options.get("resume_mode", "start_fresh") or "start_fresh").strip().lower()
                 continue_on_error = bool(self._options.get("continue_on_error", True))
                 checkpoint_override = str(self._options.get("checkpoint_path", "") or "")
+                checkpoint_generation_options = _qt_checkpoint_generation_options(self._options)
 
                 if not input_path.exists():
                     raise FileNotFoundError(f"Input path does not exist: {input_path}")
@@ -15246,7 +15302,12 @@ def _launch_qt_migration_gui() -> None:
                     all_files = collect_source_textures(input_path)
                     completed_success_files: set[str] = set()
                     if resume_mode == "resume":
-                        completed_success_files = self._load_completed_set(checkpoint_path)
+                        completed_success_files = self._load_completed_set(
+                            checkpoint_path,
+                            input_root=input_path,
+                            output_dir=output_dir,
+                            generation_options=checkpoint_generation_options,
+                        )
                     resumed_completed_count = len(completed_success_files)
                     pending_files = [
                         candidate for candidate in all_files
@@ -15362,6 +15423,7 @@ def _launch_qt_migration_gui() -> None:
                                 input_root=input_path,
                                 output_dir=output_dir,
                                 total_files_considered=len(all_files),
+                                generation_options=checkpoint_generation_options,
                             )
                             self.event.emit("file_done", {"source": str(source_path), "outputs": output_payload})
                         except Exception as exc:

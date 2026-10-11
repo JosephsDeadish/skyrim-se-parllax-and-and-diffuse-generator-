@@ -57,6 +57,8 @@ from generate_textures import (
     _merge_qt_generation_gui_state,
     _qt_profile_output_defaults,
     _qt_render_profile_modes,
+    _qt_checkpoint_generation_options,
+    _qt_resume_completed_files,
     _qt_truepbr_material_overrides,
     _apply_qt_profile_output_defaults,
     _QT_OUTPUT_GROUPS,
@@ -1006,6 +1008,75 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertAlmostEqual(float(merged["ui_scale"]), 1.3)
         self.assertEqual(merged["batch_resume_mode"], "resume")
         self.assertEqual(merged["batch_checkpoint_path"], str(Path(temp_dir) / "checkpoint.json"))
+
+    def test_qt_checkpoint_generation_options_ignore_paths_and_preview_only_settings(self) -> None:
+        options = {
+            "input_path": "/input",
+            "output_dir": "/output",
+            "checkpoint_path": "/state.json",
+            "resume_mode": "resume",
+            "lazy_preview": True,
+            "force_full_preview": False,
+            "include_normal": True,
+            "normal_strength": 2.0,
+        }
+        self.assertEqual(
+            _qt_checkpoint_generation_options(options),
+            {"include_normal": True, "normal_strength": 2.0},
+        )
+
+    def test_qt_resume_checkpoint_requires_matching_roots_and_generation_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_root = root / "input"
+            output_root = root / "output"
+            options = {"include_normal": True, "normal_strength": 2.0}
+            payload = {
+                "input_root": str(input_root.resolve()),
+                "output_root": str(output_root.resolve()),
+                "generation_options": options,
+                "completed_success_files": [str((input_root / "done.dds").resolve()), 3],
+            }
+            self.assertEqual(
+                _qt_resume_completed_files(
+                    payload,
+                    input_root=input_root,
+                    output_dir=output_root,
+                    generation_options=options,
+                ),
+                {str((input_root / "done.dds").resolve())},
+            )
+
+            invalid_cases = (
+                (
+                    {**payload, "input_root": str((root / "other-input").resolve())},
+                    "input path differs",
+                ),
+                (
+                    {**payload, "output_root": str((root / "other-output").resolve())},
+                    "output folder differs",
+                ),
+                (
+                    {**payload, "generation_options": {"include_normal": False}},
+                    "generation settings differ",
+                ),
+                (
+                    {key: value for key, value in payload.items() if key != "generation_options"},
+                    "no valid generation settings snapshot",
+                ),
+                (
+                    {**payload, "completed_success_files": "not-a-list"},
+                    "completed-file list is invalid",
+                ),
+            )
+            for invalid_payload, message in invalid_cases:
+                with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                    _qt_resume_completed_files(
+                        invalid_payload,
+                        input_root=input_root,
+                        output_dir=output_root,
+                        generation_options=options,
+                    )
 
     def test_qt_profile_recommendation_uses_existing_filename_and_path_hints(self) -> None:
         self.assertEqual(
