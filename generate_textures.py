@@ -6138,6 +6138,19 @@ def _scan_nif_validation_rows(
     return rows, cancelled
 
 
+def _write_qt_nif_scan_csv(
+    path: str | os.PathLike[str],
+    rows: Sequence[Mapping[str, str]],
+) -> int:
+    fieldnames = ("status", "file_name", "preview", "details")
+    with Path(path).open("w", encoding="utf-8-sig", newline="") as csv_file:
+        writer = csv.DictWriter(csv_file, fieldnames=fieldnames, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: str(row.get(field, "") or "") for field in fieldnames})
+    return len(rows)
+
+
 def _drain_nif_editor_ui_updates(
     updates: queue.Queue[Callable[[], None]],
     *,
@@ -15737,6 +15750,12 @@ def _launch_qt_migration_gui() -> None:
     nif_scan_status_filter = QtWidgets.QComboBox()
     nif_scan_status_filter.addItems(["ALL", "OK", "WARN", "SKIP", "FAIL"])
     nif_scan_filter_row.addWidget(nif_scan_status_filter)
+    nif_scan_export_button = QtWidgets.QPushButton("Export filtered CSV…")
+    nif_scan_export_button.setToolTip(
+        "Export every scan result matching the active filters, including results on other pages."
+    )
+    nif_scan_export_button.setEnabled(False)
+    nif_scan_filter_row.addWidget(nif_scan_export_button)
     nif_scan_layout.addLayout(nif_scan_filter_row)
     nif_scan_results = QtWidgets.QTreeWidget()
     nif_scan_results.setColumnCount(3)
@@ -16208,9 +16227,8 @@ def _launch_qt_migration_gui() -> None:
             return
         event_log.appendPlainText(message.rstrip())
 
-    def _render_nif_scan_page() -> None:
-        nonlocal nif_scan_page_index
-        filtered_rows = [
+    def _filtered_nif_scan_rows() -> list[dict[str, str]]:
+        return [
             row
             for row in nif_scan_rows
             if _nif_editor_result_matches_filters(
@@ -16219,6 +16237,10 @@ def _launch_qt_migration_gui() -> None:
                 status_filter=nif_scan_status_filter.currentText(),
             )
         ]
+
+    def _render_nif_scan_page() -> None:
+        nonlocal nif_scan_page_index
+        filtered_rows = _filtered_nif_scan_rows()
         page_rows, nif_scan_page_index, page_count = _slice_nif_editor_result_page(
             filtered_rows,
             nif_scan_page_index,
@@ -16236,6 +16258,7 @@ def _launch_qt_migration_gui() -> None:
         )
         nif_scan_previous_button.setEnabled(nif_scan_page_index > 0)
         nif_scan_next_button.setEnabled(nif_scan_page_index + 1 < page_count)
+        nif_scan_export_button.setEnabled(nif_scan_thread is None and bool(filtered_rows))
 
     def _add_nif_scan_result(row: object) -> None:
         if not isinstance(row, dict):
@@ -16260,6 +16283,7 @@ def _launch_qt_migration_gui() -> None:
         nif_scan_mode_combo.setEnabled(not running)
         nif_scan_path_edit.setEnabled(not running)
         nif_scan_browse_button.setEnabled(not running)
+        nif_scan_export_button.setEnabled(not running and bool(_filtered_nif_scan_rows()))
 
     def _finish_nif_scan(cancelled: bool) -> None:
         _render_nif_scan_page()
@@ -16701,6 +16725,28 @@ def _launch_qt_migration_gui() -> None:
         nif_scan_cancel_button.setEnabled(False)
         nif_scan_status_label.setText("Cancellation requested; finishing the current NIF scan…")
 
+    def _export_nif_scan_csv() -> None:
+        rows = _filtered_nif_scan_rows()
+        if not rows:
+            nif_scan_status_label.setText("No matching scan results to export.")
+            return
+        chosen_path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            window,
+            "Export filtered NIF scan results",
+            str(Path.home() / "nif_scan_results.csv"),
+            "CSV files (*.csv);;All files (*)",
+        )
+        if not chosen_path:
+            return
+        try:
+            exported_count = _write_qt_nif_scan_csv(chosen_path, rows)
+        except OSError as exc:
+            QtWidgets.QMessageBox.warning(window, "NIF scan export failed", str(exc))
+            return
+        nif_scan_status_label.setText(
+            f"Exported {exported_count} filtered NIF scan result(s) to {chosen_path}."
+        )
+
     def _clear_checkpoint() -> None:
         checkpoint_path = _effective_checkpoint_path()
         try:
@@ -16965,6 +17011,7 @@ def _launch_qt_migration_gui() -> None:
     nif_scan_browse_button.clicked.connect(_browse_nif_scan_target)
     nif_scan_start_button.clicked.connect(_start_nif_scan)
     nif_scan_cancel_button.clicked.connect(_cancel_nif_scan)
+    nif_scan_export_button.clicked.connect(_export_nif_scan_csv)
     nif_scan_filter_edit.textChanged.connect(_reset_nif_scan_page)
     nif_scan_status_filter.currentTextChanged.connect(_reset_nif_scan_page)
     nif_scan_previous_button.clicked.connect(lambda: _change_nif_scan_page(-1))

@@ -1,3 +1,4 @@
+import csv
 import json
 import io
 import os
@@ -135,6 +136,7 @@ from generate_textures import (
     restore_nif_backups,
     resolve_nif_editor_targets,
     _scan_nif_validation_rows,
+    _write_qt_nif_scan_csv,
     resolve_env_mask_complex_workflow,
     resolve_nif_editor_patch_options_for_target,
     load_gui_state,
@@ -609,6 +611,44 @@ class TestNifEditorTargetResolution(unittest.TestCase):
 
 
 class TestQtNifValidationScan(unittest.TestCase):
+    def test_scan_csv_export_round_trips_full_diagnostics_and_paths(self) -> None:
+        rows = [
+            {
+                "status": "WARN",
+                "file_name": "mesh, variant.nif",
+                "preview": "/mods/mesh, variant.nif",
+                "details": "Issue: missing slot\nConflict: shader_state.flag",
+                "extra": "ignored",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "scan.csv"
+            exported_count = _write_qt_nif_scan_csv(csv_path, rows)
+            with csv_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
+                exported_rows = list(csv.DictReader(csv_file))
+
+        self.assertEqual(exported_count, 1)
+        self.assertEqual(
+            exported_rows,
+            [
+                {
+                    "status": "WARN",
+                    "file_name": "mesh, variant.nif",
+                    "preview": "/mods/mesh, variant.nif",
+                    "details": "Issue: missing slot\nConflict: shader_state.flag",
+                }
+            ],
+        )
+
+    def test_scan_csv_export_writes_headers_for_empty_results(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "empty.csv"
+            self.assertEqual(_write_qt_nif_scan_csv(csv_path, []), 0)
+            with csv_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
+                reader = csv.reader(csv_file)
+                self.assertEqual(next(reader), ["status", "file_name", "preview", "details"])
+                self.assertEqual(list(reader), [])
+
     def test_scan_rows_classify_results_and_include_diagnostic_context(self) -> None:
         validations = [
             SimpleNamespace(
