@@ -5695,6 +5695,27 @@ def _normalize_nif_editor_texture_input_path(value: str) -> str | None:
     return _coerce_generated_resource_path_to_dds(normalized)
 
 
+def resolve_nif_editor_targets(path_value: str, scan_mode: str) -> tuple[list[Path], str | None]:
+    cleaned_path = str(path_value or "").strip()
+    mode = str(scan_mode or "").strip().lower()
+    if not cleaned_path:
+        return [], "Select a NIF file or mesh folder."
+    target = Path(cleaned_path).expanduser()
+    if mode == "file":
+        if not target.exists():
+            return [], f"NIF file does not exist: {target}"
+        if not target.is_file() or target.suffix.lower() != ".nif":
+            return [], "Single NIF mode requires an existing .nif file."
+        return [target], None
+    if mode == "folder":
+        if not target.exists():
+            return [], f"Mesh folder does not exist: {target}"
+        if not target.is_dir():
+            return [], "Folder mode requires an existing mesh folder."
+        return find_nif_files(target), None
+    return [], "Choose whether to patch a single NIF file or a mesh folder."
+
+
 def resolve_nif_editor_patch_options_for_target(
     nif_path: Path,
     base_options: NifPatchOptions,
@@ -13301,15 +13322,10 @@ if GUI_AVAILABLE:
                 # ---- end threading helpers -------------------------------------------
 
                 def _resolve_nifs() -> list[Path]:
-                    path_value = nif_path_var.get().strip()
-                    if not path_value:
-                        return []
-                    root_path = Path(path_value)
-                    if root_path.is_dir():
-                        return find_nif_files(root_path)
-                    if root_path.suffix.lower() == ".nif":
-                        return [root_path]
-                    return []
+                    nifs, error = resolve_nif_editor_targets(nif_path_var.get(), nif_scan_mode.get())
+                    if error:
+                        status_var.set(error)
+                    return nifs
 
                 def _resolve_conflict_nifs() -> list[Path]:
                     resolved: list[Path] = []

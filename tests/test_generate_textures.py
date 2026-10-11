@@ -100,6 +100,7 @@ from generate_textures import (
     build_render_profile_mode_controls_hint,
     render_profile_has_locked_controls,
     restore_nif_backups,
+    resolve_nif_editor_targets,
     resolve_env_mask_complex_workflow,
     resolve_nif_editor_patch_options_for_target,
     load_gui_state,
@@ -216,6 +217,54 @@ class TestNifEditorLayoutSizing(unittest.TestCase):
             ),
             160,
         )
+
+
+class TestNifEditorTargetResolution(unittest.TestCase):
+    def test_single_file_mode_rejects_folder_even_if_it_contains_nifs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "mesh.nif").write_bytes(b"nif")
+            targets, error = resolve_nif_editor_targets(str(root), "file")
+
+        self.assertEqual(targets, [])
+        self.assertIn("Single NIF mode", str(error))
+
+    def test_folder_mode_rejects_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"nif")
+            targets, error = resolve_nif_editor_targets(str(nif_path), "folder")
+
+        self.assertEqual(targets, [])
+        self.assertIn("Folder mode", str(error))
+
+    def test_single_file_mode_accepts_existing_nif(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"nif")
+            targets, error = resolve_nif_editor_targets(str(nif_path), "file")
+
+        self.assertEqual(targets, [nif_path])
+        self.assertIsNone(error)
+
+    def test_folder_mode_finds_nifs_recursively(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            nested = root / "nested"
+            nested.mkdir()
+            (root / "root.nif").write_bytes(b"nif")
+            (nested / "child.nif").write_bytes(b"nif")
+            targets, error = resolve_nif_editor_targets(str(root), "folder")
+
+        self.assertEqual(set(targets), {root / "root.nif", nested / "child.nif"})
+        self.assertIsNone(error)
+
+    def test_missing_target_returns_actionable_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            targets, error = resolve_nif_editor_targets(str(Path(temp_dir) / "missing.nif"), "file")
+
+        self.assertEqual(targets, [])
+        self.assertIn("does not exist", str(error))
 
 
 def _flat_dark_image() -> Image.Image:
