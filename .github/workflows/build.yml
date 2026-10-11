@@ -179,6 +179,9 @@ jobs:
       - name: Validate Tk Advanced output visibility settings
         run: python -m unittest -v tests.test_generate_textures.GenerateTexturesTests.test_tk_advanced_workflow_visibility_round_trips_saved_settings
 
+      - name: Validate NIF Editor Tk tabs and close behavior
+        run: python -m unittest -v tests.test_generate_textures.GenerateTexturesTests.test_tk_nif_editor_opens_all_tabs_and_closes_cleanly
+
       - name: Validate Tk cancellation checkpoint resume
         run: python -m unittest -v tests.test_generate_textures.GenerateTexturesTests.test_gui_batch_worker_cancellation_checkpoint_resumes_long_run
 

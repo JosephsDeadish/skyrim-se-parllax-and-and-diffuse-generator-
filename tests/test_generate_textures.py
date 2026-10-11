@@ -29,6 +29,7 @@ from generate_textures import (
     load_ui_translations,
     _normalize_nif_editor_texture_input_path,
     _load_nif_patcher_exports,
+    NIF_PATCHER_AVAILABLE,
     _normalize_nif_result_details,
     _preferred_dds_formats_for_output,
     _RENDER_PROFILE_GUI_VALUES,
@@ -520,6 +521,56 @@ class GenerateTexturesTests(unittest.TestCase):
             finally:
                 if restored_gui is not None:
                     restored_gui.root.destroy()
+
+    def test_tk_nif_editor_opens_all_tabs_and_closes_cleanly(self) -> None:
+        self._skip_unavailable_tk_display()
+        if not NIF_PATCHER_AVAILABLE:
+            self.skipTest("NIF patcher is unavailable in this environment.")
+
+        gui = None
+        try:
+            with mock.patch(
+                "generate_textures.load_gui_state",
+                return_value=load_gui_state(Path("/missing/gui-state.json")),
+            ):
+                gui = TextureGeneratorGUI()
+            gui.root.withdraw()
+            gui._open_nif_editor()
+            gui.root.update()
+            editors = [
+                widget for widget in gui.root.winfo_children()
+                if widget.winfo_class() == "Toplevel"
+            ]
+            self.assertEqual(len(editors), 1)
+            editor = editors[0]
+            notebooks = []
+            pending = list(editor.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TNotebook":
+                    notebooks.append(widget)
+                pending.extend(widget.winfo_children())
+            self.assertEqual(len(notebooks), 1)
+            self.assertEqual(
+                [notebooks[0].tab(tab_id, "text") for tab_id in notebooks[0].tabs()],
+                ["Patch setup", "Texture slots", "Disable / clear", "Help"],
+            )
+            self.assertEqual(str(gui.root.grab_current()), str(editor))
+            close_buttons = []
+            pending = list(editor.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TButton" and widget.cget("text") == "Close":
+                    close_buttons.append(widget)
+                pending.extend(widget.winfo_children())
+            self.assertEqual(len(close_buttons), 1)
+            close_buttons[0].invoke()
+            gui.root.update()
+            self.assertFalse(bool(editor.winfo_exists()))
+            self.assertIsNone(gui.root.grab_current())
+        finally:
+            if gui is not None:
+                gui.root.destroy()
 
     def test_normalize_gui_state_clamps_slider_values_and_sanitizes_modes(self) -> None:
         normalized = _normalize_gui_state(
