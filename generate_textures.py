@@ -13162,8 +13162,9 @@ if GUI_AVAILABLE:
                         results_tree.selection_set(last)
                         results_tree.focus(last)
                         results_tree.yview_moveto(1.0)
+                    _results_tree_dirty[0] = False
 
-                def _add_result_row(status: str, file_name: str, details: str) -> None:
+                def _append_result_row(status: str, file_name: str, details: str) -> None:
                     normalized_details = _normalize_nif_result_details(details)
                     row_preview = _format_nif_result_row_details(normalized_details)
                     all_result_rows.append(
@@ -13174,8 +13175,12 @@ if GUI_AVAILABLE:
                             "preview": row_preview,
                         }
                     )
-                    _render_results_tree()
+                    _results_tree_dirty[0] = True
                     status_var.set(f"{status}: {file_name} — {row_preview}")
+
+                def _add_result_row(status: str, file_name: str, details: str) -> None:
+                    _append_result_row(status, file_name, details)
+                    _render_results_tree()
 
                 def _batch_failure_key(details: str) -> str:
                     normalized = _normalize_nif_result_details(details)
@@ -13316,6 +13321,7 @@ if GUI_AVAILABLE:
                 _close_when_idle = [False]
                 _ui_update_queue: queue.Queue[Callable[[], None]] = queue.Queue()
                 _ui_update_poll_active = [True]
+                _results_tree_dirty = [False]
                 _action_buttons_ref: list[Any] = []  # populated after button creation
                 _control_classes = {
                     "Button",
@@ -13406,6 +13412,8 @@ if GUI_AVAILABLE:
                         _ui_update_queue,
                         on_error=lambda exc: status_var.set(f"NIF Editor UI update failed: {exc}"),
                     )
+                    if _results_tree_dirty[0] and _ui_update_queue.empty():
+                        _render_results_tree()
                     if _ui_update_poll_active[0]:
                         try:
                             win.after(25, _poll_ui_updates)
@@ -13434,7 +13442,7 @@ if GUI_AVAILABLE:
                         _finish_op()
 
                 def _safe_add_row(status: str, file_name: str, details: str) -> None:
-                    _queue_ui_update(lambda s=status, fn=file_name, d=details: _add_result_row(s, fn, d))
+                    _queue_ui_update(lambda s=status, fn=file_name, d=details: _append_result_row(s, fn, d))
 
                 def _safe_status(msg: str) -> None:
                     _queue_ui_update(lambda m=msg: status_var.set(m))
