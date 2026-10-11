@@ -8,6 +8,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
@@ -133,6 +134,7 @@ from generate_textures import (
     render_profile_has_locked_controls,
     restore_nif_backups,
     resolve_nif_editor_targets,
+    _scan_nif_validation_rows,
     resolve_env_mask_complex_workflow,
     resolve_nif_editor_patch_options_for_target,
     load_gui_state,
@@ -604,6 +606,89 @@ class TestNifEditorTargetResolution(unittest.TestCase):
 
         self.assertEqual(targets, [])
         self.assertIn("does not exist", str(error))
+
+
+class TestQtNifValidationScan(unittest.TestCase):
+    def test_scan_rows_classify_results_and_include_diagnostic_context(self) -> None:
+        validations = [
+            SimpleNamespace(
+                shader_count=2,
+                ready_count=2,
+                skip_count=0,
+                detected_game_profile="fallout4",
+                has_havok=False,
+                issues=[],
+                conflict_report=[SimpleNamespace(code="shader_state.flag", count=1)],
+            ),
+            SimpleNamespace(
+                shader_count=2,
+                ready_count=1,
+                skip_count=0,
+                detected_game_profile="skyrim",
+                has_havok=True,
+                issues=["missing parallax slot"],
+                conflict_report=[],
+            ),
+            SimpleNamespace(
+                shader_count=0,
+                ready_count=0,
+                skip_count=0,
+                detected_game_profile="unknown",
+                has_havok=False,
+                issues=[],
+                conflict_report=[],
+            ),
+        ]
+        progress: list[tuple[int, int, str]] = []
+        nif_paths = [Path("ready.nif"), Path("warn.nif"), Path("empty.nif"), Path("bad.nif")]
+        with mock.patch(
+            "generate_textures.validate_nif_for_parallax",
+            side_effect=[*validations, OSError("corrupt mesh")],
+        ):
+            rows, cancelled = _scan_nif_validation_rows(
+                nif_paths,
+                on_progress=lambda *values: progress.append(values),
+            )
+        self.assertFalse(cancelled)
+        self.assertEqual([row["status"] for row in rows], ["OK", "WARN", "SKIP", "FAIL"])
+        self.assertIn("Detected profile: fallout4", rows[0]["details"])
+        self.assertIn("Conflict shader_state.flag: 1", rows[0]["details"])
+        self.assertIn("Havok animation graph", rows[1]["details"])
+        self.assertIn("missing parallax slot", rows[1]["details"])
+        self.assertIn("No BSLightingShaderProperty", rows[2]["details"])
+        self.assertIn("corrupt mesh", rows[3]["details"])
+        self.assertEqual(len(progress), len(nif_paths))
+        self.assertEqual(progress[-1][:2], (4, 4))
+
+    def test_scan_can_cancel_after_current_mesh_and_preserve_partial_rows(self) -> None:
+        cancelled = [False]
+        emitted: list[dict[str, str]] = []
+        progress: list[tuple[int, int, str]] = []
+        validation = SimpleNamespace(
+            shader_count=1,
+            ready_count=1,
+            skip_count=0,
+            detected_game_profile="skyrim",
+            has_havok=False,
+            issues=[],
+            conflict_report=[],
+        )
+
+        def request_cancel_after_row(row: dict[str, str]) -> None:
+            emitted.append(row)
+            cancelled[0] = True
+
+        with mock.patch("generate_textures.validate_nif_for_parallax", return_value=validation):
+            rows, was_cancelled = _scan_nif_validation_rows(
+                [Path("one.nif"), Path("two.nif"), Path("three.nif")],
+                is_cancelled=lambda: cancelled[0],
+                on_progress=lambda *values: progress.append(values),
+                on_row=request_cancel_after_row,
+            )
+        self.assertTrue(was_cancelled)
+        self.assertEqual([row["file_name"] for row in rows], ["one.nif"])
+        self.assertEqual(emitted, rows)
+        self.assertEqual(len(progress), 1)
 
 
 def _flat_dark_image() -> Image.Image:

@@ -67,6 +67,7 @@ This opens a desktop interface where you can:
 - toggle **Emboss depth** for edge-ridge normal generation on flat printed assets (books/cards/scrolls/posters)
 - choose **Parallax mode**: `standard` (vanilla / Community Shaders Extended Materials) or `occlusion (ENB/POM)` for smoother ENBSeries POM heightmaps
 - scroll through all controls in smaller windows
+- inspect individual NIF files or mesh folders in the Qt **NIF Scan** tab using read-only diagnostics, status/text filters, and paged results; patching and remediation remain in the full Tkinter NIF Editor
 - use keyboard shortcuts: `Ctrl+O` opens a texture, `Ctrl+Shift+O` opens a folder, `Ctrl+Enter` starts generation, and `Esc` requests cancellation
 - use **Basic view** to keep core controls visible, then uncheck it for Advanced options
 - auto-update output folder when a different input texture is selected

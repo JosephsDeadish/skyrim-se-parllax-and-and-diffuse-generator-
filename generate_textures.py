@@ -6075,6 +6075,69 @@ def resolve_nif_editor_targets(path_value: str, scan_mode: str) -> tuple[list[Pa
     return [], "Choose whether to patch a single NIF file or a mesh folder."
 
 
+def _scan_nif_validation_rows(
+    nif_paths: Sequence[Path],
+    *,
+    is_cancelled: Callable[[], bool] | None = None,
+    on_progress: Callable[[int, int, str], None] | None = None,
+    on_row: Callable[[dict[str, str]], None] | None = None,
+) -> tuple[list[dict[str, str]], bool]:
+    rows: list[dict[str, str]] = []
+    total = len(nif_paths)
+    cancelled = False
+    for index, nif_path in enumerate(nif_paths, start=1):
+        if is_cancelled is not None and is_cancelled():
+            cancelled = True
+            break
+        try:
+            validation = validate_nif_for_parallax(nif_path)
+            shader_count = int(getattr(validation, "shader_count", 0) or 0)
+            ready_count = int(getattr(validation, "ready_count", 0) or 0)
+            skip_count = int(getattr(validation, "skip_count", 0) or 0)
+            details = [
+                f"{ready_count}/{shader_count} shader(s) ready"
+                + (f"; {skip_count} skipped" if skip_count else "")
+            ]
+            detected_profile = str(getattr(validation, "detected_game_profile", "") or "")
+            if detected_profile:
+                details.append(f"Detected profile: {detected_profile}")
+            if getattr(validation, "has_havok", False):
+                details.append("Havok animation graph detected; parallax changes may be unsafe.")
+            issues = tuple(getattr(validation, "issues", ()) or ())
+            if issues:
+                details.extend(f"Issue: {issue}" for issue in issues[:5])
+            conflicts = tuple(getattr(validation, "conflict_report", ()) or ())
+            if conflicts:
+                details.extend(
+                    f"Conflict {getattr(group, 'code', 'unknown')}: {getattr(group, 'count', 0)}"
+                    for group in conflicts[:5]
+                )
+            if shader_count == 0 or (skip_count and skip_count == shader_count):
+                status = "SKIP"
+                if shader_count == 0:
+                    details.append("No BSLightingShaderProperty found.")
+            elif ready_count == shader_count and skip_count == 0:
+                status = "OK"
+            else:
+                status = "WARN"
+            detail_text = "\n".join(details)
+        except Exception as exc:
+            status = "FAIL"
+            detail_text = f"Scan failed: {exc}"
+        row = {
+            "status": status,
+            "file_name": nif_path.name,
+            "details": detail_text,
+            "preview": str(nif_path),
+        }
+        rows.append(row)
+        if on_row is not None:
+            on_row(row)
+        if on_progress is not None:
+            on_progress(index, total, str(nif_path))
+    return rows, cancelled
+
+
 def _drain_nif_editor_ui_updates(
     updates: queue.Queue[Callable[[], None]],
     *,
@@ -15521,6 +15584,34 @@ def _launch_qt_migration_gui() -> None:
             except Exception as exc:
                 self.failed.emit(str(exc))
 
+    class _QtNifScanWorker(QtCore.QObject):
+        progress = QtCore.Signal(int, int, str)
+        result = QtCore.Signal(object)
+        finished = QtCore.Signal(bool)
+        failed = QtCore.Signal(str)
+
+        def __init__(self, nif_paths: Sequence[Path]) -> None:
+            super().__init__()
+            self._nif_paths = list(nif_paths)
+            self._cancel_requested = False
+
+        @QtCore.Slot()
+        def request_cancel(self) -> None:
+            self._cancel_requested = True
+
+        @QtCore.Slot()
+        def run(self) -> None:
+            try:
+                _, cancelled = _scan_nif_validation_rows(
+                    self._nif_paths,
+                    is_cancelled=lambda: self._cancel_requested,
+                    on_progress=lambda index, total, path: self.progress.emit(index, total, path),
+                    on_row=self.result.emit,
+                )
+                self.finished.emit(cancelled)
+            except Exception as exc:
+                self.failed.emit(str(exc))
+
     app = QtWidgets.QApplication.instance()
     if app is None:
         app = QtWidgets.QApplication(sys.argv)
@@ -15603,6 +15694,71 @@ def _launch_qt_migration_gui() -> None:
     overview_layout.addLayout(button_row)
     overview_layout.addStretch(1)
     tabs.addTab(overview, "Overview")
+
+    nif_scan_tab = QtWidgets.QWidget()
+    nif_scan_layout = QtWidgets.QVBoxLayout(nif_scan_tab)
+    nif_scan_layout.setSpacing(8)
+    nif_scan_note = QtWidgets.QLabel(
+        "Read-only diagnostics for Skyrim and experimental Fallout meshes. "
+        "Scanning does not modify NIF files."
+    )
+    nif_scan_note.setWordWrap(True)
+    nif_scan_layout.addWidget(nif_scan_note)
+    nif_scan_path_row = QtWidgets.QHBoxLayout()
+    nif_scan_mode_combo = QtWidgets.QComboBox()
+    nif_scan_mode_combo.addItem("Single NIF file", "file")
+    nif_scan_mode_combo.addItem("Mesh folder (recursive)", "folder")
+    nif_scan_path_row.addWidget(nif_scan_mode_combo)
+    nif_scan_path_edit = QtWidgets.QLineEdit()
+    nif_scan_path_edit.setPlaceholderText("Choose a .nif file or mesh folder")
+    nif_scan_path_row.addWidget(nif_scan_path_edit, 1)
+    nif_scan_browse_button = QtWidgets.QPushButton("Browse…")
+    nif_scan_path_row.addWidget(nif_scan_browse_button)
+    nif_scan_layout.addLayout(nif_scan_path_row)
+    nif_scan_action_row = QtWidgets.QHBoxLayout()
+    nif_scan_start_button = QtWidgets.QPushButton("Scan NIFs")
+    nif_scan_start_button.setToolTip("Inspect mesh flags, slots, conflicts, and renderer verdicts without writing.")
+    nif_scan_cancel_button = QtWidgets.QPushButton("Cancel scan")
+    nif_scan_cancel_button.setEnabled(False)
+    nif_scan_action_row.addWidget(nif_scan_start_button)
+    nif_scan_action_row.addWidget(nif_scan_cancel_button)
+    nif_scan_progress = QtWidgets.QProgressBar()
+    nif_scan_progress.setRange(0, 100)
+    nif_scan_progress.setValue(0)
+    nif_scan_action_row.addWidget(nif_scan_progress, 1)
+    nif_scan_layout.addLayout(nif_scan_action_row)
+    nif_scan_status_label = QtWidgets.QLabel("Ready.")
+    nif_scan_status_label.setWordWrap(True)
+    nif_scan_layout.addWidget(nif_scan_status_label)
+    nif_scan_filter_row = QtWidgets.QHBoxLayout()
+    nif_scan_filter_edit = QtWidgets.QLineEdit()
+    nif_scan_filter_edit.setPlaceholderText("Filter by file path, status, or diagnostic text")
+    nif_scan_filter_row.addWidget(nif_scan_filter_edit, 1)
+    nif_scan_status_filter = QtWidgets.QComboBox()
+    nif_scan_status_filter.addItems(["ALL", "OK", "WARN", "SKIP", "FAIL"])
+    nif_scan_filter_row.addWidget(nif_scan_status_filter)
+    nif_scan_layout.addLayout(nif_scan_filter_row)
+    nif_scan_results = QtWidgets.QTreeWidget()
+    nif_scan_results.setColumnCount(3)
+    nif_scan_results.setHeaderLabels(["Status", "NIF file", "Diagnostics"])
+    nif_scan_results.setRootIsDecorated(False)
+    nif_scan_results.setAlternatingRowColors(True)
+    nif_scan_results.setUniformRowHeights(True)
+    nif_scan_results.header().setStretchLastSection(True)
+    nif_scan_results.setColumnWidth(0, 70)
+    nif_scan_results.setColumnWidth(1, 220)
+    nif_scan_layout.addWidget(nif_scan_results, 1)
+    nif_scan_page_row = QtWidgets.QHBoxLayout()
+    nif_scan_previous_button = QtWidgets.QPushButton("Previous")
+    nif_scan_page_label = QtWidgets.QLabel("Page 1 of 1")
+    nif_scan_next_button = QtWidgets.QPushButton("Next")
+    nif_scan_page_row.addWidget(nif_scan_previous_button)
+    nif_scan_page_row.addStretch(1)
+    nif_scan_page_row.addWidget(nif_scan_page_label)
+    nif_scan_page_row.addStretch(1)
+    nif_scan_page_row.addWidget(nif_scan_next_button)
+    nif_scan_layout.addLayout(nif_scan_page_row)
+    tabs.addTab(nif_scan_tab, "NIF Scan")
 
     generation_tab = QtWidgets.QWidget()
     generation_layout = QtWidgets.QVBoxLayout(generation_tab)
@@ -16040,6 +16196,10 @@ def _launch_qt_migration_gui() -> None:
 
     qt_worker_thread: QtCore.QThread | None = None
     qt_worker: _QtGenerationWorker | None = None
+    nif_scan_thread: QtCore.QThread | None = None
+    nif_scan_worker: _QtNifScanWorker | None = None
+    nif_scan_rows: list[dict[str, str]] = []
+    nif_scan_page_index = 0
     preview_manual_paused = False
     preview_auto_speed_off = False
 
@@ -16047,6 +16207,75 @@ def _launch_qt_migration_gui() -> None:
         if not message.strip():
             return
         event_log.appendPlainText(message.rstrip())
+
+    def _render_nif_scan_page() -> None:
+        nonlocal nif_scan_page_index
+        filtered_rows = [
+            row
+            for row in nif_scan_rows
+            if _nif_editor_result_matches_filters(
+                row,
+                keyword=nif_scan_filter_edit.text(),
+                status_filter=nif_scan_status_filter.currentText(),
+            )
+        ]
+        page_rows, nif_scan_page_index, page_count = _slice_nif_editor_result_page(
+            filtered_rows,
+            nif_scan_page_index,
+        )
+        nif_scan_results.clear()
+        for row in page_rows:
+            item = QtWidgets.QTreeWidgetItem(
+                [row["status"], row["file_name"], row["details"].replace("\n", " · ")]
+            )
+            item.setToolTip(1, row["preview"])
+            item.setToolTip(2, row["details"])
+            nif_scan_results.addTopLevelItem(item)
+        nif_scan_page_label.setText(
+            f"Page {nif_scan_page_index + 1} of {page_count} · {len(filtered_rows)} result(s)"
+        )
+        nif_scan_previous_button.setEnabled(nif_scan_page_index > 0)
+        nif_scan_next_button.setEnabled(nif_scan_page_index + 1 < page_count)
+
+    def _add_nif_scan_result(row: object) -> None:
+        if not isinstance(row, dict):
+            return
+        nif_scan_rows.append({str(key): str(value) for key, value in row.items()})
+        if len(nif_scan_rows) % 25 == 0:
+            _render_nif_scan_page()
+
+    def _reset_nif_scan_page(*_: object) -> None:
+        nonlocal nif_scan_page_index
+        nif_scan_page_index = 0
+        _render_nif_scan_page()
+
+    def _change_nif_scan_page(delta: int) -> None:
+        nonlocal nif_scan_page_index
+        nif_scan_page_index += int(delta)
+        _render_nif_scan_page()
+
+    def _set_nif_scan_running(running: bool) -> None:
+        nif_scan_start_button.setEnabled(not running)
+        nif_scan_cancel_button.setEnabled(running)
+        nif_scan_mode_combo.setEnabled(not running)
+        nif_scan_path_edit.setEnabled(not running)
+        nif_scan_browse_button.setEnabled(not running)
+
+    def _finish_nif_scan(cancelled: bool) -> None:
+        _render_nif_scan_page()
+        _set_nif_scan_running(False)
+        if cancelled:
+            nif_scan_status_label.setText(
+                f"Scan cancelled after {len(nif_scan_rows)} file(s); showing collected results."
+            )
+        else:
+            nif_scan_progress.setValue(100)
+            nif_scan_status_label.setText(f"Scan complete: {len(nif_scan_rows)} file(s) inspected.")
+
+    def _fail_nif_scan(message: str) -> None:
+        _render_nif_scan_page()
+        _set_nif_scan_running(False)
+        nif_scan_status_label.setText(f"Scan failed: {message}")
 
     def _apply_qt_appearance(*_: object) -> None:
         scale = float(ui_scale_combo.currentText())
@@ -16402,6 +16631,76 @@ def _launch_qt_migration_gui() -> None:
             checkpoint_path_edit.setText(chosen_file)
             _refresh_checkpoint_health()
 
+    def _browse_nif_scan_target() -> None:
+        if nif_scan_mode_combo.currentData() == "file":
+            chosen_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+                window,
+                "Select NIF mesh",
+                str(Path.home()),
+                "NIF meshes (*.nif);;All files (*)",
+            )
+        else:
+            chosen_path = QtWidgets.QFileDialog.getExistingDirectory(
+                window,
+                "Select mesh folder",
+                str(Path.home()),
+            )
+        if chosen_path:
+            nif_scan_path_edit.setText(chosen_path)
+
+    def _on_nif_scan_progress(index: int, total: int, path: str) -> None:
+        nif_scan_progress.setValue(min(100, int(index * 100 / max(1, total))))
+        nif_scan_status_label.setText(f"Scanning {index}/{total}: {Path(path).name}")
+
+    def _start_nif_scan() -> None:
+        nonlocal nif_scan_thread, nif_scan_worker, nif_scan_page_index
+        nif_paths, error = resolve_nif_editor_targets(
+            nif_scan_path_edit.text(),
+            str(nif_scan_mode_combo.currentData() or ""),
+        )
+        if error:
+            nif_scan_status_label.setText(error)
+            return
+        if not nif_paths:
+            nif_scan_status_label.setText("No NIF files found in the selected location.")
+            return
+        if nif_scan_thread is not None:
+            return
+        nif_scan_rows.clear()
+        nif_scan_page_index = 0
+        nif_scan_results.clear()
+        nif_scan_progress.setValue(0)
+        nif_scan_status_label.setText(f"Starting read-only scan of {len(nif_paths)} NIF file(s)…")
+        _set_nif_scan_running(True)
+        nif_scan_worker = _QtNifScanWorker(nif_paths)
+        nif_scan_thread = QtCore.QThread(window)
+        nif_scan_worker.moveToThread(nif_scan_thread)
+        nif_scan_thread.started.connect(nif_scan_worker.run)
+        nif_scan_worker.progress.connect(_on_nif_scan_progress)
+        nif_scan_worker.result.connect(_add_nif_scan_result)
+        nif_scan_worker.finished.connect(_finish_nif_scan)
+        nif_scan_worker.failed.connect(_fail_nif_scan)
+        nif_scan_worker.finished.connect(nif_scan_thread.quit)
+        nif_scan_worker.failed.connect(nif_scan_thread.quit)
+        nif_scan_thread.finished.connect(nif_scan_worker.deleteLater)
+
+        def _cleanup_nif_scan() -> None:
+            nonlocal nif_scan_thread, nif_scan_worker
+            if nif_scan_thread is not None:
+                nif_scan_thread.deleteLater()
+            nif_scan_thread = None
+            nif_scan_worker = None
+
+        nif_scan_thread.finished.connect(_cleanup_nif_scan)
+        nif_scan_thread.start()
+
+    def _cancel_nif_scan() -> None:
+        if nif_scan_worker is None:
+            return
+        nif_scan_worker.request_cancel()
+        nif_scan_cancel_button.setEnabled(False)
+        nif_scan_status_label.setText("Cancellation requested; finishing the current NIF scan…")
+
     def _clear_checkpoint() -> None:
         checkpoint_path = _effective_checkpoint_path()
         try:
@@ -16663,6 +16962,13 @@ def _launch_qt_migration_gui() -> None:
     browse_input_folder_button.clicked.connect(_browse_input_folder)
     browse_output_button.clicked.connect(_browse_output)
     browse_checkpoint_button.clicked.connect(_browse_checkpoint)
+    nif_scan_browse_button.clicked.connect(_browse_nif_scan_target)
+    nif_scan_start_button.clicked.connect(_start_nif_scan)
+    nif_scan_cancel_button.clicked.connect(_cancel_nif_scan)
+    nif_scan_filter_edit.textChanged.connect(_reset_nif_scan_page)
+    nif_scan_status_filter.currentTextChanged.connect(_reset_nif_scan_page)
+    nif_scan_previous_button.clicked.connect(lambda: _change_nif_scan_page(-1))
+    nif_scan_next_button.clicked.connect(lambda: _change_nif_scan_page(1))
     clear_checkpoint_button.clicked.connect(_clear_checkpoint)
     generate_button.clicked.connect(_start_generation)
     cancel_button.clicked.connect(_cancel_generation)
