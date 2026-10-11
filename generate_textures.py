@@ -6424,6 +6424,19 @@ def _format_qt_nif_scan_page_summary(
     return f"{summary} · {status_summary}" if status_summary else summary
 
 
+def _qt_nif_scan_status_color(status: str, *, dark_mode: bool) -> str | None:
+    colors = {
+        "OK": ("#7ee2a8", "#16733a"),
+        "WARN": ("#ffd166", "#8a5a00"),
+        "SKIP": ("#b2bac5", "#5a6470"),
+        "FAIL": ("#ff8585", "#b42318"),
+    }
+    palette = colors.get(str(status or "").strip().upper())
+    if palette is None:
+        return None
+    return palette[0 if dark_mode else 1]
+
+
 def _set_nif_editor_controls_active(
     controls: Sequence[Any],
     saved_states: dict[Any, str],
@@ -16375,6 +16388,15 @@ def _launch_qt_migration_gui() -> None:
             item = QtWidgets.QTreeWidgetItem(
                 [row["status"], row["file_name"], row["details"].replace("\n", " · ")]
             )
+            status_color = _qt_nif_scan_status_color(
+                row["status"],
+                dark_mode=theme_check.isChecked(),
+            )
+            if status_color:
+                item.setForeground(0, QtGui.QBrush(QtGui.QColor(status_color)))
+                status_font = QtGui.QFont(item.font(0))
+                status_font.setBold(True)
+                item.setFont(0, status_font)
             item.setToolTip(1, row["preview"])
             item.setToolTip(2, row["details"])
             item.setData(0, QtCore.Qt.ItemDataRole.UserRole, row)
@@ -17224,6 +17246,7 @@ def _launch_qt_migration_gui() -> None:
     use_profile_recommendation_button.clicked.connect(_apply_profile_recommendation)
     apply_profile_outputs_button.clicked.connect(_apply_profile_output_defaults)
     theme_check.toggled.connect(_apply_qt_appearance)
+    theme_check.toggled.connect(_render_nif_scan_page)
     ui_scale_combo.currentTextChanged.connect(_apply_qt_appearance)
     resume_mode_combo.currentIndexChanged.connect(_update_resume_hint)
     input_path_edit.textChanged.connect(_refresh_checkpoint_health)

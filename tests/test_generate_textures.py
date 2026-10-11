@@ -46,6 +46,7 @@ from generate_textures import (
     _format_nif_result_row_details,
     _should_refresh_qt_nif_scan_page,
     _format_qt_nif_scan_page_summary,
+    _qt_nif_scan_status_color,
     _preview_qt_nif_auto_remediation,
     discover_plugin_conflict_context_from_manager,
     discover_ui_languages,
@@ -616,6 +617,13 @@ class TestNifEditorTargetResolution(unittest.TestCase):
 
 
 class TestQtNifValidationScan(unittest.TestCase):
+    def test_scan_status_colors_are_theme_aware(self) -> None:
+        self.assertEqual(_qt_nif_scan_status_color("OK", dark_mode=True), "#7ee2a8")
+        self.assertEqual(_qt_nif_scan_status_color("warn", dark_mode=False), "#8a5a00")
+        self.assertEqual(_qt_nif_scan_status_color("SKIP", dark_mode=True), "#b2bac5")
+        self.assertEqual(_qt_nif_scan_status_color("FAIL", dark_mode=False), "#b42318")
+        self.assertIsNone(_qt_nif_scan_status_color("UNKNOWN", dark_mode=False))
+
     def test_scan_page_summary_counts_filtered_statuses(self) -> None:
         summary = _format_qt_nif_scan_page_summary(
             [
