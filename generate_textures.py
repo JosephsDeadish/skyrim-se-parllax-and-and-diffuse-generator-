@@ -16,6 +16,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import uuid
 from collections import defaultdict, deque
 from dataclasses import dataclass, replace
@@ -17722,6 +17723,12 @@ def main() -> int:
         backend = str(getattr(args, "gui_backend", "auto") or "auto").strip().lower()
         if backend not in {"auto", "tk", "qt"}:
             backend = "auto"
+        if (
+            backend == "auto"
+            and getattr(sys, "frozen", False)
+            and Path(sys.executable).stem.lower() == "generate_textures_qt"
+        ):
+            backend = "qt"
         if backend == "qt":
             _launch_qt_migration_gui()
             return 0
@@ -17889,19 +17896,23 @@ def main() -> int:
 def _run_cli() -> int:
     try:
         return main()
-    except RuntimeError as exc:
-        message = str(exc)
-        if message == "GUI dependencies are unavailable in this environment.":
-            print(
-                "Error: GUI dependencies are unavailable in this environment. "
-                "Install tkinter/PySide6 support or provide an input file to run in CLI mode.",
-                file=sys.stderr,
-            )
-            return 1
-        print(f"Error: {message}", file=sys.stderr)
-        return 1
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        message = str(exc)
+        if isinstance(exc, RuntimeError) and message == "GUI dependencies are unavailable in this environment.":
+            message = (
+                "GUI dependencies are unavailable in this environment. "
+                "Install tkinter/PySide6 support or provide an input file to run in CLI mode."
+            )
+        if getattr(sys, "frozen", False) and sys.stderr is None:
+            try:
+                log_path = Path.home() / ".skyrim_texture_generator_startup_error.log"
+                with log_path.open("a", encoding="utf-8") as error_log:
+                    error_log.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Error: {message}\n")
+                    traceback.print_exception(type(exc), exc, exc.__traceback__, file=error_log)
+            except OSError:
+                pass
+        else:
+            print(f"Error: {message}", file=sys.stderr)
         return 1
 
 

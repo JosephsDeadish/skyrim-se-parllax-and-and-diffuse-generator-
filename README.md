@@ -53,6 +53,8 @@ python generate_textures.py --gui --gui-backend qt
 
 If Qt dependencies are missing, install `PySide6` first.
 
+A successful Windows build also uploads `skyrim-texture-generator-qt-migration-preview` for packaged review. The Qt-named executable defaults to Qt; explicit `--gui-backend tk|qt` overrides remain available. Launch `generate_textures_qt.exe --gui --gui-backend qt` explicitly when comparing backends; the Tk application remains the full-featured release path.
+
 This opens a desktop interface where you can:
 - select one input texture or an entire folder of source DDS textures
 - pick an output folder

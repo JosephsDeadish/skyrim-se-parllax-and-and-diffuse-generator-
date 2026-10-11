@@ -6412,6 +6412,52 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         qt_launch.assert_called_once()
 
+    def test_main_frozen_qt_executable_defaults_to_qt_on_double_click(self) -> None:
+        args = SimpleNamespace(gui=False, input_file=None, gui_backend="auto", pbr_material=False)
+        with mock.patch("generate_textures.parse_args", return_value=args), \
+             mock.patch.object(sys, "frozen", True, create=True), \
+             mock.patch.object(sys, "executable", "/packaged/generate_textures_qt.exe"), \
+             mock.patch("generate_textures.GUI_AVAILABLE", True), \
+             mock.patch("generate_textures.QT_GUI_AVAILABLE", True), \
+             mock.patch("generate_textures._launch_qt_migration_gui") as qt_launch, \
+             mock.patch("generate_textures._launch_tk_gui") as tk_launch:
+            self.assertEqual(main(), 0)
+        qt_launch.assert_called_once()
+        tk_launch.assert_not_called()
+
+    def test_main_frozen_qt_executable_honors_explicit_backend_overrides(self) -> None:
+        for backend in ("tk", "qt"):
+            with self.subTest(backend=backend):
+                args = SimpleNamespace(gui=True, input_file=None, gui_backend=backend, pbr_material=False)
+                with mock.patch("generate_textures.parse_args", return_value=args), \
+                     mock.patch.object(sys, "frozen", True, create=True), \
+                     mock.patch.object(sys, "executable", "/packaged/generate_textures_qt.exe"), \
+                     mock.patch("generate_textures.GUI_AVAILABLE", True), \
+                     mock.patch("generate_textures.QT_GUI_AVAILABLE", True), \
+                     mock.patch("generate_textures._launch_qt_migration_gui") as qt_launch, \
+                     mock.patch("generate_textures._launch_tk_gui") as tk_launch:
+                    self.assertEqual(main(), 0)
+                self.assertEqual(qt_launch.call_count, int(backend == "qt"))
+                self.assertEqual(tk_launch.call_count, int(backend == "tk"))
+
+    def test_main_normal_and_source_auto_backend_still_prefer_tk(self) -> None:
+        for frozen, executable in (
+            (True, "/packaged/generate_textures.exe"),
+            (False, "/source/generate_textures_qt.exe"),
+        ):
+            with self.subTest(frozen=frozen, executable=executable):
+                args = SimpleNamespace(gui=False, input_file=None, gui_backend="auto", pbr_material=False)
+                with mock.patch("generate_textures.parse_args", return_value=args), \
+                     mock.patch.object(sys, "frozen", frozen, create=True), \
+                     mock.patch.object(sys, "executable", executable), \
+                     mock.patch("generate_textures.GUI_AVAILABLE", True), \
+                     mock.patch("generate_textures.QT_GUI_AVAILABLE", True), \
+                     mock.patch("generate_textures._launch_qt_migration_gui") as qt_launch, \
+                     mock.patch("generate_textures._launch_tk_gui") as tk_launch:
+                    self.assertEqual(main(), 0)
+                tk_launch.assert_called_once()
+                qt_launch.assert_not_called()
+
     def test_main_pbr_material_forces_complex_material_cm_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             input_file = Path(temp_dir) / "brick.dds"
@@ -9488,6 +9534,63 @@ class RmaosJsonParallaxVsDisplacementTests(unittest.TestCase):
         self.assertIn("texture", data)
         self.assertIsInstance(data["texture"], str)
         self.assertTrue(len(data["texture"]) > 0)
+
+
+class TestPackagedStartupErrorReporting(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.log = self.home / ".skyrim_texture_generator_startup_error.log"
+
+    def test_frozen_windowed_errors_append_original_traceback_and_guidance(self) -> None:
+        startup_error = RuntimeError("GUI could not start")
+        startup_error.__cause__ = ValueError("original Tcl initialization detail")
+        errors = [
+            startup_error, OSError("startup resource unavailable"),
+            RuntimeError("GUI dependencies are unavailable in this environment."),
+        ]
+        for error in errors:
+            with mock.patch("generate_textures.main", side_effect=error), \
+                 mock.patch.object(sys, "frozen", True, create=True), \
+                 mock.patch.object(sys, "stderr", None), \
+                 mock.patch("generate_textures.Path.home", return_value=self.home):
+                self.assertEqual(_run_cli(), 1)
+        content = self.log.read_text(encoding="utf-8")
+        self.assertEqual(content.count("] Error:"), 3)
+        self.assertIn("Traceback (most recent call last)", content)
+        self.assertIn("ValueError: original Tcl initialization detail", content)
+        self.assertIn("RuntimeError: GUI could not start", content)
+        self.assertIn("OSError: startup resource unavailable", content)
+        self.assertIn("Install tkinter/PySide6 support", content)
+
+    def test_frozen_console_errors_use_stderr_without_creating_log(self) -> None:
+        stderr = io.StringIO()
+        with mock.patch("generate_textures.main", side_effect=RuntimeError("console detail")), \
+             mock.patch.object(sys, "frozen", True, create=True), \
+             mock.patch.object(sys, "stderr", stderr), \
+             mock.patch("generate_textures.Path.home", return_value=self.home):
+            self.assertEqual(_run_cli(), 1)
+        self.assertIn("Error: console detail", stderr.getvalue())
+        self.assertFalse(self.log.exists())
+
+    def test_non_frozen_missing_stderr_does_not_create_packaged_log(self) -> None:
+        with mock.patch("generate_textures.main", side_effect=RuntimeError("source detail")), \
+             mock.patch.object(sys, "frozen", False, create=True), \
+             mock.patch.object(sys, "stderr", None), \
+             mock.patch.object(sys, "stdout", io.StringIO()), \
+             mock.patch("generate_textures.Path.home", return_value=self.home):
+            self.assertEqual(_run_cli(), 1)
+        self.assertFalse(self.log.exists())
+
+    def test_unwritable_packaged_error_log_does_not_mask_original_failure(self) -> None:
+        with mock.patch("generate_textures.main", side_effect=RuntimeError("startup failed")), \
+             mock.patch.object(sys, "frozen", True, create=True), \
+             mock.patch.object(sys, "stderr", None), \
+             mock.patch("generate_textures.Path.home", return_value=self.home), \
+             mock.patch.object(Path, "open", side_effect=PermissionError("Home is read-only")):
+            self.assertEqual(_run_cli(), 1)
+        self.assertFalse(self.log.exists())
 
 
 class TestQtNifEditorRunner(unittest.TestCase):

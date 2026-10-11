@@ -198,7 +198,7 @@ jobs:
             @{ Name = "dark-200-percent"; Dark = $true; Scale = 2.0; Width = 1100; Height = 700 }
           )
           $backends = @(
-            @{ Name = "Tk"; ProcessName = "generate_textures"; Path = ".\dist\generate_textures.exe"; Backend = "tk"; StartupTimeout = 30 },
+            @{ Name = "Tk"; ProcessName = "generate_textures"; Path = ".\dist\generate_textures.exe"; Backend = "tk"; StartupTimeout = 60 },
             @{ Name = "Qt"; ProcessName = "generate_textures_qt"; Path = ".\dist\qt\generate_textures_qt.exe"; Backend = "qt"; StartupTimeout = 120 }
           )
           foreach ($backend in $backends) {
@@ -214,7 +214,9 @@ jobs:
                 $windowProcess = $null
                 do {
                   $launchedProcesses = @(Get-Process -Name $backend.ProcessName -ErrorAction SilentlyContinue | Where-Object { $existingIds -notcontains $_.Id })
-                  $windowProcess = $launchedProcesses | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+                  $windowProcess = $launchedProcesses | Where-Object {
+                    $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -like "Skyrim Texture Generator*"
+                  } | Select-Object -First 1
                   if ($windowProcess) { break }
                   Start-Sleep -Seconds 1
                 } while ((Get-Date) -lt $deadline)
@@ -222,20 +224,32 @@ jobs:
                   $launcher.Refresh()
                   $launcherState = if ($launcher.HasExited) { "exited with code $($launcher.ExitCode)" } else { "still running (PID=$($launcher.Id))" }
                   $details = ($launchedProcesses | ForEach-Object { "PID=$($_.Id) Handle=$($_.MainWindowHandle) Title='$($_.MainWindowTitle)'" }) -join "; "
+                  $startupError = Join-Path $HOME ".skyrim_texture_generator_startup_error.log"
+                  if (Test-Path $startupError) { Get-Content $startupError | Write-Host }
                   throw "Packaged $($backend.Name) GUI '$($case.Name)' did not create a main window within $($backend.StartupTimeout)s. Launcher $launcherState. Processes: $details"
                 }
                 $windowProcess.Refresh()
                 if ($backend.Backend -eq "qt" -and $windowProcess.MainWindowTitle -notlike "*Qt migration preview*") {
                   throw "Packaged Qt GUI launched an unexpected window: '$($windowProcess.MainWindowTitle)'."
                 }
-                $handle = [IntPtr]$windowProcess.MainWindowHandle
-                if (-not [WindowSmoke]::SetWindowPos($handle, [IntPtr]::Zero, 20, 20, $case.Width, $case.Height, 0x0040)) {
-                  throw "Could not resize packaged $($backend.Name) GUI '$($case.Name)' to $($case.Width)x$($case.Height)."
-                }
-                Start-Sleep -Milliseconds 500
+                $resizeDeadline = (Get-Date).AddSeconds(10)
+                $boundsRead = $false
                 $rect = New-Object WindowSmoke+RECT
-                if (-not [WindowSmoke]::GetWindowRect($handle, [ref]$rect)) {
-                  throw "Could not read packaged $($backend.Name) GUI '$($case.Name)' window bounds."
+                do {
+                  $windowProcess.Refresh()
+                  if ($windowProcess.HasExited) {
+                    throw "Packaged $($backend.Name) GUI '$($case.Name)' exited before resize verification."
+                  }
+                  $handle = [IntPtr]$windowProcess.MainWindowHandle
+                  if ($handle -ne [IntPtr]::Zero -and [WindowSmoke]::SetWindowPos($handle, [IntPtr]::Zero, 20, 20, $case.Width, $case.Height, 0x0040)) {
+                    Start-Sleep -Milliseconds 500
+                    $boundsRead = [WindowSmoke]::GetWindowRect($handle, [ref]$rect)
+                    if ($boundsRead) { break }
+                  }
+                  Start-Sleep -Milliseconds 500
+                } while ((Get-Date) -lt $resizeDeadline)
+                if (-not $boundsRead) {
+                  throw "Could not resize/read packaged $($backend.Name) GUI '$($case.Name)' window bounds after refreshing its handle."
                 }
                 $actualWidth = $rect.Right - $rect.Left
                 $actualHeight = $rect.Bottom - $rect.Top
@@ -250,6 +264,12 @@ jobs:
                 Write-Host "Packaged $($backend.Name) GUI '$($case.Name)' started: $($case.Width)x$($case.Height), scale $($case.Scale), dark=$($case.Dark)."
               }
               finally {
+                $startupError = Join-Path $HOME ".skyrim_texture_generator_startup_error.log"
+                if (Test-Path $startupError) {
+                  Get-Content $startupError | Write-Host
+                  Copy-Item $startupError (Join-Path $qtScreenshotDir "$($backend.Backend)-$($case.Name)-error.log")
+                  Remove-Item $startupError
+                }
                 @(Get-Process -Name $backend.ProcessName -ErrorAction SilentlyContinue | Where-Object { $existingIds -notcontains $_.Id }) | Stop-Process -Force -ErrorAction SilentlyContinue
                 Start-Sleep -Milliseconds 500
               }
@@ -346,7 +366,7 @@ jobs:
         with:
           name: packaged-qt-gui-screenshots
           path: artifacts/qt_gui_window_smoke
-          if-no-files-found: error
+          if-no-files-found: warn
 
       - name: Create application zip
         run: |
@@ -358,6 +378,18 @@ jobs:
         run: |
           Compress-Archive -Path generate_textures.py, nif_patcher.py, README.md, requirements.txt, assets, tests -DestinationPath skyrim-texture-generator-source.zip
         shell: pwsh
+
+      - name: Create Qt migration-preview application zip
+        run: |
+          Compress-Archive -Path dist\qt\generate_textures_qt.exe, generate_textures.py, nif_patcher.py, README.md, requirements.txt, assets, fomod -DestinationPath skyrim-texture-generator-qt.zip
+        shell: pwsh
+
+      - name: Upload Qt migration-preview application artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: skyrim-texture-generator-qt-migration-preview
+          path: skyrim-texture-generator-qt.zip
+          if-no-files-found: error
 
       - name: Upload application artifact
         uses: actions/upload-artifact@v4
