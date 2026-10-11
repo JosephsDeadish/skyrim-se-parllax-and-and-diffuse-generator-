@@ -158,23 +158,65 @@ jobs:
       - name: Smoke launch packaged Tk GUI
         shell: pwsh
         run: |
-          $existingIds = @(Get-Process -Name "generate_textures" -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
-          $launcher = Start-Process -FilePath ".\dist\generate_textures.exe" -ArgumentList @("--gui", "--gui-backend", "tk") -PassThru
-          $deadline = (Get-Date).AddSeconds(20)
-          $windowProcess = $null
-          do {
-            $launchedProcesses = @(Get-Process -Name "generate_textures" -ErrorAction SilentlyContinue | Where-Object { $existingIds -notcontains $_.Id })
-            $windowProcess = $launchedProcesses | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
-            if ($windowProcess) {
-              break
-            }
-            Start-Sleep -Seconds 1
-          } while ((Get-Date) -lt $deadline)
-          if (-not $windowProcess) {
-            $details = ($launchedProcesses | ForEach-Object { "PID=$($_.Id) Handle=$($_.MainWindowHandle) Title='$($_.MainWindowTitle)'" }) -join "; "
-            throw "Packaged Tk GUI did not create a main window. Launcher PID=$($launcher.Id). Processes: $details"
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class WindowSmoke {
+            [StructLayout(LayoutKind.Sequential)]
+            public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+            [DllImport("user32.dll", SetLastError = true)]
+            public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int width, int height, uint flags);
+            [DllImport("user32.dll", SetLastError = true)]
+            public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
           }
-          $launchedProcesses | Stop-Process -Force
+          "@
+          $statePath = Join-Path $HOME ".skyrim_texture_generator_gui_state.json"
+          $cases = @(
+            @{ Name = "light-small"; Dark = $false; Scale = 0.9; Width = 800; Height = 600 },
+            @{ Name = "dark-large"; Dark = $true; Scale = 1.5; Width = 1280; Height = 900 },
+            @{ Name = "light-medium"; Dark = $false; Scale = 1.15; Width = 960; Height = 700 }
+          )
+          foreach ($case in $cases) {
+            $existingIds = @(Get-Process -Name "generate_textures" -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+            @{
+              dark_mode = $case.Dark
+              ui_scale = $case.Scale
+            } | ConvertTo-Json | Set-Content -Path $statePath -Encoding utf8
+            $launcher = Start-Process -FilePath ".\dist\generate_textures.exe" -ArgumentList @("--gui", "--gui-backend", "tk") -PassThru
+            try {
+              $deadline = (Get-Date).AddSeconds(20)
+              $windowProcess = $null
+              do {
+                $launchedProcesses = @(Get-Process -Name "generate_textures" -ErrorAction SilentlyContinue | Where-Object { $existingIds -notcontains $_.Id })
+                $windowProcess = $launchedProcesses | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+                if ($windowProcess) { break }
+                Start-Sleep -Seconds 1
+              } while ((Get-Date) -lt $deadline)
+              if (-not $windowProcess) {
+                $details = ($launchedProcesses | ForEach-Object { "PID=$($_.Id) Handle=$($_.MainWindowHandle) Title='$($_.MainWindowTitle)'" }) -join "; "
+                throw "Packaged Tk GUI '$($case.Name)' did not create a main window. Launcher PID=$($launcher.Id). Processes: $details"
+              }
+              $handle = [IntPtr]$windowProcess.MainWindowHandle
+              if (-not [WindowSmoke]::SetWindowPos($handle, [IntPtr]::Zero, 40, 40, $case.Width, $case.Height, 0x0040)) {
+                throw "Could not resize packaged Tk GUI '$($case.Name)' to $($case.Width)x$($case.Height)."
+              }
+              Start-Sleep -Milliseconds 500
+              $rect = New-Object WindowSmoke+RECT
+              if (-not [WindowSmoke]::GetWindowRect($handle, [ref]$rect)) {
+                throw "Could not read packaged Tk GUI '$($case.Name)' window bounds."
+              }
+              $actualWidth = $rect.Right - $rect.Left
+              $actualHeight = $rect.Bottom - $rect.Top
+              if ([Math]::Abs($actualWidth - $case.Width) -gt 4 -or [Math]::Abs($actualHeight - $case.Height) -gt 4) {
+                throw "Packaged Tk GUI '$($case.Name)' window bounds were ${actualWidth}x${actualHeight}; expected $($case.Width)x$($case.Height)."
+              }
+              Write-Host "Packaged Tk GUI '$($case.Name)' started: $($case.Width)x$($case.Height), scale $($case.Scale), dark=$($case.Dark)."
+            }
+            finally {
+              @(Get-Process -Name "generate_textures" -ErrorAction SilentlyContinue | Where-Object { $existingIds -notcontains $_.Id }) | Stop-Process -Force -ErrorAction SilentlyContinue
+              Start-Sleep -Milliseconds 500
+            }
+          }
 
       - name: Validate Tk Advanced output visibility settings
         run: python -m unittest -v tests.test_generate_textures.GenerateTexturesTests.test_tk_advanced_workflow_visibility_round_trips_saved_settings
