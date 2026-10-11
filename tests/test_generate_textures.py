@@ -3,6 +3,7 @@ import os
 import queue
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -22,6 +23,7 @@ from generate_textures import (
     compute_effective_ui_scale,
     _compute_nif_editor_controls_pane_height,
     _compute_nif_editor_result_details_height,
+    _drain_nif_editor_ui_updates,
     _format_nif_result_row_details,
     discover_plugin_conflict_context_from_manager,
     discover_ui_languages,
@@ -217,6 +219,47 @@ class TestNifEditorLayoutSizing(unittest.TestCase):
             ),
             160,
         )
+
+
+class TestNifEditorUiUpdateQueue(unittest.TestCase):
+    def test_drains_callbacks_in_fifo_batches_on_calling_thread(self) -> None:
+        updates: queue.Queue = queue.Queue()
+        completed: list[tuple[int, int]] = []
+        ui_thread_id = threading.get_ident()
+
+        def _enqueue_from_worker() -> None:
+            for index in range(3):
+                updates.put(lambda i=index: completed.append((i, threading.get_ident())))
+
+        worker = threading.Thread(target=_enqueue_from_worker)
+        worker.start()
+        worker.join()
+
+        self.assertEqual(_drain_nif_editor_ui_updates(updates, limit=2), 2)
+        self.assertEqual([index for index, _ in completed], [0, 1])
+        self.assertTrue(all(thread_id == ui_thread_id for _, thread_id in completed))
+        self.assertEqual(_drain_nif_editor_ui_updates(updates), 1)
+        self.assertEqual([index for index, _ in completed], [0, 1, 2])
+
+    def test_callback_error_does_not_prevent_later_updates(self) -> None:
+        updates: queue.Queue = queue.Queue()
+        completed: list[str] = []
+        errors: list[str] = []
+
+        def _fail() -> None:
+            raise RuntimeError("callback failed")
+
+        updates.put(_fail)
+        updates.put(lambda: completed.append("later"))
+
+        drained = _drain_nif_editor_ui_updates(
+            updates,
+            on_error=lambda exc: errors.append(str(exc)),
+        )
+
+        self.assertEqual(drained, 2)
+        self.assertEqual(errors, ["callback failed"])
+        self.assertEqual(completed, ["later"])
 
 
 class TestNifEditorTargetResolution(unittest.TestCase):

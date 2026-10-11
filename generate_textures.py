@@ -5716,6 +5716,30 @@ def resolve_nif_editor_targets(path_value: str, scan_mode: str) -> tuple[list[Pa
     return [], "Choose whether to patch a single NIF file or a mesh folder."
 
 
+def _drain_nif_editor_ui_updates(
+    updates: queue.Queue[Callable[[], None]],
+    *,
+    limit: int = 100,
+    on_error: Callable[[Exception], None] | None = None,
+) -> int:
+    drained = 0
+    for _ in range(max(0, limit)):
+        try:
+            callback = updates.get_nowait()
+        except queue.Empty:
+            break
+        drained += 1
+        try:
+            callback()
+        except Exception as exc:
+            if on_error is not None:
+                try:
+                    on_error(exc)
+                except Exception:
+                    pass
+    return drained
+
+
 def resolve_nif_editor_patch_options_for_target(
     nif_path: Path,
     base_options: NifPatchOptions,
@@ -13365,15 +13389,10 @@ if GUI_AVAILABLE:
                     except Exception:
                         _ui_update_poll_active[0] = False
                         return
-                    for _ in range(100):
-                        try:
-                            callback = _ui_update_queue.get_nowait()
-                        except queue.Empty:
-                            break
-                        try:
-                            callback()
-                        except Exception as exc:
-                            status_var.set(f"NIF Editor UI update failed: {exc}")
+                    _drain_nif_editor_ui_updates(
+                        _ui_update_queue,
+                        on_error=lambda exc: status_var.set(f"NIF Editor UI update failed: {exc}"),
+                    )
                     if _ui_update_poll_active[0]:
                         try:
                             win.after(25, _poll_ui_updates)
