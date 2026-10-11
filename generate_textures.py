@@ -16,7 +16,7 @@ import tempfile
 import threading
 import time
 import uuid
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
@@ -5764,6 +5764,58 @@ def _make_latest_progress_update_enqueuer(
         updates.put(apply_latest)
 
     return enqueue
+
+
+def _make_batched_nif_result_enqueuer(
+    updates: queue.Queue[Callable[[], None]],
+    apply_batch: Callable[[Sequence[tuple[str, str, str]]], None],
+    *,
+    max_batch_size: int = 50,
+) -> tuple[
+    Callable[[str, str, str], None],
+    Callable[[Callable[[], None]], None],
+]:
+    lock = threading.Lock()
+    pending: deque[tuple[str, str, str]] = deque()
+    after_pending: list[Callable[[], None]] = []
+    callback_queued = [False]
+    batch_size = max(1, max_batch_size)
+
+    def drain_batch() -> None:
+        with lock:
+            batch = [pending.popleft() for _ in range(min(batch_size, len(pending)))]
+        try:
+            apply_batch(batch)
+        finally:
+            with lock:
+                has_more = bool(pending)
+                callbacks = [] if has_more else after_pending[:]
+                if not has_more:
+                    after_pending.clear()
+                    callback_queued[0] = False
+            if has_more:
+                updates.put(drain_batch)
+            else:
+                for callback in callbacks:
+                    callback()
+
+    def enqueue(status: str, file_name: str, details: str) -> None:
+        with lock:
+            pending.append((status, file_name, details))
+            should_schedule = not callback_queued[0]
+            if should_schedule:
+                callback_queued[0] = True
+        if should_schedule:
+            updates.put(drain_batch)
+
+    def enqueue_after_pending(callback: Callable[[], None]) -> None:
+        with lock:
+            if callback_queued[0]:
+                after_pending.append(callback)
+                return
+        updates.put(callback)
+
+    return enqueue, enqueue_after_pending
 
 
 def _should_render_nif_editor_results(
@@ -13514,7 +13566,7 @@ if GUI_AVAILABLE:
                             _safe_add_row("FAIL", "NIF Editor", f"{operation} failed: {exc}")
                             _safe_status(f"{operation} failed. See the results for details.")
                         finally:
-                            _queue_ui_update(_finish_op)
+                            _queue_after_result_rows(_finish_op)
 
                     try:
                         threading.Thread(
@@ -13528,10 +13580,15 @@ if GUI_AVAILABLE:
                         _finish_op()
 
                 def _safe_add_row(status: str, file_name: str, details: str) -> None:
-                    _queue_ui_update(lambda s=status, fn=file_name, d=details: _append_result_row(s, fn, d))
+                    _queue_result_row(status, file_name, details)
 
                 def _safe_status(msg: str) -> None:
                     _queue_ui_update(lambda m=msg: status_var.set(m))
+
+                _queue_result_row, _queue_after_result_rows = _make_batched_nif_result_enqueuer(
+                    _ui_update_queue,
+                    lambda rows: [_append_result_row(*row) for row in rows],
+                )
 
                 _queue_progress_update = _make_latest_progress_update_enqueuer(
                     _ui_update_queue,

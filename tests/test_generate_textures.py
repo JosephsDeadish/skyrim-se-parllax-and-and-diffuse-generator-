@@ -24,6 +24,7 @@ from generate_textures import (
     _compute_nif_editor_controls_pane_height,
     _compute_nif_editor_result_details_height,
     _drain_nif_editor_ui_updates,
+    _make_batched_nif_result_enqueuer,
     _make_latest_progress_update_enqueuer,
     _nif_editor_result_matches_filters,
     _can_append_nif_editor_result_incrementally,
@@ -227,6 +228,53 @@ class TestNifEditorLayoutSizing(unittest.TestCase):
 
 
 class TestNifEditorUiUpdateQueue(unittest.TestCase):
+    def test_result_updates_batch_with_bounded_ui_work_and_defer_completion(self) -> None:
+        updates: queue.Queue = queue.Queue()
+        applied: list[tuple[str, str, str, int]] = []
+        completion_threads: list[int] = []
+        ui_thread_id = threading.get_ident()
+        enqueue_row, after_rows = _make_batched_nif_result_enqueuer(
+            updates,
+            lambda rows: applied.extend((*row, threading.get_ident()) for row in rows),
+            max_batch_size=25,
+        )
+
+        def _produce_rows() -> None:
+            for index in range(1000):
+                enqueue_row("OK", f"{index:04d}.nif", "scanned")
+            after_rows(lambda: completion_threads.append(threading.get_ident()))
+
+        worker = threading.Thread(target=_produce_rows)
+        worker.start()
+        worker.join()
+
+        self.assertEqual(updates.qsize(), 1)
+        self.assertEqual(_drain_nif_editor_ui_updates(updates, limit=1), 1)
+        self.assertEqual(len(applied), 25)
+        self.assertEqual(updates.qsize(), 1)
+        self.assertEqual(completion_threads, [])
+
+        while not updates.empty():
+            self.assertEqual(_drain_nif_editor_ui_updates(updates, limit=1), 1)
+
+        self.assertEqual([row[1] for row in applied], [f"{index:04d}.nif" for index in range(1000)])
+        self.assertTrue(all(row[3] == ui_thread_id for row in applied))
+        self.assertEqual(completion_threads, [ui_thread_id])
+
+    def test_completion_without_pending_results_stays_queued(self) -> None:
+        updates: queue.Queue = queue.Queue()
+        completed: list[int] = []
+        ui_thread_id = threading.get_ident()
+        _enqueue_row, after_rows = _make_batched_nif_result_enqueuer(updates, lambda _rows: None)
+
+        worker = threading.Thread(target=lambda: after_rows(lambda: completed.append(threading.get_ident())))
+        worker.start()
+        worker.join()
+
+        self.assertEqual(completed, [])
+        self.assertEqual(_drain_nif_editor_ui_updates(updates), 1)
+        self.assertEqual(completed, [ui_thread_id])
+
     def test_progress_updates_coalesce_to_latest_value_on_ui_thread(self) -> None:
         updates: queue.Queue = queue.Queue()
         applied: list[tuple[float, int]] = []
