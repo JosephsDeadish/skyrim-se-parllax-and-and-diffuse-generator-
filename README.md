@@ -193,6 +193,8 @@ https://github.com/community-shaders/skyrim-community-shaders/releases
 
 The generated sidecar uses PGPatcher/PBRNifPatcher per-shape entries (for example: `texture`, `parallax`, `specular_level`, `roughness_scale`, `smooth_angle`, `displacement_scale`, `emissive_scale`, `vertex_color_lum_mult`). These snake_case fields are distinct from Community Shaders' built-in `Data/PBRTextureSets/<EDID>.json` camelCase fields (`specularLevel`, `roughnessScale`, `displacementScale`); the target patcher maps its sidecar values into the material parameters. The emitted `texture` matcher is retained for compatibility and is the legacy alias of `match_diffuse` in the [current PGPatcher schema](https://github.com/hakasapl/PGPatcher/blob/main/schema/pbr.schema.json). In the current Community Shaders TruePBR material contract, RMAOS alpha is **non-metal reflectance**, not height; the implementation is documented in [`BSLightingShaderMaterialPBR.h`](https://github.com/community-shaders/skyrim-community-shaders/blob/master/src/TruePBR/BSLightingShaderMaterialPBR.h). Validate against the PGPatcher/Community Shaders versions installed by the user.
 
+The Qt migration UI keeps **Advanced map strengths** (which change generated pixels) separate from **TruePBR material settings (sidecar)** (which change JSON only). Sidecar overrides are opt-in; when disabled, material-specific inferred values are preserved. When enabled, the explicit parallax, displacement, specular, and roughness values replace those inferred values in PGPatcher per-shape JSON. These controls do not author Community Shaders `PBRTextureSets` landscape JSON.
+
 ### True PBR workflow notes (users vs creators)
 
 #### For users (installing mods)

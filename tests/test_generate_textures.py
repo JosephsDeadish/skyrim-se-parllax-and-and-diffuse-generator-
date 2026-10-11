@@ -54,6 +54,7 @@ from generate_textures import (
     _merge_qt_generation_gui_state,
     _qt_profile_output_defaults,
     _qt_render_profile_modes,
+    _qt_truepbr_material_overrides,
     _apply_qt_profile_output_defaults,
     _describe_qt_profile_guidance,
     _qt_preview_channel_options,
@@ -870,6 +871,11 @@ class GenerateTexturesTests(unittest.TestCase):
                 environment_mask_strength=1.8,
                 rmaos_strength=2.1,
                 complex_strength=1.7,
+                truepbr_sidecar_overrides_enabled=True,
+                truepbr_sidecar_parallax=False,
+                truepbr_sidecar_displacement_scale=0.14,
+                truepbr_sidecar_specular_level=0.07,
+                truepbr_sidecar_roughness_scale=1.3,
                 dark_mode=True,
                 ui_scale=1.3,
             )
@@ -900,6 +906,11 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(merged["environment_mask_strength"], 1.8)
         self.assertEqual(merged["rmaos_strength"], 2.1)
         self.assertEqual(merged["complex_strength"], 1.7)
+        self.assertTrue(merged["truepbr_sidecar_overrides_enabled"])
+        self.assertFalse(merged["truepbr_sidecar_parallax"])
+        self.assertAlmostEqual(merged["truepbr_sidecar_displacement_scale"], 0.14)
+        self.assertAlmostEqual(merged["truepbr_sidecar_specular_level"], 0.07)
+        self.assertAlmostEqual(merged["truepbr_sidecar_roughness_scale"], 1.3)
         self.assertTrue(bool(merged["dark_mode"]))
         self.assertAlmostEqual(float(merged["ui_scale"]), 1.3)
         self.assertEqual(merged["batch_resume_mode"], "resume")
@@ -949,6 +960,32 @@ class GenerateTexturesTests(unittest.TestCase):
 
         self.assertFalse(any(_qt_profile_output_defaults("custom").values()))
         self.assertTrue(_qt_profile_output_defaults("vanilla")["include_diffuse"])
+
+    def test_qt_truepbr_material_overrides_are_opt_in(self) -> None:
+        self.assertIsNone(
+            _qt_truepbr_material_overrides(
+                False,
+                parallax=True,
+                displacement_scale=0.4,
+                specular_level=0.06,
+                roughness_scale=1.2,
+            )
+        )
+        self.assertEqual(
+            _qt_truepbr_material_overrides(
+                True,
+                parallax=False,
+                displacement_scale=0.4,
+                specular_level=0.06,
+                roughness_scale=1.2,
+            ),
+            {
+                "parallax": False,
+                "displacement_scale": 0.4,
+                "specular_level": 0.06,
+                "roughness_scale": 1.2,
+            },
+        )
 
     def test_qt_renderer_modes_follow_presets_and_preserve_custom_choices(self) -> None:
         current = {
@@ -6586,6 +6623,34 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertAlmostEqual(float(payload[0]["subsurface_opacity"]), 1.0)
             self.assertAlmostEqual(float(payload[0]["specular_level"]), 0.04)
 
+    def test_run_with_options_applies_explicit_truepbr_sidecar_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "skin.png"
+            _sample_image().save(input_path)
+            outputs = run_with_options(
+                input_file=input_path,
+                output_dir=temp_path / "out",
+                include_diffuse=False,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_rmaos=True,
+                include_complex=False,
+                truepbr_material_overrides={
+                    "parallax": True,
+                    "displacement_scale": 0.35,
+                    "specular_level": 0.08,
+                    "roughness_scale": 0.7,
+                },
+            )
+            payload = json.loads(outputs["rmaos_json"].read_text(encoding="utf-8"))[0]
+            self.assertTrue(payload["parallax"])
+            self.assertAlmostEqual(payload["displacement_scale"], 0.35)
+            self.assertAlmostEqual(payload["specular_level"], 0.08)
+            self.assertAlmostEqual(payload["roughness_scale"], 0.7)
+
     def test_run_with_options_rmaos_writes_sidecar_next_to_textures_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -7968,12 +8033,21 @@ class RmaosJsonMaterialTypeTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
-    def _write_and_read(self, material_type: str) -> dict:
+    def _write_and_read(
+        self,
+        material_type: str,
+        material_overrides: dict[str, object] | None = None,
+    ) -> dict:
         import json
         from pathlib import Path
 
         rmaos_path = Path(self._tmpdir) / f"test_{material_type}_rmaos.dds"
-        write_rmaos_json_sidecar(rmaos_path, parallax_enabled=False, material_type=material_type)
+        write_rmaos_json_sidecar(
+            rmaos_path,
+            parallax_enabled=False,
+            material_type=material_type,
+            material_overrides=material_overrides,
+        )
         # The function writes into a PBRNifPatcher sub-directory.
         json_path = Path(self._tmpdir) / "PBRNifPatcher" / f"{rmaos_path.stem}.json"
         with open(json_path) as f:
@@ -8000,6 +8074,25 @@ class RmaosJsonMaterialTypeTests(unittest.TestCase):
         }
         self.assertTrue(schema_fields.issubset(data))
         self.assertIsInstance(data["parallax"], bool)
+
+    def test_explicit_sidecar_overrides_replace_material_defaults(self) -> None:
+        data = self._write_and_read(
+            "skin",
+            {
+                "parallax": True,
+                "displacement_scale": 0.35,
+                "specular_level": 0.08,
+                "roughness_scale": 0.7,
+            },
+        )
+        self.assertTrue(data["parallax"])
+        self.assertAlmostEqual(data["displacement_scale"], 0.35)
+        self.assertAlmostEqual(data["specular_level"], 0.08)
+        self.assertAlmostEqual(data["roughness_scale"], 0.7)
+
+    def test_sidecar_rejects_invalid_material_override(self) -> None:
+        with self.assertRaisesRegex(ValueError, "between 0.0 and 1.0"):
+            self._write_and_read("general", {"specular_level": 2.0})
 
     def test_general_uses_defaults(self) -> None:
         data = self._write_and_read("general")

@@ -242,6 +242,11 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "environment_mask_strength": 1.2,
     "rmaos_strength": 1.2,
     "complex_strength": 1.15,
+    "truepbr_sidecar_overrides_enabled": False,
+    "truepbr_sidecar_parallax": True,
+    "truepbr_sidecar_displacement_scale": 0.2,
+    "truepbr_sidecar_specular_level": 0.04,
+    "truepbr_sidecar_roughness_scale": 1.0,
     "specular_strength": 1.15,
     "wetness_mask_strength": 1.0,
     "snow_mask_strength": 1.0,
@@ -855,6 +860,30 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         raw.get("rmaos_strength"), float(state["rmaos_strength"]), 0.1, 12.0
     )
     state["complex_strength"] = _coerce_float(raw.get("complex_strength"), float(state["complex_strength"]), 0.1, 12.0)
+    state["truepbr_sidecar_overrides_enabled"] = _coerce_bool(
+        raw.get("truepbr_sidecar_overrides_enabled"), bool(state["truepbr_sidecar_overrides_enabled"])
+    )
+    state["truepbr_sidecar_parallax"] = _coerce_bool(
+        raw.get("truepbr_sidecar_parallax"), bool(state["truepbr_sidecar_parallax"])
+    )
+    state["truepbr_sidecar_displacement_scale"] = _coerce_float(
+        raw.get("truepbr_sidecar_displacement_scale"),
+        float(state["truepbr_sidecar_displacement_scale"]),
+        0.0,
+        10.0,
+    )
+    state["truepbr_sidecar_specular_level"] = _coerce_float(
+        raw.get("truepbr_sidecar_specular_level"),
+        float(state["truepbr_sidecar_specular_level"]),
+        0.0,
+        1.0,
+    )
+    state["truepbr_sidecar_roughness_scale"] = _coerce_float(
+        raw.get("truepbr_sidecar_roughness_scale"),
+        float(state["truepbr_sidecar_roughness_scale"]),
+        0.0,
+        4.0,
+    )
     state["specular_strength"] = _coerce_float(raw.get("specular_strength"), float(state["specular_strength"]), 0.1, 12.0)
     state["wetness_mask_strength"] = _coerce_float(
         raw.get("wetness_mask_strength"), float(state["wetness_mask_strength"]), 0.1, 3.0
@@ -927,6 +956,11 @@ def _merge_qt_generation_gui_state(
     environment_mask_strength: float | None = None,
     rmaos_strength: float | None = None,
     complex_strength: float | None = None,
+    truepbr_sidecar_overrides_enabled: bool | None = None,
+    truepbr_sidecar_parallax: bool | None = None,
+    truepbr_sidecar_displacement_scale: float | None = None,
+    truepbr_sidecar_specular_level: float | None = None,
+    truepbr_sidecar_roughness_scale: float | None = None,
     dark_mode: bool | None = None,
     ui_scale: float | None = None,
 ) -> dict[str, object]:
@@ -968,6 +1002,11 @@ def _merge_qt_generation_gui_state(
         ("environment_mask_strength", environment_mask_strength),
         ("rmaos_strength", rmaos_strength),
         ("complex_strength", complex_strength),
+        ("truepbr_sidecar_overrides_enabled", truepbr_sidecar_overrides_enabled),
+        ("truepbr_sidecar_parallax", truepbr_sidecar_parallax),
+        ("truepbr_sidecar_displacement_scale", truepbr_sidecar_displacement_scale),
+        ("truepbr_sidecar_specular_level", truepbr_sidecar_specular_level),
+        ("truepbr_sidecar_roughness_scale", truepbr_sidecar_roughness_scale),
     ):
         if value is not None:
             merged[key] = value
@@ -5147,6 +5186,7 @@ def write_rmaos_json_sidecar(
     parallax_enabled: bool = True,
     material_type: str = "general",
     glow_enabled: bool = False,
+    material_overrides: Mapping[str, object] | None = None,
 ) -> Path:
     """Write a TruePBR sidecar JSON for PBRNifPatcher.
 
@@ -5414,7 +5454,26 @@ def write_rmaos_json_sidecar(
         },
     }
 
-    overrides = _RMAOS_JSON_MATERIAL_OVERRIDES.get(str(material_type).lower(), {})
+    overrides = dict(_RMAOS_JSON_MATERIAL_OVERRIDES.get(str(material_type).lower(), {}))
+    allowed_overrides = {
+        "parallax": (bool, None, None),
+        "displacement_scale": (float, 0.0, 10.0),
+        "specular_level": (float, 0.0, 1.0),
+        "roughness_scale": (float, 0.0, 4.0),
+    }
+    if material_overrides:
+        for key, value in material_overrides.items():
+            if key not in allowed_overrides:
+                raise ValueError(f"Unsupported TruePBR sidecar override: {key}")
+            expected_type, minimum, maximum = allowed_overrides[key]
+            if expected_type is bool:
+                if not isinstance(value, bool):
+                    raise ValueError(f"TruePBR sidecar override '{key}' must be a boolean.")
+            elif isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"TruePBR sidecar override '{key}' must be numeric.")
+            elif not math.isfinite(float(value)) or not minimum <= float(value) <= maximum:
+                raise ValueError(f"TruePBR sidecar override '{key}' must be between {minimum} and {maximum}.")
+            overrides[key] = value
 
     # parallax (bool) and displacement_scale (float) are distinct CS TruePBR controls.
     # parallax is the POM shader enablement flag; displacement_scale is the height depth
@@ -7350,6 +7409,7 @@ def run_with_options(
     include_roughness: bool = False,
     roughness_strength: float | None = None,
     roughness_name: str | None = None,
+    truepbr_material_overrides: Mapping[str, object] | None = None,
 ) -> dict[str, Path]:
     if include_environment_mask and include_rmaos:
         raise ValueError(
@@ -7567,6 +7627,7 @@ def run_with_options(
                 parallax_enabled=include_parallax,
                 material_type=resolved_material_type,
                 glow_enabled=include_glow,
+                material_overrides=truepbr_material_overrides,
             )
 
         if include_wetness_mask:
@@ -14837,6 +14898,24 @@ def _qt_render_profile_modes(
     )
 
 
+def _qt_truepbr_material_overrides(
+    enabled: bool,
+    *,
+    parallax: bool,
+    displacement_scale: float,
+    specular_level: float,
+    roughness_scale: float,
+) -> dict[str, object] | None:
+    if not enabled:
+        return None
+    return {
+        "parallax": bool(parallax),
+        "displacement_scale": float(displacement_scale),
+        "specular_level": float(specular_level),
+        "roughness_scale": float(roughness_scale),
+    }
+
+
 def _apply_qt_profile_output_defaults(
     current: Mapping[str, bool],
     defaults: Mapping[str, bool],
@@ -14972,6 +15051,13 @@ def _launch_qt_migration_gui() -> None:
                 environment_mask_strength = float(self._options.get("environment_mask_strength", 1.2))
                 rmaos_strength = float(self._options.get("rmaos_strength", 1.2))
                 complex_strength = float(self._options.get("complex_strength", 1.15))
+                truepbr_material_overrides = _qt_truepbr_material_overrides(
+                    bool(self._options.get("truepbr_sidecar_overrides_enabled", False)),
+                    parallax=bool(self._options.get("truepbr_sidecar_parallax", True)),
+                    displacement_scale=float(self._options.get("truepbr_sidecar_displacement_scale", 0.2)),
+                    specular_level=float(self._options.get("truepbr_sidecar_specular_level", 0.04)),
+                    roughness_scale=float(self._options.get("truepbr_sidecar_roughness_scale", 1.0)),
+                )
                 resume_mode = str(self._options.get("resume_mode", "start_fresh") or "start_fresh").strip().lower()
                 continue_on_error = bool(self._options.get("continue_on_error", True))
                 checkpoint_override = str(self._options.get("checkpoint_path", "") or "")
@@ -15091,6 +15177,7 @@ def _launch_qt_migration_gui() -> None:
                                 environment_mask_strength=environment_mask_strength,
                                 rmaos_strength=rmaos_strength,
                                 complex_strength=complex_strength,
+                                truepbr_material_overrides=truepbr_material_overrides,
                                 render_profile=render_profile,
                             )
                             output_payload = {name: str(path) for name, path in outputs.items()}
@@ -15164,6 +15251,7 @@ def _launch_qt_migration_gui() -> None:
                     environment_mask_strength=environment_mask_strength,
                     rmaos_strength=rmaos_strength,
                     complex_strength=complex_strength,
+                    truepbr_material_overrides=truepbr_material_overrides,
                     render_profile=render_profile,
                 )
                 output_payload = {name: str(path) for name, path in outputs.items()}
@@ -15393,6 +15481,64 @@ def _launch_qt_migration_gui() -> None:
 
     advanced_controls_toggle.toggled.connect(_toggle_advanced_strength_controls)
 
+    truepbr_settings_toggle = QtWidgets.QToolButton()
+    truepbr_settings_toggle.setText("TruePBR material settings (sidecar)")
+    truepbr_settings_toggle.setCheckable(True)
+    truepbr_settings_toggle.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+    truepbr_settings_toggle.setArrowType(QtCore.Qt.ArrowType.RightArrow)
+    truepbr_settings_panel = QtWidgets.QWidget()
+    truepbr_settings_form = QtWidgets.QFormLayout(truepbr_settings_panel)
+    truepbr_overrides_enabled_check = QtWidgets.QCheckBox("Override inferred material defaults")
+    truepbr_overrides_enabled_check.setChecked(bool(qt_saved_state["truepbr_sidecar_overrides_enabled"]))
+    truepbr_parallax_check = QtWidgets.QCheckBox("Enable parallax in sidecar")
+    truepbr_parallax_check.setChecked(bool(qt_saved_state["truepbr_sidecar_parallax"]))
+    truepbr_displacement_scale = QtWidgets.QDoubleSpinBox()
+    truepbr_displacement_scale.setRange(0.0, 10.0)
+    truepbr_displacement_scale.setDecimals(3)
+    truepbr_displacement_scale.setSingleStep(0.02)
+    truepbr_displacement_scale.setValue(float(qt_saved_state["truepbr_sidecar_displacement_scale"]))
+    truepbr_specular_level = QtWidgets.QDoubleSpinBox()
+    truepbr_specular_level.setRange(0.0, 1.0)
+    truepbr_specular_level.setDecimals(3)
+    truepbr_specular_level.setSingleStep(0.01)
+    truepbr_specular_level.setValue(float(qt_saved_state["truepbr_sidecar_specular_level"]))
+    truepbr_roughness_scale = QtWidgets.QDoubleSpinBox()
+    truepbr_roughness_scale.setRange(0.0, 4.0)
+    truepbr_roughness_scale.setDecimals(3)
+    truepbr_roughness_scale.setSingleStep(0.05)
+    truepbr_roughness_scale.setValue(float(qt_saved_state["truepbr_sidecar_roughness_scale"]))
+    truepbr_settings_form.addRow(truepbr_overrides_enabled_check)
+    truepbr_settings_form.addRow("Parallax (POM)", truepbr_parallax_check)
+    truepbr_settings_form.addRow("Displacement scale", truepbr_displacement_scale)
+    truepbr_settings_form.addRow("Specular level", truepbr_specular_level)
+    truepbr_settings_form.addRow("Roughness scale", truepbr_roughness_scale)
+    truepbr_settings_note = QtWidgets.QLabel(
+        "These values affect PBRNifPatcher per-shape JSON, not map pixels or Community Shaders "
+        "PBRTextureSets landscape JSON. Explicit overrides can replace material-specific safety defaults."
+    )
+    truepbr_settings_note.setWordWrap(True)
+    truepbr_settings_form.addRow(truepbr_settings_note)
+    truepbr_settings_panel.setVisible(False)
+
+    def _toggle_truepbr_settings(expanded: bool) -> None:
+        truepbr_settings_panel.setVisible(expanded)
+        truepbr_settings_toggle.setArrowType(
+            QtCore.Qt.ArrowType.DownArrow if expanded else QtCore.Qt.ArrowType.RightArrow
+        )
+
+    def _set_truepbr_override_controls_enabled(enabled: bool) -> None:
+        for control in (
+            truepbr_parallax_check,
+            truepbr_displacement_scale,
+            truepbr_specular_level,
+            truepbr_roughness_scale,
+        ):
+            control.setEnabled(enabled)
+
+    truepbr_settings_toggle.toggled.connect(_toggle_truepbr_settings)
+    truepbr_overrides_enabled_check.toggled.connect(_set_truepbr_override_controls_enabled)
+    _set_truepbr_override_controls_enabled(truepbr_overrides_enabled_check.isChecked())
+
     mode_row = 4 + (len(output_checks) + 1) // 2 + 1
     complex_format_combo = QtWidgets.QComboBox()
     complex_format_combo.addItem("ENB complex (_msn)", "msn")
@@ -15417,6 +15563,8 @@ def _launch_qt_migration_gui() -> None:
     generation_layout.addWidget(controls_group)
     generation_layout.addWidget(advanced_controls_toggle)
     generation_layout.addWidget(advanced_controls_panel)
+    generation_layout.addWidget(truepbr_settings_toggle)
+    generation_layout.addWidget(truepbr_settings_panel)
 
     action_row = QtWidgets.QHBoxLayout()
     generate_button = QtWidgets.QPushButton("Generate")
@@ -15809,6 +15957,11 @@ def _launch_qt_migration_gui() -> None:
             environment_mask_strength=float(advanced_strength_controls["environment_mask_strength"].value()),
             rmaos_strength=float(advanced_strength_controls["rmaos_strength"].value()),
             complex_strength=float(advanced_strength_controls["complex_strength"].value()),
+            truepbr_sidecar_overrides_enabled=truepbr_overrides_enabled_check.isChecked(),
+            truepbr_sidecar_parallax=truepbr_parallax_check.isChecked(),
+            truepbr_sidecar_displacement_scale=truepbr_displacement_scale.value(),
+            truepbr_sidecar_specular_level=truepbr_specular_level.value(),
+            truepbr_sidecar_roughness_scale=truepbr_roughness_scale.value(),
             dark_mode=theme_check.isChecked(),
             ui_scale=float(ui_scale_combo.currentText()),
         )
@@ -15978,6 +16131,10 @@ def _launch_qt_migration_gui() -> None:
             option_check.setEnabled(not running)
         for strength_control in advanced_strength_controls.values():
             strength_control.setEnabled(not running)
+        _set_truepbr_override_controls_enabled(
+            not running and truepbr_overrides_enabled_check.isChecked()
+        )
+        truepbr_overrides_enabled_check.setEnabled(not running)
 
     def _start_generation() -> None:
         nonlocal qt_worker_thread, qt_worker, preview_manual_paused, preview_auto_speed_off
@@ -16027,6 +16184,11 @@ def _launch_qt_migration_gui() -> None:
             "environment_mask_strength": float(advanced_strength_controls["environment_mask_strength"].value()),
             "rmaos_strength": float(advanced_strength_controls["rmaos_strength"].value()),
             "complex_strength": float(advanced_strength_controls["complex_strength"].value()),
+            "truepbr_sidecar_overrides_enabled": truepbr_overrides_enabled_check.isChecked(),
+            "truepbr_sidecar_parallax": truepbr_parallax_check.isChecked(),
+            "truepbr_sidecar_displacement_scale": truepbr_displacement_scale.value(),
+            "truepbr_sidecar_specular_level": truepbr_specular_level.value(),
+            "truepbr_sidecar_roughness_scale": truepbr_roughness_scale.value(),
             "resume_mode": resume_mode_combo.currentText().strip(),
             "checkpoint_path": checkpoint_path_edit.text().strip(),
             "continue_on_error": continue_on_error_check.isChecked(),
@@ -16219,6 +16381,15 @@ def _launch_qt_migration_gui() -> None:
         mode_control.currentIndexChanged.connect(_persist_qt_gui_state)
     for strength_control in advanced_strength_controls.values():
         strength_control.valueChanged.connect(_persist_qt_gui_state)
+    truepbr_overrides_enabled_check.toggled.connect(_persist_qt_gui_state)
+    for truepbr_control in (
+        truepbr_parallax_check,
+        truepbr_displacement_scale,
+        truepbr_specular_level,
+        truepbr_roughness_scale,
+    ):
+        signal = truepbr_control.toggled if isinstance(truepbr_control, QtWidgets.QCheckBox) else truepbr_control.valueChanged
+        signal.connect(_persist_qt_gui_state)
     for output_control in (include_complex_check, include_environment_mask_check, include_parallax_check):
         output_control.toggled.connect(lambda _checked: _update_qt_render_modes(apply_profile=False))
     for option_check in output_checks:
