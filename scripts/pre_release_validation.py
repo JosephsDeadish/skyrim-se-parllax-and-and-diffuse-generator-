@@ -182,6 +182,25 @@ def _packaged_smoke_dimensions(size: int | tuple[int, int]) -> tuple[int, int]:
     return max(1, int(width)), max(1, int(height))
 
 
+def _packaged_smoke_resume_args(
+    binary: Path,
+    input_dir: Path,
+    output_dir: Path,
+    invocation_args: list[str],
+    telemetry_path: Path,
+) -> list[str]:
+    return [
+        str(binary),
+        str(input_dir),
+        "--output-dir",
+        str(output_dir),
+        *invocation_args,
+        "--resume-checkpoint",
+        "--batch-telemetry-file",
+        str(telemetry_path),
+    ]
+
+
 def _write_packaged_smoke_png(path: Path, size: int | tuple[int, int]) -> None:
     width, height = _packaged_smoke_dimensions(size)
 
@@ -1242,20 +1261,19 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                                 f"key '{key}' expected non-empty string."
                             )
             if checkpoint_path is not None:
-                resume_out = smoke_io / f"out_loop{loop_index}_{scenario_name}_resume"
-                resume_out.mkdir(parents=True, exist_ok=True)
+                resume_out = smoke_out
+                outputs_before_resume = {
+                    path.name: path.read_bytes() for path in sorted(resume_out.glob("*.dds"))
+                }
                 resume_telemetry = smoke_io / f"telemetry_loop{loop_index}_{scenario_name}_resume.json"
                 resumed = subprocess.run(
-                    [
-                        str(binary),
-                        str(smoke_input),
-                        "--output-dir",
-                        str(resume_out),
-                        *invocation_args,
-                        "--resume-checkpoint",
-                        "--batch-telemetry-file",
-                        str(resume_telemetry),
-                    ],
+                    _packaged_smoke_resume_args(
+                        binary,
+                        smoke_input,
+                        resume_out,
+                        invocation_args,
+                        resume_telemetry,
+                    ),
                     cwd=REPO_ROOT,
                     capture_output=True,
                     text=True,
@@ -1264,11 +1282,18 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                     print(resumed.stdout)
                     print(resumed.stderr)
                     raise SystemExit(resumed.returncode)
-                resumed_outputs = sorted(resume_out.glob("*.dds"))
-                if resumed_outputs:
+                outputs_after_resume = {
+                    path.name: path.read_bytes() for path in sorted(resume_out.glob("*.dds"))
+                }
+                if outputs_after_resume != outputs_before_resume:
+                    changed_outputs = sorted(
+                        name
+                        for name in outputs_before_resume.keys() | outputs_after_resume.keys()
+                        if outputs_before_resume.get(name) != outputs_after_resume.get(name)
+                    )
                     raise SystemExit(
-                        f"Packaged executable smoke resume for '{scenario_name}' regenerated "
-                        f"{len(resumed_outputs)} DDS file(s) instead of skipping completed inputs."
+                        f"Packaged executable smoke resume for '{scenario_name}' changed generated "
+                        f"DDS outputs instead of skipping completed inputs: {changed_outputs!r}."
                     )
                 try:
                     telemetry_payload = json.loads(resume_telemetry.read_text(encoding="utf-8"))

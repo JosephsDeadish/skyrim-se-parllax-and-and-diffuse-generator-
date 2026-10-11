@@ -17,6 +17,7 @@ from scripts.pre_release_validation import (
     _load_prior_bucket_distribution,
     _load_realmod_pack_payload,
     _packaged_smoke_dimensions,
+    _packaged_smoke_resume_args,
     _packaged_smoke_scenarios,
     _read_packaged_smoke_dds_dimensions,
     _resolve_seed_realmod_delta_files,
@@ -343,6 +344,18 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
     def test_resolve_packaged_smoke_binary_raises_when_missing(self) -> None:
         with self.assertRaises(SystemExit):
             _resolve_packaged_smoke_binary(self.tmp)
+
+    def test_packaged_smoke_resume_uses_checkpoint_output_directory(self) -> None:
+        command = _packaged_smoke_resume_args(
+            self.tmp / "app.exe",
+            self.tmp / "input",
+            self.tmp / "checkpoint-output",
+            ["--render-profile", "vanilla"],
+            self.tmp / "resume-telemetry.json",
+        )
+        self.assertEqual(command[command.index("--output-dir") + 1], str(self.tmp / "checkpoint-output"))
+        self.assertIn("--resume-checkpoint", command)
+        self.assertEqual(command[command.index("--batch-telemetry-file") + 1], str(self.tmp / "resume-telemetry.json"))
 
     def test_read_packaged_smoke_dds_dimensions(self) -> None:
         dds_path = self.tmp / "sample.dds"
