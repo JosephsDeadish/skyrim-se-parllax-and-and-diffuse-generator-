@@ -5881,8 +5881,20 @@ def _nif_editor_result_matches_filters(
     )
 
 
-def _can_append_nif_editor_result_incrementally(sort_mode: str) -> bool:
-    return sort_mode.strip().lower() == "newest"
+_NIF_EDITOR_RESULT_PAGE_SIZE = 200
+
+
+def _slice_nif_editor_result_page(
+    rows: Sequence[dict[str, str]],
+    page_index: int,
+    *,
+    page_size: int = _NIF_EDITOR_RESULT_PAGE_SIZE,
+) -> tuple[list[dict[str, str]], int, int]:
+    normalized_page_size = max(1, int(page_size))
+    page_count = max(1, (len(rows) + normalized_page_size - 1) // normalized_page_size)
+    current_page = min(max(0, int(page_index)), page_count - 1)
+    start = current_page * normalized_page_size
+    return list(rows[start : start + normalized_page_size]), current_page, page_count
 
 
 def _set_nif_editor_controls_active(
@@ -13191,6 +13203,22 @@ if GUI_AVAILABLE:
                     state="readonly",
                 )
                 result_sort_combo.pack(side="left", padx=(6, 0))
+                result_page_frame = ttk.Frame(res_frame)
+                result_page_frame.pack(fill="x", pady=(0, 4))
+                previous_results_page_button = ttk.Button(
+                    result_page_frame,
+                    text="← Previous",
+                    state="disabled",
+                )
+                previous_results_page_button.pack(side="left")
+                result_page_label = ttk.Label(result_page_frame, text="Page 1 of 1 · 0 results")
+                result_page_label.pack(side="left", padx=8)
+                next_results_page_button = ttk.Button(
+                    result_page_frame,
+                    text="Next →",
+                    state="disabled",
+                )
+                next_results_page_button.pack(side="left")
                 results_list_frame = ttk.Frame(res_frame)
                 results_list_frame.pack(fill="both", expand=True)
                 style = ttk.Style(win)
@@ -13267,6 +13295,8 @@ if GUI_AVAILABLE:
                 all_result_rows: list[dict[str, str]] = []
                 latest_validation_codes: dict[str, list[str]] = {}
                 latest_conflict_files: set[str] = set()
+                _results_page_index = [0]
+                _results_follow_latest = [True]
 
                 def _status_sort_rank(status_value: str) -> int:
                     ranks = {"FAIL": 0, "WARN": 1, "SKIP": 2, "OK": 3}
@@ -13296,17 +13326,51 @@ if GUI_AVAILABLE:
                         results_tree.delete(item)
                     full_row_details.clear()
                     rows = _filtered_rows()
-                    for row in rows:
+                    if _results_follow_latest[0]:
+                        _results_page_index[0] = max(
+                            0,
+                            (len(rows) - 1) // _NIF_EDITOR_RESULT_PAGE_SIZE,
+                        )
+                    page_rows, _results_page_index[0], page_count = _slice_nif_editor_result_page(
+                        rows,
+                        _results_page_index[0],
+                    )
+                    result_page_label.configure(
+                        text=f"Page {_results_page_index[0] + 1} of {page_count} · {len(rows)} results"
+                    )
+                    previous_results_page_button.configure(
+                        state=(tk.NORMAL if _results_page_index[0] > 0 else tk.DISABLED)
+                    )
+                    next_results_page_button.configure(
+                        state=(tk.NORMAL if _results_page_index[0] < page_count - 1 else tk.DISABLED)
+                    )
+                    for row in page_rows:
                         item_id = results_tree.insert("", "end", values=(row["status"], row["file_name"], row["preview"]))
                         full_row_details[str(item_id)] = row["details"]
-                    if rows:
+                    if page_rows:
                         last = results_tree.get_children()[-1]
                         results_tree.selection_set(last)
                         results_tree.focus(last)
-                        results_tree.yview_moveto(1.0)
+                        results_tree.yview_moveto(1.0 if _results_follow_latest[0] else 0.0)
                     _results_tree_pending_focus[0] = None
                     _results_tree_dirty[0] = False
                     _last_result_tree_render[0] = time.monotonic()
+
+                def _change_results_page(offset: int) -> None:
+                    _results_follow_latest[0] = False
+                    _results_page_index[0] += offset
+                    _render_results_tree()
+                    rows = _filtered_rows()
+                    if _results_page_index[0] >= max(
+                        0,
+                        (len(rows) - 1) // _NIF_EDITOR_RESULT_PAGE_SIZE,
+                    ):
+                        _results_follow_latest[0] = True
+
+                def _on_results_view_changed(*_: object) -> None:
+                    _results_page_index[0] = 0
+                    _results_follow_latest[0] = False
+                    _schedule_results_tree_render()
 
                 def _append_result_row(status: str, file_name: str, details: str) -> None:
                     normalized_details = _normalize_nif_result_details(details)
@@ -13318,21 +13382,7 @@ if GUI_AVAILABLE:
                         "preview": row_preview,
                     }
                     all_result_rows.append(row)
-                    if _can_append_nif_editor_result_incrementally(result_sort_var.get()):
-                        if _nif_editor_result_matches_filters(
-                            row,
-                            keyword=(result_filter_var.get() or "").strip().lower(),
-                            status_filter=(result_status_filter_var.get() or "All").strip().upper(),
-                        ):
-                            item_id = results_tree.insert(
-                                "",
-                                "end",
-                                values=(row["status"], row["file_name"], row["preview"]),
-                            )
-                            full_row_details[str(item_id)] = row["details"]
-                            _results_tree_pending_focus[0] = str(item_id)
-                    else:
-                        _results_tree_dirty[0] = True
+                    _results_tree_dirty[0] = True
                     status_var.set(f"{status}: {file_name} — {row_preview}")
 
                 def _add_result_row(status: str, file_name: str, details: str) -> None:
@@ -13379,6 +13429,12 @@ if GUI_AVAILABLE:
                     all_result_rows.clear()
                     latest_validation_codes.clear()
                     latest_conflict_files.clear()
+                    _results_page_index[0] = 0
+                    _results_follow_latest[0] = True
+                    result_page_label.configure(text="Page 1 of 1 · 0 results")
+                    previous_results_page_button.configure(state=tk.DISABLED)
+                    next_results_page_button.configure(state=tk.DISABLED)
+                    _results_tree_dirty[0] = False
                     status_var.set("Results cleared.")
                     progress_var.set(0.0)
 
@@ -13472,9 +13528,11 @@ if GUI_AVAILABLE:
                     _render_results_tree,
                     delay_ms=120,
                 )
-                result_filter_var.trace_add("write", _schedule_results_tree_render)
-                result_status_filter_var.trace_add("write", _schedule_results_tree_render)
-                result_sort_var.trace_add("write", _schedule_results_tree_render)
+                previous_results_page_button.configure(command=lambda: _change_results_page(-1))
+                next_results_page_button.configure(command=lambda: _change_results_page(1))
+                result_filter_var.trace_add("write", _on_results_view_changed)
+                result_status_filter_var.trace_add("write", _on_results_view_changed)
+                result_sort_var.trace_add("write", _on_results_view_changed)
 
                 # ---- Threading helpers -----------------------------------------------
                 # Scan/patch/restore operations run in daemon threads so the UI stays

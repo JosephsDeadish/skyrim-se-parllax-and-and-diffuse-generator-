@@ -2954,6 +2954,50 @@ class TestPatchNifFlags(unittest.TestCase):
         infos = scan_nif(nif)
         self.assertTrue(infos[0].has_parallax_flag)
 
+    def test_target_game_fallout_parallax_write_preserves_other_flags_and_texture_slots(self) -> None:
+        original_paths = [
+            "textures\\fallout\\armor_d.dds",
+            "textures\\fallout\\armor_n.dds",
+            "textures\\fallout\\armor_g.dds",
+            "",
+            "textures\\fallout\\armor_e.dds",
+            "textures\\fallout\\armor_m.dds",
+            "textures\\fallout\\extra_6.dds",
+            "textures\\fallout\\extra_7.dds",
+            "textures\\fallout\\extra_8.dds",
+        ]
+        preserved_flags1 = SLSF1_ENVIRONMENT_MAPPING | SLSF1_LANDSCAPE
+        nif = _write_nif(
+            self.tmp,
+            user_ver2=130,
+            shader_layout="real",
+            flags1=preserved_flags1,
+            flags2=SLSF2_GLOW_MAP,
+            texture_paths=original_paths,
+        )
+        _rewrite_user_version(nif, 11)
+
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_texture_path="textures\\fallout\\armor_p.dds",
+                backup=False,
+                target_game="fallout",
+                experimental_fallout_write=True,
+            ),
+        )
+
+        self.assertTrue(result.success, result.errors)
+        info = scan_nif(nif)[0]
+        self.assertEqual(info.flags1 & preserved_flags1, preserved_flags1)
+        self.assertEqual(info.flags2 & SLSF2_GLOW_MAP, SLSF2_GLOW_MAP)
+        self.assertEqual(info.texture_paths.get(TEXTURE_SLOT_PARALLAX), "textures\\fallout\\armor_p.dds")
+        for slot, expected_path in enumerate(original_paths):
+            if slot == 3:
+                continue
+            self.assertEqual(info.texture_paths.get(slot), expected_path)
+
     def test_target_game_fallout_legacy_layout_with_opt_in_patches_flags(self) -> None:
         nif = _write_nif(self.tmp, user_ver2=130, shader_layout="legacy")
         _rewrite_user_version(nif, 11)

@@ -28,7 +28,7 @@ from generate_textures import (
     _make_debounced_callback,
     _make_latest_progress_update_enqueuer,
     _nif_editor_result_matches_filters,
-    _can_append_nif_editor_result_incrementally,
+    _slice_nif_editor_result_page,
     _should_render_nif_editor_results,
     _set_nif_editor_controls_active,
     _format_nif_result_row_details,
@@ -444,11 +444,22 @@ class TestNifEditorUiUpdateQueue(unittest.TestCase):
             )
         )
 
-    def test_only_newest_sort_supports_incremental_append(self) -> None:
-        self.assertTrue(_can_append_nif_editor_result_incrementally("Newest"))
-        self.assertTrue(_can_append_nif_editor_result_incrementally(" newest "))
-        self.assertFalse(_can_append_nif_editor_result_incrementally("Status"))
-        self.assertFalse(_can_append_nif_editor_result_incrementally("File"))
+    def test_result_pages_slice_and_clamp_indices(self) -> None:
+        rows = [{"file_name": f"mesh-{index}.nif"} for index in range(5)]
+
+        page, page_index, page_count = _slice_nif_editor_result_page(rows, 1, page_size=2)
+
+        self.assertEqual([row["file_name"] for row in page], ["mesh-2.nif", "mesh-3.nif"])
+        self.assertEqual((page_index, page_count), (1, 3))
+
+        last_page, page_index, page_count = _slice_nif_editor_result_page(rows, 99, page_size=2)
+        self.assertEqual([row["file_name"] for row in last_page], ["mesh-4.nif"])
+        self.assertEqual((page_index, page_count), (2, 3))
+
+    def test_empty_results_have_single_empty_page_and_size_is_at_least_one(self) -> None:
+        page, page_index, page_count = _slice_nif_editor_result_page([], -1, page_size=0)
+        self.assertEqual(page, [])
+        self.assertEqual((page_index, page_count), (0, 1))
 
 
 class TestNifEditorOperationControlStates(unittest.TestCase):
