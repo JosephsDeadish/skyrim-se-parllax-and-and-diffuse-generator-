@@ -67,6 +67,8 @@ This opens a desktop interface where you can:
 - toggle **Emboss depth** for edge-ridge normal generation on flat printed assets (books/cards/scrolls/posters)
 - choose **Parallax mode**: `standard` (vanilla / Community Shaders Extended Materials) or `occlusion (ENB/POM)` for smoother ENBSeries POM heightmaps
 - scroll through all controls in smaller windows
+- use keyboard shortcuts: `Ctrl+O` opens a texture, `Ctrl+Shift+O` opens a folder, `Ctrl+Enter` starts generation, and `Esc` requests cancellation
+- use **Basic view** to keep core controls visible, then uncheck it for Advanced options
 - auto-update output folder when a different input texture is selected
 - get adaptive recommended defaults based on richer image-content analysis
 - use a clearly labeled **Automatic suggestions (analyze image and set sliders)** toggle to turn auto slider updates on/off
@@ -189,7 +191,7 @@ https://github.com/community-shaders/skyrim-community-shaders/releases
   4. Generate textures; the tool writes `_rmaos` (or `_ramos`) plus a PBRNifPatcher JSON sidecar (placed in a `PBRNifPatcher/` folder next to `textures/` when a textures root is detected)
   5. Validate the generated JSON/channels against your installed TruePBR schema
 
-The generated sidecar uses pgen/PBRNifPatcher-style texture entries (for example: `texture`, `parallax`, `specular_level`, `roughness_scale`, `smooth_angle`, `displacement_scale`, `emissive_scale`, `vertex_color_lum_mult`) and is intended as a practical starting point you can tune per asset pack.
+The generated sidecar uses pgen/PBRNifPatcher-style texture entries (for example: `texture`, `parallax`, `specular_level`, `roughness_scale`, `smooth_angle`, `displacement_scale`, `emissive_scale`, `vertex_color_lum_mult`) and is intended as a practical starting point you can tune per asset pack. In the current Community Shaders TruePBR material contract, RMAOS alpha is **non-metal reflectance**, not height; the implementation is documented in [`BSLightingShaderMaterialPBR.h`](https://github.com/community-shaders/skyrim-community-shaders/blob/master/src/TruePBR/BSLightingShaderMaterialPBR.h). The sidecar's `specular_level`, `roughness_scale`, and `displacement_scale` are separate material parameters; validate JSON field compatibility against the version installed by the user.
 
 ### True PBR workflow notes (users vs creators)
 
@@ -211,7 +213,7 @@ To ship a complete True PBR set, do both:
 1. **Mesh/config setup**  
    Enable PBR on target meshes (`BSLightingShaderProperty` with `SLSF2 Unused01/PBR` flag), or ship PBRNifPatcher/PGPatcher JSON rules for user-side patching. The app's NIF Editor TruePBR preset now enables that flag instead of stripping it during parallax/env-mask patching.
 2. **Texture setup**  
-   Provide `<stem>.dds` diffuse/base color, `<stem>_n.dds` DirectX normal, and packed `<stem>_rmaos.dds`/`<stem>_ramos.dds` data in this tool (R=Roughness, G=Metallic, B=AO, A=Specular/other depending on config) — plus optional emission/parallax/feature maps. Do not treat standalone Blender-style `_rough`, `_metallic`, or `_ao` exports as the primary Skyrim runtime names for this workflow.
+   Provide `<stem>.dds` diffuse/base color, `<stem>_n.dds` DirectX normal, and packed `<stem>_rmaos.dds`/`<stem>_ramos.dds` data in this tool (R=Roughness, G=Metallic, B=AO, A=non-metal reflectance) — plus optional emission/parallax/feature maps. Height/displacement is a separate map/config value. Do not treat standalone Blender-style `_rough`, `_metallic`, or `_ao` exports as the primary Skyrim runtime names for this workflow.
 
 Key mesh-side tuning values (when authoring NIFs):
 
@@ -273,13 +275,13 @@ Generated outputs default to `.dds` filenames regardless of the input format. Ex
 - Output generation now enforces per-map Skyrim-safe channel profiles during preview and file export (for example: normal maps always RGB with blue channel floor, standard env masks always greyscale, complex outputs always RGBA).
 - **Environment mask** (`*_m` / `*_rmaos`) has two modes:
   - **Standard** (default) — greyscale `L`-mode texture. Texture Slot 5 in the NIF. Controls per-pixel environment/specular reflection intensity (brighter = more reflection). Requires `SLSF1_Environment_Mapping` shader flag. Works with vanilla Skyrim SE — **no ENBSeries required**. Typically stored as DXT1.
-  - **Complex** (select in GUI or via `--environment-mask-mode complex`) — RGBA channel-packed for renderer-specific workflows. In this app's ENB preset: R=Reflection/specular brightness, G=Glossiness, B=Metalness (cubemap tint), A=Parallax height. In TruePBR workflows: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (JSON-driven). **ENBSeries required** with `ComplexParallaxMaterial=true` in `enbseries.ini` for ENB usage. The generator defaults naming to `*_rmaos.dds` for TruePBR and `*_m.dds` for ENB preset output (custom naming still works).
+  - **Complex** (select in GUI or via `--environment-mask-mode complex`) — RGBA channel-packed for renderer-specific workflows. In this app's ENB preset: R=Reflection/specular brightness, G=Glossiness, B=Metalness (cubemap tint), A=Parallax height. TruePBR RMAOS: R=Roughness, G=Metallic, B=Ambient Occlusion, A=non-metal reflectance; displacement is separate. **ENBSeries required** with `ComplexParallaxMaterial=true` in `enbseries.ini` for ENB usage. The generator defaults naming to `*_rmaos.dds` for TruePBR and `*_m.dds` for ENB preset output (custom naming still works).
 - For large/high-detail sources (2K/4K/8K), generation applies adaptive detail dampening to reduce over-sharpened normals/parallax and complex-material sparkle artifacts. Analysis and auto-recommendation calculations are automatically performed on a downscaled copy so large textures are processed faster without sacrificing output quality.
 - Generation warnings now include extra guardrails for UI/interface texture paths and paper/card-like assets when map combinations are likely to look incorrect in-game.
 - Parallax warnings are now strength-aware: terrain textures always warn when parallax is enabled; snow/ice warns above strength 1.5; dirt/sand warns above strength 2.0 to prevent mipmap shimmer and depth-noise artefacts at those material types.
 - Material classification for `sand` now uses distinct tokens (`sand`, `dune`, `arid`, `dust`) that do not overlap with the `dirt` category, preventing a class of silent mis-classification where dirt-named paths could fall through to sand.
 - Specular generation uses numpy float32 arithmetic with percentile-based range normalisation so true-black hole artefacts cannot be introduced by integer rounding, regardless of texture size or content.
-- `_msn` output stores normal RGB with specular in alpha (ENBSeries Slot 1); `_cm`/`_c`/`_C` stores packed Community Shaders Extended Materials channels (R=environment reflection amount, G=glossiness, B=metallic, A=height/mode-control alpha); `_rmaos` is reserved for TruePBR (R=roughness, G=metallic, B=AO, A=other/height), while this app's ENB preset writes complex ENB channel packing to `_m`.
+- `_msn` output stores normal RGB with specular in alpha (ENBSeries Slot 1); `_cm`/`_c`/`_C` stores packed Community Shaders Extended Materials channels (R=environment reflection amount, G=glossiness, B=metallic, A=height/mode-control alpha); `_rmaos` is reserved for TruePBR (R=roughness, G=metallic, B=AO, A=non-metal reflectance), while this app's ENB preset writes complex ENB channel packing to `_m`.
 
 ## File name recognition
 
@@ -295,7 +297,7 @@ The tool recognises a mix of common Skyrim SE suffix conventions and workflow-sp
 | `_p` | Parallax Heightmap | Greyscale, Slot 3, requires a parallax-capable runtime path (vanilla-compatible setup, Community Shaders, or ENB depending on workflow) |
 | `_g` | Glow / Emissive | Slot 2, requires `SLSF1_Own_Emit` flag |
 | `_m` | Environment Mask | Context-dependent Slot 5 map. Vanilla workflow uses greyscale reflection intensity; this app's ENB complex preset can also write channel-packed `_m` data. |
-| `_rmaos` | Complex Env Mask (TruePBR naming) | RGBA Slot 5 packed data map for Community Shaders TruePBR. Channels: R=Roughness, G=Metallic, B=AO, A=Other/smoothness/height (JSON-driven). |
+| `_rmaos` | Complex Env Mask (TruePBR naming) | RGBA Slot 5 packed data map for Community Shaders TruePBR. Channels: R=Roughness, G=Metallic, B=AO, A=non-metal reflectance. Displacement is separate. |
 | `_s` | Subsurface Scattering | Slot 6, skin/character textures |
 | `_sk` | Skin Specular | Slot 7, character-specific |
 | `_msn` | Complex Parallax Material (ENBSeries) | RGBA Slot 1 — replaces `_n` when ENBSeries complex material is active. Channels: R=Normal X, G=Normal Y, B=Normal Z, A=Specular intensity. **ENBSeries only — not vanilla Skyrim SE.** |

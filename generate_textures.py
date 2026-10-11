@@ -211,6 +211,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "env_mask_mode": "standard",
     "parallax_mode": "standard",
     "render_profile": "custom",
+    "qt_render_profile": "custom",
     "target_game": "skyrim",
     "emboss_mode": False,
     "relief_mode": False,
@@ -819,15 +820,7 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     else:
         state["parallax_mode"] = str(_GUI_STATE_DEFAULTS["parallax_mode"])
     render_profile = str(raw.get("render_profile", state["render_profile"]) or state["render_profile"]).strip().lower()
-    if render_profile in {
-        "custom",
-        "vanilla",
-        "community_shaders",
-        "community shaders",
-        "truepbr",
-        "true pbr",
-        "enb",
-    }:
+    if render_profile in {"custom", "vanilla", "community_shaders", "community shaders", "truepbr", "true pbr", "enb"}:
         if render_profile == "community shaders":
             state["render_profile"] = "community_shaders"
         elif render_profile == "true pbr":
@@ -836,6 +829,15 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
             state["render_profile"] = render_profile
     else:
         state["render_profile"] = str(_GUI_STATE_DEFAULTS["render_profile"])
+    qt_render_profile = str(
+        raw.get("qt_render_profile", raw.get("render_profile", state["qt_render_profile"]))
+        or state["qt_render_profile"]
+    ).strip().lower()
+    state["qt_render_profile"] = (
+        qt_render_profile
+        if qt_render_profile in _RENDER_PROFILE_CLI_VALUES
+        else str(_GUI_STATE_DEFAULTS["qt_render_profile"])
+    )
     state["target_game"] = _normalize_texture_target_game(str(raw.get("target_game", state["target_game"]) or state["target_game"]))
     resume_mode = str(raw.get("batch_resume_mode", state.get("batch_resume_mode", "start_fresh")) or "start_fresh").strip().lower()
     if resume_mode not in {"start_fresh", "resume"}:
@@ -941,18 +943,59 @@ def _merge_qt_generation_gui_state(
     }
     merged.update({key: value for key, value in optional_outputs.items() if value is not None})
     if render_profile is not None:
-        merged["render_profile"] = render_profile
+        merged["qt_render_profile"] = render_profile
     return _normalize_gui_state(merged)
 
 
-def _load_qt_preview_png(path: str | os.PathLike[str], *, max_dimension: int = 768) -> bytes:
+def _load_qt_preview_png(
+    path: str | os.PathLike[str],
+    *,
+    max_dimension: int = 768,
+    channel: str | None = None,
+) -> bytes:
     preview_limit = max(1, int(max_dimension))
     with Image.open(path) as image:
-        preview = image.copy()
+        if channel is None:
+            preview = image.copy()
+        else:
+            normalized_channel = str(channel).strip().upper()
+            if normalized_channel not in {"R", "G", "B", "A"}:
+                raise ValueError("Preview channel must be one of R, G, B, or A.")
+            bands = image.getbands()
+            if normalized_channel == "A":
+                if "A" not in bands:
+                    raise ValueError("This output has no alpha channel.")
+                preview = image.getchannel("A")
+            elif "L" in bands:
+                preview = image.getchannel("L")
+            else:
+                preview = image.convert("RGB").getchannel(normalized_channel)
     preview.thumbnail((preview_limit, preview_limit), Image.Resampling.LANCZOS)
     buffer = io.BytesIO()
     preview.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def _describe_qt_output_channels(output_key: str, render_profile: str) -> str:
+    key = str(output_key or "").strip().lower()
+    profile = str(render_profile or "custom").strip().lower()
+    if key == "rmaos":
+        return "TruePBR RMAOS: R roughness · G metallic · B ambient occlusion · A non-metal reflectance."
+    if key == "complex_material":
+        if profile == "enb":
+            return "ENB _msn: R/G/B tangent-space normal XYZ · A specular intensity."
+        return "Community Shaders Extended Materials: R reflection · G glossiness · B metallic · A height/mode control."
+    if key == "environment_mask":
+        if profile == "enb":
+            return "ENB complex _m: R reflection · G glossiness · B metalness · A parallax height."
+        return "Standard _m: grayscale environment-reflection intensity."
+    if key == "wetness_mask":
+        return "Community Shaders wetness mask: grayscale; shader-specific, not a universal vanilla map."
+    if key == "snow_mask":
+        return "Community Shaders Dynamic Snow mask: grayscale; shader-specific, not a universal vanilla map."
+    if key in {"ao", "roughness"}:
+        return "Standalone authoring map: grayscale; not a universal Skyrim runtime suffix."
+    return "RGB image output."
 
 
 def _connect_qt_worker_thread_lifecycle(
@@ -2314,6 +2357,9 @@ _RENDER_PROFILE_GUI_VALUES: tuple[str, ...] = (
     "truepbr",
     "enb",
 )
+_QT_RENDER_PROFILE_VALUES: tuple[str, ...] = tuple(
+    value for value in _RENDER_PROFILE_CLI_VALUES if value != "auto"
+)
 
 _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     "custom": (
@@ -2382,7 +2428,7 @@ _RENDER_PROFILE_OUTPUT_RECOMMENDATIONS: dict[str, str] = {
     "truepbr": (
         "Community Shaders TruePBR workflow (JSON-driven material path).\n"
         "Typical files: textures\\pbr\\<stem>.dds + textures\\pbr\\<stem>_n.dds + textures\\pbr\\<stem>_rmaos.dds (or _ramos.dds alias) + matching JSON sidecar in PBRNifPatcher/ (optional _p/_g and other feature textures by material).\n"
-        "_rmaos/_ramos RGBA layout for this preset: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (config-driven).\n"
+        "_rmaos/_ramos RGBA layout: R=Roughness, G=Metallic, B=Ambient Occlusion, A=non-metal reflectance. Height/displacement is a separate map/config value.\n"
         "How files should look: _n stays purple/blue, _rmaos/_ramos should look like packed grayscale channels (not like a normal map).\n"
         "Treat _rmaos/_ramos as the core packed data map for this preset — do NOT substitute separate Blender-style _rough/_metallic/_ao files into slot 5.\n"
         "Mesh side must be TruePBR-enabled (BSLightingShaderProperty with SLSF2 Unused01/PBR flag, default shader type unless feature-specific overrides).\n"
@@ -4281,7 +4327,7 @@ def generate_environment_mask(source: Image.Image, strength: float = 1.2, mode: 
         Contrast/intensity strength factor (higher = stronger reflection/glossiness).
     mode:
         ``"complex"`` — RGBA texture using TruePBR-style RMAOS channel packing
-        (R=Roughness, G=Metallic, B=AO, A=Other/height). Use
+        (R=Roughness, G=Metallic, B=AO, A=non-metal reflectance). Use
         :func:`generate_environment_mask_for_workflow` when you need explicit
         ENB channel packing.
 
@@ -4314,6 +4360,7 @@ def generate_environment_mask_for_workflow(
 
     rgb_source = source.convert("RGB")
     grayscale = ImageOps.grayscale(rgb_source).filter(ImageFilter.GaussianBlur(radius=0.8))
+    specular = generate_specular(rgb_source, strength=max(0.1, min(8.0, strength + 0.15)))
     grayscale_min, grayscale_max = grayscale.getextrema()
     if (grayscale_max - grayscale_min) <= 2:
         if normalized_complex_workflow == "enb":
@@ -4325,26 +4372,23 @@ def generate_environment_mask_for_workflow(
         roughness = _lift_black_floor(Image.new("L", grayscale.size, color=182), floor=24)
         metallic = _lift_black_floor(Image.new("L", grayscale.size, color=18), floor=6)
         ao = _lift_black_floor(Image.new("L", grayscale.size, color=214), floor=24)
-        specular_height = _lift_black_floor(Image.new("L", grayscale.size, color=127), floor=24)
-        return Image.merge("RGBA", (roughness, metallic, ao, specular_height))
+        return Image.merge("RGBA", (roughness, metallic, ao, specular))
 
     red, green, blue = rgb_source.split()
     maximum = ImageChops.lighter(ImageChops.lighter(red, green), blue)
     minimum = ImageChops.darker(ImageChops.darker(red, green), blue)
     chroma = ImageChops.subtract(maximum, minimum)
 
-    specular = generate_specular(rgb_source, strength=max(0.1, min(8.0, strength + 0.15)))
-
     metallic = Image.blend(chroma, specular, alpha=_clamp(0.22 + (strength * 0.1), 0.22, 0.85))
     metallic = ImageEnhance.Contrast(metallic).enhance(0.75 + (strength * 0.34))
     metallic = _lift_black_floor(ImageOps.autocontrast(metallic, cutoff=0), floor=6)
 
-    raw_height = generate_parallax(rgb_source, strength=max(0.85, min(2.0, strength)))
-    specular_height = Image.blend(raw_height, specular, alpha=_clamp(0.28 + (strength * 0.1), 0.28, 0.82))
-    specular_height = Image.blend(Image.new("L", raw_height.size, color=127), specular_height, alpha=0.74)
-    specular_height = _lift_black_floor(specular_height, floor=24)
-    specular_height = specular_height.point(lambda value: int(_clamp(float(value), 24.0, 224.0)))
     if normalized_complex_workflow == "enb":
+        raw_height = generate_parallax(rgb_source, strength=max(0.85, min(2.0, strength)))
+        specular_height = Image.blend(raw_height, specular, alpha=_clamp(0.28 + (strength * 0.1), 0.28, 0.82))
+        specular_height = Image.blend(Image.new("L", raw_height.size, color=127), specular_height, alpha=0.74)
+        specular_height = _lift_black_floor(specular_height, floor=24)
+        specular_height = specular_height.point(lambda value: int(_clamp(float(value), 24.0, 224.0)))
         reflection = Image.blend(grayscale, specular, alpha=_clamp(0.56 + (strength * 0.06), 0.56, 0.88))
         reflection = ImageEnhance.Contrast(reflection).enhance(0.84 + (strength * 0.2))
         reflection = _lift_black_floor(ImageOps.autocontrast(reflection, cutoff=0), floor=12)
@@ -4360,7 +4404,7 @@ def generate_environment_mask_for_workflow(
     cavity = ImageOps.invert(ImageEnhance.Contrast(local_detail).enhance(1.05 + (strength * 0.24)))
     ao = Image.blend(grayscale, cavity, alpha=_clamp(0.52 + (strength * 0.12), 0.52, 0.92))
     ao = _lift_black_floor(ImageOps.autocontrast(ao, cutoff=0), floor=24)
-    return Image.merge("RGBA", (roughness, metallic, ao, specular_height))
+    return Image.merge("RGBA", (roughness, metallic, ao, specular))
 
 
 def _generate_standard_env_mask(source: Image.Image, strength: float = 1.2) -> Image.Image:
@@ -6280,7 +6324,7 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
         "environment_mask",
         "Community Shaders TruePBR RMAOS Map (_rmaos)",
         "Used for Community Shaders TruePBR workflows. "
-        "RGBA channel layout: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (JSON-driven). "
+        "RGBA channel layout: R=Roughness, G=Metallic, B=Ambient Occlusion, A=non-metal reflectance. "
         "In this generator, _rmaos naming is reserved for TruePBR. ENB preset output uses _m with ENB channel packing. "
         "Do NOT reuse TruePBR _rmaos maps in ENB complex-material setups.",
     ),
@@ -6288,7 +6332,7 @@ _SKYRIM_SE_SUFFIX_INFO: dict[str, tuple[str, str, str]] = {
         "environment_mask",
         "Community Shaders TruePBR RAMOS Map alias (_ramos)",
         "Alias naming for TruePBR packed map output in some pipelines. "
-        "RGBA channel layout matches _rmaos: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (JSON-driven). "
+        "RGBA channel layout matches _rmaos: R=Roughness, G=Metallic, B=Ambient Occlusion, A=non-metal reflectance. "
         "In this generator, _ramos is treated the same as _rmaos and should be paired with a JSON sidecar. "
         "Do NOT reuse TruePBR _ramos maps in ENB complex-material setups.",
     ),
@@ -9400,7 +9444,7 @@ if GUI_AVAILABLE:
                 "parallax": "Height/parallax preview. Darker = lower, lighter = higher.",
                 "glow": "Emissive/glow preview. Brighter pixels emit more light.",
                 "environment_mask": "Reflection mask preview. Brighter = shinier, darker = more matte.",
-                "rmaos": "🧩 TruePBR RMAOS preview (_rmaos/_ramos).\nPacked grayscale channels (not purple normal-map colors). Generator also writes a JSON sidecar in PBRNifPatcher/.",
+                "rmaos": "🧩 TruePBR RMAOS (_rmaos/_ramos): R=roughness, G=metallic, B=AO, A=non-metal reflectance.\nDisplacement is separate; JSON sidecar carries scales and material settings.",
                 "wetness_mask": "Wetness-mask preview (_wt).",
                 "snow_mask": "Dynamic-snow mask preview (_sm).",
                 "ao": "Ambient-occlusion preview (_ao). Darker crevices indicate stronger cavity shading.",
@@ -15051,7 +15095,7 @@ def _launch_qt_migration_gui() -> None:
     controls_layout.setVerticalSpacing(6)
     controls_layout.addWidget(QtWidgets.QLabel("Target renderer"), 0, 0)
     render_profile_combo = QtWidgets.QComboBox()
-    render_profile_combo.addItems(_RENDER_PROFILE_CLI_VALUES)
+    render_profile_combo.addItems(_QT_RENDER_PROFILE_VALUES)
     controls_layout.addWidget(render_profile_combo, 0, 1)
     controls_layout.addWidget(
         QtWidgets.QLabel("Choose one primary workflow; map naming and channels depend on the target."),
@@ -15155,6 +15199,16 @@ def _launch_qt_migration_gui() -> None:
 
     preview_results_label = QtWidgets.QLabel("Latest generated outputs")
     preview_layout.addWidget(preview_results_label)
+    preview_channel_row = QtWidgets.QHBoxLayout()
+    preview_channel_row.addWidget(QtWidgets.QLabel("View channel"))
+    preview_channel_combo = QtWidgets.QComboBox()
+    preview_channel_combo.addItems(["Composite", "R", "G", "B", "A"])
+    preview_channel_row.addWidget(preview_channel_combo)
+    preview_channel_row.addStretch(1)
+    preview_layout.addLayout(preview_channel_row)
+    preview_channel_note = QtWidgets.QLabel("Select an output to see its channel meanings.")
+    preview_channel_note.setWordWrap(True)
+    preview_layout.addWidget(preview_channel_note)
     preview_image_label = QtWidgets.QLabel("Select a generated output to preview it.")
     preview_image_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
     preview_image_label.setMinimumHeight(240)
@@ -15193,7 +15247,7 @@ def _launch_qt_migration_gui() -> None:
     batch_layout.addWidget(continue_on_error_check)
     input_path_edit.setText(str(qt_saved_state["input_path"]))
     output_dir_edit.setText(str(qt_saved_state["output_path"]))
-    profile_index = render_profile_combo.findText(str(qt_saved_state["render_profile"]))
+    profile_index = render_profile_combo.findText(str(qt_saved_state["qt_render_profile"]))
     if profile_index >= 0:
         render_profile_combo.setCurrentIndex(profile_index)
     include_diffuse_check.setChecked(bool(qt_saved_state["include_diffuse"]))
@@ -15259,10 +15313,16 @@ def _launch_qt_migration_gui() -> None:
         if item is None:
             preview_image_label.setPixmap(QtGui.QPixmap())
             preview_image_label.setText("Select a generated output to preview it.")
+            preview_channel_note.setText("Select an output to see its channel meanings.")
             return
         image_path = str(item.data(QtCore.Qt.ItemDataRole.UserRole) or "")
+        output_key = str(item.data(QtCore.Qt.ItemDataRole.UserRole + 1) or "")
+        selected_channel = preview_channel_combo.currentText()
         try:
-            image_data = _load_qt_preview_png(image_path)
+            image_data = _load_qt_preview_png(
+                image_path,
+                channel=None if selected_channel == "Composite" else selected_channel,
+            )
             pixmap = QtGui.QPixmap()
             if not pixmap.loadFromData(image_data, "PNG"):
                 raise ValueError("Qt could not decode the generated preview image.")
@@ -15274,9 +15334,15 @@ def _launch_qt_migration_gui() -> None:
                     QtCore.Qt.TransformationMode.SmoothTransformation,
                 )
             )
+            preview_channel_note.setText(
+                _describe_qt_output_channels(output_key, render_profile_combo.currentText())
+            )
         except Exception as exc:
             preview_image_label.setPixmap(QtGui.QPixmap())
             preview_image_label.setText(f"Preview unavailable: {exc}")
+            preview_channel_note.setText(
+                _describe_qt_output_channels(output_key, render_profile_combo.currentText())
+            )
 
     def _update_resume_hint() -> None:
         mode = resume_mode_combo.currentText().strip().lower()
@@ -15487,8 +15553,13 @@ def _launch_qt_migration_gui() -> None:
                 outputs = payload.get("outputs", {})
                 if isinstance(outputs, dict):
                     for key, path in sorted(outputs.items()):
+                        if Path(str(path)).suffix.lower() not in {
+                            ".dds", ".png", ".jpg", ".jpeg", ".tga", ".bmp", ".webp"
+                        }:
+                            continue
                         item = QtWidgets.QListWidgetItem(f"{key}: {path}")
                         item.setData(QtCore.Qt.ItemDataRole.UserRole, str(path))
+                        item.setData(QtCore.Qt.ItemDataRole.UserRole + 1, str(key))
                         preview_results_list.addItem(item)
                     while preview_results_list.count() > 200:
                         preview_results_list.takeItem(0)
@@ -15624,6 +15695,7 @@ def _launch_qt_migration_gui() -> None:
     for option_check in output_checks:
         option_check.toggled.connect(_persist_qt_gui_state)
     preview_results_list.currentItemChanged.connect(_show_selected_qt_preview)
+    preview_channel_combo.currentTextChanged.connect(_show_selected_qt_preview)
 
     _update_resume_hint()
     _refresh_preview_state_badge()

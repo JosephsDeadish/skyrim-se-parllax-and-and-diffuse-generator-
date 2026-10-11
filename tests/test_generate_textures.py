@@ -33,6 +33,7 @@ from generate_textures import (
     _slice_nif_editor_result_page,
     _load_qt_preview_png,
     _bind_tk_main_window_shortcuts,
+    _describe_qt_output_channels,
     _should_render_nif_editor_results,
     _set_nif_editor_controls_active,
     _format_nif_result_row_details,
@@ -871,7 +872,8 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(merged["include_snow_mask"]))
         self.assertTrue(bool(merged["include_ao"]))
         self.assertTrue(bool(merged["include_roughness"]))
-        self.assertEqual(merged["render_profile"], "terrain")
+        self.assertEqual(merged["qt_render_profile"], "terrain")
+        self.assertEqual(merged["render_profile"], "custom")
         self.assertEqual(merged["batch_resume_mode"], "resume")
         self.assertEqual(merged["batch_checkpoint_path"], str(Path(temp_dir) / "checkpoint.json"))
 
@@ -885,6 +887,35 @@ class GenerateTexturesTests(unittest.TestCase):
         with Image.open(io.BytesIO(preview_bytes)) as preview:
             self.assertEqual(preview.format, "PNG")
             self.assertEqual(preview.size, (256, 128))
+
+    def test_qt_preview_loader_can_inspect_rgba_channels(self) -> None:
+        image = Image.new("RGBA", (2, 1))
+        image.putdata([(10, 40, 90, 180), (20, 50, 100, 200)])
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "channels.png"
+            image.save(image_path)
+            channel_png = _load_qt_preview_png(image_path, channel="A")
+            with Image.open(io.BytesIO(channel_png)) as channel:
+                self.assertEqual(channel.mode, "L")
+                self.assertEqual(list(channel.getdata()), [180, 200])
+            rgb_path = image_path.with_name("rgb.png")
+            Image.new("RGB", (2, 1), (1, 2, 3)).save(rgb_path)
+            with self.assertRaisesRegex(ValueError, "no alpha channel"):
+                _load_qt_preview_png(rgb_path, channel="A")
+
+    def test_qt_channel_guidance_matches_supported_workflow_contracts(self) -> None:
+        self.assertIn(
+            "A non-metal reflectance",
+            _describe_qt_output_channels("rmaos", "truepbr"),
+        )
+        self.assertIn(
+            "ENB _msn",
+            _describe_qt_output_channels("complex_material", "enb"),
+        )
+        self.assertIn(
+            "not a universal vanilla map",
+            _describe_qt_output_channels("wetness_mask", "community_shaders"),
+        )
 
     def test_save_gui_state_round_trips_expected_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1021,6 +1052,36 @@ class GenerateTexturesTests(unittest.TestCase):
             finally:
                 if restored_gui is not None:
                     restored_gui.root.destroy()
+
+    def test_tk_theme_scale_and_window_sizes_remain_usable(self) -> None:
+        self._skip_unavailable_tk_display()
+        gui = TextureGeneratorGUI()
+        try:
+            for geometry in ("800x600", "960x700", "1280x900"):
+                gui.root.geometry(geometry)
+                gui.root.update_idletasks()
+                self.assertGreater(gui.root.winfo_width(), 0)
+                self.assertGreater(gui.root.winfo_height(), 0)
+
+            style = gui.root.tk.call
+            with mock.patch("generate_textures.save_gui_state"):
+                for scale in ("0.9", "1.0", "1.15", "1.3", "1.5"):
+                    gui.ui_scale_combo.set(scale)
+                    gui._on_ui_scale_changed()
+                    self.assertAlmostEqual(float(gui.ui_scale_var.get()), float(scale))
+                    for dark_mode, palette in ((False, _LIGHT_THEME), (True, _DARK_THEME)):
+                        gui.dark_mode_var.set(dark_mode)
+                        gui._apply_theme()
+                        self.assertEqual(
+                            style("ttk::style", "lookup", "Muted.TLabel", "-foreground"),
+                            palette["muted_fg"],
+                        )
+                        self.assertEqual(
+                            style("ttk::style", "lookup", "Status.Error.TLabel", "-foreground"),
+                            palette["error_fg"],
+                        )
+        finally:
+            gui.root.destroy()
 
     def test_tk_nif_editor_opens_all_tabs_and_closes_cleanly(self) -> None:
         self._skip_unavailable_tk_display()
@@ -3286,24 +3347,33 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_generate_environment_mask_complex_mode_flat_surface_avoids_black_holes(self) -> None:
         environment_mask = generate_environment_mask(_flat_dark_image(), strength=2.2, mode="complex")
-        roughness, metallic, ao, specular_height = environment_mask.split()
+        roughness, metallic, ao, nonmetal_reflectance = environment_mask.split()
         rough_min, rough_max = roughness.getextrema()
         metallic_min, _ = metallic.getextrema()
         ao_min, _ = ao.getextrema()
-        alpha_min, alpha_max = specular_height.getextrema()
+        alpha_min, alpha_max = nonmetal_reflectance.getextrema()
         self.assertGreaterEqual(rough_min, 24)
         self.assertLessEqual(rough_max - rough_min, 80)
         self.assertGreaterEqual(metallic_min, 6)
         self.assertGreaterEqual(ao_min, 24)
-        self.assertGreaterEqual(alpha_min, 24)
-        self.assertLessEqual(alpha_max, 224)
+        expected_reflectance = generate_specular(_flat_dark_image(), strength=2.35)
+        self.assertEqual(nonmetal_reflectance.tobytes(), expected_reflectance.tobytes())
+        self.assertGreaterEqual(alpha_min, 8)
+        self.assertLessEqual(alpha_max, 255)
 
     def test_generate_environment_mask_complex_mode_channel_order_matches_rmaos_contract(self) -> None:
         environment_mask = generate_environment_mask(_flat_dark_image(), strength=2.2, mode="complex")
-        roughness, metallic, ao, specular_height = environment_mask.split()
+        roughness, metallic, ao, nonmetal_reflectance = environment_mask.split()
         self.assertGreater(ImageStat.Stat(roughness).mean[0], ImageStat.Stat(metallic).mean[0])
         self.assertGreater(ImageStat.Stat(ao).mean[0], ImageStat.Stat(roughness).mean[0])
-        self.assertGreater(ImageStat.Stat(specular_height).mean[0], ImageStat.Stat(metallic).mean[0])
+        expected_reflectance = generate_specular(_flat_dark_image(), strength=2.35)
+        self.assertEqual(nonmetal_reflectance.tobytes(), expected_reflectance.tobytes())
+
+    def test_generate_environment_mask_rmaos_alpha_is_nonmetal_reflectance(self) -> None:
+        source = _sample_image()
+        environment_mask = generate_environment_mask(source, strength=1.2, mode="complex")
+        expected_reflectance = generate_specular(source, strength=1.35)
+        self.assertEqual(environment_mask.getchannel("A").tobytes(), expected_reflectance.tobytes())
 
     def test_generate_environment_mask_for_workflow_enb_uses_reflection_gloss_metal_height_layout(self) -> None:
         environment_mask = generate_environment_mask_for_workflow(
@@ -7739,6 +7809,14 @@ class RmaosJsonMaterialTypeTests(unittest.TestCase):
             raw = json.load(f)
         # Payload is a list; return the first (and only) entry for convenience.
         return raw[0] if isinstance(raw, list) else raw
+
+    def test_sidecar_uses_separate_truepbr_material_parameters(self) -> None:
+        data = self._write_and_read("general")
+        self.assertIn("specular_level", data)
+        self.assertIn("roughness_scale", data)
+        self.assertIn("displacement_scale", data)
+        self.assertIn("parallax", data)
+        self.assertIsInstance(data["parallax"], bool)
 
     def test_general_uses_defaults(self) -> None:
         data = self._write_and_read("general")

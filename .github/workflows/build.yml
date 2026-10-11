@@ -179,6 +179,9 @@ jobs:
       - name: Validate Tk Advanced output visibility settings
         run: python -m unittest -v tests.test_generate_textures.GenerateTexturesTests.test_tk_advanced_workflow_visibility_round_trips_saved_settings
 
+      - name: Validate Tk themes, scaling, and responsive window sizes
+        run: python -m unittest -v tests.test_generate_textures.GenerateTexturesTests.test_tk_theme_scale_and_window_sizes_remain_usable
+
       - name: Validate NIF Editor Tk tabs and close behavior
         run: python -m unittest -v tests.test_generate_textures.GenerateTexturesTests.test_tk_nif_editor_opens_all_tabs_and_closes_cleanly
 
