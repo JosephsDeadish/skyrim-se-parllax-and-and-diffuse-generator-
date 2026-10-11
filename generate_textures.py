@@ -909,6 +909,13 @@ def _merge_qt_generation_gui_state(
     include_environment_mask: bool,
     resume_mode: str,
     checkpoint_path: str,
+    include_rmaos: bool | None = None,
+    include_complex: bool | None = None,
+    include_wetness_mask: bool | None = None,
+    include_snow_mask: bool | None = None,
+    include_ao: bool | None = None,
+    include_roughness: bool | None = None,
+    render_profile: str | None = None,
 ) -> dict[str, object]:
     merged = dict(state)
     merged.update(
@@ -924,6 +931,17 @@ def _merge_qt_generation_gui_state(
             "batch_checkpoint_path": checkpoint_path,
         }
     )
+    optional_outputs = {
+        "include_rmaos": include_rmaos,
+        "include_complex": include_complex,
+        "include_wetness_mask": include_wetness_mask,
+        "include_snow_mask": include_snow_mask,
+        "include_ao": include_ao,
+        "include_roughness": include_roughness,
+    }
+    merged.update({key: value for key, value in optional_outputs.items() if value is not None})
+    if render_profile is not None:
+        merged["render_profile"] = render_profile
     return _normalize_gui_state(merged)
 
 
@@ -14757,6 +14775,13 @@ def _launch_qt_migration_gui() -> None:
                 include_parallax = bool(self._options.get("include_parallax", True))
                 include_glow = bool(self._options.get("include_glow", False))
                 include_environment_mask = bool(self._options.get("include_environment_mask", False))
+                include_rmaos = bool(self._options.get("include_rmaos", False))
+                include_complex = bool(self._options.get("include_complex", False))
+                include_wetness_mask = bool(self._options.get("include_wetness_mask", False))
+                include_snow_mask = bool(self._options.get("include_snow_mask", False))
+                include_ao = bool(self._options.get("include_ao", False))
+                include_roughness = bool(self._options.get("include_roughness", False))
+                render_profile = str(self._options.get("render_profile", "custom") or "custom")
                 resume_mode = str(self._options.get("resume_mode", "start_fresh") or "start_fresh").strip().lower()
                 continue_on_error = bool(self._options.get("continue_on_error", True))
                 checkpoint_override = str(self._options.get("checkpoint_path", "") or "")
@@ -14791,6 +14816,12 @@ def _launch_qt_migration_gui() -> None:
                         "parallax": include_parallax,
                         "glow": include_glow,
                         "environment_mask": include_environment_mask,
+                        "rmaos": include_rmaos,
+                        "complex": include_complex,
+                        "wetness_mask": include_wetness_mask,
+                        "snow_mask": include_snow_mask,
+                        "ao": include_ao,
+                        "roughness": include_roughness,
                     }
                     max_pixels = int(batch_metrics.get("max_dimension", 0) or 0)
                     deferred_keys = resolve_lazy_preview_deferred_outputs(
@@ -14855,6 +14886,13 @@ def _launch_qt_migration_gui() -> None:
                                 include_parallax=include_parallax,
                                 include_glow=include_glow,
                                 include_environment_mask=include_environment_mask,
+                                include_rmaos=include_rmaos,
+                                include_complex=include_complex,
+                                include_wetness_mask=include_wetness_mask,
+                                include_snow_mask=include_snow_mask,
+                                include_ao=include_ao,
+                                include_roughness=include_roughness,
+                                render_profile=render_profile,
                             )
                             output_payload = {name: str(path) for name, path in outputs.items()}
                             result_rows.append({"source": str(source_path), "outputs": output_payload})
@@ -14912,6 +14950,13 @@ def _launch_qt_migration_gui() -> None:
                     include_parallax=include_parallax,
                     include_glow=include_glow,
                     include_environment_mask=include_environment_mask,
+                    include_rmaos=include_rmaos,
+                    include_complex=include_complex,
+                    include_wetness_mask=include_wetness_mask,
+                    include_snow_mask=include_snow_mask,
+                    include_ao=include_ao,
+                    include_roughness=include_roughness,
+                    render_profile=render_profile,
                 )
                 output_payload = {name: str(path) for name, path in outputs.items()}
                 result_rows.append({"source": str(input_path), "outputs": output_payload})
@@ -14962,7 +15007,7 @@ def _launch_qt_migration_gui() -> None:
     overview_layout.setSpacing(8)
     overview_text = QtWidgets.QLabel(
         "Qt migration scope in this build:\n"
-        "• generation control row set #1 is now native Qt\n"
+        "• generation includes renderer selection and the supported texture-map output choices\n"
         "• queue/progress/events use Qt worker-thread signals\n"
         "• preview lazy/staged state controls + batch resume controls are now in Qt tabs\n"
         "• legacy Tkinter UI remains available for complete parity while migration continues"
@@ -15000,8 +15045,21 @@ def _launch_qt_migration_gui() -> None:
     output_row.addWidget(browse_output_button)
     generation_layout.addLayout(output_row)
 
-    controls_group = QtWidgets.QGroupBox("Generation controls — row set #1 (ported from Tk)")
-    controls_layout = QtWidgets.QHBoxLayout(controls_group)
+    controls_group = QtWidgets.QGroupBox("Target renderer and output maps")
+    controls_layout = QtWidgets.QGridLayout(controls_group)
+    controls_layout.setHorizontalSpacing(14)
+    controls_layout.setVerticalSpacing(6)
+    controls_layout.addWidget(QtWidgets.QLabel("Target renderer"), 0, 0)
+    render_profile_combo = QtWidgets.QComboBox()
+    render_profile_combo.addItems(_RENDER_PROFILE_CLI_VALUES)
+    controls_layout.addWidget(render_profile_combo, 0, 1)
+    controls_layout.addWidget(
+        QtWidgets.QLabel("Choose one primary workflow; map naming and channels depend on the target."),
+        0,
+        2,
+        1,
+        2,
+    )
     include_diffuse_check = QtWidgets.QCheckBox("Diffuse")
     include_diffuse_check.setChecked(True)
     include_normal_check = QtWidgets.QCheckBox("Normal")
@@ -15009,16 +15067,35 @@ def _launch_qt_migration_gui() -> None:
     include_parallax_check = QtWidgets.QCheckBox("Parallax")
     include_parallax_check.setChecked(True)
     include_glow_check = QtWidgets.QCheckBox("Glow")
-    include_environment_mask_check = QtWidgets.QCheckBox("Environment mask")
-    for control in (
+    include_environment_mask_check = QtWidgets.QCheckBox("Environment mask (_m)")
+    include_rmaos_check = QtWidgets.QCheckBox("TruePBR RMAOS (_rmaos)")
+    include_complex_check = QtWidgets.QCheckBox("Complex material (_msn/_cm)")
+    include_wetness_mask_check = QtWidgets.QCheckBox("Wetness mask (_wt)")
+    include_snow_mask_check = QtWidgets.QCheckBox("Dynamic snow mask (_sm)")
+    include_ao_check = QtWidgets.QCheckBox("Standalone AO (_ao)")
+    include_roughness_check = QtWidgets.QCheckBox("Standalone roughness (_rough)")
+    output_checks = (
         include_diffuse_check,
         include_normal_check,
         include_parallax_check,
         include_glow_check,
         include_environment_mask_check,
-    ):
-        controls_layout.addWidget(control)
-    controls_layout.addStretch(1)
+        include_rmaos_check,
+        include_complex_check,
+        include_wetness_mask_check,
+        include_snow_mask_check,
+        include_ao_check,
+        include_roughness_check,
+    )
+    for index, control in enumerate(output_checks):
+        controls_layout.addWidget(control, 1 + index // 4, index % 4)
+    workflow_note = QtWidgets.QLabel(
+        "Vanilla/ENB _m and TruePBR _rmaos are separate Slot 5 workflows. "
+        "Community Shaders _cm is Extended Materials, not TruePBR. "
+        "_wt/_sm are shader-specific; terrain selection does not generate layered landscape sets."
+    )
+    workflow_note.setWordWrap(True)
+    controls_layout.addWidget(workflow_note, 4, 0, 1, 4)
     generation_layout.addWidget(controls_group)
 
     action_row = QtWidgets.QHBoxLayout()
@@ -15116,11 +15193,22 @@ def _launch_qt_migration_gui() -> None:
     batch_layout.addWidget(continue_on_error_check)
     input_path_edit.setText(str(qt_saved_state["input_path"]))
     output_dir_edit.setText(str(qt_saved_state["output_path"]))
+    profile_index = render_profile_combo.findText(str(qt_saved_state["render_profile"]))
+    if profile_index >= 0:
+        render_profile_combo.setCurrentIndex(profile_index)
     include_diffuse_check.setChecked(bool(qt_saved_state["include_diffuse"]))
     include_normal_check.setChecked(bool(qt_saved_state["include_normal"]))
     include_parallax_check.setChecked(bool(qt_saved_state["include_parallax"]))
     include_glow_check.setChecked(bool(qt_saved_state["include_glow"]))
     include_environment_mask_check.setChecked(bool(qt_saved_state["include_environment_mask"]))
+    include_rmaos_check.setChecked(bool(qt_saved_state["include_rmaos"]))
+    include_complex_check.setChecked(bool(qt_saved_state["include_complex"]))
+    include_wetness_mask_check.setChecked(bool(qt_saved_state["include_wetness_mask"]))
+    include_snow_mask_check.setChecked(bool(qt_saved_state["include_snow_mask"]))
+    include_ao_check.setChecked(bool(qt_saved_state["include_ao"]))
+    include_roughness_check.setChecked(bool(qt_saved_state["include_roughness"]))
+    if include_environment_mask_check.isChecked() and include_rmaos_check.isChecked():
+        include_rmaos_check.setChecked(False)
     resume_index = resume_mode_combo.findText(str(qt_saved_state["batch_resume_mode"]))
     if resume_index >= 0:
         resume_mode_combo.setCurrentIndex(resume_index)
@@ -15209,6 +15297,13 @@ def _launch_qt_migration_gui() -> None:
             include_environment_mask=include_environment_mask_check.isChecked(),
             resume_mode=resume_mode_combo.currentText(),
             checkpoint_path=checkpoint_path_edit.text(),
+            include_rmaos=include_rmaos_check.isChecked(),
+            include_complex=include_complex_check.isChecked(),
+            include_wetness_mask=include_wetness_mask_check.isChecked(),
+            include_snow_mask=include_snow_mask_check.isChecked(),
+            include_ao=include_ao_check.isChecked(),
+            include_roughness=include_roughness_check.isChecked(),
+            render_profile=render_profile_combo.currentText(),
         )
         save_gui_state(state)
 
@@ -15308,6 +15403,9 @@ def _launch_qt_migration_gui() -> None:
         clear_checkpoint_button.setEnabled(not running)
         resume_mode_combo.setEnabled(not running)
         checkpoint_path_edit.setEnabled(not running)
+        render_profile_combo.setEnabled(not running)
+        for option_check in output_checks:
+            option_check.setEnabled(not running)
 
     def _start_generation() -> None:
         nonlocal qt_worker_thread, qt_worker, preview_manual_paused, preview_auto_speed_off
@@ -15323,6 +15421,12 @@ def _launch_qt_migration_gui() -> None:
             include_parallax_check.isChecked(),
             include_glow_check.isChecked(),
             include_environment_mask_check.isChecked(),
+            include_rmaos_check.isChecked(),
+            include_complex_check.isChecked(),
+            include_wetness_mask_check.isChecked(),
+            include_snow_mask_check.isChecked(),
+            include_ao_check.isChecked(),
+            include_roughness_check.isChecked(),
         ]
         if not any(include_flags):
             QtWidgets.QMessageBox.warning(window, "No outputs selected", "Enable at least one generation output.")
@@ -15335,6 +15439,13 @@ def _launch_qt_migration_gui() -> None:
             "include_parallax": include_parallax_check.isChecked(),
             "include_glow": include_glow_check.isChecked(),
             "include_environment_mask": include_environment_mask_check.isChecked(),
+            "include_rmaos": include_rmaos_check.isChecked(),
+            "include_complex": include_complex_check.isChecked(),
+            "include_wetness_mask": include_wetness_mask_check.isChecked(),
+            "include_snow_mask": include_snow_mask_check.isChecked(),
+            "include_ao": include_ao_check.isChecked(),
+            "include_roughness": include_roughness_check.isChecked(),
+            "render_profile": render_profile_combo.currentText(),
             "resume_mode": resume_mode_combo.currentText().strip(),
             "checkpoint_path": checkpoint_path_edit.text().strip(),
             "continue_on_error": continue_on_error_check.isChecked(),
@@ -15503,13 +15614,14 @@ def _launch_qt_migration_gui() -> None:
     output_dir_edit.textChanged.connect(_persist_qt_gui_state)
     checkpoint_path_edit.textChanged.connect(_persist_qt_gui_state)
     resume_mode_combo.currentTextChanged.connect(_persist_qt_gui_state)
-    for option_check in (
-        include_diffuse_check,
-        include_normal_check,
-        include_parallax_check,
-        include_glow_check,
-        include_environment_mask_check,
-    ):
+    include_environment_mask_check.toggled.connect(
+        lambda checked: include_rmaos_check.setChecked(False) if checked else None
+    )
+    include_rmaos_check.toggled.connect(
+        lambda checked: include_environment_mask_check.setChecked(False) if checked else None
+    )
+    render_profile_combo.currentTextChanged.connect(_persist_qt_gui_state)
+    for option_check in output_checks:
         option_check.toggled.connect(_persist_qt_gui_state)
     preview_results_list.currentItemChanged.connect(_show_selected_qt_preview)
 

@@ -847,6 +847,13 @@ class GenerateTexturesTests(unittest.TestCase):
                 include_environment_mask=True,
                 resume_mode="resume",
                 checkpoint_path=str(Path(temp_dir) / "checkpoint.json"),
+                include_rmaos=True,
+                include_complex=True,
+                include_wetness_mask=True,
+                include_snow_mask=True,
+                include_ao=True,
+                include_roughness=True,
+                render_profile="terrain",
             )
 
         self.assertEqual(merged["input_path"], str(input_path))
@@ -858,6 +865,13 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(bool(merged["include_parallax"]))
         self.assertTrue(bool(merged["include_glow"]))
         self.assertTrue(bool(merged["include_environment_mask"]))
+        self.assertTrue(bool(merged["include_rmaos"]))
+        self.assertTrue(bool(merged["include_complex"]))
+        self.assertTrue(bool(merged["include_wetness_mask"]))
+        self.assertTrue(bool(merged["include_snow_mask"]))
+        self.assertTrue(bool(merged["include_ao"]))
+        self.assertTrue(bool(merged["include_roughness"]))
+        self.assertEqual(merged["render_profile"], "terrain")
         self.assertEqual(merged["batch_resume_mode"], "resume")
         self.assertEqual(merged["batch_checkpoint_path"], str(Path(temp_dir) / "checkpoint.json"))
 
