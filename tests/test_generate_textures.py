@@ -1174,6 +1174,10 @@ class GenerateTexturesTests(unittest.TestCase):
                 _qt_preview_channel_options(grayscale_path),
                 (("Composite", None), ("Grayscale", "L")),
             )
+            grayscale_preview = _load_qt_preview_png(grayscale_path, channel="L")
+            with Image.open(io.BytesIO(grayscale_preview)) as preview:
+                self.assertEqual(preview.mode, "L")
+                self.assertEqual(list(preview.getdata()), [128])
             with self.assertRaisesRegex(ValueError, "no separate RGB channels"):
                 _load_qt_preview_png(grayscale_path, channel="R")
 

@@ -1037,8 +1037,8 @@ def _load_qt_preview_png(
             preview = image.copy()
         else:
             normalized_channel = str(channel).strip().upper()
-            if normalized_channel not in {"R", "G", "B", "A"}:
-                raise ValueError("Preview channel must be one of R, G, B, or A.")
+            if normalized_channel not in {"R", "G", "B", "A", "L"}:
+                raise ValueError("Preview channel must be one of R, G, B, A, or L.")
             bands = image.getbands()
             if normalized_channel == "A":
                 if "A" not in bands:
