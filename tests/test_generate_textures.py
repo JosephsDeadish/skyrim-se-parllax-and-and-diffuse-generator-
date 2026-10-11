@@ -5136,7 +5136,48 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(payload["completed_success_count"], 2)
             self.assertEqual(payload["resumed_completed_count"], 0)
             self.assertEqual(len(payload["completed_success_files"]), 2)
+            self.assertEqual(payload["output_root"], str(output_dir.resolve()))
+            self.assertTrue(payload["generation_options"]["include_diffuse"])
             self.assertEqual(len(outputs), 2)
+
+    def test_run_batch_with_options_rejects_resume_with_changed_output_or_generation_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            checkpoint = temp_path / "batch_checkpoint.json"
+            input_dir.mkdir()
+            _sample_image().save(input_dir / "a.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(input_dir / "b.dds", format="DDS", pixel_format="DXT5")
+            baseline_options = {
+                "include_diffuse": True,
+                "include_normal": False,
+                "include_parallax": False,
+                "include_glow": False,
+                "include_environment_mask": False,
+                "include_complex": False,
+                "batch_workers": 1,
+                "checkpoint_file": checkpoint,
+            }
+            run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                **baseline_options,
+            )
+
+            with self.assertRaisesRegex(ValueError, "generation settings differ"):
+                run_batch_with_options(
+                    input_path=input_dir,
+                    output_dir=output_dir,
+                    **{**baseline_options, "include_normal": True, "resume_from_checkpoint": True},
+                )
+
+            with self.assertRaisesRegex(ValueError, "output folder differs"):
+                run_batch_with_options(
+                    input_path=input_dir,
+                    output_dir=temp_path / "different-output",
+                    **{**baseline_options, "resume_from_checkpoint": True},
+                )
 
     def test_run_batch_with_options_resume_checkpoint_skips_completed_successes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

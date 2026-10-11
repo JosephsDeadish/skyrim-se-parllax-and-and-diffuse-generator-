@@ -7900,6 +7900,52 @@ def run_batch_with_options(
     def _checkpoint_key(path: Path) -> str:
         return str(path.resolve())
 
+    effective_output_root = output_dir if output_dir is not None else (
+        input_path if input_path.is_dir() else input_path.parent
+    )
+    generation_options = {
+        "diffuse_name": diffuse_name,
+        "normal_name": normal_name,
+        "parallax_name": parallax_name,
+        "glow_name": glow_name,
+        "environment_mask_name": environment_mask_name,
+        "rmaos_name": rmaos_name,
+        "complex_name": complex_name,
+        "normal_strength": normal_strength,
+        "parallax_strength": parallax_strength,
+        "glow_threshold": glow_threshold,
+        "environment_mask_strength": environment_mask_strength,
+        "rmaos_strength": rmaos_strength,
+        "complex_strength": complex_strength,
+        "specular_strength": specular_strength,
+        "complex_format": complex_format,
+        "env_mask_mode": env_mask_mode,
+        "emboss_mode": emboss_mode,
+        "relief_mode": relief_mode,
+        "parallax_mode": parallax_mode,
+        "include_diffuse": include_diffuse,
+        "include_normal": include_normal,
+        "include_parallax": include_parallax,
+        "include_glow": include_glow,
+        "include_environment_mask": include_environment_mask,
+        "include_rmaos": include_rmaos,
+        "include_complex": include_complex,
+        "render_profile": render_profile,
+        "target_game": target_game,
+        "include_wetness_mask": include_wetness_mask,
+        "wetness_mask_strength": wetness_mask_strength,
+        "wetness_name": wetness_name,
+        "include_snow_mask": include_snow_mask,
+        "snow_mask_strength": snow_mask_strength,
+        "snow_name": snow_name,
+        "include_ao": include_ao,
+        "ao_strength": ao_strength,
+        "ao_name": ao_name,
+        "include_roughness": include_roughness,
+        "roughness_strength": roughness_strength,
+        "roughness_name": roughness_name,
+    }
+
     def _write_checkpoint_state() -> None:
         if checkpoint_file is None:
             return
@@ -7908,6 +7954,8 @@ def run_batch_with_options(
             "tool": "generate_textures",
             "version": APP_VERSION,
             "input_root": _checkpoint_key(input_path),
+            "output_root": _checkpoint_key(effective_output_root),
+            "generation_options": generation_options,
             "completed_success_count": len(completed_success_files),
             "resumed_completed_count": resumed_completed_count,
             "completed_success_files": sorted(completed_success_files),
@@ -7920,6 +7968,18 @@ def run_batch_with_options(
         except Exception:
             payload = {}
         if isinstance(payload, dict):
+            checkpoint_input_root = str(payload.get("input_root", "") or "").strip()
+            if checkpoint_input_root and checkpoint_input_root != _checkpoint_key(input_path):
+                raise ValueError("Checkpoint input path differs; start fresh or use the original input.")
+            checkpoint_output_root = str(payload.get("output_root", "") or "").strip()
+            if checkpoint_output_root and checkpoint_output_root != _checkpoint_key(effective_output_root):
+                raise ValueError("Checkpoint output folder differs; start fresh or use the original output folder.")
+            checkpoint_options = payload.get("generation_options")
+            if checkpoint_options is not None:
+                if not isinstance(checkpoint_options, dict):
+                    raise ValueError("Checkpoint generation settings are invalid; start fresh.")
+                if checkpoint_options != generation_options:
+                    raise ValueError("Checkpoint generation settings differ; start fresh or use the original settings.")
             raw_completed = payload.get("completed_success_files", [])
             if isinstance(raw_completed, list):
                 completed_success_files = {str(entry) for entry in raw_completed if isinstance(entry, str)}
