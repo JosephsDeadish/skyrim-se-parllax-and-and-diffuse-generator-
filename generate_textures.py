@@ -1073,6 +1073,25 @@ def _qt_preview_channel_options(path: str | os.PathLike[str]) -> tuple[tuple[str
     return tuple(options)
 
 
+def _inspect_qt_output_image(
+    path: str | os.PathLike[str],
+    output_key: str,
+) -> str:
+    with Image.open(path) as image:
+        width, height = image.size
+        mode = image.mode
+        bands = image.getbands()
+    summary = f"Image: {width} × {height} px · {mode} · channels {', '.join(bands)}."
+    if str(output_key or "").strip().lower() == "rmaos":
+        if not all(channel in bands for channel in ("R", "G", "B", "A")):
+            return (
+                f"Validation warning: TruePBR RMAOS should contain RGBA channels; "
+                f"found {mode} ({', '.join(bands)}). {summary}"
+            )
+        return f"Validation passed: TruePBR RMAOS contains RGBA channels. {summary}"
+    return summary
+
+
 def _describe_qt_output_channels(output_key: str, render_profile: str) -> str:
     key = str(output_key or "").strip().lower()
     profile = str(render_profile or "custom").strip().lower()
@@ -15843,8 +15862,10 @@ def _launch_qt_migration_gui() -> None:
             preview_channel_note.setText(
                 _describe_qt_output_channels(output_key, render_profile_combo.currentText())
             )
+            inspection = _inspect_qt_output_image(image_path, output_key)
             preview_channel_note.setText(
-                f"{preview_channel_note.text()} Viewing: {preview_channel_combo.currentText()}."
+                f"{preview_channel_note.text()} {inspection} "
+                f"Viewing: {preview_channel_combo.currentText()}."
             )
         except Exception as exc:
             preview_image_label.setPixmap(QtGui.QPixmap())

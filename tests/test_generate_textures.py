@@ -58,6 +58,7 @@ from generate_textures import (
     _apply_qt_profile_output_defaults,
     _describe_qt_profile_guidance,
     _qt_preview_channel_options,
+    _inspect_qt_output_image,
     _DARK_THEME,
     _LIGHT_THEME,
     _resolve_batch_workers,
@@ -1118,6 +1119,29 @@ class GenerateTexturesTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "no separate RGB channels"):
                 _load_qt_preview_png(grayscale_path, channel="R")
+
+    def test_qt_output_inspection_validates_truepbr_rgba_channels(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            rgba_path = Path(temp_dir) / "rmaos.png"
+            Image.new("RGBA", (4, 3), (10, 20, 30, 40)).save(rgba_path)
+            valid_message = _inspect_qt_output_image(rgba_path, "rmaos")
+            self.assertIn("Validation passed", valid_message)
+            self.assertIn("4 × 3 px", valid_message)
+            self.assertIn("R, G, B, A", valid_message)
+
+            rgb_path = Path(temp_dir) / "rmaos_without_alpha.png"
+            Image.new("RGB", (4, 3), (10, 20, 30)).save(rgb_path)
+            warning_message = _inspect_qt_output_image(rgb_path, "rmaos")
+            self.assertIn("Validation warning", warning_message)
+            self.assertIn("should contain RGBA channels", warning_message)
+
+    def test_qt_output_inspection_does_not_impose_rgba_on_grayscale_masks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mask_path = Path(temp_dir) / "ao.png"
+            Image.new("L", (2, 2), 128).save(mask_path)
+            inspection = _inspect_qt_output_image(mask_path, "ao")
+        self.assertNotIn("Validation warning", inspection)
+        self.assertIn("channels L", inspection)
 
     def test_qt_channel_guidance_matches_supported_workflow_contracts(self) -> None:
         self.assertIn(
