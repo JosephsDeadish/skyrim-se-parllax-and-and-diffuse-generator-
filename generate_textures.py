@@ -918,6 +918,9 @@ def _merge_qt_generation_gui_state(
     include_ao: bool | None = None,
     include_roughness: bool | None = None,
     render_profile: str | None = None,
+    complex_format: str | None = None,
+    env_mask_mode: str | None = None,
+    parallax_mode: str | None = None,
     dark_mode: bool | None = None,
     ui_scale: float | None = None,
 ) -> dict[str, object]:
@@ -946,6 +949,12 @@ def _merge_qt_generation_gui_state(
     merged.update({key: value for key, value in optional_outputs.items() if value is not None})
     if render_profile is not None:
         merged["qt_render_profile"] = render_profile
+    if complex_format is not None:
+        merged["complex_format"] = complex_format
+    if env_mask_mode is not None:
+        merged["env_mask_mode"] = env_mask_mode
+    if parallax_mode is not None:
+        merged["parallax_mode"] = parallax_mode
     if dark_mode is not None:
         merged["dark_mode"] = dark_mode
     if ui_scale is not None:
@@ -14797,6 +14806,21 @@ def _qt_profile_output_defaults(profile: str) -> dict[str, bool]:
     return {key: bool(value) for key, value in defaults.items()}
 
 
+def _qt_render_profile_modes(
+    profile: str,
+    current_modes: Mapping[str, str],
+    *,
+    recommended_profile: str | None = None,
+) -> dict[str, str]:
+    normalized_profile = _normalize_render_profile(profile)
+    return resolve_render_profile_mode_selection(
+        current_modes,
+        selected_profile=normalized_profile,
+        recommended_profile=recommended_profile,
+        apply_preset=normalized_profile != "custom",
+    )
+
+
 def _apply_qt_profile_output_defaults(
     current: Mapping[str, bool],
     defaults: Mapping[str, bool],
@@ -14923,6 +14947,9 @@ def _launch_qt_migration_gui() -> None:
                 include_ao = bool(self._options.get("include_ao", False))
                 include_roughness = bool(self._options.get("include_roughness", False))
                 render_profile = str(self._options.get("render_profile", "custom") or "custom")
+                complex_format = str(self._options.get("complex_format", "msn") or "msn")
+                env_mask_mode = str(self._options.get("env_mask_mode", "standard") or "standard")
+                parallax_mode = str(self._options.get("parallax_mode", "standard") or "standard")
                 resume_mode = str(self._options.get("resume_mode", "start_fresh") or "start_fresh").strip().lower()
                 continue_on_error = bool(self._options.get("continue_on_error", True))
                 checkpoint_override = str(self._options.get("checkpoint_path", "") or "")
@@ -15033,6 +15060,9 @@ def _launch_qt_migration_gui() -> None:
                                 include_snow_mask=include_snow_mask,
                                 include_ao=include_ao,
                                 include_roughness=include_roughness,
+                                complex_format=complex_format,
+                                env_mask_mode=env_mask_mode,
+                                parallax_mode=parallax_mode,
                                 render_profile=render_profile,
                             )
                             output_payload = {name: str(path) for name, path in outputs.items()}
@@ -15097,6 +15127,9 @@ def _launch_qt_migration_gui() -> None:
                     include_snow_mask=include_snow_mask,
                     include_ao=include_ao,
                     include_roughness=include_roughness,
+                    complex_format=complex_format,
+                    env_mask_mode=env_mask_mode,
+                    parallax_mode=parallax_mode,
                     render_profile=render_profile,
                 )
                 output_payload = {name: str(path) for name, path in outputs.items()}
@@ -15287,6 +15320,27 @@ def _launch_qt_migration_gui() -> None:
     )
     workflow_note.setWordWrap(True)
     controls_layout.addWidget(workflow_note, 4 + (len(output_checks) + 1) // 2, 0, 1, 3)
+    mode_row = 4 + (len(output_checks) + 1) // 2 + 1
+    complex_format_combo = QtWidgets.QComboBox()
+    complex_format_combo.addItem("ENB complex (_msn)", "msn")
+    complex_format_combo.addItem("Community Shaders (_cm)", "cm")
+    env_mask_mode_combo = QtWidgets.QComboBox()
+    env_mask_mode_combo.addItem("Standard", "standard")
+    env_mask_mode_combo.addItem("Complex", "complex")
+    parallax_mode_combo = QtWidgets.QComboBox()
+    parallax_mode_combo.addItem("Standard height", "standard")
+    parallax_mode_combo.addItem("Occlusion (ENB/POM)", "occlusion")
+    controls_layout.addWidget(QtWidgets.QLabel("Complex material format"), mode_row, 0)
+    controls_layout.addWidget(complex_format_combo, mode_row, 1)
+    controls_layout.addWidget(QtWidgets.QLabel("Environment mask mode"), mode_row + 1, 0)
+    controls_layout.addWidget(env_mask_mode_combo, mode_row + 1, 1)
+    controls_layout.addWidget(QtWidgets.QLabel("Parallax mode"), mode_row + 2, 0)
+    controls_layout.addWidget(parallax_mode_combo, mode_row + 2, 1)
+    mode_controls_hint = QtWidgets.QLabel()
+    mode_controls_hint.setWordWrap(True)
+    controls_layout.addWidget(mode_controls_hint, mode_row, 2, 3, 1)
+    for control in (complex_format_combo, env_mask_mode_combo, parallax_mode_combo):
+        control.setToolTip("Renderer presets select compatible modes. Custom mode exposes manual choices.")
     generation_layout.addWidget(controls_group)
 
     action_row = QtWidgets.QHBoxLayout()
@@ -15417,6 +15471,17 @@ def _launch_qt_migration_gui() -> None:
     include_snow_mask_check.setChecked(bool(qt_saved_state["include_snow_mask"]))
     include_ao_check.setChecked(bool(qt_saved_state["include_ao"]))
     include_roughness_check.setChecked(bool(qt_saved_state["include_roughness"]))
+    for control, state_key in (
+        (complex_format_combo, "complex_format"),
+        (env_mask_mode_combo, "env_mask_mode"),
+        (parallax_mode_combo, "parallax_mode"),
+    ):
+        saved_value = str(qt_saved_state[state_key])
+        if state_key == "parallax_mode":
+            saved_value = _normalize_parallax_mode_key(saved_value)
+        saved_index = control.findData(saved_value)
+        if saved_index >= 0:
+            control.setCurrentIndex(saved_index)
     if include_environment_mask_check.isChecked() and include_rmaos_check.isChecked():
         include_rmaos_check.setChecked(False)
     resume_index = resume_mode_combo.findText(str(qt_saved_state["batch_resume_mode"]))
@@ -15593,6 +15658,54 @@ def _launch_qt_migration_gui() -> None:
     def _update_profile_guidance(*_: object) -> None:
         profile_guidance_label.setText(_describe_qt_profile_guidance(render_profile_combo.currentText()))
 
+    def _update_qt_render_modes(*_: object, apply_profile: bool = True) -> None:
+        profile = render_profile_combo.currentText()
+        recommended = _recommend_qt_render_profile(
+            input_path_edit.text(),
+            manager_context=manager_context,
+        )
+        current_modes = {
+            "complex_format": str(complex_format_combo.currentData() or "msn"),
+            "env_mask_mode": str(env_mask_mode_combo.currentData() or "standard"),
+            "parallax_mode": str(parallax_mode_combo.currentData() or "standard"),
+        }
+        if not apply_profile:
+            modes = {
+                "complex_format": _normalize_complex_format(current_modes["complex_format"]),
+                "env_mask_mode": _normalize_env_mask_mode(current_modes["env_mask_mode"]),
+                "parallax_mode": _normalize_parallax_mode_key(current_modes["parallax_mode"]),
+            }
+        else:
+            modes = _qt_render_profile_modes(
+                profile,
+                current_modes,
+                recommended_profile=recommended,
+            )
+            for control, key in (
+                (complex_format_combo, "complex_format"),
+                (env_mask_mode_combo, "env_mask_mode"),
+                (parallax_mode_combo, "parallax_mode"),
+            ):
+                control.blockSignals(True)
+                index = control.findData(modes[key])
+                if index >= 0:
+                    control.setCurrentIndex(index)
+                control.blockSignals(False)
+        states = resolve_render_profile_mode_control_states(
+            selected_profile=profile,
+            include_complex=include_complex_check.isChecked(),
+            include_environment_mask=include_environment_mask_check.isChecked(),
+            include_parallax=include_parallax_check.isChecked(),
+        )
+        for control, key in (
+            (complex_format_combo, "complex_format"),
+            (env_mask_mode_combo, "env_mask_mode"),
+            (parallax_mode_combo, "parallax_mode"),
+        ):
+            control.setEnabled(str(states[key]) != "disabled")
+        mode_controls_hint.setText(build_render_profile_mode_controls_hint(states))
+        _persist_qt_gui_state()
+
     def _persist_qt_gui_state(*_: object) -> None:
         state = _merge_qt_generation_gui_state(
             load_gui_state(),
@@ -15612,6 +15725,9 @@ def _launch_qt_migration_gui() -> None:
             include_ao=include_ao_check.isChecked(),
             include_roughness=include_roughness_check.isChecked(),
             render_profile=render_profile_combo.currentText(),
+            complex_format=str(complex_format_combo.currentData() or "msn"),
+            env_mask_mode=str(env_mask_mode_combo.currentData() or "standard"),
+            parallax_mode=str(parallax_mode_combo.currentData() or "standard"),
             dark_mode=theme_check.isChecked(),
             ui_scale=float(ui_scale_combo.currentText()),
         )
@@ -15763,6 +15879,11 @@ def _launch_qt_migration_gui() -> None:
         resume_mode_combo.setEnabled(not running)
         checkpoint_path_edit.setEnabled(not running)
         render_profile_combo.setEnabled(not running)
+        if running:
+            for mode_control in (complex_format_combo, env_mask_mode_combo, parallax_mode_combo):
+                mode_control.setEnabled(False)
+        else:
+            _update_qt_render_modes(apply_profile=False)
         suggested_profile = _recommend_qt_render_profile(
             input_path_edit.text(),
             manager_context=manager_context,
@@ -15814,6 +15935,9 @@ def _launch_qt_migration_gui() -> None:
             "include_ao": include_ao_check.isChecked(),
             "include_roughness": include_roughness_check.isChecked(),
             "render_profile": render_profile_combo.currentText(),
+            "complex_format": str(complex_format_combo.currentData() or "msn"),
+            "env_mask_mode": str(env_mask_mode_combo.currentData() or "standard"),
+            "parallax_mode": str(parallax_mode_combo.currentData() or "standard"),
             "resume_mode": resume_mode_combo.currentText().strip(),
             "checkpoint_path": checkpoint_path_edit.text().strip(),
             "continue_on_error": continue_on_error_check.isChecked(),
@@ -15986,6 +16110,7 @@ def _launch_qt_migration_gui() -> None:
     resume_mode_combo.currentIndexChanged.connect(_update_resume_hint)
     input_path_edit.textChanged.connect(_refresh_checkpoint_health)
     input_path_edit.textChanged.connect(_update_profile_recommendation)
+    input_path_edit.textChanged.connect(_update_qt_render_modes)
     output_dir_edit.textChanged.connect(_refresh_checkpoint_health)
     checkpoint_path_edit.textChanged.connect(_refresh_checkpoint_health)
     input_path_edit.textChanged.connect(_persist_qt_gui_state)
@@ -16000,6 +16125,11 @@ def _launch_qt_migration_gui() -> None:
     )
     render_profile_combo.currentTextChanged.connect(_persist_qt_gui_state)
     render_profile_combo.currentTextChanged.connect(_update_profile_guidance)
+    render_profile_combo.currentTextChanged.connect(_update_qt_render_modes)
+    for mode_control in (complex_format_combo, env_mask_mode_combo, parallax_mode_combo):
+        mode_control.currentIndexChanged.connect(_persist_qt_gui_state)
+    for output_control in (include_complex_check, include_environment_mask_check, include_parallax_check):
+        output_control.toggled.connect(lambda _checked: _update_qt_render_modes(apply_profile=False))
     for option_check in output_checks:
         option_check.toggled.connect(_persist_qt_gui_state)
     preview_results_list.currentItemChanged.connect(_update_qt_preview_channels)
@@ -16008,6 +16138,7 @@ def _launch_qt_migration_gui() -> None:
     _update_resume_hint()
     _update_profile_recommendation()
     _update_profile_guidance()
+    _update_qt_render_modes()
     _refresh_preview_state_badge()
     _refresh_checkpoint_health()
     window.setCentralWidget(root)

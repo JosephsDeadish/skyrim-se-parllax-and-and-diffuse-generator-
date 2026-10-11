@@ -53,6 +53,7 @@ from generate_textures import (
     _normalize_gui_state,
     _merge_qt_generation_gui_state,
     _qt_profile_output_defaults,
+    _qt_render_profile_modes,
     _apply_qt_profile_output_defaults,
     _describe_qt_profile_guidance,
     _qt_preview_channel_options,
@@ -860,6 +861,9 @@ class GenerateTexturesTests(unittest.TestCase):
                 include_ao=True,
                 include_roughness=True,
                 render_profile="terrain",
+                complex_format="cm",
+                env_mask_mode="complex",
+                parallax_mode="occlusion",
                 dark_mode=True,
                 ui_scale=1.3,
             )
@@ -881,6 +885,9 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(merged["include_roughness"]))
         self.assertEqual(merged["qt_render_profile"], "terrain")
         self.assertEqual(merged["render_profile"], "custom")
+        self.assertEqual(merged["complex_format"], "cm")
+        self.assertEqual(merged["env_mask_mode"], "complex")
+        self.assertEqual(merged["parallax_mode"], "occlusion (ENB/POM)")
         self.assertTrue(bool(merged["dark_mode"]))
         self.assertAlmostEqual(float(merged["ui_scale"]), 1.3)
         self.assertEqual(merged["batch_resume_mode"], "resume")
@@ -930,6 +937,35 @@ class GenerateTexturesTests(unittest.TestCase):
 
         self.assertFalse(any(_qt_profile_output_defaults("custom").values()))
         self.assertTrue(_qt_profile_output_defaults("vanilla")["include_diffuse"])
+
+    def test_qt_renderer_modes_follow_presets_and_preserve_custom_choices(self) -> None:
+        current = {
+            "complex_format": "cm",
+            "env_mask_mode": "complex",
+            "parallax_mode": "occlusion",
+        }
+        self.assertEqual(
+            _qt_render_profile_modes("enb", current),
+            {
+                "selected_profile": "enb",
+                "effective_profile": "enb",
+                "complex_format": "msn",
+                "env_mask_mode": "complex",
+                "parallax_mode": "occlusion",
+            },
+        )
+        self.assertEqual(
+            _qt_render_profile_modes("community_shaders", current)["complex_format"],
+            "cm",
+        )
+        self.assertEqual(
+            _qt_render_profile_modes("custom", current),
+            {
+                "selected_profile": "custom",
+                "effective_profile": "custom",
+                **current,
+            },
+        )
 
     def test_qt_profile_output_defaults_preserve_unrelated_optional_maps(self) -> None:
         current = {
