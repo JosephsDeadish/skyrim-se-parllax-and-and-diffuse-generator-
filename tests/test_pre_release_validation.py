@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import json
 import struct
+import subprocess
 import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
 
 from scripts.pre_release_validation import (
+    REPO_ROOT,
+    _realistic_batch_inventory,
+    _validate_batch_acceptance_dds,
+    _write_batch_acceptance_dds,
+    main,
+    run_realistic_batch_acceptance,
     _DEFAULT_REALMOD_DELTA_SEED,
     _assert_realmod_fallback_drift_within_limit,
     _assert_bucket_distribution_drift_within_limit,
@@ -25,6 +32,180 @@ from scripts.pre_release_validation import (
     _resolve_packaged_smoke_binary,
     _write_packaged_smoke_png,
 )
+
+
+class TestRealisticBatchAcceptance(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory(dir=REPO_ROOT)
+        self.root = Path(self._td.name)
+        self.calls: list[list[str]] = []
+        self.inventory = {name: (16, 16) for name in _realistic_batch_inventory(12)}
+        self.mutation = ""
+
+    def tearDown(self) -> None:
+        self._td.cleanup()
+
+    def fake_cli(self, command, **kwargs):
+        self.calls.append(command)
+        phase = len(self.calls) - 1
+        input_dir = Path(command[1] if command[0].endswith("binary") else command[2])
+        output_dir = Path(command[command.index("--output-dir") + 1])
+        checkpoint = Path(command[command.index("--checkpoint-file") + 1])
+        telemetry = Path(command[command.index("--batch-telemetry-file") + 1])
+        names = list(self.inventory)
+        if phase:
+            names.append("corrupt.dds")
+        generated = names if phase == 0 else ["corrupt.dds"] if phase == 1 else []
+        for name in generated:
+            for suffix in ("", "_n", "_p"):
+                size = (1024, 1024) if name == "corrupt.dds" else (16, 16)
+                _write_batch_acceptance_dds(output_dir / f"{Path(name).stem}{suffix}.dds", size)
+        state = {"completed_success_count": len(names), "resumed_completed_count": (0, 12, 13)[phase],
+                 "completed_success_files": sorted(str(input_dir / name) for name in names)}
+        if self.mutation == "checkpoint":
+            state["completed_success_files"][0] = str(input_dir / "unknown.dds")
+        if phase < 2:
+            checkpoint.write_text(json.dumps(state), encoding="utf-8")
+        summary = {
+            "workers": 2 if phase == 0 else 1, "total_files_considered": 13,
+            "processed_files": (13, 1, 0)[phase], "successful_files": (12, 1, 0)[phase],
+            "failed_files": (1, 0, 0)[phase], "resumed_completed_count": (0, 12, 13)[phase],
+            "checkpoint_enabled": True, "resumed_from_checkpoint": phase > 0,
+            "source_files_4k_or_above": 2, "max_source_dimension": 4096,
+        }
+        if self.mutation == "telemetry":
+            summary["successful_files"] = 99
+        telemetry.write_text(json.dumps({"summary": summary}), encoding="utf-8")
+        if phase == 0:
+            failure = {"summary": {"failed_files": 1, "successful_files": 12, "successful_outputs": 36},
+                       "failures": [{"file": str(input_dir / "corrupt.dds"), "error": "Invalid DDS"}]}
+            (output_dir / "batch_failure_report.json").write_text(json.dumps(failure), encoding="utf-8")
+            (output_dir / "batch_failure_report.csv").write_text("file,error\ncorrupt.dds,Invalid DDS\n", encoding="utf-8")
+        if self.mutation == "mtime" and phase == 1:
+            import os
+            target = output_dir / "striped_00.dds"
+            stamp = target.stat().st_mtime_ns + 1_000_000
+            os.utime(target, ns=(stamp, stamp))
+        return subprocess.CompletedProcess(command, 1 if phase == 0 else 0)
+
+    def run_mocked(self, binary=None):
+        with unittest.mock.patch("scripts.pre_release_validation._realistic_batch_inventory", return_value=self.inventory.copy()), \
+             unittest.mock.patch("scripts.pre_release_validation.subprocess.run", side_effect=self.fake_cli):
+            return run_realistic_batch_acceptance(self.root, binary=binary, workers=3, timeout=7, count=12)
+
+    def test_source_orchestration_recovers_then_noops_and_preserves_outputs(self) -> None:
+        report = self.run_mocked()
+        self.assertEqual(report["status"], "pass", report.get("error"))
+        self.assertEqual([row["output_count"] for row in report["phases"]], [36, 39, 39])
+        self.assertEqual([row["unchanged_output_count"] for row in report["phases"]], [0, 36, 39])
+        self.assertEqual(report["cli_cooperative_cancellation"], "unsupported")
+        self.assertIn("not_mod_scale", report["scope"])
+        self.assertTrue(self.calls[0][1].endswith("generate_textures.py"))
+        self.assertNotIn("--resume-checkpoint", self.calls[0])
+        self.assertTrue(all("--resume-checkpoint" in command for command in self.calls[1:]))
+        for row in report["phases"]:
+            self.assertTrue(Path(row["log_path"]).exists())
+            self.assertTrue(Path(row["telemetry_path"]).exists())
+        self.assertEqual(json.loads(Path(report["report_path"]).read_text())["status"], "pass")
+
+    def test_packaged_binary_uses_existing_cli_and_unique_artifacts(self) -> None:
+        binary = self.root / "binary"
+        first = self.run_mocked(binary)
+        self.assertEqual(first["status"], "pass", first.get("error"))
+        self.assertEqual(self.calls[0][0], str(binary.resolve()))
+        self.calls.clear()
+        second = self.run_mocked(binary)
+        self.assertNotEqual(first["report_path"], second["report_path"])
+
+    def test_rejects_wrong_telemetry_checkpoint_and_modified_resume_output(self) -> None:
+        for mutation in ("telemetry", "checkpoint", "mtime"):
+            with self.subTest(mutation=mutation):
+                self.calls.clear()
+                self.mutation = mutation
+                report = self.run_mocked()
+                self.assertEqual(report["status"], "fail")
+                self.assertTrue(report.get("error"))
+                self.assertTrue(Path(report["report_path"]).exists())
+
+    def test_timeout_retains_failure_report_log_and_missing_telemetry_evidence(self) -> None:
+        with unittest.mock.patch("scripts.pre_release_validation._realistic_batch_inventory", return_value=self.inventory), \
+             unittest.mock.patch("scripts.pre_release_validation.subprocess.run",
+                                 side_effect=subprocess.TimeoutExpired("cli", 0.1)):
+            report = run_realistic_batch_acceptance(self.root, timeout=0.1, count=12)
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("TimeoutExpired", report["error"])
+        row = report["phases"][0]
+        self.assertTrue(Path(row["log_path"]).exists())
+        self.assertEqual(json.loads(Path(row["telemetry_path"]).read_text())["status"], "unavailable")
+
+    def test_inventory_and_real_4k_payload_is_nonflat_decodable_and_complete(self) -> None:
+        from collections import Counter
+        from PIL import Image
+
+        inventory = _realistic_batch_inventory(12)
+        self.assertEqual(Counter(inventory.values()), {
+            (4096, 4096): 2, (2048, 2048): 3, (1024, 1024): 4,
+            (2048, 1024): 1, (1024, 2048): 1, (512, 1024): 1,
+        })
+        path = self.root / "payload.dds"
+        _write_batch_acceptance_dds(path, (4096, 4096))
+        evidence = _validate_batch_acceptance_dds(path, (4096, 4096))
+        self.assertEqual(evidence["payload_bytes"], 4096 * 4096 * 3)
+        with Image.open(path) as image:
+            image.load()
+            self.assertTrue(all(low < high for low, high in image.getextrema()))
+        with path.open("ab") as stream:
+            stream.write(b"unexpected trailing payload")
+        with self.assertRaisesRegex(ValueError, "payload length"):
+            _validate_batch_acceptance_dds(path, (4096, 4096))
+
+    def test_configurable_inventory_keeps_two_4k_inputs_and_repeats_mixed_queue_workload(self) -> None:
+        from collections import Counter
+
+        self.assertEqual(len(_realistic_batch_inventory()), 64)
+        for count in (12, 64, 500):
+            inventory = _realistic_batch_inventory(count)
+            self.assertEqual(len(inventory), count)
+            self.assertEqual(list(inventory.values())[:12], list(_realistic_batch_inventory(12).values()))
+            sizes = Counter(inventory.values())
+            self.assertEqual(sizes[(4096, 4096)], 2)
+            if count > 12:
+                self.assertEqual(max(max(size) for size in list(inventory.values())[12:]), 2048)
+            self.assertTrue(all(name.endswith(".dds") for name in inventory))
+        with self.assertRaisesRegex(ValueError, "at least 12"):
+            _realistic_batch_inventory(11)
+
+    def test_invalid_count_persists_failure_evidence_without_running_cli(self) -> None:
+        with unittest.mock.patch("scripts.pre_release_validation.subprocess.run") as cli:
+            report = run_realistic_batch_acceptance(self.root, count=11)
+        self.assertEqual(report["status"], "fail")
+        self.assertIn("at least 12", report["error"])
+        self.assertTrue(Path(report["report_path"]).is_file())
+        cli.assert_not_called()
+
+    def test_acceptance_only_bypasses_regular_gates_and_propagates_failure(self) -> None:
+        for status, expected in (("pass", 0), ("fail", 1)):
+            with unittest.mock.patch("sys.argv", ["validation", "--batch-acceptance-only",
+                                                  "--artifact-dir", str(self.root)]), \
+                 unittest.mock.patch("scripts.pre_release_validation.run_realistic_batch_acceptance",
+                                     return_value={"status": status}) as acceptance, \
+                 unittest.mock.patch("scripts.pre_release_validation._run_step") as gate:
+                self.assertEqual(main(), expected)
+                acceptance.assert_called_once_with(self.root, None, 2, 900, count=64)
+                gate.assert_not_called()
+
+    def test_cli_passes_explicit_synthetic_count_and_rejects_too_small_inventory(self) -> None:
+        with unittest.mock.patch("sys.argv", ["validation", "--batch-acceptance-only",
+                                              "--artifact-dir", str(self.root), "--batch-acceptance-count", "500"]), \
+             unittest.mock.patch("scripts.pre_release_validation.run_realistic_batch_acceptance",
+                                 return_value={"status": "pass"}) as acceptance:
+            self.assertEqual(main(), 0)
+            acceptance.assert_called_once_with(self.root, None, 2, 900, count=500)
+        with unittest.mock.patch("sys.argv", ["validation", "--batch-acceptance-count", "11"]), \
+             unittest.mock.patch("sys.stderr"):
+            with self.assertRaises(SystemExit) as exc:
+                main()
+            self.assertEqual(exc.exception.code, 2)
 
 
 def _snapshot(stamp: str) -> dict[str, object]:

@@ -168,6 +168,11 @@ jobs:
       - name: Smoke run packaged Qt executable
         run: .\dist\qt\generate_textures_qt.exe --help
 
+      - name: Validate Qt themes, scales, editor writes, and generation cancellation/resume
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest -v tests.test_generate_textures.TestQtNifEditorRunner tests.test_generate_textures.TestQtNifEditorEventLoop
+
       - name: Smoke launch packaged Tk and Qt GUIs
         shell: pwsh
         run: |
@@ -189,7 +194,8 @@ jobs:
           $cases = @(
             @{ Name = "light-small"; Dark = $false; Scale = 0.9; Width = 800; Height = 600 },
             @{ Name = "dark-large"; Dark = $true; Scale = 1.5; Width = 960; Height = 700 },
-            @{ Name = "light-medium"; Dark = $false; Scale = 1.15; Width = 900; Height = 660 }
+            @{ Name = "light-medium"; Dark = $false; Scale = 1.15; Width = 900; Height = 660 },
+            @{ Name = "dark-200-percent"; Dark = $true; Scale = 2.0; Width = 1100; Height = 700 }
           )
           $backends = @(
             @{ Name = "Tk"; ProcessName = "generate_textures"; Path = ".\dist\generate_textures.exe"; Backend = "tk"; StartupTimeout = 30 },
@@ -262,6 +268,24 @@ jobs:
       - name: Validate Tk cancellation checkpoint resume
         run: python -m unittest -v tests.test_generate_textures.GenerateTexturesTests.test_gui_batch_worker_cancellation_checkpoint_resumes_long_run
 
+      - name: Realistic mixed-resolution packaged batch recovery and resume
+        run: |
+          python scripts/pre_release_validation.py --batch-acceptance-only --batch-acceptance-count 500 --batch-acceptance-timeout 3600 --batch-acceptance-binary dist/generate_textures.exe --artifact-dir artifacts/windows_batch_acceptance/tk
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/pre_release_validation.py --batch-acceptance-only --batch-acceptance-count 500 --batch-acceptance-timeout 3600 --batch-acceptance-binary dist/qt/generate_textures_qt.exe --artifact-dir artifacts/windows_batch_acceptance/qt
+
+      - name: Upload realistic packaged batch acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-batch-acceptance
+          path: |
+            artifacts/windows_batch_acceptance/**/acceptance_report.json
+            artifacts/windows_batch_acceptance/**/*.log
+            artifacts/windows_batch_acceptance/**/*telemetry.json
+            artifacts/windows_batch_acceptance/**/checkpoint.json
+          if-no-files-found: warn
+
       - name: End-to-end packaged executable smoke generation
         run: |
           python - <<'PY'
@@ -317,6 +341,7 @@ jobs:
           if-no-files-found: error
 
       - name: Upload packaged Qt GUI screenshots
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: packaged-qt-gui-screenshots

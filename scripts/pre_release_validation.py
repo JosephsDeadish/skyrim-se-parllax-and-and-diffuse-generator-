@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import re
 import shutil
@@ -12,6 +13,8 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
+import uuid
 import zlib
 from datetime import datetime, timezone
 from pathlib import Path
@@ -241,6 +244,218 @@ def _read_packaged_smoke_dds_dimensions(path: Path) -> tuple[int, int]:
     if width < 1 or height < 1:
         raise ValueError(f"'{path.name}' has invalid DDS dimensions ({width}, {height}).")
     return width, height
+
+
+def _realistic_batch_inventory(count: int = 64) -> dict[str, tuple[int, int]]:
+    if count < 12:
+        raise ValueError("Acceptance count must be at least 12.")
+    sizes = (
+        [(4096, 4096)] * 2 + [(2048, 2048)] * 3 + [(1024, 1024)] * 4
+        + [(2048, 1024), (1024, 2048), (512, 1024)]
+    )
+    extra_sizes = [(1024, 1024)] * 6 + [(2048, 2048), (2048, 1024), (1024, 2048), (512, 1024)]
+    sizes.extend(extra_sizes[index % len(extra_sizes)] for index in range(count - 12))
+    return {f"striped_{index:02d}.dds": size for index, size in enumerate(sizes)}
+
+
+def _write_batch_acceptance_dds(path: Path, size: tuple[int, int]) -> None:
+    from PIL import Image, ImageDraw
+
+    with Image.new("RGB", size, (48, 76, 100)) as image:
+        draw = ImageDraw.Draw(image)
+        for x in range(0, size[0], 64):
+            draw.rectangle((x, 0, x + 31, size[1] - 1), fill=(184, 146, 92))
+        for y in range(0, size[1], 128):
+            draw.rectangle((0, y, size[0] - 1, y + 15), fill=(92, 118, 152))
+        image.save(path, format="DDS")
+
+
+def _validate_batch_acceptance_dds(path: Path, size: tuple[int, int]) -> dict[str, object]:
+    from PIL import Image
+
+    if _read_packaged_smoke_dds_dimensions(path) != size:
+        raise ValueError(f"Unexpected DDS dimensions: {path}")
+    with path.open("rb") as stream:
+        header = stream.read(148)
+    if len(header) < 128 or struct.unpack_from("<I", header, 76)[0] != 32:
+        raise ValueError(f"Invalid DDS pixel header: {path}")
+    fourcc = header[84:88]
+    block_bytes = {b"DXT1": 8, b"DXT3": 16, b"DXT5": 16, b"ATI1": 8, b"ATI2": 16,
+                   b"BC4U": 8, b"BC5U": 16}.get(fourcc)
+    offset = 128
+    if fourcc == b"DX10":
+        offset = 148
+        dxgi = struct.unpack_from("<I", header, 128)[0]
+        block_bytes = {71: 8, 72: 8, 74: 16, 75: 16, 77: 16, 78: 16,
+                       80: 8, 83: 16, 98: 16, 99: 16}.get(dxgi)
+        if block_bytes is None:
+            raise ValueError(f"Unsupported acceptance DDS DXGI format {dxgi}: {path}")
+    elif fourcc != b"\0\0\0\0" and block_bytes is None:
+        raise ValueError(f"Unsupported acceptance DDS FourCC {fourcc!r}: {path}")
+    bits = struct.unpack_from("<I", header, 88)[0]
+    width, height = size
+    mip_count = max(1, struct.unpack_from("<I", header, 28)[0])
+    if mip_count > max(size).bit_length() or (block_bytes is None and bits not in (8, 16, 24, 32)):
+        raise ValueError(f"Invalid acceptance DDS payload layout: {path}")
+    payload_bytes = 0
+    for _ in range(mip_count):
+        payload_bytes += (
+            ((width + 3) // 4) * ((height + 3) // 4) * block_bytes
+            if block_bytes is not None else ((width * bits + 7) // 8) * height
+        )
+        width, height = max(1, width // 2), max(1, height // 2)
+    if path.stat().st_size != offset + payload_bytes:
+        raise ValueError(f"DDS payload length mismatch: {path}")
+    with Image.open(path) as image:
+        image.load()
+        if image.size != size:
+            raise ValueError(f"DDS decoded dimensions mismatch: {path}")
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return {"sha256": digest.hexdigest(), "mtime_ns": path.stat().st_mtime_ns,
+            "dimensions": list(size), "payload_bytes": payload_bytes}
+
+
+def run_realistic_batch_acceptance(
+    artifact_dir: Path, binary: Path | None = None, workers: int = 2, timeout: float = 900,
+    count: int = 64,
+) -> dict[str, object]:
+    """Exercise bounded real DDS generation and failed-input checkpoint recovery."""
+    root = Path(artifact_dir).resolve() / f"batch_acceptance_{uuid.uuid4().hex}"
+    root.mkdir(parents=True)
+    report_path = root / "acceptance_report.json"
+    inventory: dict[str, tuple[int, int]] = {}
+    report: dict[str, object] = {
+        "scope": "bounded_synthetic_4k_mixed_resolution_acceptance_not_mod_scale",
+        "status": "running", "artifact_dir": str(root), "report_path": str(report_path),
+        "requested_workers": workers, "timeout_seconds_per_phase": timeout,
+        "synthetic_valid_input_count": count, "initial_total_input_count": count + 1,
+        "synthetic_mod_scale_sized": count >= 500, "real_mod_samples": False,
+        "cli_cooperative_cancellation": "unsupported",
+        "cancellation_note": "Failed-input recovery is not cancellation acceptance; GUI cancellation is tested separately.",
+        "inventory": {name: list(size) for name, size in inventory.items()},
+        "phases": [], "outputs": {},
+    }
+    started = time.perf_counter()
+    for phase_name in ("initial_corrupt_recovery", "repaired_resume", "noop_resume"):
+        (root / f"{phase_name}.log").write_text("", encoding="utf-8")
+        (root / f"{phase_name}_telemetry.json").write_text(
+            json.dumps({"status": "not_run"}), encoding="utf-8",
+        )
+
+    def require(condition: bool, message: str) -> None:
+        if not condition:
+            raise ValueError(message)
+
+    try:
+        require(workers in (2, 3, 4), "Acceptance workers must be between 2 and 4.")
+        require(timeout > 0, "Acceptance timeout must be positive.")
+        inventory = _realistic_batch_inventory(count)
+        report["inventory"] = {name: list(size) for name, size in inventory.items()}
+        input_dir, output_dir = root / "input", root / "output"
+        input_dir.mkdir()
+        output_dir.mkdir()
+        for name, size in inventory.items():
+            _write_batch_acceptance_dds(input_dir / name, size)
+        bad = input_dir / "corrupt.dds"
+        bad.write_bytes(b"DDS corrupt acceptance fixture")
+        checkpoint = root / "checkpoint.json"
+        executable = [str(Path(binary).resolve())] if binary is not None else [PYTHON, str(REPO_ROOT / "generate_textures.py")]
+        report["executable"] = executable
+        base_command = [
+            *executable, str(input_dir), "--output-dir", str(output_dir),
+            "--render-profile", "vanilla", "--batch-workers", str(workers),
+            "--checkpoint-file", str(checkpoint),
+        ]
+        prior_outputs: dict[str, dict[str, object]] = {}
+        for phase, expected_return, successful, failed, processed, skipped in (
+            ("initial_corrupt_recovery", 1, count, 1, count + 1, 0),
+            ("repaired_resume", 0, 1, 0, 1, count),
+            ("noop_resume", 0, 0, 0, 0, count + 1),
+        ):
+            if phase == "repaired_resume":
+                _write_batch_acceptance_dds(bad, (1024, 1024))
+                inventory[bad.name] = (1024, 1024)
+            telemetry_path = root / f"{phase}_telemetry.json"
+            log_path = root / f"{phase}.log"
+            command = [*base_command, "--batch-telemetry-file", str(telemetry_path)]
+            if skipped:
+                command.append("--resume-checkpoint")
+            row: dict[str, object] = {
+                "name": phase, "command": command, "log_path": str(log_path),
+                "telemetry_path": str(telemetry_path), "status": "running",
+            }
+            report["phases"].append(row)
+            phase_start = time.perf_counter()
+            try:
+                with log_path.open("w", encoding="utf-8") as log:
+                    result = subprocess.run(command, cwd=REPO_ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
+                row["returncode"] = result.returncode
+            finally:
+                row["wall_seconds"] = round(time.perf_counter() - phase_start, 6)
+                telemetry = json.loads(telemetry_path.read_text(encoding="utf-8"))
+                if "summary" in telemetry:
+                    row["telemetry"] = telemetry
+                else:
+                    telemetry_path.write_text(json.dumps({"status": "unavailable", "reason": "CLI did not emit telemetry"}), encoding="utf-8")
+            require(result.returncode == expected_return, f"{phase}: unexpected return code {result.returncode}")
+            summary = row["telemetry"]["summary"]
+            expected = {"successful_files": successful, "failed_files": failed, "processed_files": processed,
+                        "resumed_completed_count": skipped, "total_files_considered": count + 1}
+            for field, value in expected.items():
+                require(summary.get(field) == value, f"{phase}: {field} expected {value}, got {summary.get(field)!r}")
+            require(summary.get("checkpoint_enabled") is True, f"{phase}: checkpoint telemetry missing")
+            require(summary.get("resumed_from_checkpoint") is bool(skipped), f"{phase}: incorrect resume telemetry")
+            if not skipped:
+                require(2 <= summary.get("workers", 0) <= 4, "Initial phase did not exercise concurrent workers")
+                require(summary.get("source_files_4k_or_above") == 2, "Missing 4K telemetry evidence")
+                require(summary.get("max_source_dimension") == 4096, "Missing mixed-resolution telemetry evidence")
+                failure_report = json.loads((output_dir / "batch_failure_report.json").read_text(encoding="utf-8"))
+                require(failure_report["summary"] == {"failed_files": 1, "successful_files": count, "successful_outputs": count * 3},
+                        "Incorrect failure report summary")
+                failures = failure_report["failures"]
+                require(len(failures) == 1 and failures[0]["file"] == str(bad) and bool(failures[0]["error"]),
+                        "Failure report must identify only corrupt.dds")
+                require((output_dir / "batch_failure_report.csv").is_file(), "Missing CSV failure report")
+                report["failure_report"] = failure_report
+            state = json.loads(checkpoint.read_text(encoding="utf-8"))
+            expected_members = sorted(str((input_dir / name).resolve()) for name in inventory)
+            require(state["completed_success_files"] == expected_members, f"{phase}: incorrect checkpoint membership")
+            require(state["completed_success_count"] == len(inventory), f"{phase}: incorrect checkpoint count")
+            # A no-op CLI resume does not rewrite the last successful checkpoint.
+            checkpoint_skipped = count if phase == "noop_resume" else skipped
+            require(state["resumed_completed_count"] == checkpoint_skipped,
+                    f"{phase}: incorrect checkpoint resume count")
+            if phase == "noop_resume":
+                require(state == report["phases"][-2]["checkpoint"], "No-op resume changed checkpoint state")
+            row["checkpoint"] = state
+            expected_paths = {f"{Path(name).stem}{suffix}.dds": size
+                              for name, size in inventory.items() for suffix in ("", "_n", "_p")}
+            require({path.name for path in output_dir.glob("*.dds")} == set(expected_paths),
+                    f"{phase}: incorrect output membership")
+            current = {name: _validate_batch_acceptance_dds(output_dir / name, size)
+                       for name, size in expected_paths.items()}
+            for name, fingerprint in prior_outputs.items():
+                require(current[name] == fingerprint, f"{phase}: resumed output changed: {name}")
+            row["unchanged_output_count"] = len(prior_outputs)
+            row["output_count"] = len(current)
+            row["status"] = "pass"
+            prior_outputs = current
+            report["outputs"] = current
+        report["status"] = "pass"
+    except Exception as exc:
+        report["status"] = "fail"
+        report["error"] = f"{type(exc).__name__}: {exc}"
+        if report["phases"]:
+            report["phases"][-1]["status"] = "fail"
+    finally:
+        report["wall_seconds"] = round(time.perf_counter() - started, 6)
+        report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+        print(f"Batch acceptance {report['status']}: {report_path}")
+        print("CLI cooperative cancellation: unsupported (recovery is not cancellation).")
+    return report
 
 
 def _packaged_smoke_scenarios() -> list[dict[str, object]]:
@@ -2791,6 +3006,17 @@ def _append_trend_history(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run pre-release validation gate with artifacts.")
+    parser.add_argument("--batch-acceptance-only", action="store_true",
+                        help="Run only bounded synthetic 4K/mixed-resolution batch acceptance (not mod-scale).")
+    parser.add_argument("--realistic-batch-acceptance", action="store_true",
+                        help="Also run bounded real DDS batch generation and checkpoint recovery.")
+    parser.add_argument("--batch-acceptance-binary", type=Path, default=None,
+                        help="Use this packaged CLI binary instead of source generate_textures.py.")
+    parser.add_argument("--batch-acceptance-workers", type=int, choices=(2, 3, 4), default=2)
+    parser.add_argument("--batch-acceptance-count", type=int, default=64,
+                        help="Valid synthetic DDS inputs (minimum 12, default 64; 500+ is synthetic mod-scale-sized, not real-mod validation).")
+    parser.add_argument("--batch-acceptance-timeout", type=float, default=900,
+                        help="Subprocess timeout in seconds per acceptance phase.")
     parser.add_argument(
         "--artifact-dir",
         type=Path,
@@ -2883,9 +3109,29 @@ def main() -> int:
         help="Number of consecutive packaged executable smoke loops per workflow scenario.",
     )
     args = parser.parse_args()
+    if args.batch_acceptance_timeout <= 0:
+        parser.error("--batch-acceptance-timeout must be positive")
+    if args.batch_acceptance_count < 12:
+        parser.error("--batch-acceptance-count must be at least 12")
+    if args.batch_acceptance_only:
+        report = run_realistic_batch_acceptance(
+            args.artifact_dir, args.batch_acceptance_binary,
+            args.batch_acceptance_workers, args.batch_acceptance_timeout,
+            count=args.batch_acceptance_count,
+        )
+        return 0 if report["status"] == "pass" else 1
     loops = max(1, int(args.repeat_validation_loops))
 
     step_status: list[tuple[str, str]] = []
+    if args.realistic_batch_acceptance:
+        report = run_realistic_batch_acceptance(
+            args.artifact_dir, args.batch_acceptance_binary,
+            args.batch_acceptance_workers, args.batch_acceptance_timeout,
+            count=args.batch_acceptance_count,
+        )
+        if report["status"] != "pass":
+            return 1
+        step_status.append(("Bounded synthetic 4K/mixed-resolution batch acceptance (not mod-scale)", "pass"))
     for loop_index in range(1, loops + 1):
         suffix = f" (loop {loop_index}/{loops})" if loops > 1 else ""
         _run_step(
@@ -2911,7 +3157,7 @@ def main() -> int:
             [PYTHON, "-m", "compileall", "generate_textures.py", "nif_patcher.py", "tests"],
         )
         _run_step(
-            f"Large real-sample batch verification{suffix}",
+            f"Batch checkpoint/UI unit regression checks (not mod-scale){suffix}",
             [
                 PYTHON,
                 "-m",
@@ -2930,7 +3176,7 @@ def main() -> int:
     step_status.append((f"Full unittest suite x{loops}", "pass"))
     step_status.append((f"Targeted NIF fixture/parity stress checks x{loops}", "pass"))
     step_status.append((f"Compile check x{loops}", "pass"))
-    step_status.append((f"Large real-sample batch verification x{loops}", "pass"))
+    step_status.append((f"Batch checkpoint/UI unit regression checks (not mod-scale) x{loops}", "pass"))
     _run_repository_hygiene_scan()
     step_status.append(("Repository hygiene scan", "pass"))
     _run_secret_scan()

@@ -9490,5 +9490,424 @@ class RmaosJsonParallaxVsDisplacementTests(unittest.TestCase):
         self.assertTrue(len(data["texture"]) > 0)
 
 
+class TestQtNifEditorRunner(unittest.TestCase):
+    def setUp(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+        self.build_nif = _build_minimal_nif
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def make_nif(self, name="mesh.nif", **kwargs):
+        path = self.root / name
+        path.write_bytes(self.build_nif(**kwargs))
+        return path
+
+    def options(self, **kwargs):
+        from generate_textures import NifPatchOptions
+        return NifPatchOptions(**kwargs)
+
+    def run_operation(self, paths, options, **kwargs):
+        from generate_textures import run_nif_editor_operation
+        return run_nif_editor_operation(paths, options, **kwargs)
+
+    def test_skyrim_dry_run_write_type3_slots_and_restore(self) -> None:
+        from nif_patcher import scan_nif
+        path = self.make_nif(texture_paths=["textures\\stone.dds", "textures\\stone_n.dds"] + [""] * 7)
+        original = path.read_bytes()
+        options = self.options(
+            enable_parallax=True, force_shader_type_3=True, parallax_scale=2.0,
+            parallax_texture_path="textures\\stone_p.dds", diffuse_texture_path="textures\\new.dds",
+            clear_normal_texture_path=True, backup=False, dry_run=True,
+        )
+        self.assertEqual(self.run_operation([path], options)["success"], 1)
+        self.assertEqual(path.read_bytes(), original)
+        self.assertFalse(path.with_suffix(".nif.bak").exists())
+        options.dry_run = False
+        summary = self.run_operation([path], options)
+        self.assertEqual(summary["failed"], 0, summary)
+        self.assertEqual(path.with_suffix(".nif.bak").read_bytes(), original)
+        info = scan_nif(path)[0]
+        self.assertEqual(info.shader_type, 3)
+        self.assertAlmostEqual(info.parallax_scale, 2.0)
+        self.assertEqual(info.texture_paths[0], "textures\\new.dds")
+        self.assertEqual(info.texture_paths.get(1, ""), "")
+        patched = path.read_bytes()
+        self.run_operation([path], self.options(dry_run=True), operation="restore")
+        self.assertEqual(path.read_bytes(), patched)
+        self.assertEqual(self.run_operation([path], self.options(), operation="restore")["success"], 1)
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_tristate_keep_enable_disable_and_all_texture_slots(self) -> None:
+        from nif_patcher import scan_nif
+        path = self.make_nif()
+        options = build_nif_patch_options_for_nif_editor(
+            enable_parallax=True, enable_pom=True, enable_env_mapping=True,
+            enable_glow_map=True, enable_pbr=True, parallax_scale=1.5, force_shader_type_3=True,
+            **{f"{slot}_texture_path": f"textures\\{slot}.dds" for slot in
+               ("diffuse", "normal", "parallax", "glow", "env_mask", "cubemap")},
+        )
+        summary = self.run_operation([path], options)
+        self.assertEqual(summary["success"], 1, summary)
+        info = scan_nif(path)[0]
+        self.assertTrue(info.has_parallax_flag and info.has_pom_flag and info.has_env_mapping_flag and info.has_glow_map_flag)
+        before = path.read_bytes()
+        self.run_operation([path], self.options())
+        self.assertEqual(path.read_bytes(), before)
+        options = self.options(**{f"disable_{flag}": True for flag in
+                                  ("parallax", "pom", "env_mapping", "glow_map", "pbr")},
+                               **{f"clear_{slot}_texture_path": True for slot in
+                                  ("diffuse", "normal", "parallax", "glow", "env_mask", "cubemap")})
+        summary = self.run_operation([path], options)
+        self.assertEqual(summary["success"], 1, summary)
+        info = scan_nif(path)[0]
+        self.assertFalse(info.has_parallax_flag or info.has_pom_flag or info.has_env_mapping_flag or info.has_glow_map_flag)
+        self.assertEqual(info.flags2 & (1 << 31), 0)
+        self.assertTrue(all(info.texture_paths.get(slot, "") == "" for slot in range(6)))
+
+    def test_fallout_opt_in_operation_gates_write_and_restore(self) -> None:
+        from tests.test_nif_patcher import _rewrite_user_version
+        from nif_patcher import scan_nif
+        path = self.make_nif(user_ver2=130, shader_layout="real", shader_type=3, parallax_scale=1.0)
+        _rewrite_user_version(path, 11)
+        original = path.read_bytes()
+        options = self.options(
+            target_game="fallout", enable_parallax=True, parallax_scale=2.0,
+            parallax_texture_path="textures\\fallout_p.dds",
+        )
+        for dry_run in (True, False):
+            options.dry_run = dry_run
+            self.assertEqual(self.run_operation([path], options)["failed"], 1)
+            self.assertEqual(path.read_bytes(), original)
+        options.experimental_fallout_write = True
+        self.assertEqual(self.run_operation([path], options)["failed"], 1)
+        self.assertEqual(path.read_bytes(), original)
+        options.fallout_allow_parallax_scale = True
+        options.dry_run = True
+        self.assertEqual(self.run_operation([path], options)["success"], 1)
+        self.assertEqual(path.read_bytes(), original)
+        options.dry_run = False
+        summary = self.run_operation([path], options)
+        self.assertEqual(summary["success"], 1, summary)
+        self.assertAlmostEqual(scan_nif(path)[0].parallax_scale, 2.0)
+        self.assertEqual(path.with_suffix(".nif.bak").read_bytes(), original)
+        options.force_shader_type_3 = True
+        self.assertEqual(self.run_operation([path], options)["failed"], 1)
+        self.run_operation([path], self.options(), operation="restore")
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_safe_remediation_dry_run_and_backup(self) -> None:
+        from nif_patcher import scan_nif
+        path = self.make_nif(texture_paths=["textures\\stone.dds", "", "textures\\stone_g.dds",
+                                                       "textures\\stone_p.dds", "", "textures\\stone_m.dds"] + [""] * 3)
+        original = path.read_bytes()
+        summary = self.run_operation([path], self.options(dry_run=True), operation="remediate")
+        self.assertEqual(summary["success"], 1, summary)
+        self.assertEqual(path.read_bytes(), original)
+        summary = self.run_operation([path], self.options(backup=False), operation="remediate")
+        self.assertEqual(summary["success"], 1, summary)
+        self.assertTrue(scan_nif(path)[0].has_parallax_flag)
+        self.assertEqual(path.with_suffix(".nif.bak").read_bytes(), original)
+
+    def test_per_file_failure_continue_and_between_file_cancellation(self) -> None:
+        bad = self.root / "broken.nif"
+        bad.write_bytes(b"broken")
+        good = self.make_nif("good.nif")
+        summary = self.run_operation([bad, good], self.options(enable_glow_map=True))
+        self.assertEqual((summary["failed"], summary["success"]), (1, 1), summary)
+        untouched = self.make_nif("untouched.nif")
+        original = untouched.read_bytes()
+        rows = []
+        summary = self.run_operation(
+            [good, untouched], self.options(enable_pbr=True),
+            is_cancelled=lambda: bool(rows), on_result=rows.append,
+        )
+        self.assertTrue(summary["cancelled"])
+        self.assertEqual(summary["processed"], 1)
+        self.assertEqual(untouched.read_bytes(), original)
+        self.assertEqual(self.run_operation([untouched], self.options(), operation="restore")["skipped"], 1)
+        with self.assertRaises(ValueError):
+            self.run_operation([], self.options(), operation="invalid")
+
+
+class TestQtNifEditorEventLoop(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        import generate_textures as gt
+        if not gt.QT_GUI_AVAILABLE:
+            raise unittest.SkipTest("Optional PySide6 unavailable")
+        cls.qt = gt
+        cls.app = gt.QtWidgets.QApplication.instance() or gt.QtWidgets.QApplication([])
+        gt._qt_application = cls.app
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.messages = []
+        old_handler = self.qt.QtCore.qInstallMessageHandler(
+            lambda kind, context, message: self.messages.append(message)
+        )
+        self.addCleanup(lambda: self.qt.QtCore.qInstallMessageHandler(old_handler))
+
+    def widget(self, window, name):
+        widget = window.findChild(self.qt.QtCore.QObject, name)
+        self.assertIsNotNone(widget, name)
+        return widget
+
+    def run_window(self, scenario):
+        from contextlib import redirect_stderr
+        failures = []
+        windows = []
+        stderr = io.StringIO()
+        started = time.monotonic()
+        finished = False
+
+        def ready(window):
+            windows.append(window)
+            timer = self.qt.QtCore.QTimer(window)
+            timer.setInterval(5)
+
+            def tick():
+                nonlocal finished
+                try:
+                    if failures:
+                        finished = True
+                    if not finished:
+                        finished = bool(scenario(window))
+                    if time.monotonic() - started > 30:
+                        raise AssertionError(
+                            f"Qt scenario timed out: {window.property('generation_summary')}; "
+                            f"editor={window.property('nif_editor_summary')}"
+                        )
+                except BaseException as exc:
+                    failures.append(exc)
+                    finished = True
+                    window.close()
+                if finished and self.widget(window, "generate").isEnabled():
+                    timer.stop()
+                    window.close()
+                    self.app.quit()
+
+            timer.timeout.connect(tick)
+            timer.start()
+
+        def unexpected_dialog(*args):
+            failures.append(AssertionError(f"Unexpected Qt dialog: {args[1:]}"))
+            return self.qt.QtWidgets.QMessageBox.StandardButton.Ok
+
+        with mock.patch("generate_textures.load_gui_state", return_value=dict(self.qt._GUI_STATE_DEFAULTS)), \
+             mock.patch("generate_textures.save_gui_state"), \
+             mock.patch.object(self.qt.QtWidgets.QMessageBox, "critical", side_effect=unexpected_dialog), \
+             mock.patch.object(self.qt.QtWidgets.QMessageBox, "warning", side_effect=unexpected_dialog), \
+             redirect_stderr(stderr):
+            self.qt._launch_qt_migration_gui(on_ready=ready)
+        for window in windows:
+            window.deleteLater()
+        self.qt.QtCore.QCoreApplication.sendPostedEvents(None, self.qt.QtCore.QEvent.Type.DeferredDelete)
+        self.app.processEvents()
+        if failures:
+            raise failures[0]
+        self.assertEqual(stderr.getvalue(), "", "Qt callback errors must not be silently ignored")
+        bad_messages = [message for message in self.messages if any(
+            term in message.lower() for term in ("different thread", "cannot create children", "qthread: destroyed", "callback", "exception")
+        )]
+        self.assertEqual(bad_messages, [])
+
+    def test_actual_editor_dry_run_write_confirmation_scan_and_restore(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+        path = self.root / "mesh.nif"
+        original = _build_minimal_nif()
+        path.write_bytes(original)
+        state = {"step": 0}
+        confirmations = []
+
+        def confirm(*args):
+            confirmations.append(args[-1])
+            return self.qt.QtWidgets.QMessageBox.StandardButton.No if len(confirmations) == 1 else self.qt.QtWidgets.QMessageBox.StandardButton.Yes
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                self.assertTrue(w("nif_dry_run").isChecked())
+                for dark, scale, size in ((False, "0.9", (640, 480)), (True, "1.5", (1100, 760)), (True, "1.15", (800, 600))):
+                    w("theme").setChecked(dark)
+                    w("ui_scale").setCurrentText(scale)
+                    window.resize(*size)
+                    self.app.processEvents()
+                w("nif_scan_path").setText(str(path))
+                w("nif_texture_diffuse").setText("textures\\edited.dds")
+                w("nif_editor_patch").click()
+                self.assertFalse(w("generate").isEnabled())
+                self.assertFalse(w("nif_scan_start").isEnabled())
+                state["step"] = 1
+            elif step == 1 and w("generate").isEnabled():
+                self.assertEqual(path.read_bytes(), original)
+                self.assertEqual(window.property("nif_editor_summary")["success"], 1)
+                w("nif_dry_run").setChecked(False)
+                w("nif_editor_patch").click()
+                self.assertEqual(path.read_bytes(), original)
+                self.assertTrue(w("generate").isEnabled())
+                w("nif_editor_patch").click()
+                state["step"] = 2
+            elif step == 2 and w("generate").isEnabled():
+                self.assertNotEqual(path.read_bytes(), original)
+                self.assertEqual(path.with_suffix(".nif.bak").read_bytes(), original)
+                w("nif_scan_start").click()
+                state["step"] = 3
+            elif step == 3 and w("generate").isEnabled():
+                self.assertEqual(w("nif_scan_results").topLevelItemCount(), 1)
+                w("nif_scan_results").setCurrentItem(w("nif_scan_results").topLevelItem(0))
+                w("nif_scan_preview").click()
+                self.assertFalse(w("generate").isEnabled())
+                self.assertFalse(w("nif_editor_patch").isEnabled())
+                state["step"] = 4
+            elif step == 4 and w("generate").isEnabled():
+                w("nif_editor_restore").click()
+                state["step"] = 5
+            elif step == 5 and w("generate").isEnabled():
+                self.assertEqual(path.read_bytes(), original)
+                self.assertTrue(all(value == self.qt.QtWidgets.QMessageBox.StandardButton.No for value in confirmations))
+                return True
+            return False
+
+        with mock.patch.object(self.qt.QtWidgets.QMessageBox, "question", side_effect=confirm):
+            self.run_window(scenario)
+
+    def test_actual_fallout_editor_opt_in_and_scale_gate(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif, _rewrite_user_version
+        from nif_patcher import scan_nif
+        path = self.root / "fallout.nif"
+        path.write_bytes(_build_minimal_nif(user_ver2=130, shader_layout="real", shader_type=3, parallax_scale=1.0))
+        _rewrite_user_version(path, 11)
+        original = path.read_bytes()
+        state = {"step": 0}
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                w("nif_scan_path").setText(str(path))
+                w("nif_profile").setCurrentText("fallout")
+                w("nif_flag_parallax").setCurrentText("Enable")
+                w("nif_scale_enabled").setChecked(True)
+                w("nif_scale").setValue(2.0)
+                self.assertFalse(w("nif_fallout_allow_parallax_scale").isEnabled())
+                w("nif_editor_patch").click()
+                state["step"] = 1
+            elif step == 1 and w("generate").isEnabled():
+                self.assertEqual(window.property("nif_editor_summary")["failed"], 1)
+                self.assertEqual(path.read_bytes(), original)
+                w("nif_experimental").setChecked(True)
+                self.assertTrue(w("nif_fallout_allow_parallax_scale").isEnabled())
+                w("nif_editor_patch").click()
+                state["step"] = 2
+            elif step == 2 and w("generate").isEnabled():
+                self.assertEqual(window.property("nif_editor_summary")["failed"], 1)
+                self.assertEqual(path.read_bytes(), original)
+                w("nif_fallout_allow_parallax_scale").setChecked(True)
+                w("nif_dry_run").setChecked(False)
+                w("nif_editor_patch").click()
+                state["step"] = 3
+            elif step == 3 and w("generate").isEnabled():
+                self.assertEqual(window.property("nif_editor_summary")["success"], 1)
+                self.assertAlmostEqual(scan_nif(path)[0].parallax_scale, 2.0)
+                self.assertEqual(path.with_suffix(".nif.bak").read_bytes(), original)
+                return True
+            return False
+
+        with mock.patch.object(self.qt.QtWidgets.QMessageBox, "question", return_value=self.qt.QtWidgets.QMessageBox.StandardButton.Yes):
+            self.run_window(scenario)
+
+    def test_actual_editor_close_cancels_folder_between_files(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+        original = _build_minimal_nif()
+        for index in range(6):
+            (self.root / f"{index}.nif").write_bytes(original)
+        state = {"step": 0}
+        real_patch = self.qt.patch_nif
+
+        def slow_patch(*args, **kwargs):
+            time.sleep(0.05)
+            return real_patch(*args, **kwargs)
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            if state["step"] == 0:
+                w("nif_scan_mode").setCurrentIndex(1)
+                w("nif_scan_path").setText(str(self.root))
+                w("nif_texture_diffuse").setText("textures\\edited.dds")
+                w("nif_editor_patch").click()
+                self.assertTrue(w("nif_editor_cancel").isEnabled())
+                self.assertFalse(window.close())
+                self.assertTrue(window.isVisible())
+                state["step"] = 1
+            elif w("generate").isEnabled():
+                summary = window.property("nif_editor_summary")
+                self.assertTrue(summary["cancelled"])
+                self.assertLess(summary["processed"], 6)
+                self.assertTrue(all(path.read_bytes() == original for path in self.root.glob("*.nif")))
+                return True
+            return False
+
+        with mock.patch("generate_textures.patch_nif", side_effect=slow_patch):
+            self.run_window(scenario)
+
+    def test_actual_six_file_generation_cancel_and_checkpoint_resume(self) -> None:
+        sources = self.root / "source"
+        outputs = self.root / "output"
+        sources.mkdir()
+        checkpoint = self.root / "checkpoint.json"
+        for index in range(6):
+            Image.new("RGB", (8, 8), (index * 30, 80, 120)).save(sources / f"stone{index}.dds")
+        state = {"step": 0}
+        real_generate = self.qt.run_with_options
+
+        def slow_generate(*args, **kwargs):
+            time.sleep(0.05)
+            return real_generate(*args, **kwargs)
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                w("input_path").setText(str(sources))
+                w("output_dir").setText(str(outputs))
+                w("checkpoint_path").setText(str(checkpoint))
+                w("generate").click()
+                self.assertFalse(w("nif_editor_patch").isEnabled())
+                self.assertFalse(w("nif_scan_start").isEnabled())
+                state["step"] = 1
+            elif step == 1 and checkpoint.exists():
+                w("cancel_generation").click()
+                self.assertFalse(window.close())
+                self.assertTrue(window.isVisible())
+                state["step"] = 2
+            elif step == 2 and w("generate").isEnabled():
+                summary = window.property("generation_summary")
+                self.assertTrue(summary["cancelled"], summary)
+                self.assertGreater(summary["success"], 0)
+                self.assertLess(summary["success"], 6)
+                state["completed"] = summary["success"]
+                state["checkpoint"] = json.loads(checkpoint.read_text())
+                self.assertTrue(list(outputs.rglob("*.dds")))
+                w("resume_mode").setCurrentText("resume")
+                w("generate").click()
+                state["step"] = 3
+            elif step == 3 and w("generate").isEnabled():
+                summary = window.property("generation_summary")
+                self.assertFalse(summary["cancelled"])
+                self.assertEqual(summary["failed"], 0, summary)
+                self.assertEqual(summary["resumed_completed"], state["completed"])
+                self.assertEqual(summary["success"] + summary["resumed_completed"], 6)
+                self.assertEqual(len(json.loads(checkpoint.read_text())["completed_success_files"]), 6)
+                return True
+            return False
+
+        with mock.patch("generate_textures.run_with_options", side_effect=slow_generate):
+            self.run_window(scenario)
+
+
 if __name__ == "__main__":
     unittest.main()

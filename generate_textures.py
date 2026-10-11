@@ -15360,12 +15360,150 @@ def _qt_resume_mode_guidance(mode: str) -> str:
     return "Start fresh ignores prior checkpoint entries."
 
 
-def _launch_qt_migration_gui() -> None:
+def run_nif_editor_operation(
+    nif_paths: Sequence[Path],
+    options: NifPatchOptions,
+    *,
+    operation: str = "patch",
+    is_cancelled: Callable[[], bool] = lambda: False,
+    on_progress: Callable[[int, int, str], None] | None = None,
+    on_result: Callable[[object], None] | None = None,
+) -> dict[str, object]:
+    """Run the Qt editor's bounded, backup-protected per-file operations."""
+    if operation not in {"patch", "remediate", "restore"}:
+        raise ValueError(f"Unknown NIF editor operation: {operation}")
+    options = replace(options, backup=True, strict_pre_write_validation=True)
+    rows: list[dict[str, str]] = []
+    cancelled = False
+    for index, path in enumerate(nif_paths, 1):
+        if is_cancelled():
+            cancelled = True
+            break
+        path = Path(path)
+        if on_progress:
+            on_progress(index, len(nif_paths), str(path))
+        try:
+            notes: tuple[str, ...] = ()
+            if operation == "restore":
+                if options.dry_run:
+                    status = "OK" if path.with_suffix(".nif.bak").is_file() else "SKIP"
+                    message = "Would restore sibling .nif.bak; no file written." if status == "OK" else "No .nif.bak backup found."
+                else:
+                    status, _, message = restore_nif_backups([path])[0]
+            else:
+                if operation == "patch":
+                    resolved, notes = resolve_nif_editor_patch_options_for_target(path, options)
+                    result = patch_nif(path, resolved)
+                else:
+                    validation = validate_nif_for_parallax(path)
+                    codes = sorted({group.code for group in validation.conflict_report})
+                    result, notes = auto_remediate_nif_conflicts(
+                        path, codes, allow_destructive=False, backup=True,
+                        dry_run=options.dry_run, target_game=options.target_game,
+                        experimental_fallout_write=options.experimental_fallout_write,
+                        **{name: getattr(options, name) for name in (
+                            "fallout_allow_parallax_scale", "fallout_allow_fix_mesh_lighting",
+                            "fallout_allow_spec_strength", "fallout_allow_spec_color",
+                            "fallout_allow_env_map_scale",
+                        )},
+                    )
+                status = "SKIP" if result is None else ("OK" if result.success else "FAIL")
+                message = "No safe automatic fix available." if result is None else "\n".join(
+                    [str(result.message), *result.warnings, *result.errors]
+                )
+            row = {"status": status, "path": str(path), "message": "\n".join([message, *notes])}
+        except Exception as exc:
+            row = {"status": "FAIL", "path": str(path), "message": str(exc)}
+        rows.append(row)
+        if on_result:
+            on_result(row)
+    return {
+        "total": len(nif_paths), "processed": len(rows), "cancelled": cancelled,
+        "success": sum(row["status"] == "OK" for row in rows),
+        "failed": sum(row["status"] == "FAIL" for row in rows),
+        "skipped": sum(row["status"] == "SKIP" for row in rows), "results": rows,
+        "dry_run": options.dry_run, "operation": operation,
+    }
+
+
+_qt_application: Any = None
+
+
+def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -> None:
     if not QT_GUI_AVAILABLE or QtWidgets is None or QtCore is None:
         install_hint = "Install PySide6 (pip install PySide6) to use the Qt migration UI."
         if QT_GUI_IMPORT_ERROR:
             raise RuntimeError(f"Qt GUI dependencies are unavailable ({QT_GUI_IMPORT_ERROR}). {install_hint}")
         raise RuntimeError(f"Qt GUI dependencies are unavailable. {install_hint}")
+
+    class _QtUiReceiver(QtCore.QObject):
+        """Retained GUI-thread receiver; never connect worker signals to closures."""
+
+        def __init__(self, callbacks: Mapping[str, Callable[..., None]]) -> None:
+            super().__init__(window)
+            self.callbacks = callbacks
+
+        @QtCore.Slot(int, int, str)
+        def scan_progress(self, index: int, total: int, path: str) -> None:
+            self.callbacks["progress"](index, total, path)
+
+        @QtCore.Slot(int, int, str, float, float)
+        def generation_progress(self, index: int, total: int, path: str, elapsed: float, eta: float) -> None:
+            self.callbacks["progress"](index, total, path, elapsed, eta)
+
+        @QtCore.Slot(str, object)
+        def generation_event(self, name: str, payload: object) -> None:
+            self.callbacks["event"](name, payload)
+
+        @QtCore.Slot(object)
+        def result(self, payload: object) -> None:
+            self.callbacks["result"](payload)
+
+        @QtCore.Slot(object)
+        def finished(self, payload: object) -> None:
+            self.callbacks["finished"](payload)
+
+        @QtCore.Slot(bool)
+        def scan_finished(self, cancelled: bool) -> None:
+            self.callbacks["finished"](cancelled)
+
+        @QtCore.Slot(str)
+        def preview_finished(self, preview: str) -> None:
+            self.callbacks["finished"](preview)
+
+        @QtCore.Slot(str)
+        def failed(self, message: str) -> None:
+            self.callbacks["failed"](message)
+
+        @QtCore.Slot()
+        def cleanup(self) -> None:
+            self.callbacks["cleanup"]()
+            self.deleteLater()
+
+    class _QtNifEditorWorker(QtCore.QObject):
+        progress = QtCore.Signal(int, int, str)
+        result = QtCore.Signal(object)
+        finished = QtCore.Signal(object)
+        failed = QtCore.Signal(str)
+
+        def __init__(self, paths: Sequence[Path], options: NifPatchOptions, operation: str) -> None:
+            super().__init__()
+            self.paths, self.options, self.operation = paths, options, operation
+            self.cancelled = False
+
+        def request_cancel(self) -> None:
+            self.cancelled = True
+
+        @QtCore.Slot()
+        def run(self) -> None:
+            try:
+                self.finished.emit(run_nif_editor_operation(
+                    self.paths, self.options, operation=self.operation,
+                    is_cancelled=lambda: self.cancelled,
+                    on_progress=self.progress.emit, on_result=self.result.emit,
+                ))
+            except Exception as exc:
+                self.failed.emit(str(exc))
 
     class _QtGenerationWorker(QtCore.QObject):
         progress = QtCore.Signal(int, int, str, float, float)
@@ -15749,13 +15887,26 @@ def _launch_qt_migration_gui() -> None:
             except Exception as exc:
                 self.failed.emit(str(exc))
 
+    global _qt_application
     app = QtWidgets.QApplication.instance()
     if app is None:
         app = QtWidgets.QApplication(sys.argv)
+    _qt_application = app
     qt_saved_state = load_gui_state()
     manager_context = detect_mod_manager_context()
 
-    window = QtWidgets.QMainWindow()
+    class _QtMainWindow(QtWidgets.QMainWindow):
+        def closeEvent(self, event: Any) -> None:
+            if _operation_active():
+                _cancel_generation()
+                _cancel_nif_scan()
+                if nif_editor_worker is not None:
+                    nif_editor_worker.request_cancel()
+                event.ignore()
+                return
+            super().closeEvent(event)
+
+    window = _QtMainWindow()
     window.setWindowTitle(f"Skyrim Texture Generator {APP_VERSION} — Qt migration preview")
     screen = app.primaryScreen()
     if screen is None:
@@ -15919,6 +16070,97 @@ def _launch_qt_migration_gui() -> None:
     nif_scan_layout.addLayout(nif_scan_page_row)
     tabs.addTab(nif_scan_tab, "NIF Scan")
 
+    nif_editor_tab = QtWidgets.QScrollArea()
+    nif_editor_tab.setWidgetResizable(True)
+    nif_editor_content = QtWidgets.QWidget()
+    nif_editor_layout = QtWidgets.QVBoxLayout(nif_editor_content)
+    nif_editor_note = QtWidgets.QLabel(
+        "Uses the single file / recursive folder target from NIF Scan. "
+        "Keep leaves flags unchanged. Dry-run is the default; writes always keep .nif.bak backups. "
+        "Fallout writes are experimental, not real-mod validated; verify in-game."
+    )
+    nif_editor_note.setWordWrap(True)
+    nif_editor_layout.addWidget(nif_editor_note)
+    nif_editor_form = QtWidgets.QFormLayout()
+    nif_editor_flags: dict[str, Any] = {}
+    for name, label in (
+        ("parallax", "Parallax"), ("pom", "Parallax occlusion (POM)"),
+        ("env_mapping", "Environment mapping"), ("glow_map", "Glow map"), ("pbr", "TruePBR"),
+    ):
+        combo = QtWidgets.QComboBox()
+        combo.addItems(["Keep", "Enable", "Disable"])
+        combo.setObjectName(f"nif_flag_{name}")
+        nif_editor_flags[name] = combo
+        nif_editor_form.addRow(label, combo)
+    nif_editor_textures: dict[str, tuple[Any, Any]] = {}
+    for name in ("diffuse", "normal", "parallax", "glow", "env_mask", "cubemap"):
+        row = QtWidgets.QHBoxLayout()
+        path_edit = QtWidgets.QLineEdit()
+        path_edit.setObjectName(f"nif_texture_{name}")
+        path_edit.setPlaceholderText("Keep existing path (blank), or textures\\…\\file.dds")
+        clear = QtWidgets.QCheckBox("Clear slot")
+        clear.setObjectName(f"nif_clear_{name}")
+        clear.toggled.connect(path_edit.setDisabled)
+        row.addWidget(path_edit, 1)
+        row.addWidget(clear)
+        nif_editor_textures[name] = (path_edit, clear)
+        nif_editor_form.addRow(name.replace("_", " ").title(), row)
+    nif_editor_type3 = QtWidgets.QCheckBox("Upgrade Default shader to Heightmap (type 3)")
+    nif_editor_type3.setObjectName("nif_type3")
+    nif_editor_form.addRow(nif_editor_type3)
+    nif_editor_scale_enabled = QtWidgets.QCheckBox("Set parallax scale (enable Parallax or POM)")
+    nif_editor_scale = QtWidgets.QDoubleSpinBox()
+    nif_editor_scale.setObjectName("nif_scale")
+    nif_editor_scale.setRange(0.0, 10.0)
+    nif_editor_scale.setValue(1.0)
+    nif_editor_scale.setEnabled(False)
+    nif_editor_scale_enabled.setObjectName("nif_scale_enabled")
+    nif_editor_scale_enabled.toggled.connect(nif_editor_scale.setEnabled)
+    nif_editor_form.addRow(nif_editor_scale_enabled, nif_editor_scale)
+    nif_editor_profile = QtWidgets.QComboBox()
+    nif_editor_profile.addItems(["auto", "skyrim", "fallout"])
+    nif_editor_profile.setObjectName("nif_profile")
+    nif_editor_form.addRow("Target game", nif_editor_profile)
+    nif_editor_experimental = QtWidgets.QCheckBox("Opt in to experimental Fallout writes")
+    nif_editor_experimental.setObjectName("nif_experimental")
+    nif_editor_form.addRow(nif_editor_experimental)
+    nif_editor_gates: dict[str, Any] = {}
+    for name in ("parallax_scale", "fix_mesh_lighting", "spec_strength", "spec_color", "env_map_scale"):
+        gate = QtWidgets.QCheckBox("Allow Fallout " + name.replace("_", " "))
+        gate.setObjectName(f"nif_fallout_allow_{name}")
+        gate.setEnabled(False)
+        nif_editor_experimental.toggled.connect(gate.setEnabled)
+        nif_editor_gates[name] = gate
+        nif_editor_form.addRow(gate)
+    nif_editor_dry_run = QtWidgets.QCheckBox("Dry-run (no writes, including restore)")
+    nif_editor_dry_run.setObjectName("nif_dry_run")
+    nif_editor_dry_run.setChecked(True)
+    nif_editor_form.addRow(nif_editor_dry_run)
+    nif_editor_layout.addLayout(nif_editor_form)
+    nif_editor_actions = QtWidgets.QHBoxLayout()
+    nif_editor_buttons: dict[str, Any] = {}
+    for name, label in (("patch", "Apply edits"), ("remediate", "Apply safe fixes"), ("restore", "Restore backups")):
+        button = QtWidgets.QPushButton(label)
+        button.setObjectName(f"nif_editor_{name}")
+        nif_editor_buttons[name] = button
+        nif_editor_actions.addWidget(button)
+    nif_editor_cancel = QtWidgets.QPushButton("Cancel edit")
+    nif_editor_cancel.setObjectName("nif_editor_cancel")
+    nif_editor_cancel.setEnabled(False)
+    nif_editor_actions.addWidget(nif_editor_cancel)
+    nif_editor_layout.addLayout(nif_editor_actions)
+    nif_editor_status = QtWidgets.QLabel("Ready. Dry-run enabled.")
+    nif_editor_status.setObjectName("nif_editor_status")
+    nif_editor_status.setWordWrap(True)
+    nif_editor_layout.addWidget(nif_editor_status)
+    nif_editor_results = QtWidgets.QPlainTextEdit()
+    nif_editor_results.setReadOnly(True)
+    nif_editor_results.setObjectName("nif_editor_results")
+    nif_editor_results.setMinimumHeight(120)
+    nif_editor_layout.addWidget(nif_editor_results)
+    nif_editor_tab.setWidget(nif_editor_content)
+    tabs.addTab(nif_editor_tab, "NIF Editor")
+
     generation_tab = QtWidgets.QWidget()
     generation_layout = QtWidgets.QVBoxLayout(generation_tab)
     generation_layout.setSpacing(10)
@@ -16078,7 +16320,6 @@ def _launch_qt_migration_gui() -> None:
         )
 
     advanced_controls_toggle.toggled.connect(_toggle_advanced_strength_controls)
-    advanced_controls_toggle.toggled.connect(_persist_qt_gui_state)
 
     truepbr_settings_toggle = QtWidgets.QToolButton()
     truepbr_settings_toggle.setText("TruePBR material settings (sidecar)")
@@ -16136,7 +16377,6 @@ def _launch_qt_migration_gui() -> None:
             control.setEnabled(enabled)
 
     truepbr_settings_toggle.toggled.connect(_toggle_truepbr_settings)
-    truepbr_settings_toggle.toggled.connect(_persist_qt_gui_state)
     truepbr_overrides_enabled_check.toggled.connect(_set_truepbr_override_controls_enabled)
     _set_truepbr_override_controls_enabled(truepbr_overrides_enabled_check.isChecked())
 
@@ -16359,10 +16599,141 @@ def _launch_qt_migration_gui() -> None:
     nif_scan_worker: _QtNifScanWorker | None = None
     nif_remediation_preview_thread: QtCore.QThread | None = None
     nif_remediation_preview_worker: _QtNifRemediationPreviewWorker | None = None
+    nif_editor_thread: QtCore.QThread | None = None
+    nif_editor_worker: _QtNifEditorWorker | None = None
+    ui_receivers: list[_QtUiReceiver] = []
     nif_scan_rows: list[dict[str, str]] = []
     nif_scan_page_index = 0
     preview_manual_paused = False
     preview_auto_speed_off = False
+
+    def _operation_active() -> bool:
+        return any(thread is not None for thread in (
+            qt_worker_thread, nif_scan_thread, nif_remediation_preview_thread, nif_editor_thread,
+        ))
+
+    def _sync_operation_controls() -> None:
+        busy = _operation_active()
+        generate_button.setEnabled(not busy)
+        launch_tk_button.setEnabled(not busy)
+        nif_scan_start_button.setEnabled(not busy)
+        nif_scan_path_edit.setEnabled(not busy)
+        nif_scan_mode_combo.setEnabled(not busy)
+        nif_scan_browse_button.setEnabled(not busy)
+        nif_scan_cancel_button.setEnabled(nif_scan_thread is not None)
+        nif_scan_remediation_preview_button.setEnabled(
+            not busy and nif_scan_results.currentItem() is not None
+        )
+        for control in (
+            *nif_editor_flags.values(),
+            *(widget for pair in nif_editor_textures.values() for widget in pair),
+            nif_editor_type3, nif_editor_scale_enabled, nif_editor_profile,
+            nif_editor_experimental, nif_editor_dry_run,
+        ):
+            control.setEnabled(not busy)
+        nif_editor_scale.setEnabled(not busy and nif_editor_scale_enabled.isChecked())
+        for gate in nif_editor_gates.values():
+            gate.setEnabled(not busy and nif_editor_experimental.isChecked())
+        for control, clear in nif_editor_textures.values():
+            control.setEnabled(not busy and not clear.isChecked())
+        for button in nif_editor_buttons.values():
+            button.setEnabled(not busy)
+        # Cancel remains usable while the editor settings are frozen.
+        nif_editor_cancel.setEnabled(nif_editor_thread is not None)
+
+    def _retain_receiver(callbacks: Mapping[str, Callable[..., None]]) -> _QtUiReceiver:
+        receiver = _QtUiReceiver(callbacks)
+        ui_receivers.append(receiver)
+        return receiver
+
+    def _start_nif_editor(operation: str) -> None:
+        nonlocal nif_editor_thread, nif_editor_worker
+        if _operation_active():
+            return
+        paths, error = resolve_nif_editor_targets(
+            nif_scan_path_edit.text(), str(nif_scan_mode_combo.currentData() or ""),
+        )
+        if error or not paths:
+            nif_editor_status.setText(error or "No NIF files found.")
+            return
+        values: dict[str, Any] = {
+            "backup": True, "dry_run": nif_editor_dry_run.isChecked(),
+            "dry_run_diff": nif_editor_dry_run.isChecked(),
+            "target_game": nif_editor_profile.currentText(),
+            "experimental_fallout_write": nif_editor_experimental.isChecked(),
+            "force_shader_type_3": nif_editor_type3.isChecked(),
+            "parallax_scale": nif_editor_scale.value() if nif_editor_scale_enabled.isChecked() else None,
+        }
+        for name, combo in nif_editor_flags.items():
+            values[f"enable_{name}"] = combo.currentText() == "Enable"
+            values[f"disable_{name}"] = combo.currentText() == "Disable"
+        for name, (control, clear) in nif_editor_textures.items():
+            values[f"{name}_texture_path"] = "" if clear.isChecked() else control.text()
+            values[f"clear_{name}_texture_path"] = clear.isChecked()
+        for name, gate in nif_editor_gates.items():
+            values[f"fallout_allow_{name}"] = nif_editor_experimental.isChecked() and gate.isChecked()
+        options = build_nif_patch_options_for_nif_editor(**values)
+        if not options.dry_run:
+            answer = QtWidgets.QMessageBox.question(
+                window, "Confirm NIF writes",
+                f"{operation.title()} {len(paths)} NIF file(s)? Backups are mandatory. "
+                "Restore overwrites the current mesh with its backup. Verify experimental Fallout changes in-game.",
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No,
+            )
+            if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+        nif_editor_results.clear()
+        nif_editor_status.setText(f"Starting {operation} on {len(paths)} NIF file(s)…")
+        nif_editor_worker = _QtNifEditorWorker(paths, options, operation)
+        nif_editor_thread = QtCore.QThread(window)
+        nif_editor_worker.moveToThread(nif_editor_thread)
+
+        def _result(payload: object) -> None:
+            if isinstance(payload, dict):
+                nif_editor_results.appendPlainText(
+                    f"{payload['status']}: {payload['path']}\n{payload['message']}\n"
+                )
+
+        def _finished(payload: object) -> None:
+            window.setProperty("nif_editor_summary", payload)
+            nif_editor_status.setText(
+                f"{'Dry-run' if options.dry_run else 'Write'} "
+                f"{'cancelled' if payload['cancelled'] else 'complete'}: "
+                f"processed={payload['processed']}/{payload['total']}, "
+                f"success={payload['success']}, failed={payload['failed']}, skipped={payload['skipped']}."
+            )
+
+        def _cleanup() -> None:
+            nonlocal nif_editor_thread, nif_editor_worker
+            nif_editor_thread.wait()
+            nif_editor_thread.deleteLater()
+            nif_editor_thread = None
+            nif_editor_worker = None
+            _sync_operation_controls()
+            ui_receivers.remove(receiver)
+
+        receiver = _retain_receiver({
+            "progress": lambda index, total, path: nif_editor_status.setText(
+                f"{operation.title()} {index}/{total}: {path}"
+            ),
+            "result": _result, "finished": _finished,
+            "failed": lambda message: nif_editor_status.setText(f"Editor failed: {message}"),
+            "cleanup": _cleanup,
+        })
+        nif_editor_worker.progress.connect(receiver.scan_progress)
+        nif_editor_worker.result.connect(receiver.result)
+        nif_editor_worker.finished.connect(receiver.finished)
+        nif_editor_worker.failed.connect(receiver.failed)
+        _connect_qt_worker_thread_lifecycle(nif_editor_worker, nif_editor_thread, receiver.cleanup)
+        nif_editor_thread.started.connect(nif_editor_worker.run)
+        _sync_operation_controls()
+        nif_editor_thread.start()
+
+    def _cancel_nif_editor() -> None:
+        if nif_editor_worker is not None:
+            nif_editor_worker.request_cancel()
+            nif_editor_status.setText("Cancel requested; finishing current NIF.")
 
     def _append_event_log(message: str) -> None:
         if not message.strip():
@@ -16462,32 +16833,22 @@ def _launch_qt_migration_gui() -> None:
             nif_scan_remediation_preview_button.setEnabled(False)
         else:
             _show_selected_nif_scan_detail(nif_scan_results.currentItem())
+        _sync_operation_controls()
 
     def _preview_selected_nif_remediation() -> None:
         nonlocal nif_remediation_preview_thread, nif_remediation_preview_worker
-        if nif_scan_thread is not None or nif_remediation_preview_thread is not None:
+        if _operation_active():
             return
         item = nif_scan_results.currentItem()
         row = item.data(0, QtCore.Qt.ItemDataRole.UserRole) if item else None
         if not isinstance(row, dict) or not row.get("preview"):
             return
-        nif_remediation_preview_button.setEnabled(False)
+        nif_scan_remediation_preview_button.setEnabled(False)
         nif_scan_status_label.setText(f"Previewing safe remediation for {row.get('file_name', 'selected NIF')}…")
         nif_remediation_preview_thread = QtCore.QThread(window)
         nif_remediation_preview_worker = _QtNifRemediationPreviewWorker(str(row["preview"]))
         nif_remediation_preview_worker.moveToThread(nif_remediation_preview_thread)
         nif_remediation_preview_thread.started.connect(nif_remediation_preview_worker.run)
-        nif_remediation_preview_worker.finished.connect(
-            lambda preview: nif_scan_detail_view.setPlainText(
-                _format_qt_nif_scan_detail(row) + "\n\n" + str(preview)
-            )
-        )
-        nif_remediation_preview_worker.finished.connect(
-            lambda _preview: nif_scan_status_label.setText("Safe remediation preview complete; no file was written.")
-        )
-        nif_remediation_preview_worker.failed.connect(
-            lambda message: nif_scan_status_label.setText(f"Remediation preview failed: {message}")
-        )
         nif_remediation_preview_worker.finished.connect(nif_remediation_preview_thread.quit)
         nif_remediation_preview_worker.failed.connect(nif_remediation_preview_thread.quit)
         nif_remediation_preview_thread.finished.connect(nif_remediation_preview_worker.deleteLater)
@@ -16495,12 +16856,27 @@ def _launch_qt_migration_gui() -> None:
         def _cleanup_nif_remediation_preview() -> None:
             nonlocal nif_remediation_preview_thread, nif_remediation_preview_worker
             if nif_remediation_preview_thread is not None:
+                nif_remediation_preview_thread.wait()
                 nif_remediation_preview_thread.deleteLater()
             nif_remediation_preview_thread = None
             nif_remediation_preview_worker = None
             _show_selected_nif_scan_detail(nif_scan_results.currentItem())
+            _sync_operation_controls()
+            ui_receivers.remove(receiver)
 
-        nif_remediation_preview_thread.finished.connect(_cleanup_nif_remediation_preview)
+        def _preview_finished(preview: str) -> None:
+            nif_scan_detail_view.setPlainText(_format_qt_nif_scan_detail(row) + "\n\n" + preview)
+            nif_scan_status_label.setText("Safe remediation preview complete; no file was written.")
+
+        receiver = _retain_receiver({
+            "finished": _preview_finished,
+            "failed": lambda message: nif_scan_status_label.setText(f"Remediation preview failed: {message}"),
+            "cleanup": _cleanup_nif_remediation_preview,
+        })
+        nif_remediation_preview_worker.finished.connect(receiver.preview_finished)
+        nif_remediation_preview_worker.failed.connect(receiver.failed)
+        nif_remediation_preview_thread.finished.connect(receiver.cleanup)
+        _sync_operation_controls()
         nif_remediation_preview_thread.start()
 
     def _finish_nif_scan(cancelled: bool) -> None:
@@ -16896,7 +17272,7 @@ def _launch_qt_migration_gui() -> None:
 
     def _start_nif_scan() -> None:
         nonlocal nif_scan_thread, nif_scan_worker, nif_scan_page_index
-        if nif_remediation_preview_thread is not None:
+        if _operation_active():
             return
         nif_paths, error = resolve_nif_editor_targets(
             nif_scan_path_edit.text(),
@@ -16921,10 +17297,6 @@ def _launch_qt_migration_gui() -> None:
         nif_scan_thread = QtCore.QThread(window)
         nif_scan_worker.moveToThread(nif_scan_thread)
         nif_scan_thread.started.connect(nif_scan_worker.run)
-        nif_scan_worker.progress.connect(_on_nif_scan_progress)
-        nif_scan_worker.result.connect(_add_nif_scan_result)
-        nif_scan_worker.finished.connect(_finish_nif_scan)
-        nif_scan_worker.failed.connect(_fail_nif_scan)
         nif_scan_worker.finished.connect(nif_scan_thread.quit)
         nif_scan_worker.failed.connect(nif_scan_thread.quit)
         nif_scan_thread.finished.connect(nif_scan_worker.deleteLater)
@@ -16932,11 +17304,24 @@ def _launch_qt_migration_gui() -> None:
         def _cleanup_nif_scan() -> None:
             nonlocal nif_scan_thread, nif_scan_worker
             if nif_scan_thread is not None:
+                nif_scan_thread.wait()
                 nif_scan_thread.deleteLater()
             nif_scan_thread = None
             nif_scan_worker = None
+            _sync_operation_controls()
+            ui_receivers.remove(receiver)
 
-        nif_scan_thread.finished.connect(_cleanup_nif_scan)
+        receiver = _retain_receiver({
+            "progress": _on_nif_scan_progress, "result": _add_nif_scan_result,
+            "finished": _finish_nif_scan, "failed": _fail_nif_scan,
+            "cleanup": _cleanup_nif_scan,
+        })
+        nif_scan_worker.progress.connect(receiver.scan_progress)
+        nif_scan_worker.result.connect(receiver.result)
+        nif_scan_worker.finished.connect(receiver.scan_finished)
+        nif_scan_worker.failed.connect(receiver.failed)
+        nif_scan_thread.finished.connect(receiver.cleanup)
+        _sync_operation_controls()
         nif_scan_thread.start()
 
     def _cancel_nif_scan() -> None:
@@ -17014,7 +17399,7 @@ def _launch_qt_migration_gui() -> None:
 
     def _start_generation() -> None:
         nonlocal qt_worker_thread, qt_worker, preview_manual_paused, preview_auto_speed_off
-        if qt_worker_thread is not None:
+        if _operation_active():
             return
         input_text = input_path_edit.text().strip()
         if not input_text:
@@ -17132,6 +17517,7 @@ def _launch_qt_migration_gui() -> None:
             nonlocal qt_worker_thread, qt_worker
             if qt_worker_thread is not None:
                 try:
+                    qt_worker_thread.wait()
                     qt_worker_thread.deleteLater()
                 except Exception:
                     pass
@@ -17139,9 +17525,12 @@ def _launch_qt_migration_gui() -> None:
             qt_worker_thread = None
             _set_running_state(False)
             _refresh_checkpoint_health()
+            _sync_operation_controls()
+            ui_receivers.remove(receiver)
 
         def _on_finished(summary: object) -> None:
             nonlocal preview_auto_speed_off
+            window.setProperty("generation_summary", summary)
             progress_bar.setValue(100)
             payload = summary if isinstance(summary, dict) else {}
             cancelled = bool(payload.get("cancelled", False))
@@ -17172,14 +17561,19 @@ def _launch_qt_migration_gui() -> None:
             QtWidgets.QMessageBox.critical(window, "Generation failed", message)
             _append_event_log(f"[fatal] {message}")
 
-        qt_worker.progress.connect(_on_progress)
-        qt_worker.event.connect(_on_event)
-        qt_worker.finished.connect(_on_finished)
-        qt_worker.failed.connect(_on_failed)
-        _connect_qt_worker_thread_lifecycle(qt_worker, qt_worker_thread, _cleanup_worker)
+        receiver = _retain_receiver({
+            "progress": _on_progress, "event": _on_event,
+            "finished": _on_finished, "failed": _on_failed, "cleanup": _cleanup_worker,
+        })
+        qt_worker.progress.connect(receiver.generation_progress)
+        qt_worker.event.connect(receiver.generation_event)
+        qt_worker.finished.connect(receiver.finished)
+        qt_worker.failed.connect(receiver.failed)
+        _connect_qt_worker_thread_lifecycle(qt_worker, qt_worker_thread, receiver.cleanup)
         qt_worker_thread.started.connect(qt_worker.run)
         qt_worker_thread.start()
         _set_running_state(True)
+        _sync_operation_controls()
         progress_bar.setValue(0)
         status_label.setText("Generation running…")
         _append_event_log("[run] started Qt-native worker thread.")
@@ -17225,6 +17619,11 @@ def _launch_qt_migration_gui() -> None:
             window.activateWindow()
 
     launch_tk_button.clicked.connect(_open_legacy_tk)
+    for operation, button in nif_editor_buttons.items():
+        button.clicked.connect(lambda _checked=False, name=operation: _start_nif_editor(name))
+    nif_editor_cancel.clicked.connect(_cancel_nif_editor)
+    advanced_controls_toggle.toggled.connect(_persist_qt_gui_state)
+    truepbr_settings_toggle.toggled.connect(_persist_qt_gui_state)
     browse_input_button.clicked.connect(_browse_input)
     browse_input_folder_button.clicked.connect(_browse_input_folder)
     browse_output_button.clicked.connect(_browse_output)
@@ -17298,8 +17697,22 @@ def _launch_qt_migration_gui() -> None:
     _refresh_preview_state_badge()
     _refresh_checkpoint_health()
     window.setCentralWidget(root)
+    for name, control in (
+        ("nif_scan_path", nif_scan_path_edit), ("nif_scan_mode", nif_scan_mode_combo),
+        ("nif_scan_start", nif_scan_start_button), ("nif_scan_cancel", nif_scan_cancel_button),
+        ("nif_scan_preview", nif_scan_remediation_preview_button),
+        ("nif_scan_status", nif_scan_status_label), ("nif_scan_results", nif_scan_results),
+        ("input_path", input_path_edit), ("output_dir", output_dir_edit),
+        ("checkpoint_path", checkpoint_path_edit), ("resume_mode", resume_mode_combo),
+        ("generate", generate_button), ("cancel_generation", cancel_button),
+        ("theme", theme_check), ("ui_scale", ui_scale_combo), ("tabs", tabs),
+    ):
+        control.setObjectName(name)
+    _sync_operation_controls()
     _apply_qt_appearance()
     window.show()
+    if on_ready is not None:
+        QtCore.QTimer.singleShot(0, lambda: on_ready(window))
     app.exec()
 
 

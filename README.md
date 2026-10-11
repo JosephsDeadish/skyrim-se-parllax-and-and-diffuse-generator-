@@ -68,7 +68,8 @@ This opens a desktop interface where you can:
 - toggle **Emboss depth** for edge-ridge normal generation on flat printed assets (books/cards/scrolls/posters)
 - choose **Parallax mode**: `standard` (vanilla / Community Shaders Extended Materials) or `occlusion (ENB/POM)` for smoother ENBSeries POM heightmaps
 - scroll through all controls in smaller windows
-- inspect individual NIF files or mesh folders in the Qt **NIF Scan** tab using read-only diagnostics, status/text filters, and paged results; patching and remediation remain in the full Tkinter NIF Editor
+- inspect individual NIF files or mesh folders in the Qt **NIF Scan** tab using read-only diagnostics, status/text filters, and paged results
+- use the Qt **NIF Editor** for flag/texture-slot edits, safe conflict remediation, and backup restore on the target chosen in NIF Scan; dry-run is enabled by default, writes require confirmation and backups, and cancellation finishes the current file first. The Tk editor retains additional advanced presets and tuning controls.
 - use keyboard shortcuts: `Ctrl+O` opens a texture, `Ctrl+Shift+O` opens a folder, `Ctrl+Enter` starts generation, and `Esc` requests cancellation
 - use **Basic view** to keep core controls visible, then uncheck it for Advanced options
 - auto-update output folder when a different input texture is selected
@@ -331,6 +332,8 @@ When both Community Shaders and ENB markers are detected in mod-manager context,
 
 The **NIF Editor** (accessible from the toolbar button) patches Skyrim-format BSLightingShaderProperty flags and texture slots for supported Skyrim LE/SE/AE/VR/CK variants. Fallout-era headers are now detected with an experimental profile path and should be treated as best-effort.
 Skyrim NIF editing is a supported workflow; review scan results and keep backups before patching. Fallout-era writes remain experimental and best-effort.
+
+Qt editor regressions exercise synthetic Skyrim and Fallout meshes, including dry-run, guarded writes, remediation, and backup restoration. These fixtures are not redistributed real Fallout mod meshes. Real-mod validation remains blocked until samples with explicit permission for use and redistribution are available; synthetic diagnostics and successful writes do not establish in-game compatibility.
 The **Auto-patch NIFs after generation** checkbox (off by default) triggers NIF patching automatically after each generation run.
 For safety, parallax auto-patching skips known-problem cases by default (Havok-attached meshes, skinned/alpha meshes, decal/anisotropic/soft-lighting variants, and single-pass shader blocks).
 For CLI runs, `nif_patcher.py --target-game auto|skyrim|fallout` now makes profile intent explicit. Fallout writes require `--experimental-fallout-write` and default to guarded flag/texture-slot patching.
@@ -367,6 +370,10 @@ For long-running folder batches, use `--checkpoint-file <path>` to persist succe
 ### Large real-sample batch verification checklist (release readiness)
 
 Before publishing a release, run at least one real mod-scale verification pass:
+
+For bounded high-resolution acceptance, run `python scripts/pre_release_validation.py --batch-acceptance-only --artifact-dir /tmp/batch-acceptance` locally, or add `--batch-acceptance-binary <packaged-executable>` for an existing build. It exercises striped inputs (including two 4K textures, mixed 2K/1K and rectangular textures), parallel queue pressure, one corrupt input, repair/resume, and no-op resume. Reports record timings, telemetry, checkpoint membership, output dimensions, decoded payloads, hashes, and unchanged successful outputs. The approval-gated Windows workflow runs this against both executables and uploads evidence. This synthetic workload is **not** a real mod-scale sign-off. CLI recovery is not cooperative cancellation; GUI cancellation has separate regression coverage.
+
+Packaged GUI screenshots and automated window checks are acceptance evidence, not a substitute for manual review of every tab at different Windows display scales and themes. Windows execution still requires approval of the `pr-build-approval` environment. Versioned shader compatibility validation and terrain-layer authoring are not implemented product features; Terrain remains per-texture map generation.
 
 1. Prepare a representative sample set (minimum recommended: **500+ textures**, include some **4K/8K** sources).
 2. Run one pass in **start_fresh** mode and one pass in **resume** mode.
