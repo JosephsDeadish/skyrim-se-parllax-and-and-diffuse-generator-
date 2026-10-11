@@ -899,6 +899,20 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertIsNone(_recommend_qt_render_profile(str(folder)))
         self.assertIsNone(_recommend_qt_render_profile(""))
 
+    def test_qt_profile_recommendation_uses_mod_manager_context(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            profile_name="Default",
+            loaded_mods=("Community Shaders",),
+        )
+        self.assertEqual(
+            _recommend_qt_render_profile(
+                "textures/misc/neutral_asset.dds",
+                manager_context=context,
+            ),
+            "community_shaders",
+        )
+
     def test_qt_preview_loader_decodes_and_bounds_image_dimensions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             source_path = Path(temp_dir) / "source.png"

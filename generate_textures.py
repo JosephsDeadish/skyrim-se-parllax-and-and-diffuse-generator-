@@ -14746,7 +14746,11 @@ def _launch_tk_gui() -> None:
         raise
 
 
-def _recommend_qt_render_profile(input_text: str) -> str | None:
+def _recommend_qt_render_profile(
+    input_text: str,
+    *,
+    manager_context: ModManagerContext | None = None,
+) -> str | None:
     normalized_input = input_text.strip()
     if not normalized_input:
         return None
@@ -14759,6 +14763,7 @@ def _recommend_qt_render_profile(input_text: str) -> str | None:
         detected_role=role_info["role"] if role_info is not None else None,
         detected_suffix=role_info["suffix"] if role_info is not None else None,
         material_type=classify_material_type(input_path),
+        manager_context=manager_context,
     )
 
 
@@ -15048,6 +15053,7 @@ def _launch_qt_migration_gui() -> None:
     if app is None:
         app = QtWidgets.QApplication(sys.argv)
     qt_saved_state = load_gui_state()
+    manager_context = detect_mod_manager_context()
 
     window = QtWidgets.QMainWindow()
     window.setWindowTitle(f"Skyrim Texture Generator {APP_VERSION} — Qt migration preview")
@@ -15099,6 +15105,12 @@ def _launch_qt_migration_gui() -> None:
     )
     overview_text.setWordWrap(True)
     overview_layout.addWidget(overview_text)
+    manager_context_label = QtWidgets.QLabel(manager_context.summary)
+    manager_context_label.setWordWrap(True)
+    manager_context_label.setToolTip(
+        "Detected MO2/Vortex context is used as a renderer recommendation hint; it does not select a profile automatically."
+    )
+    overview_layout.addWidget(manager_context_label)
     button_row = QtWidgets.QHBoxLayout()
     launch_tk_button = QtWidgets.QPushButton("Open full legacy UI (Tkinter)")
     launch_tk_button.setEnabled(GUI_AVAILABLE)
@@ -15463,7 +15475,10 @@ def _launch_qt_migration_gui() -> None:
             )
             use_profile_recommendation_button.setEnabled(False)
             return
-        suggested_profile = _recommend_qt_render_profile(input_text)
+        suggested_profile = _recommend_qt_render_profile(
+            input_text,
+            manager_context=manager_context,
+        )
         if suggested_profile is None:
             profile_recommendation_label.setText("Select a texture file to see a renderer suggestion.")
             use_profile_recommendation_button.setEnabled(False)
@@ -15504,7 +15519,10 @@ def _launch_qt_migration_gui() -> None:
         save_gui_state(state)
 
     def _apply_profile_recommendation() -> None:
-        suggested_profile = _recommend_qt_render_profile(input_path_edit.text())
+        suggested_profile = _recommend_qt_render_profile(
+            input_path_edit.text(),
+            manager_context=manager_context,
+        )
         if suggested_profile is None:
             return
         profile_index = render_profile_combo.findText(suggested_profile)
@@ -15608,7 +15626,10 @@ def _launch_qt_migration_gui() -> None:
         resume_mode_combo.setEnabled(not running)
         checkpoint_path_edit.setEnabled(not running)
         render_profile_combo.setEnabled(not running)
-        suggested_profile = _recommend_qt_render_profile(input_path_edit.text())
+        suggested_profile = _recommend_qt_render_profile(
+            input_path_edit.text(),
+            manager_context=manager_context,
+        )
         use_profile_recommendation_button.setEnabled(
             not running
             and suggested_profile is not None
