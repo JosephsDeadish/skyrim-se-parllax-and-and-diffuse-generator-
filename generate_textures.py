@@ -5756,6 +5756,8 @@ def _nif_editor_result_matches_filters(
     keyword: str,
     status_filter: str,
 ) -> bool:
+    keyword = keyword.strip().lower()
+    status_filter = status_filter.strip().upper()
     if status_filter != "ALL" and row["status"].upper() != status_filter:
         return False
     if not keyword:
