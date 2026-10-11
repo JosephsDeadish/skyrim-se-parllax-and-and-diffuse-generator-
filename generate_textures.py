@@ -5740,6 +5740,16 @@ def _drain_nif_editor_ui_updates(
     return drained
 
 
+def _should_render_nif_editor_results(
+    *,
+    dirty: bool,
+    queue_empty: bool,
+    seconds_since_render: float,
+    minimum_interval: float = 0.25,
+) -> bool:
+    return dirty and (queue_empty or seconds_since_render >= minimum_interval)
+
+
 def _set_nif_editor_controls_active(
     controls: Sequence[Any],
     saved_states: dict[Any, str],
@@ -13163,6 +13173,7 @@ if GUI_AVAILABLE:
                         results_tree.focus(last)
                         results_tree.yview_moveto(1.0)
                     _results_tree_dirty[0] = False
+                    _last_result_tree_render[0] = time.monotonic()
 
                 def _append_result_row(status: str, file_name: str, details: str) -> None:
                     normalized_details = _normalize_nif_result_details(details)
@@ -13322,6 +13333,7 @@ if GUI_AVAILABLE:
                 _ui_update_queue: queue.Queue[Callable[[], None]] = queue.Queue()
                 _ui_update_poll_active = [True]
                 _results_tree_dirty = [False]
+                _last_result_tree_render = [0.0]
                 _action_buttons_ref: list[Any] = []  # populated after button creation
                 _control_classes = {
                     "Button",
@@ -13412,7 +13424,12 @@ if GUI_AVAILABLE:
                         _ui_update_queue,
                         on_error=lambda exc: status_var.set(f"NIF Editor UI update failed: {exc}"),
                     )
-                    if _results_tree_dirty[0] and _ui_update_queue.empty():
+                    queue_empty = _ui_update_queue.empty()
+                    if _should_render_nif_editor_results(
+                        dirty=_results_tree_dirty[0],
+                        queue_empty=queue_empty,
+                        seconds_since_render=time.monotonic() - _last_result_tree_render[0],
+                    ):
                         _render_results_tree()
                     if _ui_update_poll_active[0]:
                         try:

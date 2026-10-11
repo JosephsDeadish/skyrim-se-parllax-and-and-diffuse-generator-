@@ -24,6 +24,7 @@ from generate_textures import (
     _compute_nif_editor_controls_pane_height,
     _compute_nif_editor_result_details_height,
     _drain_nif_editor_ui_updates,
+    _should_render_nif_editor_results,
     _set_nif_editor_controls_active,
     _format_nif_result_row_details,
     discover_plugin_conflict_context_from_manager,
@@ -261,6 +262,36 @@ class TestNifEditorUiUpdateQueue(unittest.TestCase):
         self.assertEqual(drained, 2)
         self.assertEqual(errors, ["callback failed"])
         self.assertEqual(completed, ["later"])
+
+    def test_results_redraw_periodically_during_backlog_and_immediately_when_drained(self) -> None:
+        self.assertFalse(
+            _should_render_nif_editor_results(
+                dirty=True,
+                queue_empty=False,
+                seconds_since_render=0.1,
+            )
+        )
+        self.assertTrue(
+            _should_render_nif_editor_results(
+                dirty=True,
+                queue_empty=False,
+                seconds_since_render=0.25,
+            )
+        )
+        self.assertTrue(
+            _should_render_nif_editor_results(
+                dirty=True,
+                queue_empty=True,
+                seconds_since_render=0.0,
+            )
+        )
+        self.assertFalse(
+            _should_render_nif_editor_results(
+                dirty=False,
+                queue_empty=False,
+                seconds_since_render=1.0,
+            )
+        )
 
 
 class TestNifEditorOperationControlStates(unittest.TestCase):
