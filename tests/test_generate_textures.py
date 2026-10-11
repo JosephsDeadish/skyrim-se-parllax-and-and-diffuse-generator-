@@ -7812,10 +7812,22 @@ class RmaosJsonMaterialTypeTests(unittest.TestCase):
 
     def test_sidecar_uses_separate_truepbr_material_parameters(self) -> None:
         data = self._write_and_read("general")
-        self.assertIn("specular_level", data)
-        self.assertIn("roughness_scale", data)
-        self.assertIn("displacement_scale", data)
-        self.assertIn("parallax", data)
+        schema_fields = {
+            "texture",
+            "emissive",
+            "emissive_scale",
+            "parallax",
+            "displacement_scale",
+            "specular_level",
+            "roughness_scale",
+            "smooth_angle",
+            "subsurface",
+            "subsurface_foliage",
+            "subsurface_color",
+            "subsurface_opacity",
+            "vertex_color_lum_mult",
+        }
+        self.assertTrue(schema_fields.issubset(data))
         self.assertIsInstance(data["parallax"], bool)
 
     def test_general_uses_defaults(self) -> None:
