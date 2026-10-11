@@ -15074,33 +15074,40 @@ def _launch_qt_migration_gui() -> None:
     generation_layout.setSpacing(10)
 
     input_row = QtWidgets.QHBoxLayout()
-    input_row.addWidget(QtWidgets.QLabel("Input file/folder"))
+    input_label = QtWidgets.QLabel("Input file or folder")
+    input_row.addWidget(input_label)
     input_path_edit = QtWidgets.QLineEdit()
+    input_path_edit.setPlaceholderText("Choose a texture file or a folder of textures")
     input_row.addWidget(input_path_edit, 1)
     browse_input_button = QtWidgets.QPushButton("Browse…")
+    browse_input_button.setShortcut("Ctrl+O")
+    browse_input_button.setToolTip("Choose an input file or folder (Ctrl+O).")
     input_row.addWidget(browse_input_button)
     generation_layout.addLayout(input_row)
 
     output_row = QtWidgets.QHBoxLayout()
-    output_row.addWidget(QtWidgets.QLabel("Output folder (optional)"))
+    output_label = QtWidgets.QLabel("Output folder (optional)")
+    output_row.addWidget(output_label)
     output_dir_edit = QtWidgets.QLineEdit()
+    output_dir_edit.setPlaceholderText("Leave blank to save beside the source")
     output_row.addWidget(output_dir_edit, 1)
     browse_output_button = QtWidgets.QPushButton("Browse…")
+    browse_output_button.setToolTip("Choose where generated maps will be saved.")
     output_row.addWidget(browse_output_button)
     generation_layout.addLayout(output_row)
 
     controls_group = QtWidgets.QGroupBox("Target renderer and output maps")
     controls_layout = QtWidgets.QGridLayout(controls_group)
     controls_layout.setHorizontalSpacing(14)
-    controls_layout.setVerticalSpacing(6)
+    controls_layout.setVerticalSpacing(8)
     controls_layout.addWidget(QtWidgets.QLabel("Target renderer"), 0, 0)
     render_profile_combo = QtWidgets.QComboBox()
     render_profile_combo.addItems(_QT_RENDER_PROFILE_VALUES)
     controls_layout.addWidget(render_profile_combo, 0, 1)
     controls_layout.addWidget(
-        QtWidgets.QLabel("Choose one primary workflow; map naming and channels depend on the target."),
+        QtWidgets.QLabel("Choose one primary workflow. Map names and channels depend on the target."),
+        1,
         0,
-        2,
         1,
         2,
     )
@@ -15132,19 +15139,23 @@ def _launch_qt_migration_gui() -> None:
         include_roughness_check,
     )
     for index, control in enumerate(output_checks):
-        controls_layout.addWidget(control, 1 + index // 4, index % 4)
+        controls_layout.addWidget(control, 2 + index // 2, index % 2)
     workflow_note = QtWidgets.QLabel(
         "Vanilla/ENB _m and TruePBR _rmaos are separate Slot 5 workflows. "
         "Community Shaders _cm is Extended Materials, not TruePBR. "
         "_wt/_sm are shader-specific; terrain selection does not generate layered landscape sets."
     )
     workflow_note.setWordWrap(True)
-    controls_layout.addWidget(workflow_note, 4, 0, 1, 4)
+    controls_layout.addWidget(workflow_note, 2 + (len(output_checks) + 1) // 2, 0, 1, 2)
     generation_layout.addWidget(controls_group)
 
     action_row = QtWidgets.QHBoxLayout()
     generate_button = QtWidgets.QPushButton("Generate")
+    generate_button.setShortcut("Ctrl+Return")
+    generate_button.setToolTip("Start generating the selected maps (Ctrl+Enter).")
     cancel_button = QtWidgets.QPushButton("Cancel")
+    cancel_button.setShortcut("Escape")
+    cancel_button.setToolTip("Request cancellation after the current texture finishes (Esc).")
     cancel_button.setEnabled(False)
     action_row.addWidget(generate_button)
     action_row.addWidget(cancel_button)
@@ -15162,8 +15173,13 @@ def _launch_qt_migration_gui() -> None:
 
     event_log = QtWidgets.QPlainTextEdit()
     event_log.setReadOnly(True)
+    event_log.setMinimumHeight(100)
     generation_layout.addWidget(event_log, 1)
-    tabs.addTab(generation_tab, "Generation")
+    generation_scroll = QtWidgets.QScrollArea()
+    generation_scroll.setWidgetResizable(True)
+    generation_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+    generation_scroll.setWidget(generation_tab)
+    tabs.addTab(generation_scroll, "Generation")
 
     preview_tab = QtWidgets.QWidget()
     preview_layout = QtWidgets.QVBoxLayout(preview_tab)
@@ -15276,7 +15292,11 @@ def _launch_qt_migration_gui() -> None:
     batch_bottleneck_label.setWordWrap(True)
     batch_layout.addWidget(batch_bottleneck_label)
     batch_layout.addStretch(1)
-    tabs.addTab(batch_tab, "Batch/Resume")
+    batch_scroll = QtWidgets.QScrollArea()
+    batch_scroll.setWidgetResizable(True)
+    batch_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+    batch_scroll.setWidget(batch_tab)
+    tabs.addTab(batch_scroll, "Batch/Resume")
 
     status_tab = QtWidgets.QWidget()
     status_layout = QtWidgets.QVBoxLayout(status_tab)
