@@ -8092,6 +8092,11 @@ _LIGHT_THEME: dict[str, str] = {
     "tooltip_bg": "#ffffcc",
     "tooltip_fg": "#000000",
     "disabled_fg": "#888888",
+    "muted_fg": "#5f6368",
+    "info_fg": "#1d4ed8",
+    "success_fg": "#166534",
+    "warning_fg": "#92400e",
+    "error_fg": "#b91c1c",
 }
 _DARK_THEME: dict[str, str] = {
     "bg": "#1e1e2e",
@@ -8103,6 +8108,11 @@ _DARK_THEME: dict[str, str] = {
     "tooltip_bg": "#313244",
     "tooltip_fg": "#cdd6f4",
     "disabled_fg": "#6c7086",
+    "muted_fg": "#bac2de",
+    "info_fg": "#89b4fa",
+    "success_fg": "#a6e3a1",
+    "warning_fg": "#f9e2af",
+    "error_fg": "#f38ba8",
 }
 
 
@@ -8413,7 +8423,7 @@ if GUI_AVAILABLE:
             _detected_context_label = ttk.Label(
                 file_frame,
                 textvariable=self.detected_context_var,
-                foreground="gray",
+                style="Muted.TLabel",
                 justify=tk.LEFT,
                 anchor=tk.W,
             )
@@ -8465,7 +8475,7 @@ if GUI_AVAILABLE:
             _pbr_note = ttk.Label(
                 _pbr_section,
                 text="Shares Diffuse + Normal with Vanilla/ENB",
-                foreground="gray",
+                style="Muted.TLabel",
                 font=("TkDefaultFont", 8),
             )
             _pbr_note.grid(row=0, column=0, sticky=tk.W, pady=(0, 2))
@@ -8560,7 +8570,7 @@ if GUI_AVAILABLE:
                 _preset_custom_button,
                 "Start from conservative defaults but leave workflow choices manual.",
             )
-            _preset_hint = ttk.Label(_workflow_frame, textvariable=self.safe_preset_hint_var, foreground="gray")
+            _preset_hint = ttk.Label(_workflow_frame, textvariable=self.safe_preset_hint_var, style="Muted.TLabel")
             _preset_hint.grid(row=3, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
             _preset_usage_hint = ttk.Label(
                 _workflow_frame,
@@ -8568,7 +8578,7 @@ if GUI_AVAILABLE:
                     "Quick guide: Vanilla = stock Skyrim. ENB = ENB complex materials. "
                     "Community Shaders = Extended Materials. TruePBR = CS TruePBR JSON workflow."
                 ),
-                foreground="gray",
+                style="Muted.TLabel",
             )
             _preset_usage_hint.grid(row=4, column=0, columnspan=3, sticky=tk.W, pady=(0, 2))
             simplified_optional_preset_widgets: list[tk.Widget] = [
@@ -8658,7 +8668,7 @@ if GUI_AVAILABLE:
             self.render_profile_hint_label = ttk.Label(
                 options_frame,
                 textvariable=self.render_profile_suggestion_var,
-                foreground="gray",
+                style="Muted.TLabel",
                 justify=tk.LEFT,
                 anchor=tk.W,
                 wraplength=520,
@@ -8709,7 +8719,7 @@ if GUI_AVAILABLE:
             _env_mode_hint_label = ttk.Label(
                 options_frame,
                 text="standard = vanilla Skyrim SE  |  complex = packed RGBA (renderer-specific channels)",
-                foreground="gray",
+                style="Muted.TLabel",
             )
             _env_mode_hint_label.grid(row=3, column=4, sticky=tk.W, padx=(4, 0))
             self._add_tooltip(
@@ -8893,13 +8903,13 @@ if GUI_AVAILABLE:
             _parallax_mode_hint_label = ttk.Label(
                 options_frame,
                 text="standard = vanilla  |  occlusion = ENBSeries POM",
-                foreground="gray",
+                style="Muted.TLabel",
             )
             _parallax_mode_hint_label.grid(row=14, column=3, columnspan=2, sticky=tk.W, padx=(4, 0))
             self.mode_controls_hint_label = ttk.Label(
                 options_frame,
                 textvariable=self.mode_controls_hint_var,
-                foreground="gray",
+                style="Muted.TLabel",
                 justify=tk.LEFT,
                 anchor=tk.W,
                 wraplength=520,
@@ -9039,7 +9049,11 @@ if GUI_AVAILABLE:
             )
             _status_label = ttk.Label(actions, textvariable=self.status_var, justify=tk.LEFT, anchor=tk.W)
             _status_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=14)
-            self.preview_speed_badge = ttk.Label(actions, textvariable=self.preview_speed_state_var, foreground="#6b7280")
+            self.preview_speed_badge = ttk.Label(
+                actions,
+                textvariable=self.preview_speed_state_var,
+                style="Muted.TLabel",
+            )
             self.preview_speed_badge.pack(side=tk.LEFT, padx=(0, 8))
             self.reenable_batch_preview_button = ttk.Button(
                 actions,
@@ -9064,7 +9078,7 @@ if GUI_AVAILABLE:
                 "Turn live batch preview back on after an auto speed pause.\n"
                 "Use this after heavy batches when you want live updates again.",
             )
-            _perf_hint_label = ttk.Label(actions, textvariable=self.batch_perf_hint_var, foreground="gray")
+            _perf_hint_label = ttk.Label(actions, textvariable=self.batch_perf_hint_var, style="Muted.TLabel")
             _perf_hint_label.pack(side=tk.LEFT, padx=(0, 4))
             self._bind_responsive_wrap(top_primary_row, top_bar_message, horizontal_padding=260, min_wrap=220)
             self._bind_responsive_wrap(file_frame, _detected_context_label, horizontal_padding=28, min_wrap=220)
@@ -9228,7 +9242,7 @@ if GUI_AVAILABLE:
                 "start_fresh: reprocess all selected files and ignore existing checkpoint entries.\n"
                 "resume: process only remaining files not already marked complete in the checkpoint.",
             )
-            _resume_hint_label = ttk.Label(source_controls, textvariable=self.batch_resume_hint_var, foreground="gray")
+            _resume_hint_label = ttk.Label(source_controls, textvariable=self.batch_resume_hint_var, style="Muted.TLabel")
             _resume_hint_label.pack(side=tk.LEFT, padx=(6, 4))
             self._add_tooltip(
                 _resume_hint_label,
@@ -9247,7 +9261,11 @@ if GUI_AVAILABLE:
                 "Delete checkpoint data for this run target.\n"
                 "Use this only when you intentionally want to rerun all files.",
             )
-            self.checkpoint_health_label = ttk.Label(source_controls, textvariable=self.checkpoint_health_var, foreground="gray")
+            self.checkpoint_health_label = ttk.Label(
+                source_controls,
+                textvariable=self.checkpoint_health_var,
+                style="Muted.TLabel",
+            )
             self.checkpoint_health_label.pack(side=tk.LEFT, padx=(10, 4))
             self._add_tooltip(
                 self.checkpoint_health_label,
@@ -9668,6 +9686,11 @@ if GUI_AVAILABLE:
             style.configure("TCombobox", fieldbackground=colors["field_bg"], foreground=colors["fg"], background=colors["button_bg"])
             style.map("TCombobox", fieldbackground=[("readonly", colors["field_bg"])], foreground=[("readonly", colors["fg"])])
             style.configure("TEntry", fieldbackground=colors["field_bg"], foreground=colors["fg"])
+            style.configure("Muted.TLabel", foreground=colors["muted_fg"])
+            style.configure("Status.Info.TLabel", foreground=colors["info_fg"])
+            style.configure("Status.Success.TLabel", foreground=colors["success_fg"])
+            style.configure("Status.Warning.TLabel", foreground=colors["warning_fg"])
+            style.configure("Status.Error.TLabel", foreground=colors["error_fg"])
             style.configure("Horizontal.TScale", background=colors["bg"], troughcolor=colors["trough"])
             style.configure("Manual.Horizontal.TScale", background=colors["bg"], troughcolor=colors["trough"])
             style.configure("Auto.Horizontal.TScale", background=colors["bg"], troughcolor=colors["auto_trough"])
@@ -10087,12 +10110,12 @@ if GUI_AVAILABLE:
             if checkpoint_path is None:
                 self.checkpoint_health_var.set("Checkpoint: unavailable")
                 if hasattr(self, "checkpoint_health_label"):
-                    self.checkpoint_health_label.configure(foreground="#6b7280")
+                    self.checkpoint_health_label.configure(style="Muted.TLabel")
                 return
             if not checkpoint_path.exists():
                 self.checkpoint_health_var.set(f"Checkpoint: new ({checkpoint_path.name})")
                 if hasattr(self, "checkpoint_health_label"):
-                    self.checkpoint_health_label.configure(foreground="#2563eb")
+                    self.checkpoint_health_label.configure(style="Status.Info.TLabel")
                 return
             age_seconds = max(0.0, time.time() - checkpoint_path.stat().st_mtime)
             if age_seconds < 120:
@@ -10150,11 +10173,11 @@ if GUI_AVAILABLE:
                 )
             if hasattr(self, "checkpoint_health_label"):
                 if mismatch_flags:
-                    self.checkpoint_health_label.configure(foreground="#dc2626")
+                    self.checkpoint_health_label.configure(style="Status.Error.TLabel")
                 elif stale_flag:
-                    self.checkpoint_health_label.configure(foreground="#d97706")
+                    self.checkpoint_health_label.configure(style="Status.Warning.TLabel")
                 else:
-                    self.checkpoint_health_label.configure(foreground="#16a34a")
+                    self.checkpoint_health_label.configure(style="Status.Success.TLabel")
 
         def _write_batch_checkpoint_state(
             self,
@@ -10889,22 +10912,22 @@ if GUI_AVAILABLE:
         def _set_preview_speed_badge(self, mode: str, *, deferred_count: int = 0) -> None:
             if mode == "manual_pause":
                 self.preview_speed_state_var.set("⏸ Preview paused (manual)")
-                self.preview_speed_badge.configure(foreground="#dc2626")
+                self.preview_speed_badge.configure(style="Status.Error.TLabel")
                 return
             if mode == "auto_speed_off":
                 self.preview_speed_state_var.set("⚡ Preview off for speed")
-                self.preview_speed_badge.configure(foreground="#d97706")
+                self.preview_speed_badge.configure(style="Status.Warning.TLabel")
                 return
             if mode == "staged" and deferred_count > 0:
                 self.preview_speed_state_var.set(f"🧩 Staged preview loading ({deferred_count} tile(s) queued)")
-                self.preview_speed_badge.configure(foreground="#2563eb")
+                self.preview_speed_badge.configure(style="Status.Info.TLabel")
                 return
             if mode == "lazy" and deferred_count > 0:
                 self.preview_speed_state_var.set(f"🪶 Lazy preview active ({deferred_count} tile(s) deferred)")
-                self.preview_speed_badge.configure(foreground="#2563eb")
+                self.preview_speed_badge.configure(style="Status.Info.TLabel")
                 return
             self.preview_speed_state_var.set("")
-            self.preview_speed_badge.configure(foreground="#6b7280")
+            self.preview_speed_badge.configure(style="Muted.TLabel")
 
         def _cancel_deferred_preview_staging(self, *, clear_queue: bool = True) -> None:
             if self.preview_deferred_render_after_id is not None:
@@ -12663,7 +12686,7 @@ if GUI_AVAILABLE:
                     ),
                     justify=tk.LEFT,
                     wraplength=860,
-                    foreground="gray",
+                    style="Muted.TLabel",
                 )
                 guarded_mode_note.pack(fill="x", pady=(2, 0))
                 self._bind_responsive_wrap(opt_frame, guarded_mode_note, horizontal_padding=40, min_wrap=220)

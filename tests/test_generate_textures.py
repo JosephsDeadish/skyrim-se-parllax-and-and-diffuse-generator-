@@ -49,6 +49,8 @@ from generate_textures import (
     _run_cli,
     _normalize_gui_state,
     _merge_qt_generation_gui_state,
+    _DARK_THEME,
+    _LIGHT_THEME,
     _resolve_batch_workers,
     _summarize_batch_texture_dimensions,
     _visible_preview_output_keys,
@@ -713,6 +715,23 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_app_version_is_0_9(self) -> None:
         self.assertEqual(APP_VERSION, "0.9")
+
+    def test_theme_text_colors_meet_wcag_aa_contrast(self) -> None:
+        def relative_luminance(color: str) -> float:
+            channels = [int(color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+            linear = [
+                channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+                for channel in channels
+            ]
+            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+        for theme in (_LIGHT_THEME, _DARK_THEME):
+            background = relative_luminance(theme["bg"])
+            for key in ("muted_fg", "info_fg", "success_fg", "warning_fg", "error_fg"):
+                foreground = relative_luminance(theme[key])
+                contrast = (max(background, foreground) + 0.05) / (min(background, foreground) + 0.05)
+                with self.subTest(theme=theme["bg"], color=key):
+                    self.assertGreaterEqual(contrast, 4.5)
 
     def test_normalize_gui_state_turns_off_individual_auto_flags_when_master_off(self) -> None:
         normalized = _normalize_gui_state(
