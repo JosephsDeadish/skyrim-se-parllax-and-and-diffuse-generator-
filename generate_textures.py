@@ -972,14 +972,33 @@ def _load_qt_preview_png(
                 if "A" not in bands:
                     raise ValueError("This output has no alpha channel.")
                 preview = image.getchannel("A")
-            elif "L" in bands:
+            elif normalized_channel == "L":
+                if "L" not in bands:
+                    raise ValueError("This output has no grayscale channel.")
                 preview = image.getchannel("L")
+            elif "L" in bands:
+                raise ValueError("This output is grayscale and has no separate RGB channels.")
             else:
                 preview = image.convert("RGB").getchannel(normalized_channel)
     preview.thumbnail((preview_limit, preview_limit), Image.Resampling.LANCZOS)
     buffer = io.BytesIO()
     preview.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def _qt_preview_channel_options(path: str | os.PathLike[str]) -> tuple[tuple[str, str | None], ...]:
+    with Image.open(path) as image:
+        bands = image.getbands()
+    if "L" in bands and not any(channel in bands for channel in ("R", "G", "B")):
+        options = [("Composite", None), ("Grayscale", "L")]
+        if "A" in bands:
+            options.append(("Alpha channel", "A"))
+        return tuple(options)
+    options: list[tuple[str, str | None]] = [("Composite", None)]
+    options.extend((f"{channel} channel", channel) for channel in ("R", "G", "B"))
+    if "A" in bands:
+        options.append(("Alpha channel", "A"))
+    return tuple(options)
 
 
 def _describe_qt_output_channels(output_key: str, render_profile: str) -> str:
@@ -15296,7 +15315,7 @@ def _launch_qt_migration_gui() -> None:
     preview_channel_row = QtWidgets.QHBoxLayout()
     preview_channel_row.addWidget(QtWidgets.QLabel("View channel"))
     preview_channel_combo = QtWidgets.QComboBox()
-    preview_channel_combo.addItems(["Composite", "R", "G", "B", "A"])
+    preview_channel_combo.addItem("Composite", None)
     preview_channel_row.addWidget(preview_channel_combo)
     preview_channel_row.addStretch(1)
     preview_layout.addLayout(preview_channel_row)
@@ -15449,11 +15468,11 @@ def _launch_qt_migration_gui() -> None:
             return
         image_path = str(item.data(QtCore.Qt.ItemDataRole.UserRole) or "")
         output_key = str(item.data(QtCore.Qt.ItemDataRole.UserRole + 1) or "")
-        selected_channel = preview_channel_combo.currentText()
+        selected_channel = preview_channel_combo.currentData()
         try:
             image_data = _load_qt_preview_png(
                 image_path,
-                channel=None if selected_channel == "Composite" else selected_channel,
+                channel=str(selected_channel) if selected_channel else None,
             )
             pixmap = QtGui.QPixmap()
             if not pixmap.loadFromData(image_data, "PNG"):
@@ -15469,12 +15488,30 @@ def _launch_qt_migration_gui() -> None:
             preview_channel_note.setText(
                 _describe_qt_output_channels(output_key, render_profile_combo.currentText())
             )
+            preview_channel_note.setText(
+                f"{preview_channel_note.text()} Viewing: {preview_channel_combo.currentText()}."
+            )
         except Exception as exc:
             preview_image_label.setPixmap(QtGui.QPixmap())
             preview_image_label.setText(f"Preview unavailable: {exc}")
             preview_channel_note.setText(
                 _describe_qt_output_channels(output_key, render_profile_combo.currentText())
             )
+
+    def _update_qt_preview_channels(*_: object) -> None:
+        item = preview_results_list.currentItem()
+        image_path = str(item.data(QtCore.Qt.ItemDataRole.UserRole) or "") if item else ""
+        preview_channel_combo.blockSignals(True)
+        try:
+            preview_channel_combo.clear()
+            options = _qt_preview_channel_options(image_path) if image_path else (("Composite", None),)
+            for label, channel in options:
+                preview_channel_combo.addItem(label, channel)
+        except Exception:
+            preview_channel_combo.addItem("Composite", None)
+        finally:
+            preview_channel_combo.blockSignals(False)
+        _show_selected_qt_preview()
 
     def _update_resume_hint() -> None:
         mode = resume_mode_combo.currentText().strip().lower()
@@ -15899,7 +15936,7 @@ def _launch_qt_migration_gui() -> None:
     render_profile_combo.currentTextChanged.connect(_persist_qt_gui_state)
     for option_check in output_checks:
         option_check.toggled.connect(_persist_qt_gui_state)
-    preview_results_list.currentItemChanged.connect(_show_selected_qt_preview)
+    preview_results_list.currentItemChanged.connect(_update_qt_preview_channels)
     preview_channel_combo.currentTextChanged.connect(_show_selected_qt_preview)
 
     _update_resume_hint()

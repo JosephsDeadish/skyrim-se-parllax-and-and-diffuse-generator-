@@ -53,6 +53,7 @@ from generate_textures import (
     _normalize_gui_state,
     _merge_qt_generation_gui_state,
     _qt_profile_output_defaults,
+    _qt_preview_channel_options,
     _DARK_THEME,
     _LIGHT_THEME,
     _resolve_batch_workers,
@@ -953,6 +954,28 @@ class GenerateTexturesTests(unittest.TestCase):
             Image.new("RGB", (2, 1), (1, 2, 3)).save(rgb_path)
             with self.assertRaisesRegex(ValueError, "no alpha channel"):
                 _load_qt_preview_png(rgb_path, channel="A")
+
+    def test_qt_preview_channel_options_follow_actual_image_bands(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            rgb_path = Path(temp_dir) / "rgb.png"
+            Image.new("RGB", (1, 1), (1, 2, 3)).save(rgb_path)
+            self.assertEqual(
+                _qt_preview_channel_options(rgb_path),
+                (
+                    ("Composite", None),
+                    ("R channel", "R"),
+                    ("G channel", "G"),
+                    ("B channel", "B"),
+                ),
+            )
+            grayscale_path = Path(temp_dir) / "gray.png"
+            Image.new("L", (1, 1), 128).save(grayscale_path)
+            self.assertEqual(
+                _qt_preview_channel_options(grayscale_path),
+                (("Composite", None), ("Grayscale", "L")),
+            )
+            with self.assertRaisesRegex(ValueError, "no separate RGB channels"):
+                _load_qt_preview_png(grayscale_path, channel="R")
 
     def test_qt_channel_guidance_matches_supported_workflow_contracts(self) -> None:
         self.assertIn(
