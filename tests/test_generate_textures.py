@@ -6782,23 +6782,39 @@ class GenerateTexturesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             input_path = temp_path / "brick.png"
-            _sample_image().save(input_path)
-            for case_name, options, expected_names in cases:
-                with self.subTest(case=case_name), mock.patch(
-                    "generate_textures._save_with_dds_fallback",
-                    side_effect=lambda _image, path, **_kwargs: path,
-                ):
-                    outputs = run_with_options(
-                        input_file=input_path,
-                        output_dir=temp_path / case_name,
-                        **options,
+            for source_size in ((4, 4), (16, 8), (32, 32)):
+                Image.new("RGB", source_size, color=(60, 100, 140)).save(input_path)
+                for case_name, options, expected_names in cases:
+                    saved_image_sizes: dict[str, tuple[int, int]] = {}
+
+                    def record_saved_image(image: Image.Image, path: Path, **_kwargs: object) -> Path:
+                        saved_image_sizes[path.name] = image.size
+                        return path
+
+                    with self.subTest(case=case_name, size=source_size), mock.patch(
+                        "generate_textures._save_with_dds_fallback",
+                        side_effect=record_saved_image,
+                    ):
+                        outputs = run_with_options(
+                            input_file=input_path,
+                            output_dir=temp_path / f"{case_name}-{source_size[0]}x{source_size[1]}",
+                            **options,
+                        )
+                    label = f"{case_name} at {source_size}"
+                    self.assertEqual(set(outputs), set(expected_names), label)
+                    self.assertEqual(
+                        {key: Path(path).name for key, path in outputs.items()},
+                        expected_names,
+                        label,
                     )
-                self.assertEqual(set(outputs), set(expected_names), case_name)
-                self.assertEqual(
-                    {key: Path(path).name for key, path in outputs.items()},
-                    expected_names,
-                    case_name,
-                )
+                    expected_image_names = {
+                        name for name in expected_names.values() if name.endswith(".dds")
+                    }
+                    self.assertEqual(set(saved_image_sizes), expected_image_names, label)
+                    self.assertTrue(
+                        all(size == source_size for size in saved_image_sizes.values()),
+                        f"{label}: {saved_image_sizes}",
+                    )
 
     def test_run_with_options_rejects_env_mask_with_rmaos_combination(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
