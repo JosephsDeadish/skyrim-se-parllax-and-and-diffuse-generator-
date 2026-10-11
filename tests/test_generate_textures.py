@@ -24,6 +24,7 @@ from generate_textures import (
     _compute_nif_editor_controls_pane_height,
     _compute_nif_editor_result_details_height,
     _drain_nif_editor_ui_updates,
+    _make_latest_progress_update_enqueuer,
     _nif_editor_result_matches_filters,
     _can_append_nif_editor_result_incrementally,
     _should_render_nif_editor_results,
@@ -226,6 +227,27 @@ class TestNifEditorLayoutSizing(unittest.TestCase):
 
 
 class TestNifEditorUiUpdateQueue(unittest.TestCase):
+    def test_progress_updates_coalesce_to_latest_value_on_ui_thread(self) -> None:
+        updates: queue.Queue = queue.Queue()
+        applied: list[tuple[float, int]] = []
+        ui_thread_id = threading.get_ident()
+        enqueue_progress = _make_latest_progress_update_enqueuer(
+            updates,
+            lambda value: applied.append((value, threading.get_ident())),
+        )
+
+        def _enqueue_from_worker() -> None:
+            for value in range(1000):
+                enqueue_progress(float(value))
+
+        worker = threading.Thread(target=_enqueue_from_worker)
+        worker.start()
+        worker.join()
+
+        self.assertEqual(updates.qsize(), 1)
+        self.assertEqual(_drain_nif_editor_ui_updates(updates), 1)
+        self.assertEqual(applied, [(999.0, ui_thread_id)])
+
     def test_drains_callbacks_in_fifo_batches_on_calling_thread(self) -> None:
         updates: queue.Queue = queue.Queue()
         completed: list[tuple[int, int]] = []

@@ -5740,6 +5740,32 @@ def _drain_nif_editor_ui_updates(
     return drained
 
 
+def _make_latest_progress_update_enqueuer(
+    updates: queue.Queue[Callable[[], None]],
+    apply: Callable[[float], None],
+) -> Callable[[float], None]:
+    lock = threading.Lock()
+    latest_value = [0.0]
+    update_queued = [False]
+
+    def enqueue(value: float) -> None:
+        with lock:
+            latest_value[0] = value
+            if update_queued[0]:
+                return
+            update_queued[0] = True
+
+        def apply_latest() -> None:
+            with lock:
+                queued_value = latest_value[0]
+                update_queued[0] = False
+            apply(queued_value)
+
+        updates.put(apply_latest)
+
+    return enqueue
+
+
 def _should_render_nif_editor_results(
     *,
     dirty: bool,
@@ -13507,8 +13533,13 @@ if GUI_AVAILABLE:
                 def _safe_status(msg: str) -> None:
                     _queue_ui_update(lambda m=msg: status_var.set(m))
 
+                _queue_progress_update = _make_latest_progress_update_enqueuer(
+                    _ui_update_queue,
+                    lambda value: progress_var.set(value),
+                )
+
                 def _safe_progress(val: float) -> None:
-                    _queue_ui_update(lambda v=val: progress_var.set(v))
+                    _queue_progress_update(val)
 
                 win.after(25, _poll_ui_updates)
 
