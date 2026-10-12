@@ -1744,33 +1744,55 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_tk_theme_scale_and_window_sizes_remain_usable(self) -> None:
         self._skip_unavailable_tk_display()
-        gui = TextureGeneratorGUI()
+        state_file = Path(tempfile.mkdtemp()) / "gui-state.json"
+        gui = None
         try:
-            for geometry in ("800x600", "960x700", "1280x900"):
-                gui.root.geometry(geometry)
-                gui.root.update_idletasks()
-                self.assertGreater(gui.root.winfo_width(), 0)
-                self.assertGreater(gui.root.winfo_height(), 0)
+            with mock.patch("generate_textures.GUI_STATE_FILE", state_file):
+                gui = TextureGeneratorGUI()
+                try:
+                    gui.root.geometry("800x600")
+                    gui.root.update_idletasks()
+                    self.assertGreater(gui.root.winfo_width(), 0)
+                    self.assertGreater(gui.root.winfo_height(), 0)
 
-            style = gui.root.tk.call
-            with mock.patch("generate_textures.save_gui_state"):
-                for scale in ("0.9", "1.0", "1.15", "1.3", "1.5"):
-                    gui.ui_scale_combo.set(scale)
-                    gui._on_ui_scale_changed()
-                    self.assertAlmostEqual(float(gui.ui_scale_var.get()), float(scale))
-                    for dark_mode, palette in ((False, _LIGHT_THEME), (True, _DARK_THEME)):
-                        gui.dark_mode_var.set(dark_mode)
-                        gui._apply_theme()
-                        self.assertEqual(
-                            style("ttk::style", "lookup", "Muted.TLabel", "-foreground"),
-                            palette["muted_fg"],
-                        )
-                        self.assertEqual(
-                            style("ttk::style", "lookup", "Status.Error.TLabel", "-foreground"),
-                            palette["error_fg"],
-                        )
+                    for geometry in ("800x600", "960x700", "1280x900"):
+                        gui.root.geometry(geometry)
+                        gui.root.update_idletasks()
+                        self.assertGreater(gui.root.winfo_width(), 0)
+                        self.assertGreater(gui.root.winfo_height(), 0)
+
+                    gui.ui_scale_var.set(2.0)
+                    gui.dark_mode_var.set(True)
+                    gui._apply_ui_scaling()
+                    gui._apply_theme()
+                    gui._restore_default_startup_geometry()
+                    gui.root.update_idletasks()
+                    self.assertEqual(gui.root.winfo_width(), 960)
+                    self.assertEqual(gui.root.winfo_height(), 700)
+
+                    style = gui.root.tk.call
+                    with mock.patch("generate_textures.save_gui_state"):
+                        for scale in ("0.9", "1.0", "1.15", "1.3", "1.5"):
+                            gui.ui_scale_combo.set(scale)
+                            gui._on_ui_scale_changed()
+                            self.assertAlmostEqual(float(gui.ui_scale_var.get()), float(scale))
+                            for dark_mode, palette in ((False, _LIGHT_THEME), (True, _DARK_THEME)):
+                                gui.dark_mode_var.set(dark_mode)
+                                gui._apply_theme()
+                                gui._restore_default_startup_geometry()
+                                self.assertEqual(
+                                    style("ttk::style", "lookup", "Muted.TLabel", "-foreground"),
+                                    palette["muted_fg"],
+                                )
+                                self.assertEqual(
+                                    style("ttk::style", "lookup", "Status.Error.TLabel", "-foreground"),
+                                    palette["error_fg"],
+                                )
+                finally:
+                    if gui is not None:
+                        gui.root.destroy()
         finally:
-            gui.root.destroy()
+            state_file.unlink(missing_ok=True)
 
     def test_tk_nif_editor_opens_all_tabs_and_closes_cleanly(self) -> None:
         self._skip_unavailable_tk_display()

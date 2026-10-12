@@ -10023,6 +10023,14 @@ if GUI_AVAILABLE:
             self._apply_theme()
             self._on_render_profile_changed()
             self._restore_startup_selection()
+            # Reassert the default startup geometry after all persisted theme/scale
+            # state has been applied; Tk can otherwise collapse the window during
+            # high-DPI startup on Windows.
+            try:
+                self.root.update_idletasks()
+                self.root.geometry("960x700")
+            except Exception:
+                pass
             self._apply_runtime_localization()
 
         def _set_app_icon(self) -> None:
@@ -10137,6 +10145,7 @@ if GUI_AVAILABLE:
                 self.ui_scale_combo.set(f"{self.ui_scale_var.get():.2f}".rstrip("0").rstrip("."))
             self._apply_ui_scaling()
             self._apply_theme()
+            self._restore_default_startup_geometry()
             self._save_persisted_gui_state()
             self.status_var.set(
                 self._tr("UI scale set to {scale:.2f}x.").format(scale=float(self.ui_scale_var.get()))
@@ -10290,8 +10299,16 @@ if GUI_AVAILABLE:
                     pass
             self._update_slider_auto_states()
 
+        def _restore_default_startup_geometry(self) -> None:
+            try:
+                self.root.update_idletasks()
+                self.root.geometry("960x700")
+            except Exception:
+                pass
+
         def _toggle_theme(self) -> None:
             self._apply_theme()
+            self._restore_default_startup_geometry()
             theme_name = "dark" if self.dark_mode_var.get() else "light"
             self.status_var.set(self._tr("Switched to {theme_name} mode.").format(theme_name=theme_name))
 
