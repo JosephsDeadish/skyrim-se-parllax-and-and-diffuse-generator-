@@ -10061,10 +10061,12 @@ if GUI_AVAILABLE:
             self._restore_startup_selection()
             # Reassert the default startup geometry after all persisted theme/scale
             # state has been applied; Tk can otherwise collapse the window during
-            # high-DPI startup on Windows.
+            # high-DPI startup on Windows. Do this both immediately and again after
+            # idle tasks settle to cover the frozen packaged startup race.
             try:
                 self.root.update_idletasks()
                 self.root.geometry("960x700")
+                self.root.after_idle(self._restore_default_startup_geometry)
             except Exception:
                 pass
             self._apply_runtime_localization()
@@ -10335,7 +10337,7 @@ if GUI_AVAILABLE:
                     pass
             self._update_slider_auto_states()
 
-        def _restore_default_startup_geometry(self, *, retries: int = 6) -> None:
+        def _restore_default_startup_geometry(self, *, retries: int = 8) -> None:
             try:
                 self.root.update_idletasks()
                 try:
@@ -10348,7 +10350,10 @@ if GUI_AVAILABLE:
                 self.root.update_idletasks()
                 width = max(0, int(self.root.winfo_width() or 0))
                 height = max(0, int(self.root.winfo_height() or 0))
-                if retries > 0 and (width < 600 or height < 420):
+                # On Windows high-DPI / saved-state startup the window can briefly be
+                # restored to a tiny pre-layout size before the app settles. Reapply the
+                # default geometry until the size is back in the normal UI envelope.
+                if retries > 0 and (width < 640 or height < 460):
                     self.root.after(75, lambda: self._restore_default_startup_geometry(retries=retries - 1))
             except Exception:
                 if retries > 0:
