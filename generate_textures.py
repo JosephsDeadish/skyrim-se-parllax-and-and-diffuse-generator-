@@ -3511,28 +3511,35 @@ def build_nif_editor_action_guidance(
         steps = (
             "Patch recipe: keep standard parallax on for vanilla-safe meshes, keep slot 5 as _m.dds when present, "
             "leave ENB POM off unless this NIF is intentionally ENB-specific, and avoid TruePBR flags unless this "
-            "mesh is already in a different renderer workflow."
+            "mesh is already in a different renderer workflow. Likely mismatch: if this mesh still uses ENB _msn or "
+            "Community Shaders _cm/_rmaos names, switch it back to the safer vanilla baseline before patching."
         )
     elif normalized == "community_shaders":
         steps = (
             "Patch recipe: keep slot 1 as _n.dds, use standard parallax, prefer slot 5 _cm.dds (or _c.dds) for Community "
-            "Shaders, and leave ENB POM disabled unless you are intentionally switching the mesh to ENB-specific settings."
+            "Shaders, and leave ENB POM disabled unless you are intentionally switching the mesh to ENB-specific settings. "
+            "Likely mismatch: if the current mesh is still named as ENB _msn or TruePBR _rmaos, it is usually in the wrong "
+            "renderer workflow and should be corrected before a patch is applied."
         )
     elif normalized == "truepbr":
         steps = (
             "Patch recipe: keep normals as _n.dds, use slot 5 _rmaos/_ramos for the TruePBR packed data map, enable the "
-            "PBR flag, and avoid ENB-style _msn slot-1 names or ENB POM settings on the same mesh."
+            "PBR flag, and avoid ENB-style _msn slot-1 names or ENB POM settings on the same mesh. Likely mismatch: if "
+            "slot 1 is still _msn or slot 5 is _cm/_c, the mesh is probably in the wrong workflow and should be re-labeled "
+            "before patching."
         )
     elif normalized == "enb":
         steps = (
             "Patch recipe: slot 1 should usually be _msn.dds, slot 5 normally uses _m.dds, enable ENB POM with shader "
             "type 3 together for the final parallax look, and keep vanilla or Community Shaders names out of this mesh unless "
-            "you are intentionally switching workflows."
+            "you are intentionally switching workflows. Likely mismatch: if the mesh is still using Community Shaders _cm or "
+            "TruePBR _rmaos naming, do not mix it into the ENB preset without a deliberate workflow change."
         )
     else:
         steps = (
             "Patch recipe: review slot 1/3/5 naming, enable only the flags this renderer actually uses, and keep "
-            "destructive clears limited to a backup-verified subset of meshes."
+            "destructive clears limited to a backup-verified subset of meshes. Likely mismatch: if slot names do not match "
+            "the selected renderer, correct the naming first, then re-run the patch rather than forcing the wrong profile."
         )
     if target == "fallout":
         return (
