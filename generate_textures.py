@@ -2934,7 +2934,18 @@ _RENDER_PROFILE_OUTPUT_LABELS: dict[str, str] = {
 
 _RENDER_PROFILE_PATH_HINTS: dict[str, tuple[str, ...]] = {
     "enb": ("enb", "enbseries"),
-    "community_shaders": ("communityshaders", "community_shaders", "community-shaders", "cs"),
+    "community_shaders": (
+        "communityshaders",
+        "community_shaders",
+        "community-shaders",
+        "cs",
+        "dynamic cubemap",
+        "dynamic cubemaps",
+        "dynamic cube map",
+        "dynamic cube maps",
+        "dynamiccubemap",
+        "dynamiccubemaps",
+    ),
     "truepbr": ("truepbr", "true_pbr", "true-pbr", "pbrnifpatcher", "textures pbr"),
 }
 

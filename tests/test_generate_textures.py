@@ -2712,6 +2712,16 @@ class GenerateTexturesTests(unittest.TestCase):
             )
             self.assertEqual(detect_render_profile_from_mod_manager_context(context), "community_shaders")
 
+    def test_recommend_render_profile_detects_cs_from_dynamic_cubemap_path_hint(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(Path("mods/Dynamic Cube Maps/textures/architecture/stone.dds")),
+            "community_shaders",
+        )
+        self.assertEqual(
+            recommend_render_profile(Path("mods/DynamicCubemaps/textures/architecture/stone.dds")),
+            "community_shaders",
+        )
+
     def test_detect_render_profile_from_mod_manager_context_detects_cs_from_singular_dynamic_cubemap_runtime_marker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
