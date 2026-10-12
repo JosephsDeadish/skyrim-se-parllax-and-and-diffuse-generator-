@@ -8522,6 +8522,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--gui", action="store_true", help="Launch graphical interface.")
     parser.add_argument(
+        "--qt-acceptance-report",
+        type=Path,
+        default=None,
+        help="Acceptance automation only: exercise the actual Qt GUI and write a JSON report, then exit.",
+    )
+    parser.add_argument(
         "--gui-backend",
         choices=("auto", "tk", "qt"),
         default="auto",
@@ -15933,7 +15939,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     appearance_row.addWidget(theme_check)
     appearance_row.addWidget(QtWidgets.QLabel("UI scale"))
     ui_scale_combo = QtWidgets.QComboBox()
-    ui_scale_combo.addItems(["0.9", "1.0", "1.15", "1.3", "1.5"])
+    ui_scale_combo.addItems(["0.9", "1.0", "1.15", "1.3", "1.5", "2.0"])
     saved_scale = float(qt_saved_state["ui_scale"])
     scale_index = ui_scale_combo.findText(f"{saved_scale:g}")
     if scale_index < 0:
@@ -15954,6 +15960,13 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
 
     tabs = QtWidgets.QTabWidget(root)
     layout.addWidget(tabs, 1)
+
+    def _add_scrollable_tab(page: Any, title: str) -> None:
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        scroll.setWidget(page)
+        tabs.addTab(scroll, title)
 
     overview = QtWidgets.QWidget()
     overview_layout = QtWidgets.QVBoxLayout(overview)
@@ -15982,7 +15995,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     button_row.addStretch(1)
     overview_layout.addLayout(button_row)
     overview_layout.addStretch(1)
-    tabs.addTab(overview, "Overview")
+    _add_scrollable_tab(overview, "Overview")
 
     nif_scan_tab = QtWidgets.QWidget()
     nif_scan_layout = QtWidgets.QVBoxLayout(nif_scan_tab)
@@ -16069,7 +16082,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_scan_page_row.addStretch(1)
     nif_scan_page_row.addWidget(nif_scan_next_button)
     nif_scan_layout.addLayout(nif_scan_page_row)
-    tabs.addTab(nif_scan_tab, "NIF Scan")
+    _add_scrollable_tab(nif_scan_tab, "NIF Scan")
 
     nif_editor_tab = QtWidgets.QScrollArea()
     nif_editor_tab.setWidgetResizable(True)
@@ -16498,7 +16511,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     preview_results_list = QtWidgets.QListWidget()
     preview_results_list.setMaximumHeight(180)
     preview_layout.addWidget(preview_results_list, 1)
-    tabs.addTab(preview_tab, "Preview")
+    _add_scrollable_tab(preview_tab, "Preview")
 
     batch_tab = QtWidgets.QWidget()
     batch_layout = QtWidgets.QVBoxLayout(batch_tab)
@@ -16592,7 +16605,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         status_lines.extend(["", f"Qt import warning: {QT_GUI_IMPORT_ERROR}"])
     status_box.setPlainText("\n".join(status_lines))
     status_layout.addWidget(status_box, 1)
-    tabs.addTab(status_tab, "Status")
+    _add_scrollable_tab(status_tab, "Status")
 
     qt_worker_thread: QtCore.QThread | None = None
     qt_worker: _QtGenerationWorker | None = None
@@ -17704,9 +17717,15 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         ("nif_scan_preview", nif_scan_remediation_preview_button),
         ("nif_scan_status", nif_scan_status_label), ("nif_scan_results", nif_scan_results),
         ("input_path", input_path_edit), ("output_dir", output_dir_edit),
+        ("browse_input", browse_input_button), ("browse_input_folder", browse_input_folder_button),
+        ("browse_output", browse_output_button),
         ("checkpoint_path", checkpoint_path_edit), ("resume_mode", resume_mode_combo),
         ("generate", generate_button), ("cancel_generation", cancel_button),
         ("theme", theme_check), ("ui_scale", ui_scale_combo), ("tabs", tabs),
+        ("render_profile", render_profile_combo),
+        ("include_diffuse", include_diffuse_check), ("include_normal", include_normal_check),
+        ("include_parallax", include_parallax_check),
+        ("continue_on_error", continue_on_error_check),
     ):
         control.setObjectName(name)
     _sync_operation_controls()
@@ -17718,7 +17737,14 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
 
 
 def main() -> int:
-    args = _apply_cli_pbr_overrides(parse_args())
+    args = parse_args()
+    acceptance_report_path = getattr(args, "qt_acceptance_report", None)
+    if isinstance(acceptance_report_path, (str, os.PathLike)):
+        from scripts.qt_gui_acceptance import run_acceptance
+
+        report = run_acceptance(sys.modules[__name__], acceptance_report_path)
+        return 0 if report["passed"] else 1
+    args = _apply_cli_pbr_overrides(args)
     if args.gui or args.input_file is None:
         backend = str(getattr(args, "gui_backend", "auto") or "auto").strip().lower()
         if backend not in {"auto", "tk", "qt"}:

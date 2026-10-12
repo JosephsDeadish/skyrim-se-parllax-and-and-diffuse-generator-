@@ -158,6 +158,7 @@ jobs:
       - name: Build Qt migration-preview executable
         run: >-
           pyinstaller --onefile --windowed --collect-all numpy --collect-all PySide6
+          --hidden-import scripts.qt_gui_acceptance
           --add-data "nif_patcher.py;." --name generate_textures_qt
           --icon assets\panda.ico --distpath dist\qt --workpath build\pyinstaller-qt
           generate_textures.py
@@ -173,13 +174,61 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: python -m unittest -v tests.test_generate_textures.TestQtNifEditorRunner tests.test_generate_textures.TestQtNifEditorEventLoop
 
+      - name: Exercise packaged Qt tabs, themes, generation, cancellation and checkpoint recovery
+        run: >-
+          python -c "import json, subprocess; from pathlib import Path;
+          report = Path('artifacts/qt_gui_acceptance/report.json');
+          report.parent.mkdir(parents=True, exist_ok=True);
+          result = subprocess.run([str(Path('dist/qt/generate_textures_qt.exe').resolve()),
+          '--qt-acceptance-report', str(report.resolve())], timeout=1200);
+          assert result.returncode == 0, f'Packaged Qt acceptance exited {result.returncode}';
+          assert json.loads(report.read_text(encoding='utf-8'))['status'] == 'pass',
+          'Packaged Qt GUI acceptance did not pass'"
+
+      - name: Upload packaged Qt interaction acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-qt-interaction-acceptance
+          path: |
+            artifacts/qt_gui_acceptance/**/*.json
+            artifacts/qt_gui_acceptance/**/*.png
+          if-no-files-found: warn
+
       - name: Smoke launch packaged Tk and Qt GUIs
         shell: pwsh
         run: |
           Add-Type @"
           using System;
+          using System.Text;
           using System.Runtime.InteropServices;
           public static class WindowSmoke {
+            private delegate bool EnumWindowProc(IntPtr hWnd, IntPtr param);
+            [DllImport("user32.dll")]
+            private static extern bool EnumWindows(EnumWindowProc callback, IntPtr param);
+            [DllImport("user32.dll")]
+            private static extern bool IsWindowVisible(IntPtr hWnd);
+            [DllImport("user32.dll")]
+            private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+            [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+            private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+            public static string Title(IntPtr hWnd) {
+              var title = new StringBuilder(512);
+              GetWindowText(hWnd, title, title.Capacity);
+              return title.ToString();
+            }
+            public static IntPtr FindMainWindow(int processId) {
+              IntPtr found = IntPtr.Zero;
+              EnumWindows((hWnd, param) => {
+                uint owner;
+                GetWindowThreadProcessId(hWnd, out owner);
+                if (owner != (uint)processId || !IsWindowVisible(hWnd)) return true;
+                if (!Title(hWnd).StartsWith("Skyrim Texture Generator", StringComparison.Ordinal)) return true;
+                found = hWnd;
+                return false;
+              }, IntPtr.Zero);
+              return found;
+            }
             [StructLayout(LayoutKind.Sequential)]
             public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
             [DllImport("user32.dll", SetLastError = true)]
@@ -215,7 +264,7 @@ jobs:
                 do {
                   $launchedProcesses = @(Get-Process -Name $backend.ProcessName -ErrorAction SilentlyContinue | Where-Object { $existingIds -notcontains $_.Id })
                   $windowProcess = $launchedProcesses | Where-Object {
-                    $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -like "Skyrim Texture Generator*"
+                    [WindowSmoke]::FindMainWindow($_.Id) -ne [IntPtr]::Zero
                   } | Select-Object -First 1
                   if ($windowProcess) { break }
                   Start-Sleep -Seconds 1
@@ -229,27 +278,37 @@ jobs:
                   throw "Packaged $($backend.Name) GUI '$($case.Name)' did not create a main window within $($backend.StartupTimeout)s. Launcher $launcherState. Processes: $details"
                 }
                 $windowProcess.Refresh()
-                if ($backend.Backend -eq "qt" -and $windowProcess.MainWindowTitle -notlike "*Qt migration preview*") {
-                  throw "Packaged Qt GUI launched an unexpected window: '$($windowProcess.MainWindowTitle)'."
+                $windowTitle = [WindowSmoke]::Title([WindowSmoke]::FindMainWindow($windowProcess.Id))
+                if ($backend.Backend -eq "qt" -and $windowTitle -notlike "*Qt migration preview*") {
+                  throw "Packaged Qt GUI launched an unexpected window: '$windowTitle'."
                 }
                 $resizeDeadline = (Get-Date).AddSeconds(10)
                 $boundsRead = $false
+                $resizeError = 0
+                $boundsError = 0
                 $rect = New-Object WindowSmoke+RECT
                 do {
                   $windowProcess.Refresh()
                   if ($windowProcess.HasExited) {
                     throw "Packaged $($backend.Name) GUI '$($case.Name)' exited before resize verification."
                   }
-                  $handle = [IntPtr]$windowProcess.MainWindowHandle
-                  if ($handle -ne [IntPtr]::Zero -and [WindowSmoke]::SetWindowPos($handle, [IntPtr]::Zero, 20, 20, $case.Width, $case.Height, 0x0040)) {
+                  $handle = [WindowSmoke]::FindMainWindow($windowProcess.Id)
+                  $resized = $false
+                  if ($handle -ne [IntPtr]::Zero) {
+                    $resized = [WindowSmoke]::SetWindowPos($handle, [IntPtr]::Zero, 20, 20, $case.Width, $case.Height, 0x0040)
+                    if (-not $resized) { $resizeError = [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
+                  }
+                  if ($resized) {
                     Start-Sleep -Milliseconds 500
+                    $handle = [WindowSmoke]::FindMainWindow($windowProcess.Id)
                     $boundsRead = [WindowSmoke]::GetWindowRect($handle, [ref]$rect)
+                    if (-not $boundsRead) { $boundsError = [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
                     if ($boundsRead) { break }
                   }
                   Start-Sleep -Milliseconds 500
                 } while ((Get-Date) -lt $resizeDeadline)
                 if (-not $boundsRead) {
-                  throw "Could not resize/read packaged $($backend.Name) GUI '$($case.Name)' window bounds after refreshing its handle."
+                  throw "Could not resize/read packaged $($backend.Name) GUI '$($case.Name)' bounds: PID=$($windowProcess.Id), HWND=$handle, resize error=$resizeError, bounds error=$boundsError."
                 }
                 $actualWidth = $rect.Right - $rect.Left
                 $actualHeight = $rect.Bottom - $rect.Top
@@ -289,6 +348,7 @@ jobs:
         run: python -m unittest -v tests.test_generate_textures.GenerateTexturesTests.test_gui_batch_worker_cancellation_checkpoint_resumes_long_run
 
       - name: Realistic mixed-resolution packaged batch recovery and resume
+        if: ${{ !cancelled() }}
         run: |
           python scripts/pre_release_validation.py --batch-acceptance-only --batch-acceptance-count 500 --batch-acceptance-timeout 3600 --batch-acceptance-binary dist/generate_textures.exe --artifact-dir artifacts/windows_batch_acceptance/tk
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -376,7 +436,7 @@ jobs:
 
       - name: Create source zip
         run: |
-          Compress-Archive -Path generate_textures.py, nif_patcher.py, README.md, requirements.txt, assets, tests -DestinationPath skyrim-texture-generator-source.zip
+          Compress-Archive -Path generate_textures.py, nif_patcher.py, README.md, requirements.txt, assets, scripts, tests -DestinationPath skyrim-texture-generator-source.zip
         shell: pwsh
 
       - name: Create Qt migration-preview application zip
