@@ -2698,6 +2698,14 @@ class GenerateTexturesTests(unittest.TestCase):
             )
             self.assertEqual(detect_render_profile_from_mod_manager_context(context), "community_shaders")
 
+    def test_detect_render_profile_from_mod_manager_context_detects_cs_from_dynamic_cubemap_hint(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            loaded_mods=("Dynamic Cubemaps",),
+            enabled_plugins=("DynamicCubemaps.esp",),
+        )
+        self.assertEqual(detect_render_profile_from_mod_manager_context(context), "community_shaders")
+
     def test_detect_render_profile_from_mod_manager_context_detects_truepbr_from_textures_pbr_marker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

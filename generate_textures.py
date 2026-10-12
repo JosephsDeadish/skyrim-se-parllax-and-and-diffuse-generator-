@@ -2940,7 +2940,14 @@ _RENDER_PROFILE_PATH_HINTS: dict[str, tuple[str, ...]] = {
 
 _RENDER_PROFILE_MANAGER_HINT_TOKENS: dict[str, tuple[str, ...]] = {
     "enb": ("enb", "enbseries"),
-    "community_shaders": ("community shaders", "communityshaders", "complex material", "extended materials"),
+    "community_shaders": (
+        "community shaders",
+        "communityshaders",
+        "complex material",
+        "extended materials",
+        "dynamic cubemaps",
+        "dynamiccubemaps",
+    ),
     "truepbr": ("truepbr", "true pbr", "pbrnifpatcher", "pbr nif patcher", "rmaos", "ramos"),
 }
 
