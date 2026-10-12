@@ -56,6 +56,11 @@ def _assert_unchanged(before: dict, after: dict) -> None:
             raise AssertionError(f"Successful output was rewritten or removed: {name}")
 
 
+def _assert_failure_sources(failures: list, expected_sources: list[str]) -> None:
+    if [failure[0] for failure in failures] != expected_sources:
+        raise AssertionError("Wrong source failed")
+
+
 @contextmanager
 def _isolated_gui_state(generator):
     # Only this explicit automation entry point bypasses user preferences.
@@ -367,7 +372,7 @@ def run_acceptance(generator, report_path: str | Path, *, timeout_seconds: float
                         self.require(summary["failed"] == 1 and not summary["cancelled"], "Corrupt source failure missing")
                         self.require(summary["success"] + summary["resumed_completed"] == 8, "Expected eight valid successes")
                         self.require(self.checkpoint_payload()["completed_success_count"] == 8, "Failed DDS entered checkpoint")
-                        self.require(str(corrupt) in str(summary["failures"]), "Wrong source failed")
+                        _assert_failure_sources(summary["failures"], [str(corrupt)])
                         self.valid_snapshot = _fingerprints(output)
                         _assert_unchanged(self.cancel_snapshot, self.valid_snapshot)
                         self.require(len(self.valid_snapshot) == 24, "Expected 24 valid outputs")

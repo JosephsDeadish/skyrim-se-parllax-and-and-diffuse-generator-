@@ -59,6 +59,27 @@ class TestQtGuiAcceptance(unittest.TestCase):
         self.assertIs(gt.load_gui_state, load)
         self.assertIs(gt.save_gui_state, save)
 
+    def test_failure_sources_match_exact_windows_and_posix_paths(self):
+        for source in (r"C:\acceptance\source\zz_corrupt.dds",
+                       "/acceptance/source/zz_corrupt.dds"):
+            for failures in ([(source, "Invalid DDS")], [[source, "Invalid DDS"]]):
+                with self.subTest(source=source, failures=failures):
+                    acceptance._assert_failure_sources(failures, [source])
+
+    def test_failure_sources_reject_wrong_empty_and_extra_failures(self):
+        for source in (r"C:\acceptance\source\zz_corrupt.dds",
+                       "/acceptance/source/zz_corrupt.dds"):
+            for failures in (
+                [],
+                [[source + ".other", "Invalid DDS"]],
+                [["other.dds", f"Error mentions {source}"]],
+                [[source, "Invalid DDS"], ["other.dds", "Invalid DDS"]],
+                [[source, "Invalid DDS"], [source, "Invalid DDS"]],
+            ):
+                with self.subTest(source=source, failures=failures):
+                    with self.assertRaisesRegex(AssertionError, "Wrong source failed"):
+                        acceptance._assert_failure_sources(failures, [source])
+
     def test_unavailable_qt_still_persists_failure_evidence(self):
         generator = types.SimpleNamespace(QT_GUI_AVAILABLE=False, QT_GUI_IMPORT_ERROR="missing Qt")
         path = self.root / "report.json"

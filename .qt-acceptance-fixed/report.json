@@ -1,0 +1,23 @@
+{
+  "checkpoint": "/home/runner/work/skyrim-se-parllax-and-and-diffuse-generator-/skyrim-se-parllax-and-and-diffuse-generator-/.qt-acceptance-fixed/qt-acceptance-d78c29b24ff2/checkpoint.json",
+  "executable": "/usr/bin/python",
+  "frozen": false,
+  "passed": false,
+  "qt_messages": [],
+  "real_mod_samples": false,
+  "runs": {},
+  "scope": "synthetic",
+  "scratch_root": "/home/runner/work/skyrim-se-parllax-and-and-diffuse-generator-/skyrim-se-parllax-and-and-diffuse-generator-/.qt-acceptance-fixed/qt-acceptance-d78c29b24ff2",
+  "screenshots": [],
+  "source_dimensions": [
+    512,
+    1024,
+    512,
+    2048,
+    1024,
+    512,
+    2048,
+    4096
+  ],
+  "status": "running"
+}
