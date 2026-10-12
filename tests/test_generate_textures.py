@@ -24,6 +24,7 @@ from generate_textures import (
     _map_parallax_strength_to_nif_scale,
     _compute_tooltip_position,
     _compute_qt_initial_window_size,
+    _compute_safe_startup_geometry,
     _candidate_nif_patcher_search_dirs,
     compute_effective_ui_scale,
     _compute_nif_editor_controls_pane_height,
@@ -1003,6 +1004,21 @@ def _shield_art_image() -> Image.Image:
 
 
 class GenerateTexturesTests(unittest.TestCase):
+    def test_compute_safe_startup_geometry_scales_to_screen_size(self) -> None:
+        default_width, default_height, min_width, min_height = _compute_safe_startup_geometry(1920, 1080)
+        self.assertEqual(default_width, 960)
+        self.assertEqual(default_height, 700)
+        self.assertEqual(min_width, 720)
+        self.assertEqual(min_height, 520)
+
+        narrow_width, narrow_height, narrow_min_width, narrow_min_height = _compute_safe_startup_geometry(800, 600)
+        self.assertEqual(narrow_width, 720)
+        self.assertEqual(narrow_height, 520)
+        self.assertEqual(narrow_min_width, 504)
+        self.assertEqual(narrow_min_height, 364)
+        self.assertLessEqual(narrow_width, 800)
+        self.assertLessEqual(narrow_height, 600)
+
     def test_qt_field_label_adds_mnemonic_and_focus_buddy(self) -> None:
         class FakeLabel:
             text = ""

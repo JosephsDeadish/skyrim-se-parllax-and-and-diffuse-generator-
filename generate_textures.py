@@ -1291,6 +1291,26 @@ def compute_effective_ui_scale(*, pixels_per_inch: float, user_scale: float) -> 
     return max(0.8, min(2.5, baseline * user_scale))
 
 
+def _compute_safe_startup_geometry(
+    screen_width: int,
+    screen_height: int,
+    *,
+    default_width: int = 960,
+    default_height: int = 700,
+    minimum_width: int = 720,
+    minimum_height: int = 520,
+) -> tuple[int, int, int, int]:
+    available_width = max(1, int(screen_width) - 80)
+    available_height = max(1, int(screen_height) - 80)
+    desired_width = min(default_width, max(minimum_width, int(available_width * 0.90)))
+    desired_height = min(default_height, max(minimum_height, int(available_height * 0.82)))
+    desired_width = min(desired_width, available_width)
+    desired_height = min(desired_height, available_height)
+    min_width = min(desired_width, max(480, int(available_width * 0.70)))
+    min_height = min(desired_height, max(360, int(available_height * 0.70)))
+    return desired_width, desired_height, min_width, min_height
+
+
 def _compute_qt_initial_window_size(
     available_width: int,
     available_height: int,
@@ -10345,15 +10365,21 @@ if GUI_AVAILABLE:
                     self.root.deiconify()
                 except Exception:
                     pass
-                self.root.minsize(860, 620)
-                self.root.geometry("960x700")
+                screen_width = max(1, int(self.root.winfo_screenwidth() or 0))
+                screen_height = max(1, int(self.root.winfo_screenheight() or 0))
+                safe_width, safe_height, min_width, min_height = _compute_safe_startup_geometry(
+                    screen_width,
+                    screen_height,
+                )
+                self.root.minsize(min_width, min_height)
+                self.root.geometry(f"{safe_width}x{safe_height}")
                 self.root.update_idletasks()
                 width = max(0, int(self.root.winfo_width() or 0))
                 height = max(0, int(self.root.winfo_height() or 0))
                 # On Windows high-DPI / saved-state startup the window can briefly be
                 # restored to a tiny pre-layout size before the app settles. Reapply the
-                # default geometry until the size is back in the normal UI envelope.
-                if retries > 0 and (width < 640 or height < 460):
+                # safe geometry until the size is back in a sane screen-sized envelope.
+                if retries > 0 and (width < max(320, min_width * 0.8) or height < max(240, min_height * 0.8)):
                     self.root.after(75, lambda: self._restore_default_startup_geometry(retries=retries - 1))
             except Exception:
                 if retries > 0:
