@@ -97,6 +97,7 @@ from generate_textures import (
     build_complex_preview_image,
     build_complex_output_path,
     build_environment_mask_output_path,
+    build_nif_editor_action_guidance,
     build_rmaos_output_path,
     classify_material_type,
     collect_source_textures,
@@ -1824,6 +1825,15 @@ class GenerateTexturesTests(unittest.TestCase):
                         gui.root.destroy()
         finally:
             state_file.unlink(missing_ok=True)
+
+    def test_build_nif_editor_action_guidance_is_profile_aware(self) -> None:
+        vanilla_guidance = build_nif_editor_action_guidance("vanilla")
+        self.assertIn("Patch recipe", vanilla_guidance)
+        self.assertIn("standard parallax", vanilla_guidance)
+        self.assertIn("_cm.dds", build_nif_editor_action_guidance("community_shaders"))
+        self.assertIn("PBR flag", build_nif_editor_action_guidance("truepbr"))
+        self.assertIn("ENB POM", build_nif_editor_action_guidance("enb"))
+        self.assertIn("Fallout writes are guarded", build_nif_editor_action_guidance("vanilla", target_game="fallout"))
 
     def test_tk_nif_editor_opens_all_tabs_and_closes_cleanly(self) -> None:
         self._skip_unavailable_tk_display()

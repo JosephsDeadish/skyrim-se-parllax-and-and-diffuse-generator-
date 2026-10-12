@@ -3497,6 +3497,51 @@ def build_render_profile_brief_message(recommended_profile: str) -> str:
     )
 
 
+def build_nif_editor_action_guidance(
+    recommended_profile: str,
+    *,
+    target_game: str = "auto",
+) -> str:
+    """Return a concise, profile-aware summary of what the selected NIF patch should do."""
+    normalized = _normalize_render_profile(recommended_profile)
+    if normalized == "auto":
+        normalized = "vanilla"
+    target = str(target_game or "auto").strip().lower()
+    if normalized == "vanilla":
+        steps = (
+            "Patch recipe: keep standard parallax on for vanilla-safe meshes, keep slot 5 as _m.dds when present, "
+            "leave ENB POM off unless this NIF is intentionally ENB-specific, and avoid TruePBR flags unless this "
+            "mesh is already in a different renderer workflow."
+        )
+    elif normalized == "community_shaders":
+        steps = (
+            "Patch recipe: keep slot 1 as _n.dds, use standard parallax, prefer slot 5 _cm.dds (or _c.dds) for Community "
+            "Shaders, and leave ENB POM disabled unless you are intentionally switching the mesh to ENB-specific settings."
+        )
+    elif normalized == "truepbr":
+        steps = (
+            "Patch recipe: keep normals as _n.dds, use slot 5 _rmaos/_ramos for the TruePBR packed data map, enable the "
+            "PBR flag, and avoid ENB-style _msn slot-1 names or ENB POM settings on the same mesh."
+        )
+    elif normalized == "enb":
+        steps = (
+            "Patch recipe: slot 1 should usually be _msn.dds, slot 5 normally uses _m.dds, enable ENB POM with shader "
+            "type 3 together for the final parallax look, and keep vanilla or Community Shaders names out of this mesh unless "
+            "you are intentionally switching workflows."
+        )
+    else:
+        steps = (
+            "Patch recipe: review slot 1/3/5 naming, enable only the flags this renderer actually uses, and keep "
+            "destructive clears limited to a backup-verified subset of meshes."
+        )
+    if target == "fallout":
+        return (
+            f"{steps} Fallout writes are guarded and best-effort only: keep experimental writes opt-in, test a sample "
+            "mesh first, and prefer conservative no-op results over risky bulk edits."
+        )
+    return steps
+
+
 def build_safe_preset_change_summary(
     before: Mapping[str, object],
     after: Mapping[str, object],
@@ -13376,6 +13421,24 @@ if GUI_AVAILABLE:
                 )
                 option_warning_label.pack(fill="x", pady=(2, 0))
                 self._bind_responsive_wrap(opt_frame, option_warning_label, horizontal_padding=40, min_wrap=220)
+                profile_guidance_var = tk.StringVar(value="")
+                profile_guidance_var.trace_add("write", lambda *_: None)
+                profile_guidance_label = ttk.Label(
+                    opt_frame,
+                    textvariable=profile_guidance_var,
+                    justify=tk.LEFT,
+                    wraplength=860,
+                    style="Muted.TLabel",
+                )
+                profile_guidance_label.pack(fill="x", pady=(2, 0))
+                self._bind_responsive_wrap(opt_frame, profile_guidance_label, horizontal_padding=40, min_wrap=220)
+
+                def _refresh_profile_guidance(*_: object) -> None:
+                    profile_guidance_var.set(_nif_editor_profile_guidance_text())
+
+                _refresh_profile_guidance()
+                renderer_combo.bind("<<ComboboxSelected>>", _refresh_profile_guidance, add="+")
+                target_game_var.trace_add("write", _refresh_profile_guidance)
                 guarded_mode_note = ttk.Label(
                     opt_frame,
                     text=(
@@ -13460,6 +13523,13 @@ if GUI_AVAILABLE:
                     if effective == "community_shaders":
                         return "_cm.dds"
                     return "_m.dds"
+
+                def _nif_editor_profile_guidance_text() -> str:
+                    recommended_profile = _recommended_nif_editor_profile()
+                    return build_nif_editor_action_guidance(
+                        recommended_profile,
+                        target_game=target_game_var.get(),
+                    )
 
                 def _apply_renderer_defaults(*_: object) -> None:
                     recommended_profile = _recommended_nif_editor_profile()
