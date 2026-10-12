@@ -1014,10 +1014,12 @@ class GenerateTexturesTests(unittest.TestCase):
         narrow_width, narrow_height, narrow_min_width, narrow_min_height = _compute_safe_startup_geometry(800, 600)
         self.assertEqual(narrow_width, 720)
         self.assertEqual(narrow_height, 520)
-        self.assertEqual(narrow_min_width, 504)
-        self.assertEqual(narrow_min_height, 364)
+        self.assertEqual(narrow_min_width, 720)
+        self.assertEqual(narrow_min_height, 520)
         self.assertLessEqual(narrow_width, 800)
         self.assertLessEqual(narrow_height, 600)
+        self.assertLessEqual(narrow_min_width, narrow_width)
+        self.assertLessEqual(narrow_min_height, narrow_height)
 
     def test_qt_field_label_adds_mnemonic_and_focus_buddy(self) -> None:
         class FakeLabel:

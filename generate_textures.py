@@ -1306,8 +1306,10 @@ def _compute_safe_startup_geometry(
     desired_height = min(default_height, max(minimum_height, int(available_height * 0.82)))
     desired_width = min(desired_width, available_width)
     desired_height = min(desired_height, available_height)
-    min_width = min(desired_width, max(480, int(available_width * 0.70)))
-    min_height = min(desired_height, max(360, int(available_height * 0.70)))
+
+    min_width = minimum_width if available_width >= minimum_width else min(desired_width, max(480, int(available_width * 0.70)))
+    min_height = minimum_height if available_height >= minimum_height else min(desired_height, max(360, int(available_height * 0.70)))
+
     return desired_width, desired_height, min_width, min_height
 
 
