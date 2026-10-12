@@ -8710,6 +8710,7 @@ if GUI_AVAILABLE:
             _enable_process_dpi_awareness()
             self.root = tk.Tk()
             self.root.title(f"Skyrim Texture Generator v{APP_VERSION}")
+            self.root.minsize(860, 620)
             self.root.geometry("960x700")
             self.source_image: Image.Image | None = None
             self.preview_before: ImageTk.PhotoImage | None = None
@@ -8878,7 +8879,9 @@ if GUI_AVAILABLE:
                 text="Generate Skyrim/Fallout-ready texture maps from one source image (single file or full folder batch).",
                 justify=tk.LEFT,
                 anchor=tk.W,
+                wraplength=640,
             )
+            self._bind_responsive_wrap(top_primary_row, top_bar_message, horizontal_padding=220, min_wrap=320)
             top_bar_message.pack(side=tk.LEFT, fill=tk.X, expand=True)
             _patreon_button = ttk.Button(
                 top_primary_row,
@@ -8980,6 +8983,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(_input_label, "Enter a DDS file path or select a file/folder below.")
             _input_entry = ttk.Entry(file_frame, textvariable=self.input_var, width=80)
             _input_entry.grid(row=0, column=1, padx=6, pady=4, sticky=tk.EW)
+            file_frame.columnconfigure(1, weight=1, minsize=280)
             self._add_tooltip(
                 _input_entry,
                 "Source texture path. Use File/Folder buttons or Ctrl+O / Ctrl+Shift+O if drag-and-drop is unavailable.",
@@ -8999,6 +9003,7 @@ if GUI_AVAILABLE:
             self._add_tooltip(_output_label, "Output folder for generated textures. Default: next to the source texture.")
             self.output_entry = ttk.Entry(file_frame, textvariable=self.output_var, width=80)
             self.output_entry.grid(row=1, column=1, padx=6, pady=4, sticky=tk.EW)
+            file_frame.columnconfigure(1, weight=1, minsize=280)
             self._add_tooltip(self.output_entry, "Destination folder for generated files. Leave blank to write next to the source.")
             self.output_button = ttk.Button(file_frame, text="Browse", command=self._pick_output)
             self.output_button.grid(row=1, column=2, padx=4, pady=4)
@@ -9019,7 +9024,10 @@ if GUI_AVAILABLE:
                 anchor=tk.W,
             )
             _detected_context_label.grid(row=3, column=0, columnspan=5, sticky=tk.EW, pady=(4, 0))
-            file_frame.columnconfigure(1, weight=1)
+            file_frame.columnconfigure(1, weight=1, minsize=280)
+            file_frame.columnconfigure(2, minsize=100)
+            file_frame.columnconfigure(3, minsize=100)
+            file_frame.columnconfigure(4, minsize=100)
             self._update_output_location_controls()
             self.detected_mod_button.configure(
                 state=(tk.NORMAL if self.manager_context.loaded_texture_dirs else tk.DISABLED)
@@ -10330,7 +10338,9 @@ if GUI_AVAILABLE:
         def _restore_default_startup_geometry(self) -> None:
             try:
                 self.root.update_idletasks()
+                self.root.minsize(860, 620)
                 self.root.geometry("960x700")
+                self.root.update_idletasks()
             except Exception:
                 pass
 
