@@ -2498,7 +2498,15 @@ _WORKFLOW_PROFILE_TOKENS: dict[str, tuple[str, ...]] = {
 
 
 def detect_workflow_profile(path: Path) -> str | None:
-    combined = " ".join(path.parts).lower()
+    normalized = str(path).replace("\\", "/")
+    name = Path(normalized).name.lower()
+    if name.endswith(("_cm.dds", "_c.dds")):
+        return "community_shaders"
+    if name.endswith("_msn.dds"):
+        return "enb"
+    if name.endswith(("_rmaos.dds", "_ramos.dds")):
+        return "truepbr"
+    combined = " ".join(Path(normalized).parts).lower()
     for profile, tokens in _WORKFLOW_PROFILE_TOKENS.items():
         if any(token in combined for token in tokens):
             return profile
@@ -3497,10 +3505,49 @@ def build_render_profile_brief_message(recommended_profile: str) -> str:
     )
 
 
+def _describe_nif_workflow_state_for_guidance(
+    nif_path: str | Path | None,
+    *,
+    recommended_profile: str,
+) -> str:
+    """Summarize the path-derived workflow hint for the currently selected NIF."""
+    if nif_path is None or not str(nif_path).strip():
+        return "Selected NIF: none yet. Safety guidance is based on the chosen renderer profile and slot naming alone."
+    candidate = Path(str(nif_path)).expanduser()
+    file_name = candidate.name or "selected NIF"
+    detected = None
+    if candidate.name:
+        detected = detect_workflow_profile(candidate)
+    if detected is None and candidate.exists() and candidate.is_dir():
+        detected = detect_workflow_profile(candidate)
+    elif detected is None and candidate.suffix.lower() == ".nif":
+        detected = detect_workflow_profile(candidate)
+    if detected is None:
+        detected = detect_workflow_profile(candidate.parent)
+    if detected is None:
+        return (
+            f"Selected NIF: {file_name}. No clear renderer-path hint was found in the chosen file/folder, so "
+            "the safe path is to keep the patch conservative and re-check slot 1/3/5 naming before switching workflows."
+        )
+    detected_label = _RENDER_PROFILE_LABELS.get(detected, detected.replace("_", " ").title())
+    selected_label = _RENDER_PROFILE_LABELS.get(_normalize_render_profile(recommended_profile), recommended_profile.replace("_", " ").title())
+    if detected == _normalize_render_profile(recommended_profile):
+        return (
+            f"Selected NIF: {file_name}. Detected workflow: {detected_label}. safe patch path: keep this mesh on the "
+            f"{selected_label} preset and verify slot naming before writing."
+        )
+    return (
+        f"Selected NIF: {file_name}. Detected workflow: {detected_label}. safe patch path: do not force the mesh onto "
+        f"{selected_label} unless you intentionally switch workflows; keep the selected NIF on {detected_label} defaults until "
+        "its slot 1/3/5 paths and flags are confirmed."
+    )
+
+
 def build_nif_editor_action_guidance(
     recommended_profile: str,
     *,
     target_game: str = "auto",
+    nif_path: str | Path | None = None,
 ) -> str:
     """Return a concise, profile-aware summary of what the selected NIF patch should do."""
     normalized = _normalize_render_profile(recommended_profile)
@@ -3541,12 +3588,13 @@ def build_nif_editor_action_guidance(
             "destructive clears limited to a backup-verified subset of meshes. Likely mismatch: if slot names do not match "
             "the selected renderer, correct the naming first, then re-run the patch rather than forcing the wrong profile."
         )
+    path_note = _describe_nif_workflow_state_for_guidance(nif_path, recommended_profile=recommended_profile)
     if target == "fallout":
         return (
-            f"{steps} Fallout writes are guarded and best-effort only: keep experimental writes opt-in, test a sample "
+            f"{path_note} {steps} Fallout writes are guarded and best-effort only: keep experimental writes opt-in, test a sample "
             "mesh first, and prefer conservative no-op results over risky bulk edits."
         )
-    return steps
+    return f"{path_note} {steps}"
 
 
 def build_safe_preset_change_summary(
@@ -13536,6 +13584,7 @@ if GUI_AVAILABLE:
                     return build_nif_editor_action_guidance(
                         recommended_profile,
                         target_game=target_game_var.get(),
+                        nif_path=nif_path_var.get(),
                     )
 
                 def _apply_renderer_defaults(*_: object) -> None:
