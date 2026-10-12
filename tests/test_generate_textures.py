@@ -2526,6 +2526,20 @@ class GenerateTexturesTests(unittest.TestCase):
             "interface",
         )
 
+    def test_detect_workflow_profile_detects_renderer_path_hints_for_selected_nif(self) -> None:
+        self.assertEqual(
+            detect_workflow_profile(Path("mods/Dynamic Cube Maps/textures/architecture/stone.dds")),
+            "community_shaders",
+        )
+        self.assertEqual(
+            detect_workflow_profile(Path("mods/ENBSeries/textures/architecture/stone.dds")),
+            "enb",
+        )
+        self.assertEqual(
+            detect_workflow_profile(Path("mods/TruePBR/textures/architecture/stone.dds")),
+            "truepbr",
+        )
+
     def test_detect_workflow_profile_detects_renderer_and_content_profiles(self) -> None:
         self.assertEqual(detect_workflow_profile(Path("textures/vr/armor/helmet.dds")), "vr")
         self.assertEqual(detect_workflow_profile(Path("textures/performance/stone.dds")), "performance")

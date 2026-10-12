@@ -2510,6 +2510,9 @@ def detect_workflow_profile(path: Path) -> str | None:
     for profile, tokens in _WORKFLOW_PROFILE_TOKENS.items():
         if any(token in combined for token in tokens):
             return profile
+    for profile, tokens in _RENDER_PROFILE_PATH_HINTS.items():
+        if any(token in combined for token in tokens):
+            return profile
     return None
 
 
