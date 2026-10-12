@@ -191,7 +191,33 @@ PREVIEW_SIZE_PRESETS: dict[str, tuple[int, int]] = {
     "XL": (620, 460),
 }
 GUI_STATE_FILE = Path.home() / ".skyrim_texture_generator_gui_state.json"
-UI_TRANSLATIONS_DIR = Path(__file__).resolve().parent / "assets" / "translations"
+
+
+def _resolve_runtime_asset_root() -> Path:
+    source_root = Path(__file__).resolve().parent
+    candidate_roots: list[Path] = [source_root]
+    meipass_path = getattr(sys, "_MEIPASS", None)
+    if meipass_path:
+        candidate_roots.insert(0, Path(meipass_path).resolve())
+    for candidate_root in candidate_roots:
+        asset_root = candidate_root / "assets"
+        if asset_root.is_dir():
+            return asset_root
+    return source_root / "assets"
+
+
+def _resolve_ui_translations_dir() -> Path:
+    asset_root = _resolve_runtime_asset_root()
+    translations_dir = asset_root / "translations"
+    if translations_dir.exists():
+        return translations_dir
+    top_level_translations_dir = asset_root.parent / "translations"
+    if top_level_translations_dir.exists():
+        return top_level_translations_dir
+    return asset_root / "translations"
+
+
+UI_TRANSLATIONS_DIR = _resolve_ui_translations_dir()
 _GUI_STATE_DEFAULTS: dict[str, object] = {
     "input_path": "",
     "output_path": "",
@@ -1202,12 +1228,13 @@ def _bind_tk_main_window_shortcuts(
     root.bind("<Escape>", _cancel_if_processing, add="+")
 
 
-def discover_ui_languages(translations_dir: Path = UI_TRANSLATIONS_DIR) -> tuple[str, ...]:
-    if not translations_dir.exists():
+def discover_ui_languages(translations_dir: Path | None = None) -> tuple[str, ...]:
+    resolved_dir = translations_dir or _resolve_ui_translations_dir()
+    if not resolved_dir.exists():
         return ("en",)
     names = sorted(
         path.stem
-        for path in translations_dir.glob("*.json")
+        for path in resolved_dir.glob("*.json")
         if path.is_file() and path.stem.strip()
     )
     if "en" not in names:
@@ -1215,9 +1242,10 @@ def discover_ui_languages(translations_dir: Path = UI_TRANSLATIONS_DIR) -> tuple
     return tuple(dict.fromkeys(names))
 
 
-def load_ui_translations(language: str, translations_dir: Path = UI_TRANSLATIONS_DIR) -> dict[str, str]:
+def load_ui_translations(language: str, translations_dir: Path | None = None) -> dict[str, str]:
+    resolved_dir = translations_dir or _resolve_ui_translations_dir()
     resolved_language = (language or "en").strip().lower() or "en"
-    catalog_path = translations_dir / f"{resolved_language}.json"
+    catalog_path = resolved_dir / f"{resolved_language}.json"
     if not catalog_path.exists():
         return {}
     try:

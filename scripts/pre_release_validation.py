@@ -7,6 +7,7 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import re
 import shutil
 import struct
@@ -152,6 +153,8 @@ def _run_packaging_smoke(artifact_dir: Path) -> None:
             "numpy",
             "--add-data",
             f"{REPO_ROOT / 'nif_patcher.py'}:.",
+            "--add-data",
+            f"{REPO_ROOT / 'assets'}{os.pathsep}assets",
             "--name",
             "generate_textures_smoke",
             "--distpath",

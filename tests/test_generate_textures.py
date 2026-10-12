@@ -179,6 +179,19 @@ def _sample_image() -> Image.Image:
     return Image.new("RGB", (8, 8), color=(60, 100, 140))
 
 
+class TestUiLocalizationAssetResolution(unittest.TestCase):
+    def test_discover_ui_languages_uses_meipass_assets_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_root = Path(temp_dir)
+            translations_dir = bundle_root / "assets" / "translations"
+            translations_dir.mkdir(parents=True)
+            (translations_dir / "de.json").write_text('{"strings": {}}', encoding="utf-8")
+            (translations_dir / "en.json").write_text('{"strings": {}}', encoding="utf-8")
+            with mock.patch("generate_textures.sys._MEIPASS", str(bundle_root), create=True):
+                self.assertEqual(discover_ui_languages(), ("de", "en"))
+                self.assertEqual(load_ui_translations("en"), {})
+
+
 class TestNifPatcherLoading(unittest.TestCase):
     def test_candidate_nif_patcher_search_dirs_deduplicates(self) -> None:
         base = Path("/tmp/skyrim-texture-generator")
