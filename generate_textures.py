@@ -10335,14 +10335,27 @@ if GUI_AVAILABLE:
                     pass
             self._update_slider_auto_states()
 
-        def _restore_default_startup_geometry(self) -> None:
+        def _restore_default_startup_geometry(self, *, retries: int = 6) -> None:
             try:
                 self.root.update_idletasks()
+                try:
+                    self.root.state("normal")
+                    self.root.deiconify()
+                except Exception:
+                    pass
                 self.root.minsize(860, 620)
                 self.root.geometry("960x700")
                 self.root.update_idletasks()
+                width = max(0, int(self.root.winfo_width() or 0))
+                height = max(0, int(self.root.winfo_height() or 0))
+                if retries > 0 and (width < 600 or height < 420):
+                    self.root.after(75, lambda: self._restore_default_startup_geometry(retries=retries - 1))
             except Exception:
-                pass
+                if retries > 0:
+                    try:
+                        self.root.after(75, lambda: self._restore_default_startup_geometry(retries=retries - 1))
+                    except Exception:
+                        pass
 
         def _toggle_theme(self) -> None:
             self._apply_theme()
