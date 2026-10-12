@@ -2975,6 +2975,7 @@ _RENDER_PROFILE_CS_MARKERS: tuple[tuple[str, ...], ...] = (
     ("skse", "plugins", "communityshaders.dll"),
     ("skse", "plugins", "complexmaterial.dll"),
     ("skse", "plugins", "terrainshadows.dll"),
+    ("skse", "plugins", "dynamiccubemap.dll"),
     ("skse", "plugins", "dynamiccubemaps.dll"),
 )
 

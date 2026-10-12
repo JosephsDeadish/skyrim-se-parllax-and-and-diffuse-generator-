@@ -2712,6 +2712,18 @@ class GenerateTexturesTests(unittest.TestCase):
             )
             self.assertEqual(detect_render_profile_from_mod_manager_context(context), "community_shaders")
 
+    def test_detect_render_profile_from_mod_manager_context_detects_cs_from_singular_dynamic_cubemap_runtime_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plugin_dir = root / "SKSE" / "Plugins"
+            plugin_dir.mkdir(parents=True)
+            (plugin_dir / "DynamicCubemap.dll").write_bytes(b"")
+            context = ModManagerContext(
+                manager="Vortex",
+                staging_root=root,
+            )
+            self.assertEqual(detect_render_profile_from_mod_manager_context(context), "community_shaders")
+
     def test_detect_render_profile_from_mod_manager_context_detects_truepbr_from_textures_pbr_marker(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
