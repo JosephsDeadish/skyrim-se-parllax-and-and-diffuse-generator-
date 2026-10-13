@@ -1350,8 +1350,8 @@ class ModManagerContext:
     @property
     def summary(self) -> str:
         if self.manager is None:
-            return "No MO2/Vortex context detected."
-        details: list[str] = [f"Detected {self.manager}"]
+            return "No MO2/Vortex context detected. Folder and output choices remain manual unless you choose otherwise."
+        details: list[str] = [f"Detected {self.manager} context (advisory hint)"]
         if self.profile_name:
             details.append(f"profile {self.profile_name}")
         if self.loaded_texture_dirs:
@@ -1370,6 +1370,7 @@ class ModManagerContext:
             details.append(f"skeleton hints {', '.join(self.detected_skeleton_profiles)}")
         if self.game_root is not None:
             details.append(f"game root {self.game_root}")
+        details.append("your explicit folder/output choices still take priority")
         return " — ".join(details)
 
 
