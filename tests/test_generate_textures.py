@@ -94,7 +94,9 @@ from generate_textures import (
     apply_recommendations_by_auto_flags,
     build_nif_patch_options_for_generated_outputs,
     build_nif_patch_options_for_nif_editor,
+    build_render_profile_brief_message,
     build_render_profile_recommendation_message,
+    build_render_profile_family_mismatch_warning,
     build_complex_preview_image,
     build_complex_output_path,
     build_environment_mask_output_path,
@@ -133,6 +135,7 @@ from generate_textures import (
     parse_preview_jump_input,
     recommend_generation_settings,
     recommend_render_profile,
+    recommend_render_profile_details,
     resolve_nif_patch_defaults_for_render_profile,
     resolve_render_profile_guardrails,
     resolve_render_profile_mode_control_states,
@@ -2754,6 +2757,32 @@ class GenerateTexturesTests(unittest.TestCase):
             "truepbr",
         )
 
+    def test_recommend_render_profile_details_scores_truepbr_suffix_high(self) -> None:
+        details = recommend_render_profile_details(
+            Path("textures/architecture/stone_rmaos.dds"),
+            detected_role="environment_mask",
+            detected_suffix="_rmaos",
+        )
+        self.assertEqual(details.profile, "truepbr")
+        self.assertGreaterEqual(details.confidence, 0.95)
+        self.assertIn("TruePBR", details.recommendation_reason)
+        self.assertTrue(any("ENB" in text for text in details.why_not_others))
+        self.assertTrue(any("Community Shaders" in text for text in details.why_not_others))
+
+    def test_recommend_render_profile_details_scores_mod_manager_markers_high(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            loaded_mods=("Community Shaders", "Texture Pack"),
+        )
+        details = recommend_render_profile_details(
+            Path("textures/misc/neutral_asset.dds"),
+            manager_context=context,
+        )
+        self.assertEqual(details.profile, "community_shaders")
+        self.assertGreaterEqual(details.confidence, 0.85)
+        self.assertIn("mod-manager", details.recommendation_reason.lower())
+        self.assertTrue(any("TruePBR" in text for text in details.why_not_others))
+
     def test_recommend_generation_settings_leather_is_less_reflective_than_metal(self) -> None:
         source = _detailed_low_saturation_image()
         leather = recommend_generation_settings(source, Path("textures/armor/leather/hide_strap.dds"))
@@ -3375,6 +3404,46 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("<stem>_rmaos.dds", message)
         self.assertIn("do not swap in standalone blender-style _rough/_metallic/_ao names", message.lower())
         self.assertIn(MODDING_WIKI_SKYRIM_URL, message)
+
+    def test_build_render_profile_recommendation_message_includes_confidence_block(self) -> None:
+        recommendation = recommend_render_profile_details(
+            Path("textures/architecture/stone_rmaos.dds"),
+            detected_role="environment_mask",
+            detected_suffix="_rmaos",
+        )
+        message = build_render_profile_recommendation_message(
+            recommendation.profile,
+            recommendation=recommendation,
+        )
+        self.assertIn("Confidence / rationale:", message)
+        self.assertIn("Why this was recommended:", message)
+        self.assertIn("Why not the others:", message)
+
+    def test_build_render_profile_brief_message_includes_confidence_summary(self) -> None:
+        recommendation = recommend_render_profile_details(
+            Path("textures/architecture/stone_rmaos.dds"),
+            detected_role="environment_mask",
+            detected_suffix="_rmaos",
+        )
+        message = build_render_profile_brief_message(
+            recommendation.profile,
+            recommendation=recommendation,
+        )
+        self.assertIn("Confidence:", message)
+        self.assertIn("Why this was recommended:", message)
+        self.assertIn("Why not the others:", message)
+
+    def test_build_render_profile_family_mismatch_warning_marks_probable_incompatibility(self) -> None:
+        recommendation = recommend_render_profile_details(
+            Path("textures/architecture/stone_rmaos.dds"),
+            detected_role="environment_mask",
+            detected_suffix="_rmaos",
+        )
+        message = build_render_profile_family_mismatch_warning("enb", recommendation)
+        self.assertIsNotNone(message)
+        self.assertIn("probably incompatible", message.lower())
+        self.assertIn("ENB", message)
+        self.assertIn("TruePBR", message)
 
     def test_describe_render_profile_default_outputs_mentions_auto_checked_outputs(self) -> None:
         summary = describe_render_profile_default_outputs("enb")

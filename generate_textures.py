@@ -3447,7 +3447,11 @@ def describe_render_profile_files_to_create(profile: str) -> str:
     return f"Suggested files: {', '.join(files)}."
 
 
-def build_render_profile_recommendation_message(recommended_profile: str) -> str:
+def build_render_profile_recommendation_message(
+    recommended_profile: str,
+    *,
+    recommendation: RenderProfileRecommendation | None = None,
+) -> str:
     normalized = _normalize_render_profile(recommended_profile)
     if normalized == "auto":
         normalized = "vanilla"
@@ -3472,11 +3476,16 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
     lines = [
         "Renderer guidance below reflects this tool's built-in presets and channel mappings.",
         f"Suggested target: {label} ({workflow_hint}) → {tuple_hint}.",
+    ]
+    if recommendation is not None:
+        lines.extend(_format_render_profile_recommendation_detail_lines(recommendation))
+        lines.append("")
+    lines.extend([
         describe_render_profile_output_recommendation(normalized),
         describe_render_profile_default_outputs(normalized),
         "",
         "Renderer quick guide:",
-    ]
+    ])
     for profile in (
         "custom",
         "vanilla",
@@ -3515,18 +3524,302 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
     return "\n".join(lines)
 
 
-def build_render_profile_brief_message(recommended_profile: str) -> str:
+def build_render_profile_brief_message(
+    recommended_profile: str,
+    *,
+    recommendation: RenderProfileRecommendation | None = None,
+) -> str:
     normalized = _normalize_render_profile(recommended_profile)
     if normalized == "auto":
         normalized = "vanilla"
     label = _RENDER_PROFILE_LABELS.get(normalized, normalized.replace("_", " ").title())
     defaults = describe_render_profile_default_outputs(normalized)
     files = describe_render_profile_files_to_create(normalized)
-    return (
+    message = (
         f"Suggested target: {label}. {defaults} {files} "
         "Auto-detect prioritizes installed renderer markers/suffix hints first, then falls back to content profile hints. "
         "Click Help for full renderer/channel guide."
     )
+    if recommendation is not None:
+        message = f"{message} {_format_render_profile_brief_summary(recommendation)}"
+    return message
+
+
+@dataclass(frozen=True)
+class RenderProfileRecommendation:
+    profile: str
+    confidence: float
+    confidence_label: str
+    recommendation_reason: str
+    why_not_others: tuple[str, ...] = ()
+    evidence: tuple[str, ...] = ()
+    source: str = ""
+
+
+def _render_profile_family(profile: str) -> str:
+    normalized = _normalize_render_profile(profile)
+    if normalized in {"community_shaders", "truepbr", "enb"}:
+        return normalized
+    return "vanilla"
+
+
+def _render_profile_confidence_label(confidence: float) -> str:
+    if confidence >= 0.95:
+        return "very high"
+    if confidence >= 0.85:
+        return "high"
+    if confidence >= 0.70:
+        return "medium"
+    if confidence >= 0.55:
+        return "low"
+    return "very low"
+
+
+def _render_profile_family_reason_lines(profile: str) -> tuple[str, ...]:
+    normalized = _normalize_render_profile(profile)
+    family = _render_profile_family(normalized)
+    label = _RENDER_PROFILE_LABELS.get(normalized, normalized.replace("_", " ").title())
+    if family == "community_shaders":
+        return (
+            "Not ENB: ENB uses `_msn` or `_m`, not `_cm/_c`.",
+            "Not TruePBR: TruePBR uses `_rmaos/_ramos` plus JSON sidecars, not `_cm/_c`.",
+        )
+    if family == "truepbr":
+        return (
+            "Not ENB: ENB uses `_msn` or `_m`, not TruePBR packed maps.",
+            "Not Community Shaders Extended Materials: CS uses `_cm/_c`, not `_rmaos/_ramos`.",
+        )
+    if family == "enb":
+        return (
+            "Not Community Shaders: CS uses `_cm/_c`, not `_msn`.",
+            "Not TruePBR: TruePBR uses `_rmaos/_ramos` plus JSON sidecars, not `_msn`.",
+        )
+    return (
+        f"No ENB / Community Shaders / TruePBR markers were found, so {label} is the safest fit.",
+    )
+
+
+def recommend_render_profile_details(
+    input_path: Path | None,
+    *,
+    source: Image.Image | None = None,
+    detected_role: str | None = None,
+    detected_suffix: str | None = None,
+    material_type: str = "general",
+    workflow_profile: str | None = None,
+    manager_context: ModManagerContext | None = None,
+) -> RenderProfileRecommendation:
+    inferred_workflow = workflow_profile
+    inferred_material_type = material_type
+    if input_path is not None:
+        if inferred_workflow is None:
+            inferred_workflow = detect_workflow_profile(input_path)
+        if inferred_material_type == "general":
+            inferred_material_type = classify_material_type(input_path)
+    normalized_suffix = (detected_suffix or "").strip().lower()
+    matched_profile: str | None = None
+    matched_reason = ""
+    matched_evidence: list[str] = []
+    confidence = 0.55
+    source_label = "default"
+
+    if normalized_suffix in {"_cm", "_c"}:
+        matched_profile = "community_shaders"
+        matched_reason = f"Matched the Community Shaders packed-material suffix `{normalized_suffix}`."
+        matched_evidence.append(f"suffix `{normalized_suffix}`")
+        confidence = 0.98
+        source_label = "suffix"
+    elif normalized_suffix == "_msn":
+        matched_profile = "enb"
+        matched_reason = "Matched the ENB complex-material suffix `_msn`."
+        matched_evidence.append("suffix `_msn`")
+        confidence = 0.99
+        source_label = "suffix"
+    elif normalized_suffix in TRUEPBR_ENV_MASK_SUFFIXES or normalized_suffix in LEGACY_TRUEPBR_ENV_MASK_SUFFIXES:
+        matched_profile = "truepbr"
+        matched_reason = f"Matched the TruePBR packed-map suffix `{normalized_suffix}`."
+        matched_evidence.append(f"suffix `{normalized_suffix}`")
+        confidence = 0.98
+        source_label = "suffix"
+    elif detected_role == "complex_material_cm":
+        matched_profile = "community_shaders"
+        matched_reason = "Detected a Community Shaders complex-material role from the file name."
+        matched_evidence.append("detected role `complex_material_cm`")
+        confidence = 0.95
+        source_label = "role"
+    elif detected_role == "complex_material":
+        matched_profile = "enb"
+        matched_reason = "Detected an ENB complex-material role from the file name."
+        matched_evidence.append("detected role `complex_material`")
+        confidence = 0.95
+        source_label = "role"
+    else:
+        explicit_workflow_hint = _RENDER_PROFILE_WORKFLOW_HINTS.get((workflow_profile or "").strip().lower())
+        if explicit_workflow_hint is not None:
+            matched_profile = explicit_workflow_hint
+            source_label = "workflow hint"
+            if explicit_workflow_hint == "vanilla":
+                matched_reason = "Explicit interface workflow hint maps to vanilla-safe defaults."
+                confidence = 0.90
+                matched_evidence.append(f"explicit workflow hint `{workflow_profile}`")
+            else:
+                matched_reason = f"Explicit workflow hint maps to the { _RENDER_PROFILE_LABELS[explicit_workflow_hint] } preset."
+                confidence = 0.94
+                matched_evidence.append(f"explicit workflow hint `{workflow_profile}`")
+        elif inferred_material_type == "paper":
+            matched_profile = "vanilla"
+            matched_reason = "Paper and UI/interface textures are safer with vanilla defaults."
+            confidence = 0.82
+            source_label = "material fallback"
+            matched_evidence.append("material type `paper`")
+        elif input_path is not None:
+            combined = " ".join(input_path.parts).lower()
+            for profile, tokens in _RENDER_PROFILE_PATH_HINTS.items():
+                matched_token = next((token for token in tokens if token in combined), None)
+                if matched_token is None:
+                    continue
+                matched_profile = profile
+                source_label = "path hint"
+                matched_reason = f"Matched path hint `{matched_token}` for {_RENDER_PROFILE_LABELS[profile]}."
+                matched_evidence.append(f"path hint `{matched_token}`")
+                if len(matched_token) >= 12 or " " in matched_token:
+                    confidence = 0.92
+                elif len(matched_token) >= 8:
+                    confidence = 0.88
+                else:
+                    confidence = 0.82
+                break
+
+        if matched_profile is None:
+            manager_profile = detect_render_profile_from_mod_manager_context(manager_context)
+            if manager_profile is not None:
+                matched_profile = manager_profile
+                source_label = "manager context"
+                if manager_profile == "characters":
+                    matched_reason = "Body and skeleton hints in the mod manager context point to the characters preset."
+                    confidence = 0.72
+                    matched_evidence.append("body/skeleton hints")
+                else:
+                    matched_reason = f"Installed mod-manager markers point to {_RENDER_PROFILE_LABELS[manager_profile]}."
+                    confidence = 0.90
+                    if manager_context is not None:
+                        evidence_bits: list[str] = []
+                        if manager_context.manager:
+                            evidence_bits.append(str(manager_context.manager))
+                        if manager_context.loaded_mods:
+                            evidence_bits.append(f"{len(manager_context.loaded_mods)} mod(s)")
+                        if manager_context.enabled_plugins:
+                            evidence_bits.append(f"{len(manager_context.enabled_plugins)} plugin(s)")
+                        if manager_context.load_order:
+                            evidence_bits.append(f"{len(manager_context.load_order)} load-order entry/entries")
+                        if evidence_bits:
+                            matched_evidence.append("manager context: " + ", ".join(evidence_bits))
+                if source_label == "manager context" and manager_profile != "characters" and matched_profile in {"enb", "community_shaders", "truepbr"}:
+                    confidence = min(0.99, confidence + 0.03)
+
+        if matched_profile is None:
+            inferred_workflow_hint = _RENDER_PROFILE_WORKFLOW_HINTS.get((inferred_workflow or "").strip().lower())
+            if inferred_workflow_hint is not None:
+                matched_profile = inferred_workflow_hint
+                source_label = "workflow inference"
+                matched_reason = f"Inferred workflow hint maps to {_RENDER_PROFILE_LABELS[inferred_workflow_hint]}."
+                matched_evidence.append(f"inferred workflow `{inferred_workflow}`")
+                confidence = 0.84
+
+        if matched_profile is None and inferred_material_type in {"terrain", "architecture", "characters"}:
+            matched_profile = inferred_material_type
+            source_label = "material fallback"
+            matched_reason = f"Material type `{inferred_material_type}` fits the { _RENDER_PROFILE_LABELS[inferred_material_type] } preset better than a renderer-family preset."
+            matched_evidence.append(f"material type `{inferred_material_type}`")
+            confidence = 0.76
+
+        if matched_profile is None:
+            matched_profile = "vanilla"
+            source_label = "default fallback"
+            matched_reason = "No renderer-specific markers were found, so vanilla-safe defaults are the least risky choice."
+            matched_evidence.append("no renderer-family markers")
+            confidence = 0.56
+
+    normalized_profile = _normalize_render_profile(matched_profile)
+    if manager_context is not None:
+        manager_profile = detect_render_profile_from_mod_manager_context(manager_context)
+        if manager_profile == normalized_profile and source_label != "manager context":
+            matched_evidence.append(f"mod manager context also agrees with {_RENDER_PROFILE_LABELS[normalized_profile]}.")
+            confidence = min(0.99, confidence + 0.03)
+    inferred_workflow_hint = _RENDER_PROFILE_WORKFLOW_HINTS.get((inferred_workflow or "").strip().lower())
+    if inferred_workflow_hint == normalized_profile and source_label != "workflow inference":
+        matched_evidence.append(f"workflow inference also agrees with {_RENDER_PROFILE_LABELS[normalized_profile]}.")
+        confidence = min(0.99, confidence + 0.02)
+
+    confidence = max(0.0, min(0.99, confidence))
+    return RenderProfileRecommendation(
+        profile=normalized_profile,
+        confidence=confidence,
+        confidence_label=_render_profile_confidence_label(confidence),
+        recommendation_reason=matched_reason,
+        why_not_others=_render_profile_family_reason_lines(normalized_profile),
+        evidence=tuple(matched_evidence),
+        source=source_label,
+    )
+
+
+def build_render_profile_family_mismatch_warning(
+    selected_profile: str,
+    recommendation: RenderProfileRecommendation,
+) -> str | None:
+    normalized_selected = _normalize_render_profile(selected_profile)
+    if normalized_selected in {"auto", "custom"}:
+        return None
+    selected_family = _render_profile_family(normalized_selected)
+    recommended_family = _render_profile_family(recommendation.profile)
+    if selected_family == recommended_family:
+        return None
+    selected_label = _RENDER_PROFILE_LABELS.get(normalized_selected, normalized_selected.replace("_", " ").title())
+    recommended_label = _RENDER_PROFILE_LABELS.get(recommendation.profile, recommendation.profile.replace("_", " ").title())
+    lines = [
+        f"Selected renderer preset: {selected_label}.",
+        f"Suggested for this file: {recommended_label} ({recommendation.confidence_label} confidence).",
+        f"Why this was recommended: {recommendation.recommendation_reason}",
+    ]
+    if recommendation.evidence:
+        lines.append(f"Signals: {'; '.join(recommendation.evidence[:3])}")
+    if recommendation.why_not_others:
+        lines.append("Why not the others: " + " ".join(recommendation.why_not_others))
+    lines.extend(
+        [
+            "This is probably incompatible: ENB, Community Shaders, and TruePBR are separate families and should not be mixed on the same mesh.",
+            "Use the suggested family or switch the mesh on purpose before export.",
+        ]
+    )
+    return "\n\n".join(lines)
+
+
+def _format_render_profile_brief_summary(recommendation: RenderProfileRecommendation) -> str:
+    def _clean_clause(text: str) -> str:
+        return text.strip().rstrip(".")
+
+    summary = [
+        f"Confidence: {recommendation.confidence_label} ({recommendation.confidence:.2f}).",
+        f"Why this was recommended: {_clean_clause(recommendation.recommendation_reason)}.",
+    ]
+    if recommendation.evidence:
+        summary.append(f"Signals: {'; '.join(_clean_clause(text) for text in recommendation.evidence[:2])}.")
+    if recommendation.why_not_others:
+        summary.append(f"Why not the others: {' '.join(_clean_clause(text) for text in recommendation.why_not_others)}.")
+    return " ".join(summary)
+
+
+def _format_render_profile_recommendation_detail_lines(recommendation: RenderProfileRecommendation) -> list[str]:
+    lines = [
+        "Confidence / rationale:",
+        f"- Confidence: {recommendation.confidence_label} ({recommendation.confidence:.2f})",
+        f"- Why this was recommended: {recommendation.recommendation_reason}",
+    ]
+    if recommendation.evidence:
+        lines.append(f"- Signals: {'; '.join(recommendation.evidence[:3])}")
+    if recommendation.why_not_others:
+        lines.append(f"- Why not the others: {' '.join(recommendation.why_not_others)}")
+    return lines
 
 
 def _describe_nif_workflow_state_for_guidance(
@@ -3694,49 +3987,15 @@ def recommend_render_profile(
     manager_context: ModManagerContext | None = None,
 ) -> str:
     """Recommend target rendering profile for map format/mode defaults."""
-    inferred_workflow = workflow_profile
-    inferred_material_type = material_type
-    if input_path is not None:
-        if inferred_workflow is None:
-            inferred_workflow = detect_workflow_profile(input_path)
-        if inferred_material_type == "general":
-            inferred_material_type = classify_material_type(input_path)
-    normalized_suffix = (detected_suffix or "").strip().lower()
-    if normalized_suffix in {"_cm", "_c"}:
-        return "community_shaders"
-    if normalized_suffix == "_msn":
-        return "enb"
-    if normalized_suffix in TRUEPBR_ENV_MASK_SUFFIXES:
-        return "truepbr"
-    if normalized_suffix in LEGACY_TRUEPBR_ENV_MASK_SUFFIXES:
-        return "truepbr"
-    if detected_role == "complex_material_cm":
-        return "community_shaders"
-    if detected_role == "complex_material":
-        return "enb"
-    explicit_workflow_hint = _RENDER_PROFILE_WORKFLOW_HINTS.get((workflow_profile or "").strip().lower())
-    if explicit_workflow_hint is not None:
-        return explicit_workflow_hint
-    if inferred_material_type == "paper":
-        return "vanilla"
-    if input_path is not None:
-        combined = " ".join(input_path.parts).lower()
-        for profile, tokens in _RENDER_PROFILE_PATH_HINTS.items():
-            if any(token in combined for token in tokens):
-                return profile
-    manager_profile = detect_render_profile_from_mod_manager_context(manager_context)
-    if manager_profile is not None:
-        return manager_profile
-    inferred_workflow_hint = _RENDER_PROFILE_WORKFLOW_HINTS.get((inferred_workflow or "").strip().lower())
-    if inferred_workflow_hint is not None:
-        return inferred_workflow_hint
-    if inferred_material_type in {"terrain", "snow", "dirt", "sand"}:
-        return "terrain"
-    if inferred_material_type == "architecture":
-        return "architecture"
-    if inferred_material_type in {"skin", "fur"}:
-        return "characters"
-    return "vanilla"
+    return recommend_render_profile_details(
+        input_path,
+        source=source,
+        detected_role=detected_role,
+        detected_suffix=detected_suffix,
+        material_type=material_type,
+        workflow_profile=workflow_profile,
+        manager_context=manager_context,
+    ).profile
 
 
 def detect_render_profile_from_mod_manager_context(context: ModManagerContext | None) -> str | None:
@@ -12117,13 +12376,16 @@ if GUI_AVAILABLE:
                 return None
             return self.selected_inputs[max(0, min(self.current_preview_index, len(self.selected_inputs) - 1))]
 
-        def _recommended_render_profile_for_preview(self, preview_path: Path | None) -> str:
+        def _recommended_render_profile_details_for_preview(
+            self,
+            preview_path: Path | None,
+        ) -> RenderProfileRecommendation:
             if preview_path is None:
-                return "vanilla"
+                return recommend_render_profile_details(None)
             role_info = identify_skyrim_texture_role(preview_path)
             workflow_profile = detect_workflow_profile(preview_path)
             material_type = classify_material_type(preview_path)
-            return recommend_render_profile(
+            return recommend_render_profile_details(
                 preview_path,
                 source=self.source_image,
                 detected_role=role_info["role"] if role_info is not None else None,
@@ -12132,6 +12394,9 @@ if GUI_AVAILABLE:
                 workflow_profile=workflow_profile,
                 manager_context=self.manager_context,
             )
+
+        def _recommended_render_profile_for_preview(self, preview_path: Path | None) -> str:
+            return self._recommended_render_profile_details_for_preview(preview_path).profile
 
         def _apply_render_profile_modes(
             self,
@@ -12181,8 +12446,12 @@ if GUI_AVAILABLE:
 
         def _update_render_profile_recommendation(self, *, apply_auto: bool) -> str:
             preview_path = self._current_preview_path()
-            recommended_profile = self._recommended_render_profile_for_preview(preview_path)
-            message = build_render_profile_brief_message(recommended_profile)
+            recommendation = self._recommended_render_profile_details_for_preview(preview_path)
+            recommended_profile = recommendation.profile
+            message = build_render_profile_brief_message(
+                recommended_profile,
+                recommendation=recommendation,
+            )
             selected_profile = _normalize_render_profile(self.render_profile_var.get())
             if selected_profile == "auto":
                 self.render_profile_suggestion_var.set(message)
@@ -12200,12 +12469,12 @@ if GUI_AVAILABLE:
                         self.emboss_mode_var.set(False)
             elif selected_profile == "custom":
                 self.render_profile_suggestion_var.set(
-                    "Custom mode: manual controls are active; auto renderer suggestions are disabled."
+                    f"Custom mode: manual controls are active; auto renderer suggestions are advisory only. {message}"
                 )
             else:
                 selected_label = _RENDER_PROFILE_LABELS.get(selected_profile, selected_profile.replace("_", " ").title())
                 self.render_profile_suggestion_var.set(
-                    f"Target renderer locked to {selected_label}. Mode and mapped-output controls are locked to prevent conflicting GUI combinations."
+                    f"Target renderer locked to {selected_label}. {message}"
                 )
             return recommended_profile
 
@@ -12233,8 +12502,11 @@ if GUI_AVAILABLE:
 
         def _open_render_profile_help(self) -> None:
             preview_path = self._current_preview_path()
-            recommended_profile = self._recommended_render_profile_for_preview(preview_path)
-            help_text = build_render_profile_recommendation_message(recommended_profile)
+            recommendation = self._recommended_render_profile_details_for_preview(preview_path)
+            help_text = build_render_profile_recommendation_message(
+                recommendation.profile,
+                recommendation=recommendation,
+            )
             if self.render_profile_help_window is not None and self.render_profile_help_window.winfo_exists():
                 self.render_profile_help_window.deiconify()
                 self.render_profile_help_window.lift()
@@ -12800,6 +13072,8 @@ if GUI_AVAILABLE:
             emboss_mode: bool = False,
             relief_mode: bool = False,
             parallax_strength: float | None = None,
+            render_profile: str | None = None,
+            recommended_render_profile: RenderProfileRecommendation | None = None,
         ) -> bool:
             """Show any applicable sanity warnings. Returns False if user chose to abort."""
             warnings = get_generation_warnings(
@@ -12824,6 +13098,16 @@ if GUI_AVAILABLE:
                 emboss_mode=emboss_mode,
                 relief_mode=relief_mode,
             )
+            if (
+                render_profile is not None
+                and recommended_render_profile is not None
+            ):
+                mismatch_warning = build_render_profile_family_mismatch_warning(
+                    render_profile,
+                    recommended_render_profile,
+                )
+                if mismatch_warning is not None:
+                    warnings.append(("renderer_family_mismatch", mismatch_warning))
             for warning_id, message in warnings:
                 if not self._show_dismissible_warning_dialog("Generation Warning", warning_id, message):
                     return False
@@ -13112,7 +13396,8 @@ if GUI_AVAILABLE:
                 _source_role = _role_info["role"] if _role_info is not None else None
                 _source_hint = _role_info["hint"] if _role_info is not None else None
                 _source_suffix = _role_info["suffix"] if _role_info is not None else None
-                _recommended_profile = self._recommended_render_profile_for_preview(_context_source)
+                _recommended_recommendation = self._recommended_render_profile_details_for_preview(_context_source)
+                _recommended_profile = _recommended_recommendation.profile
                 _guardrails = resolve_render_profile_guardrails(
                     selected_profile=self.render_profile_var.get(),
                     recommended_profile=_recommended_profile,
@@ -13154,6 +13439,8 @@ if GUI_AVAILABLE:
                     parallax_mode=self.parallax_mode_var.get(),
                     emboss_mode=self.emboss_mode_var.get(),
                     relief_mode=self.relief_mode_var.get(),
+                    render_profile=self.render_profile_var.get(),
+                    recommended_render_profile=_recommended_recommendation,
                 ):
                     return
 
@@ -15675,6 +15962,15 @@ def _recommend_qt_render_profile(
     *,
     manager_context: ModManagerContext | None = None,
 ) -> str | None:
+    details = _recommend_qt_render_profile_details(input_text, manager_context=manager_context)
+    return details.profile if details is not None else None
+
+
+def _recommend_qt_render_profile_details(
+    input_text: str,
+    *,
+    manager_context: ModManagerContext | None = None,
+) -> RenderProfileRecommendation | None:
     normalized_input = input_text.strip()
     if not normalized_input:
         return None
@@ -15682,7 +15978,7 @@ def _recommend_qt_render_profile(
     if input_path.is_dir():
         return None
     role_info = identify_skyrim_texture_role(input_path)
-    return recommend_render_profile(
+    return recommend_render_profile_details(
         input_path,
         detected_role=role_info["role"] if role_info is not None else None,
         detected_suffix=role_info["suffix"] if role_info is not None else None,
@@ -17500,20 +17796,22 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             )
             use_profile_recommendation_button.setEnabled(False)
             return
-        suggested_profile = _recommend_qt_render_profile(
+        recommendation = _recommend_qt_render_profile_details(
             input_text,
             manager_context=manager_context,
         )
-        if suggested_profile is None:
+        if recommendation is None:
             profile_recommendation_label.setText("Select a texture file to see a renderer suggestion.")
             use_profile_recommendation_button.setEnabled(False)
             return
+        suggested_profile = recommendation.profile
         profile_label = _RENDER_PROFILE_LABELS.get(
             suggested_profile,
             suggested_profile.replace("_", " ").title(),
         )
         profile_recommendation_label.setText(
-            f"Suggested for this file: {profile_label}. This is a filename/path heuristic; confirm your installed renderer."
+            f"Suggested for this file: {profile_label}. {_format_render_profile_brief_summary(recommendation)} "
+            "Confirm your installed renderer before exporting."
         )
         use_profile_recommendation_button.setEnabled(
             qt_worker_thread is None and render_profile_combo.findText(suggested_profile) >= 0
@@ -17920,6 +18218,26 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         if not any(include_flags):
             QtWidgets.QMessageBox.warning(window, "No outputs selected", "Enable at least one generation output.")
             return
+        recommendation = _recommend_qt_render_profile_details(
+            input_text,
+            manager_context=manager_context,
+        )
+        if recommendation is not None:
+            mismatch_warning = build_render_profile_family_mismatch_warning(
+                render_profile_combo.currentText(),
+                recommendation,
+            )
+            if mismatch_warning is not None:
+                response = QtWidgets.QMessageBox.question(
+                    window,
+                    "Renderer family mismatch",
+                    mismatch_warning,
+                    QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                    QtWidgets.QMessageBox.StandardButton.No,
+                )
+                if response != QtWidgets.QMessageBox.StandardButton.Yes:
+                    status_label.setText("Generation cancelled due to renderer family mismatch.")
+                    return
         options = {
             "input_path": input_text,
             "output_dir": output_dir_edit.text().strip(),
