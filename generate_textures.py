@@ -9806,14 +9806,14 @@ if GUI_AVAILABLE:
             self.revert_button = ttk.Button(actions, text="Revert Process", command=self._revert_last_generation, state=tk.DISABLED)
             self.revert_button.pack(side=tk.LEFT, padx=(6, 0))
             self._add_tooltip(self.revert_button, "↩ Restore files from the most recent generation run.\nDisabled until a generation run has something to undo.")
-            nif_editor_button = ttk.Button(actions, text="NIF Editor (Skyrim/Fallout)…", command=self._open_nif_editor)
+            nif_editor_button = ttk.Button(actions, text="NIF Editor (Skyrim-supported)…", command=self._open_nif_editor)
             nif_editor_button.pack(side=tk.LEFT, padx=(12, 0))
             self._add_tooltip(
                 nif_editor_button,
-                "🔧 Open the advanced NIF Editor.\n"
-                "Review scan results before patching BSLightingShaderProperty flags and texture slots.\n"
+                "🔧 Open the NIF Editor.\n"
+                "Skyrim SE mesh patching is the supported workflow for scan + patch troubleshooting.\n"
                 "Use 'NIF game profile' inside the editor to switch Auto/Skyrim/Fallout mode.\n"
-                "Fallout writes remain experimental and require explicit safety options.\n"
+                "Fallout writes stay guarded and opt-in only for best-effort testing.\n"
                 "Always keep backups before patching NIFs.",
             )
             _status_label = ttk.Label(actions, textvariable=self.status_var, justify=tk.LEFT, anchor=tk.W)
@@ -16273,7 +16273,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_scan_layout = QtWidgets.QVBoxLayout(nif_scan_tab)
     nif_scan_layout.setSpacing(8)
     nif_scan_note = QtWidgets.QLabel(
-        "Read-only diagnostics for Skyrim and experimental Fallout meshes. "
+        "Read-only diagnostics for supported Skyrim meshes, with guarded best-effort Fallout support behind explicit opt-in gates. "
         "Scanning does not modify NIF files."
     )
     nif_scan_note.setWordWrap(True)
