@@ -224,6 +224,8 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "use_custom_output": False,
     "last_mod_manager": "",
     "last_mod_profile": "",
+    "last_renderer": "",
+    "last_output_target": "",
     "dark_mode": False,
     "show_batch_preview": False,
     "auto_optimize_large_batches": True,
@@ -786,6 +788,8 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     state["output_path"] = str(raw.get("output_path", state["output_path"]) or "")
     state["last_mod_manager"] = str(raw.get("last_mod_manager", state["last_mod_manager"]) or "").strip()
     state["last_mod_profile"] = str(raw.get("last_mod_profile", state["last_mod_profile"]) or "").strip()
+    state["last_renderer"] = str(raw.get("last_renderer", state["last_renderer"]) or "").strip()
+    state["last_output_target"] = str(raw.get("last_output_target", state["last_output_target"]) or "").strip()
     for key in (
         "use_custom_output",
         "dark_mode",
@@ -1383,6 +1387,8 @@ def build_mod_manager_context_hint(
     *,
     last_mod_manager: str = "",
     last_mod_profile: str = "",
+    last_renderer: str = "",
+    last_output_target: str = "",
 ) -> str:
     summary = (
         context.summary
@@ -1396,6 +1402,16 @@ def build_mod_manager_context_hint(
     normalized_profile = last_mod_profile.strip()
     if normalized_profile and (context is None or normalized_profile != context.profile_name):
         remembered_bits.append(f"profile {normalized_profile}")
+    normalized_renderer = last_renderer.strip()
+    if normalized_renderer:
+        renderer_label = _RENDER_PROFILE_LABELS.get(
+            _normalize_render_profile(normalized_renderer),
+            normalized_renderer.replace("_", " ").title(),
+        )
+        remembered_bits.append(f"renderer {renderer_label}")
+    normalized_output_target = last_output_target.strip()
+    if normalized_output_target:
+        remembered_bits.append(f"output target {normalized_output_target}")
     if remembered_bits:
         return f"{summary}\nLast remembered mod setup: {', '.join(remembered_bits)}"
     return summary
@@ -9375,6 +9391,8 @@ if GUI_AVAILABLE:
             self.manager_context = detect_mod_manager_context()
             self.last_mod_manager_memory = ""
             self.last_mod_profile_memory = ""
+            self.last_renderer_memory = ""
+            self.last_output_target_memory = ""
             self.last_input_browse_dir: Path | None = None
             self.preview_size_var = tk.StringVar(value="Medium")
             self.preview_refresh_after_id: str | None = None
@@ -11041,6 +11059,13 @@ if GUI_AVAILABLE:
             self.use_custom_output_var.set(bool(state["use_custom_output"]))
             self.last_mod_manager_memory = str(state.get("last_mod_manager", "") or "").strip()
             self.last_mod_profile_memory = str(state.get("last_mod_profile", "") or "").strip()
+            self.last_renderer_memory = str(
+                state.get("last_renderer", state.get("render_profile", "")) or ""
+            ).strip()
+            output_target_memory = str(state.get("last_output_target", "") or "").strip()
+            if not output_target_memory:
+                output_target_memory = str(state.get("output_path", "") or "").strip() or "next to input"
+            self.last_output_target_memory = output_target_memory
             self.dark_mode_var.set(bool(state["dark_mode"]))
             self.show_batch_preview_var.set(bool(state["show_batch_preview"]))
             self.auto_optimize_large_batches_var.set(bool(state.get("auto_optimize_large_batches", True)))
@@ -11104,6 +11129,8 @@ if GUI_AVAILABLE:
                     self.manager_context,
                     last_mod_manager=self.last_mod_manager_memory,
                     last_mod_profile=self.last_mod_profile_memory,
+                    last_renderer=self.last_renderer_memory,
+                    last_output_target=self.last_output_target_memory,
                 )
             )
 
@@ -11114,6 +11141,10 @@ if GUI_AVAILABLE:
                 "use_custom_output": self.use_custom_output_var.get(),
                 "last_mod_manager": self.manager_context.manager or self.last_mod_manager_memory,
                 "last_mod_profile": self.manager_context.profile_name or self.last_mod_profile_memory,
+                "last_renderer": _normalize_render_profile(self.render_profile_var.get()),
+                "last_output_target": self.output_var.get().strip()
+                if self.use_custom_output_var.get() and self.output_var.get().strip()
+                else "next to input",
                 "dark_mode": self.dark_mode_var.get(),
                 "show_batch_preview": self.show_batch_preview_var.get(),
                 "auto_optimize_large_batches": self.auto_optimize_large_batches_var.get(),
@@ -16846,6 +16877,8 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             manager_context,
             last_mod_manager=str(qt_saved_state.get("last_mod_manager", "") or ""),
             last_mod_profile=str(qt_saved_state.get("last_mod_profile", "") or ""),
+            last_renderer=str(qt_saved_state.get("last_renderer", "") or ""),
+            last_output_target=str(qt_saved_state.get("last_output_target", "") or ""),
         )
     )
     manager_context_label.setWordWrap(True)
@@ -18023,6 +18056,12 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             state["last_mod_manager"] = manager_context.manager
         if manager_context.profile_name is not None:
             state["last_mod_profile"] = manager_context.profile_name
+        state["last_renderer"] = _normalize_render_profile(render_profile_combo.currentText())
+        state["last_output_target"] = (
+            output_dir_edit.text().strip()
+            if output_dir_edit.text().strip()
+            else "next to input"
+        )
         save_gui_state(state)
 
     def _apply_profile_recommendation() -> None:

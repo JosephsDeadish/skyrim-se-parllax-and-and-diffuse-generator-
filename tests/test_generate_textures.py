@@ -1270,10 +1270,14 @@ class GenerateTexturesTests(unittest.TestCase):
             {
                 "last_mod_manager": "  Mod Organizer 2  ",
                 "last_mod_profile": "  Main  ",
+                "last_renderer": "  community_shaders  ",
+                "last_output_target": "  next to input  ",
             }
         )
         self.assertEqual(normalized["last_mod_manager"], "Mod Organizer 2")
         self.assertEqual(normalized["last_mod_profile"], "Main")
+        self.assertEqual(normalized["last_renderer"], "community_shaders")
+        self.assertEqual(normalized["last_output_target"], "next to input")
 
     def test_load_gui_state_defaults_when_file_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1282,6 +1286,8 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(state["output_path"], "")
         self.assertEqual(state["last_mod_manager"], "")
         self.assertEqual(state["last_mod_profile"], "")
+        self.assertEqual(state["last_renderer"], "")
+        self.assertEqual(state["last_output_target"], "")
         self.assertFalse(bool(state["dark_mode"]))
         self.assertTrue(bool(state["simplified_main_layout"]))
         self.assertTrue(bool(state["auto_suggestions"]))
@@ -1293,10 +1299,14 @@ class GenerateTexturesTests(unittest.TestCase):
             None,
             last_mod_manager="Mod Organizer 2",
             last_mod_profile="Main",
+            last_renderer="community_shaders",
+            last_output_target="next to input",
         )
         self.assertIn("not detected", message.lower())
         self.assertIn("Mod Organizer 2", message)
         self.assertIn("Main", message)
+        self.assertIn("renderer Community Shaders", message)
+        self.assertIn("output target next to input", message)
 
     def test_qt_generation_settings_merge_with_shared_gui_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1738,6 +1748,8 @@ class GenerateTexturesTests(unittest.TestCase):
                     "render_profile": "community_shaders",
                     "last_mod_manager": "Mod Organizer 2",
                     "last_mod_profile": "Main",
+                    "last_renderer": "community_shaders",
+                    "last_output_target": "/tmp/out",
                     "emboss_mode": True,
                     "include_diffuse": False,
                     "include_normal": True,
@@ -1777,6 +1789,8 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(loaded["render_profile"]), "community_shaders")
         self.assertEqual(str(loaded["last_mod_manager"]), "Mod Organizer 2")
         self.assertEqual(str(loaded["last_mod_profile"]), "Main")
+        self.assertEqual(str(loaded["last_renderer"]), "community_shaders")
+        self.assertEqual(str(loaded["last_output_target"]), "/tmp/out")
         self.assertTrue(bool(loaded["emboss_mode"]))
         self.assertFalse(bool(loaded["include_diffuse"]))
         self.assertTrue(bool(loaded["include_normal"]))
