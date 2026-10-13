@@ -25,6 +25,7 @@
     "📂 Source texture path.\nTip: use File/Folder buttons if drag-and-drop is unavailable.": "📂 Quelltexturpfad.\nTipp: Nutze Datei-/Ordner-Schaltflächen, wenn Drag-and-drop nicht verfügbar ist.",
     "🗂 Open one DDS/PNG/JPG texture file.": "🗂 Eine DDS/PNG/JPG-Texturdatei öffnen.",
     "📁 Select a folder of textures for batch processing.": "📁 Einen Texturordner für die Stapelverarbeitung auswählen.",
+    "Detected Mod (Hint)": "Erkannter Mod (Hinweis)",
     "🧙 Use the detected MO2/Vortex mod texture folder when available (advisory only).": "🧙 Verwende den erkannten MO2/Vortex-Mod-Texturordner, wenn verfügbar (nur als Hinweis).",
     "📦 Write generated outputs to a different folder instead of next to input files.": "📦 Erzeugte Ausgaben in einen anderen Ordner schreiben statt neben die Eingabedateien.",
     "🎨 Generate the diffuse (colour) texture.\nThis is the one that makes your rock look like a rock and not a void of existential dread.": "🎨 Diffuse-/Albedo-Textur erzeugen.",
