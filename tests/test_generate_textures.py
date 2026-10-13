@@ -2683,6 +2683,10 @@ class GenerateTexturesTests(unittest.TestCase):
             "truepbr",
         )
 
+    def test_detect_workflow_profile_detects_legacy_truepbr_alias_suffixes(self) -> None:
+        for suffix in ("_orm", "_orms", "_mrao", "_mra"):
+            self.assertEqual(detect_workflow_profile(Path(f"textures/architecture/stone{suffix}.dds")), "truepbr")
+
     def test_recommend_render_profile_detects_truepbr_from_orm_suffix(self) -> None:
         self.assertEqual(
             recommend_render_profile(

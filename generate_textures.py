@@ -2504,7 +2504,8 @@ def detect_workflow_profile(path: Path) -> str | None:
         return "community_shaders"
     if name.endswith("_msn.dds"):
         return "enb"
-    if name.endswith(("_rmaos.dds", "_ramos.dds")):
+    truepbr_suffixes = tuple(f"{suffix}.dds" for suffix in (*TRUEPBR_ENV_MASK_SUFFIXES, *LEGACY_TRUEPBR_ENV_MASK_SUFFIXES))
+    if name.endswith(truepbr_suffixes):
         return "truepbr"
     combined = " ".join(Path(normalized).parts).lower()
     for profile, tokens in _RENDER_PROFILE_PATH_HINTS.items():
