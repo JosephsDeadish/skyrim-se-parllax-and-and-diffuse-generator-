@@ -34,7 +34,7 @@ When the tool is launched from **MO2** or **Vortex**, it now tries to detect the
 - **Vortex**: looks for the active profile/staging layout, reads `modlist.txt` plus `plugins.txt`/`loadorder.txt` when present, and exposes detected managed texture folders in the GUI.
 - Renderer auto-detect now uses loaded mod names plus concrete runtime markers from that MO2/Vortex context (for example `d3d11.dll`/`enbseries.ini`, `SKSE/Plugins/CommunityShaders.dll`, and `SKSE/Plugins/PBRNifPatcher.dll`) to better infer `ENB`, `Community Shaders`, or `TruePBR` defaults when texture path hints are unclear.
 - Context detection now also surfaces body/skeleton compatibility hints (for example `CBBE`, `3BA`, `UNP`, `BHUNP`, `HIMBO`, `SAM`, and `XPMSSE`) from enabled mod/plugin/load-order names.
-- The GUI shows the detected context under the file picker and adds a **Loaded Mod** button for faster browsing.
+- The GUI shows the detected context under the file picker and adds a **Detected Mod (Hint)** button for faster browsing.
 
 ## Usage
 
