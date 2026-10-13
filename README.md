@@ -204,7 +204,7 @@ The Qt migration UI keeps **Advanced map strengths** (which change generated pix
 
 #### For users (installing mods)
 
-- True PBR brings a more modern physically based look than vanilla or ENB/CS complex-material-only setups, and can combine effects such as parallax, glow, subsurface scattering, or dual-layer materials on the same shader path.
+- True PBR is the Community Shaders PBR path; it brings a more modern physically based look than vanilla or ENB/CS complex-material-only setups, and can combine effects such as parallax, glow, subsurface scattering, or dual-layer materials when the shader path supports them.
 - Because it follows a standard PBR workflow, materials exported from modern tools/texturing suites are easier to reuse without blindly retuning brightness/specular for Skyrim's older vanilla conventions.
 - True PBR requires **Community Shaders** to render correctly in-game.
 - True PBR texture packs will not display correctly in tools/render paths that do not run Community Shaders (for example Creation Kit, Outfit Studio, or Bodyslide preview paths).

@@ -3498,16 +3498,16 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
         [
             "",
             "TruePBR essentials (Community Shaders):",
-            "- For players/users: TruePBR gives more realistic lighting than vanilla/complex material, can combine effects like parallax, glow, subsurface scattering, or dual-layer materials, and follows the same physically-based workflow used across modern game rendering pipelines.",
+            "- For players/users: TruePBR is the Community Shaders PBR path; it gives more realistic lighting than vanilla or ENB/CS complex-material-only setups and can combine effects like parallax, glow, subsurface scattering, or dual-layer materials when the shader path supports them.",
             "- Runtime requirement: TruePBR texture packs need Community Shaders enabled in-game. They will not preview/render correctly in non-CS tool paths such as Creation Kit, Outfit Studio, or Bodyslide.",
             "- For texture artists/developers: ship both sides of the workflow — (1) meshes flagged for PBR or PGPatcher/PBRNifPatcher JSON rules, and (2) the actual TruePBR textures.",
             "- Core texture set for this tool: <stem>.dds diffuse, <stem>_n.dds normal, and packed <stem>_rmaos.dds/<stem>_ramos.dds data. Do not swap in standalone Blender-style _rough/_metallic/_ao names as the main TruePBR slot-5 texture.",
             "- Legacy alias note: if you imported older _orm/_orms/_mrao/_mra assets, normalize them to _rmaos/_ramos naming before shipping to keep workflows unambiguous.",
             "- Core mesh tuning: Specular Level controls non-metal reflectance, Roughness Scale controls surface smoothness, and Displacement Scale controls parallax/displacement depth.",
             "- Colour-space rule of thumb: save in-game colour textures as sRGB; save data textures like normal/displacement/RMAOS in linear space.",
-            "- Landscape workflow: use Data/PBRTextureSets/<TXST_EDID>.json with roughnessScale, displacementScale, and specularLevel values.",
+            "- Landscape workflow: use Data/PBRTextureSets/<TXST_EDID>.json with roughnessScale, displacementScale, and specularLevel values; material objects use Data/PBRMaterialObjects/<EDID>.json and single-pass records.",
             "- Feature compatibility: subsurface scattering conflicts with dual-layer material; glint conflicts with fuzz and dual-layer; fuzz conflicts with glint and dual-layer; hair model is a standalone shading model; dual-layer material works with parallax/emission but not glint/fuzz/subsurface.",
-            "- Material objects: PBR MATOs need single-pass records plus matching Data/PBRMaterialObjects JSON and only render on PBR-enabled surfaces.",
+            "- Material objects: PBR MATOs only render on PBR-enabled surfaces and rely on single-pass records plus matching Data/PBRMaterialObjects JSON.",
             f"- Reference: {MODDING_WIKI_SKYRIM_URL}",
         ]
     )

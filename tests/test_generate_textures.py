@@ -3315,6 +3315,8 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("TruePBR essentials (Community Shaders):", message)
         self.assertIn("For players/users", message)
         self.assertIn("Landscape workflow:", message)
+        self.assertIn("PBRTextureSets", message)
+        self.assertIn("PBRMaterialObjects", message)
         self.assertIn("Feature compatibility:", message)
         self.assertIn("<stem>_rmaos.dds", message)
         self.assertIn("do not swap in standalone blender-style _rough/_metallic/_ao names", message.lower())
