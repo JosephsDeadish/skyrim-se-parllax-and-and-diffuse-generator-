@@ -1350,12 +1350,12 @@ class ModManagerContext:
     @property
     def summary(self) -> str:
         if self.manager is None:
-            return "No MO2/Vortex context detected. Folder and output choices remain manual unless you choose otherwise."
-        details: list[str] = [f"Detected {self.manager} context (advisory hint)"]
+            return "No MO2/Vortex context detected — suggestions remain advisory, and your selected folders still take priority."
+        details: list[str] = [f"Detected {self.manager} context (advisory suggestion only)"]
         if self.profile_name:
             details.append(f"profile {self.profile_name}")
         if self.loaded_texture_dirs:
-            details.append(f"{len(self.loaded_texture_dirs)} loaded mod texture folder(s)")
+            details.append(f"{len(self.loaded_texture_dirs)} detected mod texture folder(s)")
         elif self.loaded_mods:
             details.append(f"{len(self.loaded_mods)} loaded mod(s)")
         if self.enabled_plugins:
@@ -1370,7 +1370,7 @@ class ModManagerContext:
             details.append(f"skeleton hints {', '.join(self.detected_skeleton_profiles)}")
         if self.game_root is not None:
             details.append(f"game root {self.game_root}")
-        details.append("your explicit folder/output choices still take priority")
+        details.append("explicit folder/output choices win")
         return " — ".join(details)
 
 
@@ -8845,9 +8845,9 @@ _LIGHT_THEME: dict[str, str] = {
     "button_bg": "#e0e0e0",
     "trough": "#c8c8c8",
     "auto_trough": "#66b7ff",
-    "tooltip_bg": "#ffffcc",
-    "tooltip_fg": "#000000",
-    "disabled_fg": "#888888",
+    "tooltip_bg": "#fff8d6",
+    "tooltip_fg": "#1f2937",
+    "disabled_fg": "#92989f",
     "muted_fg": "#5f6368",
     "info_fg": "#1d4ed8",
     "success_fg": "#166534",
@@ -8856,14 +8856,14 @@ _LIGHT_THEME: dict[str, str] = {
 }
 _DARK_THEME: dict[str, str] = {
     "bg": "#1e1e2e",
-    "fg": "#cdd6f4",
-    "field_bg": "#313244",
-    "button_bg": "#45475a",
+    "fg": "#e6eaf2",
+    "field_bg": "#2b2d3a",
+    "button_bg": "#3a3d52",
     "trough": "#585b70",
     "auto_trough": "#2b7da8",
-    "tooltip_bg": "#313244",
-    "tooltip_fg": "#cdd6f4",
-    "disabled_fg": "#6c7086",
+    "tooltip_bg": "#2f364a",
+    "tooltip_fg": "#edf3ff",
+    "disabled_fg": "#7a8197",
     "muted_fg": "#bac2de",
     "info_fg": "#89b4fa",
     "success_fg": "#a6e3a1",
@@ -13193,12 +13193,11 @@ if GUI_AVAILABLE:
                 intro_label = tk.Label(
                     controls_wrapper,
                     text=(
-                        "Advanced NIF editing — keep backups of your NIF files before patching.\n\n"
-                        "Patch Skyrim SE NIF files so generated textures work in-game. Fallout writes remain experimental "
-                        "and require explicit safety options.\n"
-                        "Quick start: choose your target renderer first, then use Scan NIFs to review, "
-                        "Apply patch to enable features, Remove features to disable them, and Restore backups "
-                        "to roll back .nif.bak copies."
+                        "Skyrim-first NIF editing: the default supported flow is safe, guided, and reversible.\n\n"
+                        "Use this editor for standard Skyrim SE texture-slot patching and validation. Fallout-specific writes "
+                        "remain guarded, opt-in, and best-effort only.\n\n"
+                        "Quick start: choose the target renderer, review with Scan NIFs, then use Apply patch for supported changes, "
+                        "Remove features for cleanup, and Restore backups to roll back any .nif.bak copies."
                     ),
                     justify=tk.LEFT,
                     wraplength=740,
@@ -13474,16 +13473,15 @@ if GUI_AVAILABLE:
                 guide_label = ttk.Label(
                     help_tab,
                     text=(
-                        "Slot guide — Skyrim SE texture naming (NOT Blender defaults):\n"
-                        "  Slot 0: diffuse — vanilla Skyrim uses just <stem>.dds (no _d/_diffuse/_albedo suffix; those are Blender exports, not Skyrim).\n"
-                        "  Slot 1: normal — _n.dds for vanilla/CS/TruePBR, or _msn.dds for ENB complex material (MSN = Model Space Normal).\n"
-                        "  Slot 2: glow/emissive — prefer _g.dds. Legacy aliases such as _em/_emit/_glow may exist in older pipelines, but this tool normalizes guidance toward _g.\n"
-                        "  Slot 3: parallax height — _p.dds (greyscale height map). Used by all parallax workflows.\n"
-                        "  Slot 4: cubemap/reflection — _e.dds, _env.dds, or _cube.dds.\n"
-                        "  Slot 5: env mask / packed data — _m.dds (vanilla greyscale or ENB RGBA), _cm/_c.dds (CS Extended Materials), _rmaos/_ramos.dds (TruePBR under textures\\pbr\\); not standalone _rough/_metallic/_ao exports.\n"
-                        "Enable standard parallax for vanilla/community shaders/truepbr. Enable ENB POM only for ENB setups. "
-                        "Enable the TruePBR/PBR flag when using Community Shaders TruePBR _rmaos + JSON workflows. "
-                        "Enable environment mapping only when slot 5 has a texture. Force shader type 3 to write stronger parallax scale."
+                        "Slot guide — Skyrim SE naming is the default support path (NOT Blender defaults):\n"
+                        "  Slot 0: diffuse — use <stem>.dds in Skyrim; avoid Blender-style _d/_diffuse/_albedo suffixes unless the mod specifically wants them.\n"
+                        "  Slot 1: normal — _n.dds for vanilla/CS/TruePBR, or _msn.dds for ENB Complex Material (MSN = Model Space Normal).\n"
+                        "  Slot 2: glow/emissive — prefer _g.dds. Legacy aliases such as _em/_emit/_glow may appear in older pipelines, but _g is the safer default.\n"
+                        "  Slot 3: parallax height — _p.dds (greyscale/height map). This is used by standard parallax and POM workflows.\n"
+                        "  Slot 4: cubemap/reflection — _e.dds, _env.dds, or _cube.dds. If this is missing or mismatched, reflective material behavior can look wrong.\n"
+                        "  Slot 5: env mask / packed data — _m.dds (vanilla greyscale or ENB RGBA), _cm/_c.dds (Community Shaders Extended Material), _rmaos/_ramos.dds (TruePBR under textures\\pbr\\). Not standalone roughness/metal/ao exports.\n"
+                        "Use standard parallax for Skyrim/CS/TruePBR. Use ENB POM only for ENB-specific setups. Enable the TruePBR/PBR flag only when the mesh is using TruePBR _rmaos + JSON workflows. "
+                        "Enable environment mapping only when slot 5 actually contains a relevant texture. Force shader type 3 only when you understand the mesh and want stronger parallax scale."
                     ),
                     justify=tk.LEFT,
                     wraplength=860,
@@ -13520,8 +13518,8 @@ if GUI_AVAILABLE:
                 guarded_mode_note = ttk.Label(
                     opt_frame,
                     text=(
-                        "Guarded mode (safer): use Scan + Apply patch for conservative edits.\n"
-                        "Destructive actions (Disable / clear) remove flags or slot paths; keep backups and verify results before large batch runs."
+                        "Guarded mode (recommended): start with Scan + Apply patch for conservative, reversible edits.\n"
+                        "Destructive actions (Disable / clear) remove flags or slot paths; keep .nif.bak backups and verify a small sample before larger batch runs."
                     ),
                     justify=tk.LEFT,
                     wraplength=860,
