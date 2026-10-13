@@ -208,6 +208,7 @@ The Qt migration UI keeps **Advanced map strengths** (which change generated pix
 - Because it follows a standard PBR workflow, materials exported from modern tools/texturing suites are easier to reuse without blindly retuning brightness/specular for Skyrim's older vanilla conventions.
 - True PBR requires **Community Shaders** to render correctly in-game.
 - True PBR texture packs will not display correctly in tools/render paths that do not run Community Shaders (for example Creation Kit, Outfit Studio, or Bodyslide preview paths).
+- If you already have exported PBR textures, TruePBR Manager can assemble them into a working Skyrim mod; it handles channel packing, compression formats, texture-slot mapping, JSON sidecars, and folder structure.
 - Keep renderer workflows separate:
   - TruePBR: `_n + _rmaos/_ramos + JSON` metadata workflow
   - Community Shaders Extended Materials: `_cm/_c/_C`
