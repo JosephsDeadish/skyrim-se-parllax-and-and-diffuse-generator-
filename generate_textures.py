@@ -14139,6 +14139,7 @@ if GUI_AVAILABLE:
                         clear_cubemap_texture_path=clear_cubemap_var.get(),
                         target_game=target_game_var.get(),
                         experimental_fallout_write=experimental_fallout_write_var.get(),
+                        dry_run=dry_run_var.get(),
                     )
                     option_warning_var.set("⚠ " + " | ".join(warnings[:3]) if warnings else "")
 
