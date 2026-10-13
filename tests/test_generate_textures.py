@@ -2539,6 +2539,10 @@ class GenerateTexturesTests(unittest.TestCase):
             detect_workflow_profile(Path("mods/TruePBR/textures/architecture/stone.dds")),
             "truepbr",
         )
+        self.assertEqual(
+            detect_workflow_profile(Path("Data/PBRTextureSets/LandscapeDirt01.json")),
+            "truepbr",
+        )
 
     def test_detect_workflow_profile_detects_renderer_and_content_profiles(self) -> None:
         self.assertEqual(detect_workflow_profile(Path("textures/vr/armor/helmet.dds")), "vr")

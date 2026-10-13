@@ -2957,7 +2957,16 @@ _RENDER_PROFILE_PATH_HINTS: dict[str, tuple[str, ...]] = {
         "dynamiccubemap",
         "dynamiccubemaps",
     ),
-    "truepbr": ("truepbr", "true_pbr", "true-pbr", "pbrnifpatcher", "textures pbr"),
+    "truepbr": (
+        "truepbr",
+        "true_pbr",
+        "true-pbr",
+        "pbrnifpatcher",
+        "textures pbr",
+        "pbrtexturesets",
+        "data/pbrtexturesets",
+        "pbrtextureset",
+    ),
 }
 
 _RENDER_PROFILE_MANAGER_HINT_TOKENS: dict[str, tuple[str, ...]] = {
