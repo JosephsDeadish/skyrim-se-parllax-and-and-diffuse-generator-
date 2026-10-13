@@ -94,6 +94,7 @@ from generate_textures import (
     apply_recommendations_by_auto_flags,
     build_nif_patch_options_for_generated_outputs,
     build_nif_patch_options_for_nif_editor,
+    build_mod_manager_context_hint,
     build_render_profile_brief_message,
     build_render_profile_recommendation_message,
     build_render_profile_family_mismatch_warning,
@@ -1264,16 +1265,38 @@ class GenerateTexturesTests(unittest.TestCase):
         normalized = _normalize_gui_state({"use_custom_output": True, "output_path": ""})
         self.assertFalse(bool(normalized["use_custom_output"]))
 
+    def test_normalize_gui_state_preserves_last_mod_context_memory(self) -> None:
+        normalized = _normalize_gui_state(
+            {
+                "last_mod_manager": "  Mod Organizer 2  ",
+                "last_mod_profile": "  Main  ",
+            }
+        )
+        self.assertEqual(normalized["last_mod_manager"], "Mod Organizer 2")
+        self.assertEqual(normalized["last_mod_profile"], "Main")
+
     def test_load_gui_state_defaults_when_file_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             state = load_gui_state(Path(temp_dir) / "missing-state.json")
         self.assertEqual(state["input_path"], "")
         self.assertEqual(state["output_path"], "")
+        self.assertEqual(state["last_mod_manager"], "")
+        self.assertEqual(state["last_mod_profile"], "")
         self.assertFalse(bool(state["dark_mode"]))
         self.assertTrue(bool(state["simplified_main_layout"]))
         self.assertTrue(bool(state["auto_suggestions"]))
         self.assertFalse(bool(state["qt_show_advanced_map_strengths"]))
         self.assertFalse(bool(state["qt_show_truepbr_sidecar_settings"]))
+
+    def test_build_mod_manager_context_hint_includes_remembered_setup_when_current_detection_missing(self) -> None:
+        message = build_mod_manager_context_hint(
+            None,
+            last_mod_manager="Mod Organizer 2",
+            last_mod_profile="Main",
+        )
+        self.assertIn("not detected", message.lower())
+        self.assertIn("Mod Organizer 2", message)
+        self.assertIn("Main", message)
 
     def test_qt_generation_settings_merge_with_shared_gui_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1713,6 +1736,8 @@ class GenerateTexturesTests(unittest.TestCase):
                     "env_mask_mode": "complex",
                     "parallax_mode": "occlusion",
                     "render_profile": "community_shaders",
+                    "last_mod_manager": "Mod Organizer 2",
+                    "last_mod_profile": "Main",
                     "emboss_mode": True,
                     "include_diffuse": False,
                     "include_normal": True,
@@ -1750,6 +1775,8 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(loaded["env_mask_mode"]), "complex")
         self.assertEqual(str(loaded["parallax_mode"]), "occlusion (ENB/POM)")
         self.assertEqual(str(loaded["render_profile"]), "community_shaders")
+        self.assertEqual(str(loaded["last_mod_manager"]), "Mod Organizer 2")
+        self.assertEqual(str(loaded["last_mod_profile"]), "Main")
         self.assertTrue(bool(loaded["emboss_mode"]))
         self.assertFalse(bool(loaded["include_diffuse"]))
         self.assertTrue(bool(loaded["include_normal"]))

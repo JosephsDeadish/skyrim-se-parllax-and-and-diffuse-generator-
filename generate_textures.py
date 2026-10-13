@@ -222,6 +222,8 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "input_path": "",
     "output_path": "",
     "use_custom_output": False,
+    "last_mod_manager": "",
+    "last_mod_profile": "",
     "dark_mode": False,
     "show_batch_preview": False,
     "auto_optimize_large_batches": True,
@@ -782,6 +784,8 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         return state
     state["input_path"] = str(raw.get("input_path", state["input_path"]) or "")
     state["output_path"] = str(raw.get("output_path", state["output_path"]) or "")
+    state["last_mod_manager"] = str(raw.get("last_mod_manager", state["last_mod_manager"]) or "").strip()
+    state["last_mod_profile"] = str(raw.get("last_mod_profile", state["last_mod_profile"]) or "").strip()
     for key in (
         "use_custom_output",
         "dark_mode",
@@ -1372,6 +1376,29 @@ class ModManagerContext:
             details.append(f"game root {self.game_root}")
         details.append("advisory only: explicit folder and output choices always win")
         return " — ".join(details)
+
+
+def build_mod_manager_context_hint(
+    context: ModManagerContext | None,
+    *,
+    last_mod_manager: str = "",
+    last_mod_profile: str = "",
+) -> str:
+    summary = (
+        context.summary
+        if context is not None
+        else "Detected Mod (Hint): not detected — this is only a suggestion; your chosen input/output paths still take priority."
+    )
+    remembered_bits: list[str] = []
+    normalized_manager = last_mod_manager.strip()
+    if normalized_manager and (context is None or normalized_manager != context.manager):
+        remembered_bits.append(f"manager {normalized_manager}")
+    normalized_profile = last_mod_profile.strip()
+    if normalized_profile and (context is None or normalized_profile != context.profile_name):
+        remembered_bits.append(f"profile {normalized_profile}")
+    if remembered_bits:
+        return f"{summary}\nLast remembered mod setup: {', '.join(remembered_bits)}"
+    return summary
 
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:
@@ -9346,6 +9373,8 @@ if GUI_AVAILABLE:
             self.last_generation_backups: dict[Path, Path] = {}
             self.last_generation_created_files: set[Path] = set()
             self.manager_context = detect_mod_manager_context()
+            self.last_mod_manager_memory = ""
+            self.last_mod_profile_memory = ""
             self.last_input_browse_dir: Path | None = None
             self.preview_size_var = tk.StringVar(value="Medium")
             self.preview_refresh_after_id: str | None = None
@@ -11010,6 +11039,8 @@ if GUI_AVAILABLE:
             self.input_var.set(str(state["input_path"]))
             self.output_var.set(str(state["output_path"]))
             self.use_custom_output_var.set(bool(state["use_custom_output"]))
+            self.last_mod_manager_memory = str(state.get("last_mod_manager", "") or "").strip()
+            self.last_mod_profile_memory = str(state.get("last_mod_profile", "") or "").strip()
             self.dark_mode_var.set(bool(state["dark_mode"]))
             self.show_batch_preview_var.set(bool(state["show_batch_preview"]))
             self.auto_optimize_large_batches_var.set(bool(state.get("auto_optimize_large_batches", True)))
@@ -11068,12 +11099,21 @@ if GUI_AVAILABLE:
             dismissed = state.get("dismissed_warnings", [])
             if isinstance(dismissed, list):
                 self.dismissed_warnings = set(str(w) for w in dismissed if isinstance(w, str))
+            self.detected_context_var.set(
+                build_mod_manager_context_hint(
+                    self.manager_context,
+                    last_mod_manager=self.last_mod_manager_memory,
+                    last_mod_profile=self.last_mod_profile_memory,
+                )
+            )
 
         def _build_gui_state(self) -> dict[str, object]:
             return {
                 "input_path": self.input_var.get().strip(),
                 "output_path": self.output_var.get().strip(),
                 "use_custom_output": self.use_custom_output_var.get(),
+                "last_mod_manager": self.manager_context.manager or self.last_mod_manager_memory,
+                "last_mod_profile": self.manager_context.profile_name or self.last_mod_profile_memory,
                 "dark_mode": self.dark_mode_var.get(),
                 "show_batch_preview": self.show_batch_preview_var.get(),
                 "auto_optimize_large_batches": self.auto_optimize_large_batches_var.get(),
@@ -16801,7 +16841,13 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     )
     overview_text.setWordWrap(True)
     overview_layout.addWidget(overview_text)
-    manager_context_label = QtWidgets.QLabel(manager_context.summary)
+    manager_context_label = QtWidgets.QLabel(
+        build_mod_manager_context_hint(
+            manager_context,
+            last_mod_manager=str(qt_saved_state.get("last_mod_manager", "") or ""),
+            last_mod_profile=str(qt_saved_state.get("last_mod_profile", "") or ""),
+        )
+    )
     manager_context_label.setWordWrap(True)
     manager_context_label.setToolTip(
         "Detected MO2/Vortex context is only a recommendation hint; it never auto-selects a profile, and manual input/output choices still win."
@@ -17973,6 +18019,10 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             show_advanced_map_strengths=advanced_controls_toggle.isChecked(),
             show_truepbr_sidecar_settings=truepbr_settings_toggle.isChecked(),
         )
+        if manager_context.manager is not None:
+            state["last_mod_manager"] = manager_context.manager
+        if manager_context.profile_name is not None:
+            state["last_mod_profile"] = manager_context.profile_name
         save_gui_state(state)
 
     def _apply_profile_recommendation() -> None:
