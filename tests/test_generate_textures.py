@@ -2564,6 +2564,20 @@ class GenerateTexturesTests(unittest.TestCase):
             "community_shaders",
         )
 
+    def test_recommend_render_profile_prefers_detected_renderer_over_architecture_material_hint(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(Path("textures/architecture/stone_cm.dds")),
+            "community_shaders",
+        )
+        self.assertEqual(
+            recommend_render_profile(Path("textures/architecture/stone_rmaos.dds")),
+            "truepbr",
+        )
+        self.assertEqual(
+            recommend_render_profile(Path("mods/ENBSeries/textures/architecture/stone.dds")),
+            "enb",
+        )
+
     def test_recommend_render_profile_prefers_vanilla_for_interface_or_paper(self) -> None:
         self.assertEqual(
             recommend_render_profile(

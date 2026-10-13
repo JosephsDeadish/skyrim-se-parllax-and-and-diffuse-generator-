@@ -2993,6 +2993,9 @@ _RENDER_PROFILE_WORKFLOW_HINTS: dict[str, str] = {
     "architecture": "architecture",
     "characters": "characters",
     "interface": "vanilla",
+    "community_shaders": "community_shaders",
+    "truepbr": "truepbr",
+    "enb": "enb",
 }
 
 _RENDER_PROFILE_ENB_MARKERS: tuple[tuple[str, ...], ...] = (
