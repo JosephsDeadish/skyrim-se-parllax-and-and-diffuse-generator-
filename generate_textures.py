@@ -6608,11 +6608,12 @@ def _scan_nif_validation_rows(
             shader_count = int(getattr(validation, "shader_count", 0) or 0)
             ready_count = int(getattr(validation, "ready_count", 0) or 0)
             skip_count = int(getattr(validation, "skip_count", 0) or 0)
+            probably_incompatible = _collect_qt_nif_probably_incompatible_renderer_lines(validation)
             if shader_count == 0 or (skip_count and skip_count == shader_count):
                 status = "SKIP"
                 if shader_count == 0:
                     details.append("No BSLightingShaderProperty found.")
-            elif ready_count == shader_count and skip_count == 0:
+            elif ready_count == shader_count and skip_count == 0 and not probably_incompatible:
                 status = "OK"
             else:
                 status = "WARN"
@@ -6731,6 +6732,33 @@ def _summarize_qt_nif_slot_state(validation: object) -> str | None:
     return "; ".join(slot_notes[:4])
 
 
+def _collect_qt_nif_probably_incompatible_renderer_lines(validation: object) -> list[str]:
+    renderer_verdicts = getattr(validation, "renderer_verdicts", None) or {}
+    if not renderer_verdicts:
+        return []
+    renderer_labels = {
+        "vanilla": "Vanilla parallax",
+        "enb": "ENB complex material/POM",
+        "community_shaders": "Community Shaders parallax",
+        "truepbr": "TruePBR",
+    }
+    uncertain_markers = (
+        "won't work yet",
+        "cannot verify",
+        "can't verify",
+        "matching json entry",
+    )
+    warnings: list[str] = []
+    for renderer_key in ("vanilla", "enb", "community_shaders", "truepbr"):
+        verdict = str(renderer_verdicts.get(renderer_key, "") or "").strip()
+        if not verdict:
+            continue
+        verdict_lower = verdict.lower()
+        if any(marker in verdict_lower for marker in uncertain_markers):
+            warnings.append(f"{renderer_labels.get(renderer_key, renderer_key)}: {verdict}")
+    return warnings
+
+
 def _build_qt_nif_validation_detail_lines(
     validation: object,
     *,
@@ -6768,6 +6796,10 @@ def _build_qt_nif_validation_detail_lines(
             verdict = str(renderer_verdicts.get(renderer_key, "") or "").strip()
             if verdict:
                 lines.append(f"- {verdict}")
+        probably_incompatible = _collect_qt_nif_probably_incompatible_renderer_lines(validation)
+        if probably_incompatible:
+            lines.append("Probably incompatible:")
+            lines.extend(f"- {warning}" for warning in probably_incompatible)
 
     skip_reasons = _collect_qt_nif_detail_texts(getattr(validation, "skip_reasons", ()))
     issues = _collect_qt_nif_detail_texts(getattr(validation, "issues", ()))
@@ -15218,7 +15250,6 @@ if GUI_AVAILABLE:
                     self._save_persisted_gui_state()
                     retries_per_file = max(0, min(3, int(retry_count_var.get())))
                     include_conflict_report = conflict_report_var.get()
-                    include_conflict_examples = conflict_examples_var.get()
                     _is_running[0] = True
                     _cancel_requested[0] = False
                     _set_ops_active(False)
@@ -15257,46 +15288,10 @@ if GUI_AVAILABLE:
                                 ]
                                 if latest_validation_codes[str(nif)]:
                                     latest_conflict_files.add(str(nif))
-                                combined_detail_lines: list[str] = []
-                                if validation.detected_game_profile:
-                                    combined_detail_lines.append(f"Detected profile: {validation.detected_game_profile}")
-                                if validation.has_havok:
-                                    combined_detail_lines.append("⚠ Havok animation graph detected — parallax patching on this NIF can crash in-game.")
-                                if validation.skip_reasons:
-                                    combined_detail_lines.append("Skip reasons:")
-                                    combined_detail_lines.extend(f"- {text}" for text in validation.skip_reasons)
-                                if validation.issues:
-                                    combined_detail_lines.append("Issues:")
-                                    combined_detail_lines.extend(f"- {text}" for text in validation.issues)
-                                if validation.suggestions:
-                                    combined_detail_lines.append("Suggestions:")
-                                    combined_detail_lines.extend(f"- {text}" for text in validation.suggestions)
-                                if include_conflict_report and getattr(validation, "conflict_report", None):
-                                    combined_detail_lines.append("Conflict-resolution report:")
-                                    for group in validation.conflict_report[:6]:
-                                        code = getattr(group, "code", "unknown")
-                                        count = getattr(group, "count", 0)
-                                        profile = getattr(group, "game_profile", "unknown")
-                                        layout = getattr(group, "shader_layout", "global")
-                                        combined_detail_lines.append(
-                                            f"- {code}: {count} (profile={profile}, layout={layout})"
-                                        )
-                                        if include_conflict_examples:
-                                            for example in tuple(getattr(group, "examples", ())[:2]):
-                                                combined_detail_lines.append(f"    example: {example}")
-                                        for action in tuple(getattr(group, "suggested_actions", ())[:2]):
-                                            combined_detail_lines.append(f"    auto-fix: {action}")
-                                if getattr(validation, "renderer_verdicts", None):
-                                    combined_detail_lines.append("In-game renderer verdicts:")
-                                    for renderer_key, renderer_label in (
-                                        ("vanilla", "Vanilla"),
-                                        ("enb", "ENB"),
-                                        ("community_shaders", "Community Shaders"),
-                                        ("truepbr", "TruePBR"),
-                                    ):
-                                        verdict = validation.renderer_verdicts.get(renderer_key, "")
-                                        if verdict:
-                                            combined_detail_lines.append(f"- {renderer_label}: {verdict}")
+                                combined_detail_lines = _build_qt_nif_validation_detail_lines(
+                                    validation,
+                                    include_conflict_report=include_conflict_report,
+                                )
                                 if validation.renderer_notes:
                                     combined_detail_lines.append("Renderer compatibility details:")
                                     for renderer_key, renderer_label in (
@@ -15309,7 +15304,13 @@ if GUI_AVAILABLE:
                                         if renderer_lines:
                                             combined_detail_lines.append(f"{renderer_label}:")
                                             combined_detail_lines.extend(f"  - {line}" for line in renderer_lines)
-                                if validation.ready_count == validation.shader_count and validation.shader_count > 0 and validation.skip_count == 0:
+                                probably_incompatible = _collect_qt_nif_probably_incompatible_renderer_lines(validation)
+                                if (
+                                    validation.ready_count == validation.shader_count
+                                    and validation.shader_count > 0
+                                    and validation.skip_count == 0
+                                    and not probably_incompatible
+                                ):
                                     row_args = ("OK", nif.name, f"{validation.ready_count}/{validation.shader_count} shader(s) already parallax-ready")
                                 elif validation.shader_count == 0:
                                     detail = "\n".join(combined_detail_lines) if combined_detail_lines else "No BSLightingShaderProperty found."
@@ -15321,6 +15322,8 @@ if GUI_AVAILABLE:
                                 else:
                                     skip_info = f" ({validation.skip_count} skipped)" if validation.skip_count else ""
                                     issue_text = "\n".join(combined_detail_lines) if combined_detail_lines else "Needs patching."
+                                    if probably_incompatible and validation.ready_count == validation.shader_count:
+                                        issue_text = "Probably incompatible for some renderer families.\n" + issue_text
                                     row_args = ("WARN", nif.name, f"{validation.ready_count}/{validation.shader_count} ready{skip_info}.\n{issue_text}")
                             except Exception as exc:
                                 latest_conflict_files.add(str(nif))

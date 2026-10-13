@@ -810,10 +810,12 @@ class TestQtNifValidationScan(unittest.TestCase):
 
         self.assertFalse(cancelled)
         self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["status"], "WARN")
         details = rows[0]["details"]
         self.assertIn("What this file needs:", details)
         self.assertIn("Slot / workflow state:", details)
         self.assertIn("Shader-family fit:", details)
+        self.assertIn("Probably incompatible", details)
         self.assertIn("Safe fix path:", details)
         self.assertIn("Experimental fix path:", details)
         self.assertIn("Grouped conflict codes:", details)
