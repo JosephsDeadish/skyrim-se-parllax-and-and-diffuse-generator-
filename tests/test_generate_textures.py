@@ -2532,8 +2532,16 @@ class GenerateTexturesTests(unittest.TestCase):
             "community_shaders",
         )
         self.assertEqual(
+            detect_workflow_profile(Path("mods/Community Shaders/textures/architecture/stone.dds")),
+            "community_shaders",
+        )
+        self.assertEqual(
             detect_workflow_profile(Path("mods/ENBSeries/textures/architecture/stone.dds")),
             "enb",
+        )
+        self.assertEqual(
+            detect_workflow_profile(Path("mods/True PBR/textures/architecture/stone.dds")),
+            "truepbr",
         )
         self.assertEqual(
             detect_workflow_profile(Path("mods/TruePBR/textures/architecture/stone.dds")),
