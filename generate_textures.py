@@ -3035,6 +3035,8 @@ def _normalize_render_profile(value: str | None) -> str:
         return "characters"
     if normalized in {"arch", "building"}:
         return "architecture"
+    if normalized == "interface":
+        return "vanilla"
     if normalized == "experimental":
         return "custom"
     if normalized in {

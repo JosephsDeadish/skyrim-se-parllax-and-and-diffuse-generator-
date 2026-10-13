@@ -56,6 +56,7 @@ from generate_textures import (
     load_ui_translations,
     _normalize_nif_editor_texture_input_path,
     _load_nif_patcher_exports,
+    _normalize_render_profile,
     NIF_PATCHER_AVAILABLE,
     _normalize_nif_result_details,
     _preferred_dds_formats_for_output,
@@ -2525,6 +2526,11 @@ class GenerateTexturesTests(unittest.TestCase):
             detect_workflow_profile(Path("textures/interface/cards/deck01.dds")),
             "interface",
         )
+
+    def test_interface_render_profile_is_normalized_to_vanilla(self) -> None:
+        self.assertEqual(_normalize_render_profile("interface"), "vanilla")
+        self.assertEqual(recommend_render_profile(Path("textures/interface/cards/collectible.dds")), "vanilla")
+        self.assertIn("safe patch path: do not force the mesh onto Vanilla", build_nif_editor_action_guidance("vanilla", nif_path="textures/interface/cards/collectible.dds"))
 
     def test_detect_workflow_profile_detects_renderer_path_hints_for_selected_nif(self) -> None:
         self.assertEqual(
