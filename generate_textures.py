@@ -3505,9 +3505,9 @@ def build_render_profile_recommendation_message(recommended_profile: str) -> str
             "- Legacy alias note: if you imported older _orm/_orms/_mrao/_mra assets, normalize them to _rmaos/_ramos naming before shipping to keep workflows unambiguous.",
             "- Core mesh tuning: Specular Level controls non-metal reflectance, Roughness Scale controls surface smoothness, and Displacement Scale controls parallax/displacement depth.",
             "- Colour-space rule of thumb: save in-game colour textures as sRGB; save data textures like normal/displacement/RMAOS in linear space.",
-            "- Landscape workflow: use Data/PBRTextureSets/<TXST_EDID>.json with roughnessScale, displacementScale, and specularLevel values; material objects use Data/PBRMaterialObjects/<EDID>.json and single-pass records.",
+            "- Landscape workflow: use Data/PBRTextureSets/<TXST_EDID>.json with roughnessScale, displacementScale, and specularLevel values.",
+            "- Material-object workflow: use Data/PBRMaterialObjects/<EDID>.json with single-pass records; PBR MATOs only render on PBR-enabled surfaces.",
             "- Feature compatibility: subsurface scattering conflicts with dual-layer material; glint conflicts with fuzz and dual-layer; fuzz conflicts with glint and dual-layer; hair model is a standalone shading model; dual-layer material works with parallax/emission but not glint/fuzz/subsurface.",
-            "- Material objects: PBR MATOs only render on PBR-enabled surfaces and rely on single-pass records plus matching Data/PBRMaterialObjects JSON.",
             f"- Reference: {MODDING_WIKI_SKYRIM_URL}",
         ]
     )

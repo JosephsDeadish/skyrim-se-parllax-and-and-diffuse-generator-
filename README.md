@@ -237,6 +237,7 @@ Landscape TruePBR:
 
 - Uses `Data/PBRTextureSets/<TXST_EDID>.json` sidecars (for example `LandscapeDirt02.json`)
 - Typical JSON values: `roughnessScale`, `displacementScale`, `specularLevel`
+- Material-object workflows use `Data/PBRMaterialObjects/<EDID>.json` plus single-pass records, and they only render on PBR-enabled surfaces.
 
 Feature compatibility summary:
 
