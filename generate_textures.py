@@ -16263,7 +16263,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     manager_context_label = QtWidgets.QLabel(manager_context.summary)
     manager_context_label.setWordWrap(True)
     manager_context_label.setToolTip(
-        "Detected MO2/Vortex context is used as a renderer recommendation hint; it does not select a profile automatically."
+        "Detected MO2/Vortex context is only a recommendation hint; it never auto-selects a profile, and manual input/output choices still win."
     )
     overview_layout.addWidget(manager_context_label)
     button_row = QtWidgets.QHBoxLayout()
