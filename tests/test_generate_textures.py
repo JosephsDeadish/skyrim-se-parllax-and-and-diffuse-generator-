@@ -4721,6 +4721,7 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
             self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
             self.assertEqual(context.output_dir, (instance_root / "overwrite"))
+            self.assertTrue(context.summary.startswith("Detected Mod (Hint): detected Mod Organizer 2 context"))
             self.assertIn("plugin(s)", context.summary)
             self.assertIn("load-order", context.summary)
 
@@ -4783,6 +4784,7 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
             self.assertEqual(context.staging_root, staging_root.resolve())
             self.assertEqual(context.output_dir, (tool_dir / "generated_textures").resolve())
+            self.assertTrue(context.summary.startswith("Detected Mod (Hint): detected Vortex context"))
 
     def test_detect_mod_manager_context_vortex_falls_back_to_staging_scan_when_mod_names_do_not_match_folder_names(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -4812,6 +4814,14 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(context.loaded_mods, ("Texture Pack Pretty Name",))
             self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
             self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
+
+    def test_mod_manager_context_summary_is_explicitly_advisory_without_detection(self) -> None:
+        context = ModManagerContext()
+
+        self.assertEqual(
+            context.summary,
+            "Detected Mod (Hint): not detected — this is only a suggestion; your chosen input/output paths still take priority.",
+        )
 
     def test_detect_mod_manager_context_includes_mo2_overwrite_dirs_and_game_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
