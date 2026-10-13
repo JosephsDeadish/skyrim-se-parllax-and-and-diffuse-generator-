@@ -22,7 +22,7 @@
     "📂 Source texture path.\nTip: use File/Folder buttons if drag-and-drop is unavailable.": "Source texture path. Use File/Folder buttons if drag-and-drop is unavailable.",
     "🗂 Open one DDS/PNG/JPG texture file.": "Open one DDS/PNG/JPG texture file.",
     "📁 Select a folder of textures for batch processing.": "Select a folder of textures for batch processing.",
-    "🧙 Use the detected MO2/Vortex mod texture folder when available.": "Use the detected MO2/Vortex mod texture folder when available.",
+    "🧙 Use the detected MO2/Vortex mod texture folder when available (advisory only).": "Use the detected MO2/Vortex mod texture folder when available (advisory only).",
     "📦 Write generated outputs to a different folder instead of next to input files.": "Write generated outputs to a different folder instead of next to input files.",
     "🎨 Generate the diffuse (colour) texture.\nThis is the one that makes your rock look like a rock and not a void of existential dread.": "Generate the diffuse/albedo texture.",
     "🗻 Generate a normal map for fake 3D depth.\nSkyrim's favourite optical illusion since 2011.": "Generate a normal map for surface detail.",

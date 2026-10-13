@@ -9164,7 +9164,10 @@ if GUI_AVAILABLE:
             self._add_tooltip(self.input_folder_button, "Select a texture folder for batch processing (Ctrl+Shift+O).")
             self.detected_mod_button = ttk.Button(file_frame, text="Loaded Mod", command=self._pick_detected_mod_folder)
             self.detected_mod_button.grid(row=0, column=4, padx=4, pady=4)
-            self._add_tooltip(self.detected_mod_button, "Use the detected MO2/Vortex mod texture folder when available.")
+            self._add_tooltip(
+                self.detected_mod_button,
+                "🧙 Use the detected MO2/Vortex mod texture folder when available (advisory only).",
+            )
 
             _output_label = ttk.Label(file_frame, text="Output folder")
             _output_label.grid(row=1, column=0, sticky=tk.W, pady=4)
