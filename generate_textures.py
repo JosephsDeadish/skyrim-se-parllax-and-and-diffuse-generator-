@@ -9162,7 +9162,11 @@ if GUI_AVAILABLE:
             self.input_folder_button = ttk.Button(file_frame, text="Folder", command=self._pick_input_folder)
             self.input_folder_button.grid(row=0, column=3, padx=4, pady=4)
             self._add_tooltip(self.input_folder_button, "Select a texture folder for batch processing (Ctrl+Shift+O).")
-            self.detected_mod_button = ttk.Button(file_frame, text="Loaded Mod", command=self._pick_detected_mod_folder)
+            self.detected_mod_button = ttk.Button(
+                file_frame,
+                text="Detected Mod (Hint)",
+                command=self._pick_detected_mod_folder,
+            )
             self.detected_mod_button.grid(row=0, column=4, padx=4, pady=4)
             self._add_tooltip(
                 self.detected_mod_button,
