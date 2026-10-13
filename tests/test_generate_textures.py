@@ -1887,6 +1887,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("standard parallax", vanilla_guidance)
         self.assertIn("Likely mismatch", vanilla_guidance)
         self.assertIn("Selected NIF", vanilla_guidance)
+        self.assertIn("Safety default: start in dry-run mode", vanilla_guidance)
         self.assertIn("_cm.dds", build_nif_editor_action_guidance("community_shaders"))
         self.assertIn("PBR flag", build_nif_editor_action_guidance("truepbr"))
         self.assertIn("ENB POM", build_nif_editor_action_guidance("enb"))
@@ -3231,6 +3232,17 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         self.assertTrue(any("Parallax slot path set" in text for text in warnings))
         self.assertTrue(any("Environment mask path set" in text for text in warnings))
+
+    def test_get_nif_patch_option_warnings_highlights_write_mode(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="vanilla",
+            enable_parallax=False,
+            enable_pom=False,
+            enable_env_mapping=False,
+            force_shader_type_3=False,
+            dry_run=False,
+        )
+        self.assertTrue(any("write mode is enabled" in text.lower() for text in warnings))
 
     def test_get_nif_patch_option_warnings_skips_empty_env_mask_warning_for_enb(self) -> None:
         warnings = get_nif_patch_option_warnings(
