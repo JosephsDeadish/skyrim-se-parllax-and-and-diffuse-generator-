@@ -58,7 +58,7 @@ A successful Windows build also uploads `skyrim-texture-generator-qt-migration-p
 This opens a desktop interface where you can:
 - select one input texture or an entire folder of source DDS textures
 - pick an output folder
-- see detected MO2/Vortex context and loaded-mod texture folders when launched through a mod manager (advisory only; manual input/output paths still win)
+- see detected MO2/Vortex context and loaded-mod texture folders when launched through a mod manager, and use the **Detected Mod (Hint)** button for faster browsing (advisory only; manual input/output paths still win)
 - use a **Use different output folder** toggle to switch between writing beside the input or writing to a custom location
 - choose core maps (diffuse/normal/parallax/glow) plus renderer-specific and standalone outputs (environment mask, TruePBR RMAOS, complex material, wetness/snow masks, AO, and roughness)
 - preview generated maps and inspect individual image channels; TruePBR RMAOS previews label RGBA meanings and warn when alpha is missing
