@@ -3613,12 +3613,16 @@ def build_nif_editor_action_guidance(
             "the selected renderer, correct the naming first, then re-run the patch rather than forcing the wrong profile."
         )
     path_note = _describe_nif_workflow_state_for_guidance(nif_path, recommended_profile=recommended_profile)
+    rollback_note = (
+        "Rollback path: compare against the sibling .nif.bak backup first, and restore from it before writing "
+        "if the preview looks wrong."
+    )
     if target == "fallout":
         return (
             f"{path_note} {steps} Fallout writes are guarded and best-effort only: keep experimental writes opt-in, test a sample "
-            "mesh first, and prefer conservative no-op results over risky bulk edits."
+            f"mesh first, and prefer conservative no-op results over risky bulk edits. {rollback_note}"
         )
-    return f"{path_note} {steps}"
+    return f"{path_note} {steps} {rollback_note}"
 
 
 def build_safe_preset_change_summary(
@@ -6289,27 +6293,10 @@ def _scan_nif_validation_rows(
             break
         try:
             validation = validate_nif_for_parallax(nif_path)
+            details = _build_qt_nif_validation_detail_lines(validation)
             shader_count = int(getattr(validation, "shader_count", 0) or 0)
             ready_count = int(getattr(validation, "ready_count", 0) or 0)
             skip_count = int(getattr(validation, "skip_count", 0) or 0)
-            details = [
-                f"{ready_count}/{shader_count} shader(s) ready"
-                + (f"; {skip_count} skipped" if skip_count else "")
-            ]
-            detected_profile = str(getattr(validation, "detected_game_profile", "") or "")
-            if detected_profile:
-                details.append(f"Detected profile: {detected_profile}")
-            if getattr(validation, "has_havok", False):
-                details.append("Havok animation graph detected; parallax changes may be unsafe.")
-            issues = tuple(getattr(validation, "issues", ()) or ())
-            if issues:
-                details.extend(f"Issue: {issue}" for issue in issues[:5])
-            conflicts = tuple(getattr(validation, "conflict_report", ()) or ())
-            if conflicts:
-                details.extend(
-                    f"Conflict {getattr(group, 'code', 'unknown')}: {getattr(group, 'count', 0)}"
-                    for group in conflicts[:5]
-                )
             if shader_count == 0 or (skip_count and skip_count == shader_count):
                 status = "SKIP"
                 if shader_count == 0:
@@ -6349,9 +6336,191 @@ def _write_qt_nif_scan_csv(
     return len(rows)
 
 
+def _collect_qt_nif_detail_texts(values: object) -> list[str]:
+    if values is None:
+        return []
+    if isinstance(values, str):
+        text = values.strip()
+        return [text] if text else []
+    try:
+        iterator = iter(values)
+    except TypeError:
+        text = str(values).strip()
+        return [text] if text else []
+    texts: list[str] = []
+    for value in iterator:
+        text = str(value).strip()
+        if text and text not in texts:
+            texts.append(text)
+    return texts
+
+
+def _summarize_qt_nif_slot_state(validation: object) -> str | None:
+    messages: list[str] = []
+    messages.extend(_collect_qt_nif_detail_texts(getattr(validation, "skip_reasons", ())))
+    messages.extend(_collect_qt_nif_detail_texts(getattr(validation, "issues", ())))
+    messages.extend(_collect_qt_nif_detail_texts(getattr(validation, "suggestions", ())))
+
+    slot_notes: list[str] = []
+
+    def _append(note: str) -> None:
+        if note and note not in slot_notes:
+            slot_notes.append(note)
+
+    for message in messages:
+        lower = message.lower()
+        if "slot 3" in lower or "parallax" in lower:
+            if "missing on disk" in lower or "unresolved" in lower:
+                _append("slot 3 parallax is unresolved")
+            elif "empty" in lower:
+                _append("slot 3 parallax is empty")
+            elif "points at the diffuse" in lower:
+                _append("slot 3 points at the diffuse texture")
+            elif "points at the normal" in lower:
+                _append("slot 3 points at the normal texture")
+            elif "height map" in lower or "expected _p.dds" in lower:
+                _append("slot 3 needs a dedicated _p.dds height map")
+            elif "parallax-focused" in lower:
+                _append("slot 3 needs a supported parallax shader layout")
+        if "slot 5" in lower or "environment mask" in lower or "environment mapping" in lower:
+            if "missing on disk" in lower or "unresolved" in lower:
+                _append("slot 5 environment mask is unresolved")
+            elif "empty" in lower:
+                _append("slot 5 environment mask is empty")
+            elif "not enabled" in lower:
+                _append("slot 5 is populated but environment mapping is off")
+            elif "does not look like an environment mask" in lower or "suffix" in lower:
+                _append("slot 5 suffix does not match the active renderer family")
+            elif "truepbr" in lower:
+                _append("slot 5 looks like a TruePBR packed map")
+        if "slot 4" in lower or "cubemap" in lower:
+            if "missing on disk" in lower or "unresolved" in lower:
+                _append("slot 4 cubemap is unresolved")
+            elif "empty" in lower:
+                _append("slot 4 cubemap is empty")
+            elif "not enabled" in lower:
+                _append("slot 4 is populated but environment mapping is off")
+            elif "looks like a cubemap" in lower:
+                _append("slot 4 is using a cubemap path")
+        if "slot 1" in lower or "normal" in lower:
+            if "not a .dds" in lower or "source/authoring texture extension" in lower:
+                _append("slot 1 normal map is not a runtime .dds texture")
+            elif "does not look like a normal map" in lower:
+                _append("slot 1 path does not look like a normal map")
+            elif "missing" in lower and "normal" in lower:
+                _append("slot 1 normal map is unresolved")
+        if len(slot_notes) >= 4:
+            break
+
+    if getattr(validation, "has_havok", False):
+        _append("Havok animation graph is present")
+
+    if not slot_notes:
+        return "no obvious slot mismatches detected"
+    return "; ".join(slot_notes[:4])
+
+
+def _build_qt_nif_validation_detail_lines(
+    validation: object,
+    *,
+    include_conflict_report: bool = True,
+    max_conflicts: int = 4,
+) -> list[str]:
+    shader_count = max(0, int(getattr(validation, "shader_count", 0) or 0))
+    ready_count = max(0, int(getattr(validation, "ready_count", 0) or 0))
+    needs_patch_count = max(0, int(getattr(validation, "needs_patch_count", 0) or 0))
+    skip_count = max(0, int(getattr(validation, "skip_count", 0) or 0))
+    lines: list[str] = []
+
+    if shader_count <= 0:
+        lines.append("What this file needs: no supported BSLightingShaderProperty blocks were found.")
+    else:
+        status_bits: list[str] = [f"{ready_count}/{shader_count} ready"]
+        if needs_patch_count:
+            status_bits.append(f"{needs_patch_count} need patching")
+        if skip_count:
+            status_bits.append(f"{skip_count} blocked")
+        lines.append("What this file needs: " + "; ".join(status_bits) + ".")
+
+    detected_profile = str(getattr(validation, "detected_game_profile", "") or "").strip()
+    if detected_profile:
+        lines.append(f"Detected profile: {detected_profile}")
+
+    slot_summary = _summarize_qt_nif_slot_state(validation)
+    if slot_summary:
+        lines.append(f"Slot / workflow state: {slot_summary}.")
+
+    renderer_verdicts = getattr(validation, "renderer_verdicts", None) or {}
+    if renderer_verdicts:
+        lines.append("Shader-family fit:")
+        for renderer_key in ("vanilla", "enb", "community_shaders", "truepbr"):
+            verdict = str(renderer_verdicts.get(renderer_key, "") or "").strip()
+            if verdict:
+                lines.append(f"- {verdict}")
+
+    skip_reasons = _collect_qt_nif_detail_texts(getattr(validation, "skip_reasons", ()))
+    issues = _collect_qt_nif_detail_texts(getattr(validation, "issues", ()))
+    suggestions = _collect_qt_nif_detail_texts(getattr(validation, "suggestions", ()))
+
+    if skip_reasons:
+        lines.append("Skip reasons:")
+        lines.extend(f"- {text}" for text in skip_reasons[:5])
+    if issues:
+        lines.append("Issues:")
+        lines.extend(f"- {text}" for text in issues[:5])
+    if suggestions:
+        lines.append("Suggestions:")
+        lines.extend(f"- {text}" for text in suggestions[:5])
+
+    conflict_report = tuple(getattr(validation, "conflict_report", ()) or ())
+    if include_conflict_report and conflict_report:
+        lines.append("Grouped conflict codes:")
+        for group in conflict_report[:max_conflicts]:
+            code = str(getattr(group, "code", "") or "unknown")
+            count = max(1, int(getattr(group, "count", 0) or 0))
+            profile = str(getattr(group, "game_profile", "") or "unknown")
+            layout = str(getattr(group, "shader_layout", "") or "unknown")
+            lines.append(f"Conflict {code}: {count}")
+            lines.append(f"- {code}: {count} (profile={profile}, layout={layout})")
+            examples = _collect_qt_nif_detail_texts(getattr(group, "examples", ()))
+            if examples:
+                lines.append(f"  examples: {examples[0]}" + (f" | {examples[1]}" if len(examples) > 1 else ""))
+            actions = _collect_qt_nif_detail_texts(getattr(group, "suggested_actions", ()))
+            if actions:
+                lines.append(f"  fix actions: {actions[0]}" + (f" | {actions[1]}" if len(actions) > 1 else ""))
+
+    mismatch_source = next(
+        (text for text in [*skip_reasons, *issues] if text),
+        "",
+    )
+    if mismatch_source:
+        lines.append(f"Likely mismatch: {mismatch_source}")
+
+    if conflict_report:
+        safe_actions: list[str] = []
+        for group in conflict_report:
+            for action in _collect_qt_nif_detail_texts(getattr(group, "suggested_actions", ())):
+                if action not in safe_actions:
+                    safe_actions.append(action)
+            if len(safe_actions) >= 3:
+                break
+        lines.append("Safe fix path: compare against the sibling .nif.bak backup first, then apply only supported fixes.")
+        if safe_actions:
+            lines.extend(f"  - {action}" for action in safe_actions[:3])
+    else:
+        lines.append("Safe fix path: compare against the sibling .nif.bak backup first and restore from it if the preview looks better.")
+
+    if detected_profile.lower() == "fallout" or any("fallout" in text.lower() for text in suggestions):
+        lines.append("Experimental fix path: Fallout writes stay opt-in; test one mesh first and leave dry-run enabled until the preview matches.")
+    else:
+        lines.append("Experimental fix path: only switch renderer families on purpose; do not mix ENB, Community Shaders, and TruePBR outputs on the same mesh.")
+
+    return lines
+
+
 def _format_qt_nif_scan_detail(row: Mapping[str, str] | None) -> str:
     if not row:
-        return "Select a scan result to view its full path and diagnostics."
+        return "Select a scan result to view what this file needs, the safe fix path, and rollback notes."
     return "\n".join(
         (
             f"Status: {str(row.get('status', '') or 'UNKNOWN')}",
@@ -6378,7 +6547,16 @@ def _preview_qt_nif_auto_remediation(nif_path: str | os.PathLike[str]) -> str:
         )
     )
     if not conflict_codes:
-        return f"No conflict-code remediation is available for {path.name}."
+        lines = [
+            f"Read-only remediation preview for: {path}",
+            "No NIF file was written.",
+            "",
+            *_build_qt_nif_validation_detail_lines(validation, include_conflict_report=False),
+            "",
+            f"No conflict-code remediation is available for {path.name}.",
+            "Rollback path: restore the sibling .nif.bak backup if the preview looks better.",
+        ]
+        return "\n".join(lines)
 
     result, remediation_steps = auto_remediate_nif_conflicts(
         path,
@@ -6393,6 +6571,8 @@ def _preview_qt_nif_auto_remediation(nif_path: str | os.PathLike[str]) -> str:
         f"Read-only remediation preview for: {path}",
         "No NIF file was written.",
         "",
+        *_build_qt_nif_validation_detail_lines(validation, include_conflict_report=False),
+        "",
     ]
     lines.extend(f"Conflict: {code}" for code in conflict_codes)
     if remediation_steps:
@@ -6400,6 +6580,7 @@ def _preview_qt_nif_auto_remediation(nif_path: str | os.PathLike[str]) -> str:
         lines.extend(f"• {step}" for step in remediation_steps)
     if result is None:
         lines.append("No non-destructive automatic remediation is available.")
+        lines.append("Rollback path: restore the sibling .nif.bak backup if the preview looks better.")
         return "\n".join(lines)
 
     message = str(getattr(result, "message", "") or "").strip()
@@ -6409,6 +6590,7 @@ def _preview_qt_nif_auto_remediation(nif_path: str | os.PathLike[str]) -> str:
     result_errors = tuple(getattr(result, "errors", ()) or ())
     lines.extend(f"Warning: {warning}" for warning in result_warnings)
     lines.extend(f"Error: {error}" for error in result_errors)
+    lines.append("Rollback path: restore the sibling .nif.bak backup if the preview looks better.")
     return "\n".join(lines)
 
 
@@ -16283,7 +16465,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_scan_layout.setSpacing(8)
     nif_scan_note = QtWidgets.QLabel(
         "Read-only diagnostics for supported Skyrim meshes, with guarded best-effort Fallout support behind explicit opt-in gates. "
-        "Scanning does not modify NIF files."
+        "Scanning does not modify NIF files; use Preview safe fixes to inspect supported remediation, and Restore from .bak to roll back."
     )
     nif_scan_note.setWordWrap(True)
     nif_scan_layout.addWidget(nif_scan_note)
@@ -16300,7 +16482,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_scan_layout.addLayout(nif_scan_path_row)
     nif_scan_action_row = QtWidgets.QHBoxLayout()
     nif_scan_start_button = QtWidgets.QPushButton("Scan NIFs")
-    nif_scan_start_button.setToolTip("Inspect mesh flags, slots, conflicts, and renderer verdicts without writing.")
+    nif_scan_start_button.setToolTip(
+        "Inspect mesh flags, slot states, conflict groups, and renderer verdicts without writing."
+    )
     nif_scan_cancel_button = QtWidgets.QPushButton("Cancel scan")
     nif_scan_cancel_button.setEnabled(False)
     nif_scan_action_row.addWidget(nif_scan_start_button)
@@ -16330,7 +16514,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_scan_remediation_row = QtWidgets.QHBoxLayout()
     nif_scan_remediation_preview_button = QtWidgets.QPushButton("Preview safe fixes")
     nif_scan_remediation_preview_button.setToolTip(
-        "Show non-destructive auto-remediation steps for the selected NIF without writing it."
+        "Show non-destructive auto-remediation steps, safe/experimental guidance, and rollback notes for the selected NIF."
     )
     nif_scan_remediation_preview_button.setEnabled(False)
     nif_scan_remediation_row.addWidget(nif_scan_remediation_preview_button)
@@ -16350,7 +16534,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_scan_layout.addWidget(nif_scan_detail_label)
     nif_scan_detail_view = QtWidgets.QPlainTextEdit()
     nif_scan_detail_view.setReadOnly(True)
-    nif_scan_detail_view.setPlaceholderText("Select a scan result to view its full path and diagnostics.")
+    nif_scan_detail_view.setPlaceholderText(
+        "Select a scan result to view what this file needs, the safe fix path, and rollback notes."
+    )
     nif_scan_detail_view.setMaximumHeight(150)
     nif_scan_layout.addWidget(nif_scan_detail_view)
     nif_scan_page_row = QtWidgets.QHBoxLayout()
@@ -16371,7 +16557,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_layout = QtWidgets.QVBoxLayout(nif_editor_content)
     nif_editor_note = QtWidgets.QLabel(
         "Uses the single file / recursive folder target from NIF Scan. "
-        "Keep leaves flags unchanged. Dry-run is the default; writes always keep .nif.bak backups. "
+        "Dry-run is the default; writes always keep .nif.bak backups. Compare against or restore from the backup first if the preview looks wrong. "
         "Fallout writes are experimental, not real-mod validated; verify in-game."
     )
     nif_editor_note.setWordWrap(True)
@@ -16439,6 +16625,15 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         button.setObjectName(f"nif_editor_{name}")
         nif_editor_buttons[name] = button
         nif_editor_actions.addWidget(button)
+    nif_editor_buttons["patch"].setToolTip(
+        "Write the selected NIFs after confirmation. Backups are mandatory and dry-run is recommended first."
+    )
+    nif_editor_buttons["remediate"].setToolTip(
+        "Apply supported safe-fix remediation. Compare the preview against the sibling .nif.bak before writing."
+    )
+    nif_editor_buttons["restore"].setToolTip(
+        "Restore the selected NIFs from matching sibling .nif.bak backups."
+    )
     nif_editor_cancel = QtWidgets.QPushButton("Cancel edit")
     nif_editor_cancel.setObjectName("nif_editor_cancel")
     nif_editor_cancel.setEnabled(False)
@@ -16969,10 +17164,19 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             values[f"fallout_allow_{name}"] = nif_editor_experimental.isChecked() and gate.isChecked()
         options = build_nif_patch_options_for_nif_editor(**values)
         if not options.dry_run:
+            if operation == "restore":
+                prompt = (
+                    f"Restore {len(paths)} NIF file(s) from sibling .nif.bak backups? "
+                    "This overwrites the current mesh with its backup."
+                )
+            else:
+                prompt = (
+                    f"{operation.title()} {len(paths)} NIF file(s)? Backups are mandatory. "
+                    "Compare the preview against the sibling .nif.bak first, and keep Fallout writes experimental."
+                )
             answer = QtWidgets.QMessageBox.question(
                 window, "Confirm NIF writes",
-                f"{operation.title()} {len(paths)} NIF file(s)? Backups are mandatory. "
-                "Restore overwrites the current mesh with its backup. Verify experimental Fallout changes in-game.",
+                prompt,
                 QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
                 QtWidgets.QMessageBox.StandardButton.No,
             )

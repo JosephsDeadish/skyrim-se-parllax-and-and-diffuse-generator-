@@ -701,6 +701,9 @@ class TestQtNifValidationScan(unittest.TestCase):
         self.assertIn("No NIF file was written.", preview)
         self.assertIn("shader_state.envmap_missing_slot5", preview)
         self.assertEqual(preview.count("Conflict:"), 1)
+        self.assertIn("What this file needs:", preview)
+        self.assertIn("Safe fix path:", preview)
+        self.assertIn("Rollback path:", preview)
         self.assertIn("Would disable environment mapping.", preview)
         self.assertIn("Dry run complete.", preview)
         remediate.assert_called_once_with(
@@ -725,6 +728,8 @@ class TestQtNifValidationScan(unittest.TestCase):
             preview = _preview_qt_nif_auto_remediation("mesh.nif")
 
         self.assertIn("No conflict-code remediation is available", preview)
+        self.assertIn("What this file needs:", preview)
+        self.assertIn("Rollback path:", preview)
         remediate.assert_not_called()
 
     def test_remediation_preview_reports_when_no_safe_steps_are_proposed(self) -> None:
@@ -746,6 +751,8 @@ class TestQtNifValidationScan(unittest.TestCase):
                 preview = _preview_qt_nif_auto_remediation(nif_path)
 
         self.assertIn("No non-destructive automatic remediation is available.", preview)
+        self.assertIn("Safe fix path:", preview)
+        self.assertIn("Rollback path:", preview)
 
     def test_remediation_preview_requires_nif_patcher(self) -> None:
         with mock.patch("generate_textures.NIF_PATCHER_AVAILABLE", False):
@@ -764,6 +771,50 @@ class TestQtNifValidationScan(unittest.TestCase):
         self.assertIn("Status: WARN", details)
         self.assertIn("C:/mods/example/meshes/mesh.nif", details)
         self.assertIn("Issue: missing texture slot\nConflict: shader_state.flag", details)
+
+    def test_scan_validation_rows_include_file_needs_and_fix_paths(self) -> None:
+        validation = SimpleNamespace(
+            shader_count=2,
+            ready_count=1,
+            needs_patch_count=1,
+            skip_count=0,
+            detected_game_profile="skyrim",
+            has_havok=False,
+            skip_reasons=["Block 0: skinned/animated mesh (NiSkinInstance) — parallax on skinned geometry causes CTD in Skyrim SE"],
+            issues=["Block 1: Texture slot 5 is filled ('textures\\architecture\\stone_m.dds') but SLSF1_Environment_Mapping is not enabled."],
+            suggestions=["Enable environment mapping in BSLightingShaderProperty or clear slot 5 if this mesh should not be reflective."],
+            renderer_verdicts={
+                "vanilla": "Vanilla parallax: Mesh-side setup looks ready.",
+                "enb": "ENB complex material/POM: Won't work yet: slot 5 is missing.",
+                "community_shaders": "Community Shaders parallax: Mesh-side setup looks ready.",
+                "truepbr": "TruePBR: Mesh-side setup looks ready, but TruePBR still needs a matching JSON entry that this scan cannot verify.",
+            },
+            conflict_report=[
+                SimpleNamespace(
+                    code="shader_state.envmap_missing_slot5",
+                    count=2,
+                    game_profile="skyrim",
+                    shader_layout="real",
+                    examples=("Block 1: slot 5 is filled without environment mapping.",),
+                    suggested_actions=("Enable environment mapping", "Use a matching _m.dds mask."),
+                )
+            ],
+        )
+
+        with mock.patch("generate_textures.validate_nif_for_parallax", return_value=validation):
+            rows, cancelled = _scan_nif_validation_rows([Path("mesh.nif")])
+
+        self.assertFalse(cancelled)
+        self.assertEqual(len(rows), 1)
+        details = rows[0]["details"]
+        self.assertIn("What this file needs:", details)
+        self.assertIn("Slot / workflow state:", details)
+        self.assertIn("Shader-family fit:", details)
+        self.assertIn("Safe fix path:", details)
+        self.assertIn("Experimental fix path:", details)
+        self.assertIn("Grouped conflict codes:", details)
+        self.assertIn("examples:", details)
+        self.assertIn("fix actions:", details)
 
     def test_scan_selected_result_details_have_empty_selection_guidance(self) -> None:
         self.assertIn("Select a scan result", _format_qt_nif_scan_detail(None))
