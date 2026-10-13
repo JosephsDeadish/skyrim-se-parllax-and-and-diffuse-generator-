@@ -10722,15 +10722,17 @@ if GUI_AVAILABLE:
         def _pick_detected_mod_folder(self) -> None:
             if not self.manager_context.loaded_texture_dirs:
                 messagebox.showinfo(
-                    "No detected mod folders",
-                    "No loaded mod texture folders were detected for the current MO2/Vortex context.",
+                    self._tr("No detected mod folders"),
+                    self._tr(
+                        "No loaded mod texture folders were detected for the current MO2/Vortex context."
+                    ),
                 )
                 return
             if len(self.manager_context.loaded_texture_dirs) == 1:
                 selected_path = self.manager_context.loaded_texture_dirs[0]
             else:
                 selected = filedialog.askdirectory(
-                    title="Select detected loaded mod texture folder",
+                    title=self._tr("Select detected loaded mod texture folder"),
                     initialdir=str(self._default_input_browse_dir()),
                 )
                 if not selected:
