@@ -74,6 +74,8 @@ from generate_textures import (
     _QT_OUTPUT_GROUPS,
     _describe_qt_profile_guidance,
     _format_short_guidance_tooltip,
+    _nif_editor_confirmation_text,
+    _nif_editor_safety_banner_text,
     _workflow_preset_onboarding_text,
     _qt_preview_channel_options,
     _inspect_qt_output_image,
@@ -1696,6 +1698,24 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("what it does: switches a control", tooltip)
         self.assertIn("when to use it: you need the safe preset path", tooltip)
         self.assertIn("when not to use it: you want full manual control", tooltip)
+
+    def test_nif_editor_safety_banner_mentions_backup_rollback_and_fallout(self) -> None:
+        banner = _nif_editor_safety_banner_text().lower()
+        self.assertIn("dry-run", banner)
+        self.assertIn("backup originals", banner)
+        self.assertIn("rollback path", banner)
+        self.assertIn("experimental best-effort", banner)
+
+    def test_nif_editor_confirmation_text_emphasizes_safe_defaults(self) -> None:
+        patch_message = _nif_editor_confirmation_text("patch", 2, experimental_fallout_write=True).lower()
+        self.assertIn("apply patch edits to 2 nif files", patch_message)
+        self.assertIn("dry-run first", patch_message)
+        self.assertIn("best-effort", patch_message)
+
+        restore_message = _nif_editor_confirmation_text("restore", 1).lower()
+        self.assertIn("restore 1 nif file", restore_message)
+        self.assertIn("rollback path", restore_message)
+        self.assertIn("overwrite the current .nif files", restore_message)
 
     def test_qt_preview_loader_decodes_and_bounds_image_dimensions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

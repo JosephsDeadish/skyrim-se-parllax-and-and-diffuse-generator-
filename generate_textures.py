@@ -3785,6 +3785,52 @@ def _format_short_guidance_tooltip(what_it_does: str, when_to_use_it: str, when_
     )
 
 
+def _nif_editor_safety_banner_text() -> str:
+    return (
+        "Safe default: keep Dry-run and Backup originals enabled. "
+        "Restore from .bak is the rollback path, and Fallout writes are experimental best-effort only."
+    )
+
+
+def _nif_editor_confirmation_text(
+    action: str,
+    file_count: int,
+    *,
+    experimental_fallout_write: bool = False,
+) -> str:
+    noun = "NIF file" if int(file_count) == 1 else "NIF files"
+    normalized_action = str(action or "").strip().lower()
+    lines: list[str]
+    if normalized_action == "restore":
+        lines = [
+            f"Restore {int(file_count)} {noun} from sibling .nif.bak backups?",
+            "",
+            "This is the rollback path after a write preview and will overwrite the current .nif files.",
+            "Dry-run first and backups enabled are the safe default.",
+            "Continue with restore mode?",
+        ]
+    elif normalized_action == "unpatch":
+        lines = [
+            f"Remove the selected features from {int(file_count)} {noun}?",
+            "",
+            "This is a destructive write operation. Dry-run first and backups enabled are the safe default.",
+        ]
+        if experimental_fallout_write:
+            lines.append("Fallout writes are experimental best-effort only.")
+        lines.append("Continue with write mode?")
+    else:
+        lines = [
+            f"Apply patch edits to {int(file_count)} {noun}?",
+            "",
+            "Dry-run first and backups enabled are the safe default. "
+            "Write mode modifies the meshes on disk and relies on .nif.bak backups for rollback.",
+        ]
+        if experimental_fallout_write:
+            lines.append("Fallout writes are experimental best-effort only.")
+        lines.append("Continue with write mode?")
+    return "\n".join(lines)
+
+
 def recommend_render_profile_details(
     input_path: Path | None,
     *,
@@ -14310,12 +14356,12 @@ if GUI_AVAILABLE:
                     width=14,
                 )
                 target_game_combo.pack(side="left", padx=(6, 10))
-                game_hint_label = ttk.Label(game_row, text="(Use fallout only for guarded best-effort writes)")
+                game_hint_label = ttk.Label(game_row, text="(Fallout is experimental best-effort only; keep dry-run and backups on)")
                 game_hint_label.pack(side="left")
                 fallout_mode_row = ttk.Frame(opt_frame)
                 experimental_fallout_check = ttk.Checkbutton(
                     fallout_mode_row,
-                    text="Enable experimental Fallout writes",
+                    text="Enable experimental Fallout writes (best-effort)",
                     variable=experimental_fallout_write_var,
                 )
                 experimental_fallout_check.pack(side="left")
@@ -14487,13 +14533,10 @@ if GUI_AVAILABLE:
                 target_game_var.trace_add("write", _refresh_profile_guidance)
                 guarded_mode_note = ttk.Label(
                     opt_frame,
-                    text=(
-                        "Guarded mode (recommended): start with Scan + Apply patch for conservative, reversible edits.\n"
-                        "Destructive actions (Disable / clear) remove flags or slot paths; keep .nif.bak backups and verify a small sample before larger batch runs."
-                    ),
+                    text="⚠ " + _nif_editor_safety_banner_text(),
                     justify=tk.LEFT,
                     wraplength=860,
-                    style="Muted.TLabel",
+                    style="Status.Warning.TLabel",
                 )
                 guarded_mode_note.pack(fill="x", pady=(2, 0))
                 self._bind_responsive_wrap(opt_frame, guarded_mode_note, horizontal_padding=40, min_wrap=220)
@@ -15815,10 +15858,10 @@ if GUI_AVAILABLE:
                     if not remediation_options["dry_run"]:
                         proceed = messagebox.askyesno(
                             "Confirm safe-fix writes",
-                            (
-                                f"Apply safe-fix remediation to {len(nifs)} NIF file(s)?\n\n"
-                                "Dry-run first is recommended. Write mode will modify the meshes on disk and relies on the sibling .nif.bak backups for rollback.\n"
-                                "Continue with write mode?"
+                            _nif_editor_confirmation_text(
+                                "patch",
+                                len(nifs),
+                                experimental_fallout_write=experimental_fallout_write_var.get(),
                             ),
                             parent=win,
                         )
@@ -15968,7 +16011,7 @@ if GUI_AVAILABLE:
                             "Confirm patch options",
                             "Potential option mismatch detected:\n\n"
                             + "\n".join(w for w in warnings_to_confirm if w)
-                            + "\n\nContinue anyway?",
+                            + "\n\nDry-run first and backups enabled are the safe default.\nContinue anyway?",
                             parent=win,
                         )
                         if not proceed:
@@ -16024,10 +16067,10 @@ if GUI_AVAILABLE:
                     if not options.dry_run:
                         proceed = messagebox.askyesno(
                             "Confirm NIF write mode",
-                            (
-                                f"Apply patch edits to {len(nifs)} NIF file(s)?\n\n"
-                                "Dry-run first is recommended. Write mode will modify the meshes on disk and depends on the sibling .nif.bak backups for rollback.\n"
-                                "Continue with write mode?"
+                            _nif_editor_confirmation_text(
+                                "patch",
+                                len(nifs),
+                                experimental_fallout_write=experimental_fallout_write_var.get(),
                             ),
                             parent=win,
                         )
@@ -16172,10 +16215,10 @@ if GUI_AVAILABLE:
                     if not options.dry_run:
                         proceed = messagebox.askyesno(
                             "Confirm destructive unpatch",
-                            (
-                                f"Remove the selected features from {len(nifs)} NIF file(s)?\n\n"
-                                "This is a destructive write operation. Dry-run first is recommended, and the sibling .nif.bak backups are the rollback path.\n"
-                                "Continue with write mode?"
+                            _nif_editor_confirmation_text(
+                                "unpatch",
+                                len(nifs),
+                                experimental_fallout_write=experimental_fallout_write_var.get(),
                             ),
                             parent=win,
                         )
@@ -16267,8 +16310,7 @@ if GUI_AVAILABLE:
                         return
                     proceed = messagebox.askyesno(
                         "Restore from backups",
-                        "Restore selected NIF file(s) from sibling .nif.bak backups?\n"
-                        "This is the rollback path after a write preview and will overwrite the current .nif files.",
+                        _nif_editor_confirmation_text("restore", len(nifs)),
                         parent=win,
                     )
                     if not proceed:
@@ -17417,11 +17459,12 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_content = QtWidgets.QWidget()
     nif_editor_layout = QtWidgets.QVBoxLayout(nif_editor_content)
     nif_editor_note = QtWidgets.QLabel(
-        "Uses the single file / recursive folder target from NIF Scan. "
-        "Dry-run is the default; writes always keep .nif.bak backups. Compare against or restore from the backup first if the preview looks wrong. "
-        "Fallout writes are experimental, not real-mod validated; verify in-game."
+        "⚠ " + _nif_editor_safety_banner_text()
     )
     nif_editor_note.setWordWrap(True)
+    font = nif_editor_note.font()
+    font.setBold(True)
+    nif_editor_note.setFont(font)
     nif_editor_layout.addWidget(nif_editor_note)
     nif_editor_form = QtWidgets.QFormLayout()
     nif_editor_flags: dict[str, Any] = {}
@@ -17463,12 +17506,12 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_profile.addItems(["auto", "skyrim", "fallout"])
     nif_editor_profile.setObjectName("nif_profile")
     nif_editor_form.addRow("Target game", nif_editor_profile)
-    nif_editor_experimental = QtWidgets.QCheckBox("Opt in to experimental Fallout writes")
+    nif_editor_experimental = QtWidgets.QCheckBox("Opt in to experimental Fallout writes (best-effort)")
     nif_editor_experimental.setObjectName("nif_experimental")
     nif_editor_form.addRow(nif_editor_experimental)
     nif_editor_gates: dict[str, Any] = {}
     for name in ("parallax_scale", "fix_mesh_lighting", "spec_strength", "spec_color", "env_map_scale"):
-        gate = QtWidgets.QCheckBox("Allow Fallout " + name.replace("_", " "))
+        gate = QtWidgets.QCheckBox("Allow Fallout " + name.replace("_", " ") + " (experimental)")
         gate.setObjectName(f"nif_fallout_allow_{name}")
         gate.setEnabled(False)
         nif_editor_experimental.toggled.connect(gate.setEnabled)
@@ -17500,7 +17543,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_cancel.setEnabled(False)
     nif_editor_actions.addWidget(nif_editor_cancel)
     nif_editor_layout.addLayout(nif_editor_actions)
-    nif_editor_status = QtWidgets.QLabel("Ready. Dry-run enabled.")
+    nif_editor_status = QtWidgets.QLabel("Ready. Dry-run enabled; backups are the rollback path.")
     nif_editor_status.setObjectName("nif_editor_status")
     nif_editor_status.setWordWrap(True)
     nif_editor_layout.addWidget(nif_editor_status)
@@ -18085,14 +18128,12 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         options = build_nif_patch_options_for_nif_editor(**values)
         if not options.dry_run:
             if operation == "restore":
-                prompt = (
-                    f"Restore {len(paths)} NIF file(s) from sibling .nif.bak backups? "
-                    "This is the rollback path after a write preview and will overwrite the current mesh with its backup."
-                )
+                prompt = _nif_editor_confirmation_text("restore", len(paths))
             else:
-                prompt = (
-                    f"{operation.title()} {len(paths)} NIF file(s)? Dry-run first is recommended, backups are mandatory, and write mode will modify the meshes on disk. "
-                    "Compare the preview against the sibling .nif.bak first, and keep Fallout writes experimental."
+                prompt = _nif_editor_confirmation_text(
+                    operation,
+                    len(paths),
+                    experimental_fallout_write=nif_editor_experimental.isChecked(),
                 )
             answer = QtWidgets.QMessageBox.question(
                 window, "Confirm NIF writes",
@@ -18104,7 +18145,10 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                 return
         nif_editor_results.clear()
         mode_label = "DRY-RUN" if options.dry_run else "WRITE MODE"
-        nif_editor_status.setText(f"Starting {mode_label} {operation} on {len(paths)} NIF file(s)…")
+        nif_editor_status.setText(
+            f"Starting {mode_label} {operation} on {len(paths)} NIF file(s)… "
+            "Backups stay on and dry-run is the safe default."
+        )
         nif_editor_worker = _QtNifEditorWorker(paths, options, operation)
         nif_editor_thread = QtCore.QThread(window)
         nif_editor_worker.moveToThread(nif_editor_thread)
