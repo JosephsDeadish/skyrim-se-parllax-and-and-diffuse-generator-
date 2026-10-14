@@ -421,6 +421,18 @@ The Qt build additionally runs `generate_textures_qt.exe --qt-acceptance-report 
 | Fallout-era headers (fallout profile) | Texture generation outputs are available, but keep workflows separated per mesh/material | Guarded experimental patch mode only (`--experimental-fallout-write`) | Keep guarded mode, enable only required per-operation gates, validate in game after patching |
 | Unknown/unsupported headers | Texture generation unaffected | Validation-only guidance, patching may be blocked | Run `--validate --conflict-report` first and fix header/profile issues before patching |
 
+### Which preset should I use?
+
+If you are not sure which renderer family to choose, use the shortest matching path:
+
+1. **Vanilla** — the safest default for Skyrim-only meshes that just need standard parallax.
+2. **ENB** — use when the mesh/material is intentionally built for ENB complex material or POM.
+3. **Community Shaders** — use for `_cm/_c` Extended Materials workflows.
+4. **TruePBR** — use for `_rmaos/_ramos` plus JSON sidecars.
+5. **Custom** — only when you already know the pipeline and want manual control.
+
+Do not mix ENB / Community Shaders / TruePBR families on the same mesh unless you are intentionally switching workflows.
+
 ### Troubleshooting decision tree (common NIF patch failures)
 
 1. **Patch failed before write**

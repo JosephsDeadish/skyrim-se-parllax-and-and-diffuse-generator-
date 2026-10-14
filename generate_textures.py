@@ -3767,6 +3767,14 @@ def _render_profile_family_reason_lines(profile: str) -> tuple[str, ...]:
     )
 
 
+def _workflow_preset_onboarding_text() -> str:
+    return (
+        "If you're unsure, start with the family that matches the mesh/output: Vanilla for Skyrim-safe outputs, "
+        "ENB for ENB/POM, Community Shaders for _cm/_c, and TruePBR for _rmaos/_ramos plus JSON sidecars. "
+        "Never mix ENB / Community Shaders / TruePBR families on the same mesh unless you're intentionally switching pipelines."
+    )
+
+
 def recommend_render_profile_details(
     input_path: Path | None,
     *,
@@ -9627,7 +9635,7 @@ if GUI_AVAILABLE:
             self.checkpoint_health_var = tk.StringVar(value="Checkpoint: pending")
             self.batch_perf_hint_var = tk.StringVar(value="")
             self.safe_preset_hint_var = tk.StringVar(
-                value="Safe defaults are recommended for most users: pick one workflow preset first, then only tune sliders if needed."
+                value="Safe defaults are recommended for most users. " + _workflow_preset_onboarding_text()
             )
             self.preview_force_full_once = False
             self.preview_paused_var = tk.BooleanVar(value=False)
@@ -10105,6 +10113,8 @@ if GUI_AVAILABLE:
                 style="Muted.TLabel",
             )
             _preset_usage_hint.grid(row=4, column=0, columnspan=3, sticky=tk.W, pady=(0, 2))
+            self._bind_responsive_wrap(_workflow_frame, _preset_hint, horizontal_padding=40, min_wrap=260)
+            self._bind_responsive_wrap(_workflow_frame, _preset_usage_hint, horizontal_padding=40, min_wrap=260)
             simplified_optional_preset_widgets: list[tk.Widget] = [
                 _preset_cs_button,
                 _preset_truepbr_button,
@@ -16558,6 +16568,7 @@ def _describe_qt_profile_guidance(profile: str) -> str:
             "layers or Community Shaders terrain feature sets."
         )
     guidance += " Profile selection does not change checked outputs; use Apply profile map defaults to do that."
+    guidance += f" {_workflow_preset_onboarding_text()}"
     return guidance
 
 

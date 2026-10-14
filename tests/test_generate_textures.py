@@ -73,6 +73,7 @@ from generate_textures import (
     _apply_qt_profile_output_defaults,
     _QT_OUTPUT_GROUPS,
     _describe_qt_profile_guidance,
+    _workflow_preset_onboarding_text,
     _qt_preview_channel_options,
     _inspect_qt_output_image,
     _DARK_THEME,
@@ -1670,10 +1671,19 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("<stem>_p.dds", terrain_guidance)
         self.assertIn("does not build tiled landscape layers", terrain_guidance)
         self.assertIn("profile selection does not change checked outputs", terrain_guidance)
+        self.assertIn("never mix enb / community shaders / truepbr families", terrain_guidance)
 
         truepbr_guidance = _describe_qt_profile_guidance("truepbr").lower()
         self.assertIn("<stem>_rmaos.dds", truepbr_guidance)
         self.assertIn("apply profile map defaults", truepbr_guidance)
+        self.assertIn("if you're unsure", truepbr_guidance)
+
+    def test_workflow_preset_onboarding_text_mentions_safe_family_selection(self) -> None:
+        onboarding = _workflow_preset_onboarding_text().lower()
+        self.assertIn("vanilla", onboarding)
+        self.assertIn("community shaders", onboarding)
+        self.assertIn("truepbr", onboarding)
+        self.assertIn("never mix enb / community shaders / truepbr families", onboarding)
 
     def test_qt_preview_loader_decodes_and_bounds_image_dimensions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
