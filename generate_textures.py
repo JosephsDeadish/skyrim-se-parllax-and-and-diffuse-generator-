@@ -6733,8 +6733,8 @@ def _scan_nif_validation_rows(
                 status = "SKIP"
                 if shader_count == 0:
                     details.append("No BSLightingShaderProperty found.")
-            elif ready_count == shader_count and skip_count == 0 and not probably_incompatible:
-                status = "OK"
+            elif ready_count == shader_count and skip_count == 0:
+                status = "PROBABLY INCOMPATIBLE" if probably_incompatible else "OK"
             else:
                 status = "WARN"
             detail_text = "\n".join(details)
@@ -7253,7 +7253,7 @@ def _format_qt_nif_scan_page_summary(
     page_index: int,
     page_count: int,
 ) -> str:
-    status_counts = {status: 0 for status in ("OK", "WARN", "SKIP", "FAIL")}
+    status_counts = {status: 0 for status in ("OK", "WARN", "PROBABLY INCOMPATIBLE", "SKIP", "FAIL")}
     for row in rows:
         status = str(row.get("status", "") or "").strip().upper()
         if status in status_counts:
@@ -7271,6 +7271,7 @@ def _qt_nif_scan_status_color(status: str, *, dark_mode: bool) -> str | None:
     colors = {
         "OK": ("#7ee2a8", "#16733a"),
         "WARN": ("#ffd166", "#8a5a00"),
+        "PROBABLY INCOMPATIBLE": ("#f97316", "#b45309"),
         "SKIP": ("#b2bac5", "#5a6470"),
         "FAIL": ("#ff8585", "#b42318"),
     }
@@ -15043,8 +15044,8 @@ if GUI_AVAILABLE:
                 result_status_combo = ttk.Combobox(
                     filter_frame,
                     textvariable=result_status_filter_var,
-                    values=("All", "OK", "WARN", "FAIL", "SKIP"),
-                    width=8,
+                    values=("All", "OK", "WARN", "PROBABLY INCOMPATIBLE", "SKIP", "FAIL"),
+                    width=22,
                     state="readonly",
                 )
                 result_status_combo.pack(side="left", padx=(6, 8))
@@ -15154,7 +15155,7 @@ if GUI_AVAILABLE:
                 _results_follow_latest = [True]
 
                 def _status_sort_rank(status_value: str) -> int:
-                    ranks = {"FAIL": 0, "WARN": 1, "SKIP": 2, "OK": 3}
+                    ranks = {"FAIL": 0, "PROBABLY INCOMPATIBLE": 1, "WARN": 2, "SKIP": 3, "OK": 4}
                     return ranks.get(status_value.upper(), 4)
 
                 def _filtered_rows() -> list[dict[str, str]]:
@@ -15651,6 +15652,20 @@ if GUI_AVAILABLE:
                                     and not probably_incompatible
                                 ):
                                     row_args = ("OK", nif.name, f"{validation.ready_count}/{validation.shader_count} shader(s) already parallax-ready")
+                                elif (
+                                    validation.ready_count == validation.shader_count
+                                    and validation.shader_count > 0
+                                    and validation.skip_count == 0
+                                    and probably_incompatible
+                                ):
+                                    detail_text = "Probably incompatible for some renderer families."
+                                    if combined_detail_lines:
+                                        detail_text += "\n" + "\n".join(combined_detail_lines)
+                                    row_args = (
+                                        "PROBABLY INCOMPATIBLE",
+                                        nif.name,
+                                        f"{validation.ready_count}/{validation.shader_count} shader(s) already parallax-ready\n{detail_text}",
+                                    )
                                 elif validation.shader_count == 0:
                                     detail = "\n".join(combined_detail_lines) if combined_detail_lines else "No BSLightingShaderProperty found."
                                     row_args = ("SKIP", nif.name, detail)
@@ -17308,7 +17323,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_scan_filter_edit.setPlaceholderText("Filter by file path, status, or diagnostic text")
     nif_scan_filter_row.addWidget(nif_scan_filter_edit, 1)
     nif_scan_status_filter = QtWidgets.QComboBox()
-    nif_scan_status_filter.addItems(["ALL", "OK", "WARN", "SKIP", "FAIL"])
+    nif_scan_status_filter.addItems(["ALL", "OK", "WARN", "PROBABLY INCOMPATIBLE", "SKIP", "FAIL"])
     nif_scan_filter_row.addWidget(nif_scan_status_filter)
     nif_scan_export_button = QtWidgets.QPushButton("Export filtered CSV…")
     nif_scan_export_button.setToolTip(

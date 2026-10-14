@@ -645,6 +645,10 @@ class TestQtNifValidationScan(unittest.TestCase):
     def test_scan_status_colors_are_theme_aware(self) -> None:
         self.assertEqual(_qt_nif_scan_status_color("OK", dark_mode=True), "#7ee2a8")
         self.assertEqual(_qt_nif_scan_status_color("warn", dark_mode=False), "#8a5a00")
+        self.assertEqual(
+            _qt_nif_scan_status_color("PROBABLY INCOMPATIBLE", dark_mode=True),
+            "#f97316",
+        )
         self.assertEqual(_qt_nif_scan_status_color("SKIP", dark_mode=True), "#b2bac5")
         self.assertEqual(_qt_nif_scan_status_color("FAIL", dark_mode=False), "#b42318")
         self.assertIsNone(_qt_nif_scan_status_color("UNKNOWN", dark_mode=False))
@@ -655,6 +659,7 @@ class TestQtNifValidationScan(unittest.TestCase):
                 {"status": "OK"},
                 {"status": "warn"},
                 {"status": "WARN"},
+                {"status": "PROBABLY INCOMPATIBLE"},
                 {"status": "SKIP"},
                 {"status": "FAIL"},
                 {"status": "UNKNOWN"},
@@ -664,7 +669,7 @@ class TestQtNifValidationScan(unittest.TestCase):
         )
         self.assertEqual(
             summary,
-            "Page 2 of 3 · 6 result(s) · OK 1, WARN 2, SKIP 1, FAIL 1",
+            "Page 2 of 3 · 7 result(s) · OK 1, WARN 2, PROBABLY INCOMPATIBLE 1, SKIP 1, FAIL 1",
         )
 
     def test_scan_page_summary_handles_empty_filtered_results(self) -> None:
@@ -826,6 +831,30 @@ class TestQtNifValidationScan(unittest.TestCase):
         self.assertIn("Grouped conflict codes:", details)
         self.assertIn("examples:", details)
         self.assertIn("fix actions:", details)
+
+    def test_scan_validation_rows_mark_fully_ready_uncertain_results_as_probably_incompatible(self) -> None:
+        validation = SimpleNamespace(
+            shader_count=1,
+            ready_count=1,
+            needs_patch_count=0,
+            skip_count=0,
+            detected_game_profile="skyrim",
+            has_havok=False,
+            skip_reasons=[],
+            issues=[],
+            suggestions=[],
+            renderer_verdicts={
+                "truepbr": "TruePBR: Mesh-side setup looks ready, but TruePBR still needs a matching JSON entry that this scan cannot verify.",
+            },
+            conflict_report=[],
+        )
+
+        with mock.patch("generate_textures.validate_nif_for_parallax", return_value=validation):
+            rows, cancelled = _scan_nif_validation_rows([Path("mesh.nif")])
+
+        self.assertFalse(cancelled)
+        self.assertEqual(rows[0]["status"], "PROBABLY INCOMPATIBLE")
+        self.assertIn("Probably incompatible", rows[0]["details"])
 
     def test_scan_selected_result_details_have_empty_selection_guidance(self) -> None:
         self.assertIn("Select a scan result", _format_qt_nif_scan_detail(None))
