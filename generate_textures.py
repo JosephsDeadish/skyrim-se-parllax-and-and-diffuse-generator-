@@ -1580,6 +1580,7 @@ class ModManagerContext:
     loaded_mesh_dirs: tuple[Path, ...] = ()
     detected_body_profiles: tuple[str, ...] = ()
     detected_skeleton_profiles: tuple[str, ...] = ()
+    renderer_version_hints: tuple[str, ...] = ()
 
     @property
     def summary(self) -> str:
@@ -1602,10 +1603,89 @@ class ModManagerContext:
             details.append(f"body hints {', '.join(self.detected_body_profiles)}")
         if self.detected_skeleton_profiles:
             details.append(f"skeleton hints {', '.join(self.detected_skeleton_profiles)}")
+        if self.renderer_version_hints:
+            details.append(f"version hints {', '.join(self.renderer_version_hints)}")
         if self.game_root is not None:
             details.append(f"game root {self.game_root}")
         details.append("advisory only: explicit folder and output choices always win")
         return " — ".join(details)
+
+
+def _extract_version_tuple(text: str) -> tuple[int, ...] | None:
+    match = _VERSION_HINT_RE.search(str(text))
+    if match is None:
+        return None
+    parts = tuple(int(part) for part in re.split(r"[._:-]", match.group(1)) if part.isdigit())
+    return parts if len(parts) >= 2 else None
+
+
+def _format_version_tuple(version: tuple[int, ...]) -> str:
+    return ".".join(str(part) for part in version)
+
+
+def _compare_version_tuples(left: tuple[int, ...], right: tuple[int, ...]) -> int:
+    width = max(len(left), len(right))
+    normalized_left = left + (0,) * (width - len(left))
+    normalized_right = right + (0,) * (width - len(right))
+    if normalized_left < normalized_right:
+        return -1
+    if normalized_left > normalized_right:
+        return 1
+    return 0
+
+
+def _detect_renderer_version_hints(sources: tuple[str, ...]) -> tuple[str, ...]:
+    if not sources:
+        return ()
+    detected: list[str] = []
+    seen: set[str] = set()
+    for source in sources:
+        version = _extract_version_tuple(source)
+        if version is None:
+            continue
+        normalized_source = _normalize_profile_hint_source(source)
+        for profile, hints in _RENDER_PROFILE_MANAGER_HINT_TOKENS.items():
+            if not any(_hint_token_matches_source(normalized_source, hint) for hint in hints):
+                continue
+            hint_label = _RENDER_PROFILE_LABELS.get(profile, profile.replace("_", " ").title())
+            hint = f"{hint_label} {_format_version_tuple(version)}"
+            if hint in seen:
+                break
+            seen.add(hint)
+            detected.append(hint)
+            break
+    return tuple(detected)
+
+
+def _build_truepbr_version_note(context: ModManagerContext | None) -> str | None:
+    if context is None:
+        return None
+    relevant_hints = [
+        hint
+        for hint in context.renderer_version_hints
+        if hint.lower().startswith(("community shaders pbr", "truepbr", "pbrnifpatcher"))
+    ]
+    if not relevant_hints:
+        if detect_render_profile_from_mod_manager_context(context) == "truepbr":
+            return "TruePBR markers were found, but no version hint was detected; verify the installed PBRNifPatcher / Community Shaders build before export."
+        return None
+    outdated: list[str] = []
+    for hint in relevant_hints:
+        version = _extract_version_tuple(hint)
+        if version is None:
+            continue
+        if _compare_version_tuples(version, _TRUEPBR_VERSION_BASELINE) < 0:
+            outdated.append(hint)
+    if outdated:
+        return (
+            f"TruePBR version hint(s) {', '.join(outdated)} fall below the release-aligned baseline "
+            f"{_format_version_tuple(_TRUEPBR_VERSION_BASELINE)}; treat this as probably incompatible until the "
+            "installed shader/config versions are confirmed."
+        )
+    return (
+        f"TruePBR version hint(s) {', '.join(relevant_hints)} meet the release-aligned baseline "
+        f"{_format_version_tuple(_TRUEPBR_VERSION_BASELINE)}."
+    )
 
 
 def build_mod_manager_context_hint(
@@ -1904,6 +1984,7 @@ def _detect_mo2_context(
     detection_sources = tuple((*loaded_mods, *enabled_plugins, *load_order))
     detected_body_profiles = _detect_profile_hints(detection_sources, _BODY_PROFILE_HINTS)
     detected_skeleton_profiles = _detect_profile_hints(detection_sources, _SKELETON_PROFILE_HINTS)
+    renderer_version_hints = _detect_renderer_version_hints(detection_sources)
 
     output_dir = instance_root / "overwrite" if instance_root is not None else None
     return ModManagerContext(
@@ -1920,6 +2001,7 @@ def _detect_mo2_context(
         loaded_mesh_dirs=loaded_mesh_dirs,
         detected_body_profiles=detected_body_profiles,
         detected_skeleton_profiles=detected_skeleton_profiles,
+        renderer_version_hints=renderer_version_hints,
     )
 
 
@@ -1981,6 +2063,7 @@ def _detect_vortex_context(
     detection_sources = tuple((*loaded_mods, *enabled_plugins, *load_order))
     detected_body_profiles = _detect_profile_hints(detection_sources, _BODY_PROFILE_HINTS)
     detected_skeleton_profiles = _detect_profile_hints(detection_sources, _SKELETON_PROFILE_HINTS)
+    renderer_version_hints = _detect_renderer_version_hints(detection_sources)
 
     return ModManagerContext(
         manager="Vortex",
@@ -1996,6 +2079,7 @@ def _detect_vortex_context(
         loaded_mesh_dirs=mesh_dirs,
         detected_body_profiles=detected_body_profiles,
         detected_skeleton_profiles=detected_skeleton_profiles,
+        renderer_version_hints=renderer_version_hints,
     )
 
 
@@ -3253,6 +3337,9 @@ _RENDER_PROFILE_MANAGER_HINT_TOKENS: dict[str, tuple[str, ...]] = {
     "community_shaders": (
         "community shaders",
         "communityshaders",
+        "community shader",
+        "cs extended materials",
+        "cs complex material",
         "complex material",
         "extended materials",
         "dynamic cubemap",
@@ -3262,8 +3349,21 @@ _RENDER_PROFILE_MANAGER_HINT_TOKENS: dict[str, tuple[str, ...]] = {
         "dynamiccubemap",
         "dynamiccubemaps",
     ),
-    "truepbr": ("truepbr", "true pbr", "pbrnifpatcher", "pbr nif patcher", "rmaos", "ramos"),
+    "truepbr": (
+        "truepbr",
+        "true pbr",
+        "community shaders truepbr",
+        "pbrnifpatcher",
+        "pbr nif patcher",
+        "pbr texture sets",
+        "pbr texturesets",
+        "rmaos",
+        "ramos",
+    ),
 }
+
+_VERSION_HINT_RE = re.compile(r"(?<!\d)(\d+(?:[._:-]\d+){1,3})(?!\d)")
+_TRUEPBR_VERSION_BASELINE = (1, 0, 0)
 
 _RENDER_PROFILE_WORKFLOW_HINTS: dict[str, str] = {
     "performance": "performance",
@@ -4093,6 +4193,17 @@ def recommend_render_profile_details(
         if manager_profile == normalized_profile and source_label != "manager context":
             matched_evidence.append(f"mod manager context also agrees with {_RENDER_PROFILE_LABELS[normalized_profile]}.")
             confidence = min(0.99, confidence + 0.03)
+    if normalized_profile == "truepbr":
+        truepbr_version_note = _build_truepbr_version_note(manager_context)
+        if truepbr_version_note:
+            matched_evidence.append(truepbr_version_note)
+            matched_reason = f"{matched_reason} {truepbr_version_note}".strip()
+            if "fall below" in truepbr_version_note:
+                confidence = min(confidence, 0.68)
+            elif "no version hint" in truepbr_version_note:
+                confidence = min(confidence, 0.78)
+            else:
+                confidence = min(0.99, confidence + 0.02)
     inferred_workflow_hint = _RENDER_PROFILE_WORKFLOW_HINTS.get((inferred_workflow or "").strip().lower())
     if inferred_workflow_hint == normalized_profile and source_label != "workflow inference":
         matched_evidence.append(f"workflow inference also agrees with {_RENDER_PROFILE_LABELS[normalized_profile]}.")

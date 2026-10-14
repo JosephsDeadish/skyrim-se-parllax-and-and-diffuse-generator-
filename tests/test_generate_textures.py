@@ -73,6 +73,7 @@ from generate_textures import (
     _apply_qt_profile_output_defaults,
     _QT_OUTPUT_GROUPS,
     _describe_qt_profile_guidance,
+    _detect_renderer_version_hints,
     _format_short_guidance_tooltip,
     _format_qt_log_export_text,
     _resolve_app_icon_source_path,
@@ -80,6 +81,7 @@ from generate_textures import (
     _nif_editor_safety_banner_text,
     _workflow_preset_onboarding_text,
     _bind_tk_quick_start_shortcuts,
+    _build_truepbr_version_note,
     _qt_preview_channel_options,
     _inspect_qt_output_image,
     _DARK_THEME,
@@ -3163,6 +3165,22 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(any("ENB" in text for text in details.why_not_others))
         self.assertTrue(any("Community Shaders" in text for text in details.why_not_others))
 
+    def test_recommend_render_profile_details_warns_on_outdated_truepbr_metadata(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            loaded_mods=("PBRNifPatcher 0.9.0",),
+            renderer_version_hints=("Community Shaders PBR 0.9.0",),
+        )
+        details = recommend_render_profile_details(
+            Path("textures/architecture/stone_rmaos.dds"),
+            detected_role="environment_mask",
+            detected_suffix="_rmaos",
+            manager_context=context,
+        )
+        self.assertEqual(details.profile, "truepbr")
+        self.assertIn("release-aligned baseline", details.recommendation_reason)
+        self.assertLess(details.confidence, 0.95)
+
     def test_recommend_render_profile_details_scores_mod_manager_markers_high(self) -> None:
         context = ModManagerContext(
             manager="MO2",
@@ -5352,6 +5370,40 @@ class GenerateTexturesTests(unittest.TestCase):
             context.summary,
             "Detected Mod (Hint): not detected — this is only a suggestion; your chosen input/output paths still take priority.",
         )
+
+    def test_mod_manager_context_summary_includes_renderer_version_hints(self) -> None:
+        context = ModManagerContext(
+            manager="Mod Organizer 2",
+            profile_name="Default",
+            renderer_version_hints=("Community Shaders 1.9.1", "Community Shaders PBR 1.0.0"),
+        )
+
+        self.assertIn("version hints Community Shaders 1.9.1, Community Shaders PBR 1.0.0", context.summary)
+
+    def test_detect_renderer_version_hints_prefers_family_specific_versions(self) -> None:
+        hints = _detect_renderer_version_hints(
+            (
+                "Community Shaders v1.9.1",
+                "PBRNifPatcher 0.9.0",
+                "ENBSeries 0.495",
+            )
+        )
+
+        self.assertIn("Community Shaders 1.9.1", hints)
+        self.assertIn("Community Shaders PBR 0.9.0", hints)
+
+    def test_build_truepbr_version_note_warns_on_outdated_metadata(self) -> None:
+        context = ModManagerContext(
+            manager="Mod Organizer 2",
+            loaded_mods=("PBRNifPatcher 0.9.0",),
+            renderer_version_hints=("Community Shaders PBR 0.9.0",),
+        )
+
+        note = _build_truepbr_version_note(context)
+
+        self.assertIsNotNone(note)
+        self.assertIn("fall below the release-aligned baseline", note or "")
+        self.assertIn("probably incompatible", note or "")
 
     def test_detect_mod_manager_context_includes_mo2_overwrite_dirs_and_game_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
