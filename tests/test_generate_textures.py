@@ -76,7 +76,9 @@ from generate_textures import (
     _qt_preview_channel_options,
     _inspect_qt_output_image,
     _DARK_THEME,
+    _HIGH_CONTRAST_THEME,
     _LIGHT_THEME,
+    _THEME_MODE_LABELS,
     _resolve_batch_workers,
     _summarize_batch_texture_dimensions,
     _visible_preview_output_keys,
@@ -1212,7 +1214,7 @@ class GenerateTexturesTests(unittest.TestCase):
             ]
             return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
 
-        for theme in (_LIGHT_THEME, _DARK_THEME):
+        for theme in (_LIGHT_THEME, _DARK_THEME, _HIGH_CONTRAST_THEME):
             background = relative_luminance(theme["bg"])
             for key in ("muted_fg", "info_fg", "success_fg", "warning_fg", "error_fg"):
                 foreground = relative_luminance(theme[key])
@@ -1225,15 +1227,18 @@ class GenerateTexturesTests(unittest.TestCase):
         gui = TextureGeneratorGUI()
         try:
             style = gui.root.tk.call
-            gui.dark_mode_var.set(False)
-            gui._apply_theme()
-            self.assertEqual(style("ttk::style", "lookup", "Muted.TLabel", "-foreground"), _LIGHT_THEME["muted_fg"])
-            self.assertEqual(style("ttk::style", "lookup", "Status.Error.TLabel", "-foreground"), _LIGHT_THEME["error_fg"])
+            with mock.patch("generate_textures.save_gui_state"):
+                gui._set_theme_mode("light")
+                self.assertEqual(style("ttk::style", "lookup", "Muted.TLabel", "-foreground"), _LIGHT_THEME["muted_fg"])
+                self.assertEqual(style("ttk::style", "lookup", "Status.Error.TLabel", "-foreground"), _LIGHT_THEME["error_fg"])
 
-            gui.dark_mode_var.set(True)
-            gui._apply_theme()
-            self.assertEqual(style("ttk::style", "lookup", "Muted.TLabel", "-foreground"), _DARK_THEME["muted_fg"])
-            self.assertEqual(style("ttk::style", "lookup", "Status.Error.TLabel", "-foreground"), _DARK_THEME["error_fg"])
+                gui._set_theme_mode("dark")
+                self.assertEqual(style("ttk::style", "lookup", "Muted.TLabel", "-foreground"), _DARK_THEME["muted_fg"])
+                self.assertEqual(style("ttk::style", "lookup", "Status.Error.TLabel", "-foreground"), _DARK_THEME["error_fg"])
+
+                gui._set_theme_mode("high_contrast")
+                self.assertEqual(style("ttk::style", "lookup", "Muted.TLabel", "-foreground"), _HIGH_CONTRAST_THEME["muted_fg"])
+                self.assertEqual(style("ttk::style", "lookup", "Status.Error.TLabel", "-foreground"), _HIGH_CONTRAST_THEME["error_fg"])
         finally:
             gui.root.destroy()
 
@@ -1270,6 +1275,13 @@ class GenerateTexturesTests(unittest.TestCase):
         normalized = _normalize_gui_state({"use_custom_output": True, "output_path": ""})
         self.assertFalse(bool(normalized["use_custom_output"]))
 
+    def test_normalize_gui_state_tracks_theme_mode(self) -> None:
+        normalized = _normalize_gui_state({"theme_mode": "High Contrast", "dark_mode": False})
+        self.assertEqual(str(normalized["theme_mode"]), "high_contrast")
+        self.assertTrue(bool(normalized["dark_mode"]))
+        fallback = _normalize_gui_state({"dark_mode": True})
+        self.assertEqual(str(fallback["theme_mode"]), "dark")
+
     def test_normalize_gui_state_preserves_last_mod_context_memory(self) -> None:
         normalized = _normalize_gui_state(
             {
@@ -1294,6 +1306,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(state["last_renderer"], "")
         self.assertEqual(state["last_output_target"], "")
         self.assertFalse(bool(state["dark_mode"]))
+        self.assertEqual(str(state["theme_mode"]), "light")
         self.assertEqual(str(state["workflow_mode"]), "beginner")
         self.assertTrue(bool(state["simplified_main_layout"]))
         self.assertTrue(bool(state["auto_suggestions"]))
@@ -1355,6 +1368,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 truepbr_sidecar_specular_level=0.07,
                 truepbr_sidecar_roughness_scale=1.3,
                 dark_mode=True,
+                theme_mode="high_contrast",
                 ui_scale=1.3,
                 workflow_mode="advanced",
                 show_advanced_map_strengths=True,
@@ -1364,6 +1378,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(merged["input_path"], str(input_path))
         self.assertEqual(merged["output_path"], str(Path(temp_dir) / "out"))
         self.assertTrue(bool(merged["dark_mode"]))
+        self.assertEqual(str(merged["theme_mode"]), "high_contrast")
         self.assertTrue(bool(merged["show_advanced_workflow_outputs"]))
         self.assertEqual(str(merged["workflow_mode"]), "advanced")
         self.assertTrue(bool(merged["qt_show_advanced_map_strengths"]))
@@ -1744,7 +1759,7 @@ class GenerateTexturesTests(unittest.TestCase):
                     "input_path": str(input_file),
                     "output_path": "/tmp/out",
                     "use_custom_output": True,
-                    "dark_mode": True,
+                    "theme_mode": "high_contrast",
                     "show_batch_preview": True,
                     "workflow_mode": "advanced",
                     "simplified_main_layout": False,
@@ -1786,6 +1801,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(loaded["input_path"], str(input_file))
         self.assertEqual(loaded["output_path"], "/tmp/out")
         self.assertTrue(bool(loaded["use_custom_output"]))
+        self.assertEqual(str(loaded["theme_mode"]), "high_contrast")
         self.assertTrue(bool(loaded["dark_mode"]))
         self.assertTrue(bool(loaded["show_batch_preview"]))
         self.assertFalse(bool(loaded["simplified_main_layout"]))
@@ -1835,7 +1851,7 @@ class GenerateTexturesTests(unittest.TestCase):
                     "input_path": str(source_input),
                     "output_path": "/tmp/out",
                     "use_custom_output": True,
-                    "dark_mode": True,
+                    "theme_mode": "dark",
                     "last_mod_manager": "Mod Organizer 2",
                     "last_mod_profile": "Main",
                     "last_renderer": "community_shaders",
@@ -1851,6 +1867,7 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(imported["input_path"], str(source_input))
             self.assertEqual(imported["output_path"], "/tmp/out")
             self.assertTrue(bool(imported["use_custom_output"]))
+            self.assertEqual(str(imported["theme_mode"]), "dark")
             self.assertTrue(bool(imported["dark_mode"]))
             self.assertEqual(imported["last_mod_manager"], "Mod Organizer 2")
             self.assertEqual(imported["last_mod_profile"], "Main")
@@ -1884,7 +1901,7 @@ class GenerateTexturesTests(unittest.TestCase):
                     "input_path": str(source_input),
                     "output_path": "/tmp/out",
                     "use_custom_output": True,
-                    "dark_mode": True,
+                    "theme_mode": "high_contrast",
                     "last_mod_manager": "Vortex",
                     "last_mod_profile": "Default",
                     "last_renderer": "community_shaders",
@@ -1897,6 +1914,8 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(loaded["input_path"], str(source_input))
             self.assertEqual(loaded["output_path"], "/tmp/out")
             self.assertTrue(bool(loaded["use_custom_output"]))
+            self.assertEqual(str(loaded["theme_mode"]), "high_contrast")
+            self.assertTrue(bool(loaded["dark_mode"]))
             self.assertEqual(loaded["last_renderer"], "community_shaders")
             self.assertEqual(loaded["last_output_target"], "/tmp/out")
             self.assertEqual(str(loaded["workflow_mode"]), "advanced")
@@ -2015,7 +2034,7 @@ class GenerateTexturesTests(unittest.TestCase):
                         self.assertGreater(gui.root.winfo_height(), 0)
 
                     gui.ui_scale_var.set(2.0)
-                    gui.dark_mode_var.set(True)
+                    gui._set_theme_mode("dark")
                     gui._apply_ui_scaling()
                     gui._apply_theme()
                     gui._restore_default_startup_geometry()
@@ -2029,9 +2048,8 @@ class GenerateTexturesTests(unittest.TestCase):
                             gui.ui_scale_combo.set(scale)
                             gui._on_ui_scale_changed()
                             self.assertAlmostEqual(float(gui.ui_scale_var.get()), float(scale))
-                            for dark_mode, palette in ((False, _LIGHT_THEME), (True, _DARK_THEME)):
-                                gui.dark_mode_var.set(dark_mode)
-                                gui._apply_theme()
+                            for theme_mode, palette in (("light", _LIGHT_THEME), ("dark", _DARK_THEME), ("high_contrast", _HIGH_CONTRAST_THEME)):
+                                gui._set_theme_mode(theme_mode)
                                 gui._restore_default_startup_geometry()
                                 self.assertEqual(
                                     style("ttk::style", "lookup", "Muted.TLabel", "-foreground"),
@@ -10411,8 +10429,13 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             step = state["step"]
             if step == 0:
                 self.assertTrue(w("nif_dry_run").isChecked())
-                for dark, scale, size in ((False, "0.9", (640, 480)), (True, "1.5", (1100, 760)), (True, "1.15", (800, 600))):
-                    w("theme").setChecked(dark)
+                for theme_mode, scale, size in (
+                    ("light", "0.9", (640, 480)),
+                    ("dark", "1.5", (1100, 760)),
+                    ("high_contrast", "1.15", (800, 600)),
+                ):
+                    w("theme_mode").setCurrentText(_THEME_MODE_LABELS[theme_mode])
+                    self.assertEqual(w("theme").isChecked(), theme_mode != "light")
                     w("ui_scale").setCurrentText(scale)
                     window.resize(*size)
                     self.app.processEvents()

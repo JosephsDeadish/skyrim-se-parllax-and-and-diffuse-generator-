@@ -87,7 +87,7 @@ This opens a desktop interface where you can:
 - use the NIF Editor's resizable results log to review full untruncated scan/patch details while processing whole mesh folders — always keep backups of your NIF files
 - when a folder is selected, only process original `.dds` source textures and skip generated `_n`, `_p`, `_g`/legacy glow aliases, `_m`, packed `_rmaos`/`_orm` variants, `_s`, `_sk`, `_msn`, `_cm`, `_wt`, `_sm`, and common non-Skyrim authoring-suffix aliases such as `_ao`, `_roughness`, and `_metalness`
 - continue processing remaining files in folder mode even if one file is corrupt/unreadable
-- toggle **dark mode** for low-light modding sessions
+- switch between **light**, **dark**, and **high-contrast** theme presets for different lighting and accessibility needs
 - get file-type sanity warnings (with per-warning “don’t show again”) for combinations that usually produce incorrect in-game results
 
 ### Command line

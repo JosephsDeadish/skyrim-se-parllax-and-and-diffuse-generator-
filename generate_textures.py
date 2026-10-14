@@ -227,6 +227,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "last_renderer": "",
     "last_output_target": "",
     "dark_mode": False,
+    "theme_mode": "light",
     "show_batch_preview": False,
     "auto_optimize_large_batches": True,
     "lazy_preview_mode": True,
@@ -299,6 +300,30 @@ _WORKFLOW_MODE_LABELS = {
     "advanced": "Advanced",
 }
 _WORKFLOW_MODE_LABEL_TO_VALUE = {label: value for value, label in _WORKFLOW_MODE_LABELS.items()}
+
+_THEME_MODE_VALUES = ("light", "dark", "high_contrast")
+_THEME_MODE_LABELS = {
+    "light": "☀ Light mode",
+    "dark": "🌙 Dark mode",
+    "high_contrast": "⚡ High contrast",
+}
+_THEME_MODE_LABEL_TO_VALUE = {label: value for value, label in _THEME_MODE_LABELS.items()}
+
+
+def _normalize_theme_mode(value: object | None) -> str | None:
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    if raw in _THEME_MODE_LABEL_TO_VALUE:
+        return _THEME_MODE_LABEL_TO_VALUE[raw]
+    normalized = raw.lower().replace("-", "_").replace(" ", "_")
+    if normalized in {"light", "dark", "high_contrast"}:
+        return normalized
+    if normalized in {"highcontrast", "high_contrast_mode", "highcontrastmode"}:
+        return "high_contrast"
+    return None
 
 _TEXTURE_TARGET_GAME_VALUES: tuple[str, ...] = (
     "skyrim",
@@ -885,6 +910,11 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         state["auto_specular"] = False
         state["auto_ao"] = False
         state["auto_roughness"] = False
+    theme_mode = _normalize_theme_mode(raw.get("theme_mode"))
+    if theme_mode is None:
+        theme_mode = "dark" if bool(state["dark_mode"]) else "light"
+    state["theme_mode"] = theme_mode
+    state["dark_mode"] = theme_mode != "light"
     workflow_mode = _normalize_workflow_mode(raw.get("workflow_mode"))
     if workflow_mode is None:
         workflow_mode = _infer_workflow_mode_from_state(state)
@@ -1089,6 +1119,7 @@ def _merge_qt_generation_gui_state(
     truepbr_sidecar_specular_level: float | None = None,
     truepbr_sidecar_roughness_scale: float | None = None,
     dark_mode: bool | None = None,
+    theme_mode: str | None = None,
     ui_scale: float | None = None,
     workflow_mode: str | None = None,
     show_advanced_map_strengths: bool | None = None,
@@ -1146,6 +1177,8 @@ def _merge_qt_generation_gui_state(
             merged[key] = value
     if dark_mode is not None:
         merged["dark_mode"] = dark_mode
+    if theme_mode is not None:
+        merged["theme_mode"] = theme_mode
     if ui_scale is not None:
         merged["ui_scale"] = ui_scale
     if workflow_mode is not None:
@@ -9501,6 +9534,31 @@ _DARK_THEME: dict[str, str] = {
     "warning_fg": "#f9e2af",
     "error_fg": "#f38ba8",
 }
+_HIGH_CONTRAST_THEME: dict[str, str] = {
+    "bg": "#000000",
+    "fg": "#ffffff",
+    "field_bg": "#111111",
+    "button_bg": "#1f1f1f",
+    "trough": "#444444",
+    "auto_trough": "#ffd400",
+    "tooltip_bg": "#111111",
+    "tooltip_fg": "#ffffff",
+    "disabled_fg": "#a0a0a0",
+    "muted_fg": "#d7d7d7",
+    "info_fg": "#7fd7ff",
+    "success_fg": "#80ff9f",
+    "warning_fg": "#ffe066",
+    "error_fg": "#ff8a80",
+}
+
+
+def _theme_palette_for_mode(mode: object | None) -> dict[str, str]:
+    normalized = _normalize_theme_mode(mode)
+    if normalized == "dark":
+        return _DARK_THEME
+    if normalized == "high_contrast":
+        return _HIGH_CONTRAST_THEME
+    return _LIGHT_THEME
 
 
 if GUI_AVAILABLE:
@@ -9546,6 +9604,7 @@ if GUI_AVAILABLE:
             self.batch_resume_hint_var = tk.StringVar(value="Mode: start fresh — checkpoint entries are ignored.")
             self.auto_patch_nifs_var = tk.BooleanVar(value=False)
             self.dark_mode_var = tk.BooleanVar(value=False)
+            self.theme_mode_var = tk.StringVar(value=_THEME_MODE_LABELS["light"])
             self.ui_language_var = tk.StringVar(value="en")
             self.ui_scale_var = tk.DoubleVar(value=1.0)
             self.nif_retry_count_var = tk.IntVar(value=1)
@@ -9555,6 +9614,7 @@ if GUI_AVAILABLE:
             self._tooltip_fg = _LIGHT_THEME["tooltip_fg"]
             self.dismissed_warnings: set[str] = set()
             self._workflow_mode_syncing = False
+            self._theme_mode_syncing = False
 
             self.input_var = tk.StringVar()
             self.output_var = tk.StringVar()
@@ -9624,7 +9684,7 @@ if GUI_AVAILABLE:
             self.auto_specular_suggestion_var = tk.BooleanVar(value=True)
             self.auto_ao_suggestion_var = tk.BooleanVar(value=True)
             self.auto_roughness_suggestion_var = tk.BooleanVar(value=True)
-            self.theme_mode_label_var = tk.StringVar(value="☀ Light mode")
+            self.theme_mode_label_var = tk.StringVar(value=_THEME_MODE_LABELS["light"])
             self.include_diffuse_var = tk.BooleanVar(value=True)
             self.include_normal_var = tk.BooleanVar(value=True)
             self.include_parallax_var = tk.BooleanVar(value=True)
@@ -9706,6 +9766,17 @@ if GUI_AVAILABLE:
                 command=self._open_render_profile_help,
             )
             _help_button.pack(side=tk.RIGHT, padx=4)
+            _theme_mode_label = ttk.Label(top_controls_row, text="Theme preset")
+            _theme_mode_label.pack(side=tk.LEFT, padx=(0, 4))
+            self.theme_mode_combo = ttk.Combobox(
+                top_controls_row,
+                textvariable=self.theme_mode_var,
+                values=[_THEME_MODE_LABELS[value] for value in _THEME_MODE_VALUES],
+                state="readonly",
+                width=16,
+            )
+            self.theme_mode_combo.pack(side=tk.LEFT, padx=(0, 10))
+            self.theme_mode_combo.bind("<<ComboboxSelected>>", self._on_theme_mode_selected)
             _theme_top_check = ttk.Checkbutton(
                 top_controls_row,
                 textvariable=self.theme_mode_label_var,
@@ -11144,8 +11215,39 @@ if GUI_AVAILABLE:
             widget.bind("<Leave>", _hide, add="+")
             widget.bind("<ButtonPress>", _hide, add="+")
 
+        def _theme_mode_value(self) -> str:
+            normalized = _normalize_theme_mode(self.theme_mode_var.get())
+            if normalized is None:
+                normalized = "dark" if self.dark_mode_var.get() else "light"
+            return normalized
+
+        def _sync_theme_mode_controls(self, mode: object) -> str:
+            normalized = _normalize_theme_mode(mode) or "light"
+            if self._theme_mode_syncing:
+                return normalized
+            self._theme_mode_syncing = True
+            try:
+                label = _THEME_MODE_LABELS[normalized]
+                self.theme_mode_var.set(label)
+                self.theme_mode_label_var.set(self._tr(label))
+                self.dark_mode_var.set(normalized != "light")
+                if hasattr(self, "theme_mode_combo"):
+                    self.theme_mode_combo.set(label)
+            finally:
+                self._theme_mode_syncing = False
+            return normalized
+
+        def _set_theme_mode(self, mode: object, *, persist: bool = True) -> None:
+            normalized = self._sync_theme_mode_controls(mode)
+            self._apply_theme()
+            self._restore_default_startup_geometry()
+            if persist:
+                self._save_persisted_gui_state()
+            theme_name = "high contrast" if normalized == "high_contrast" else normalized
+            self.status_var.set(self._tr("Switched to {theme_name} mode.").format(theme_name=theme_name))
+
         def _apply_theme(self) -> None:
-            colors = _DARK_THEME if self.dark_mode_var.get() else _LIGHT_THEME
+            colors = _theme_palette_for_mode(self._theme_mode_value())
             self._update_theme_toggle_text()
             self._tooltip_bg = colors["tooltip_bg"]
             self._tooltip_fg = colors["tooltip_fg"]
@@ -11226,15 +11328,15 @@ if GUI_AVAILABLE:
                         pass
 
         def _toggle_theme(self) -> None:
-            self._apply_theme()
-            self._restore_default_startup_geometry()
-            theme_name = "dark" if self.dark_mode_var.get() else "light"
-            self.status_var.set(self._tr("Switched to {theme_name} mode.").format(theme_name=theme_name))
+            self._set_theme_mode("dark" if self.dark_mode_var.get() else "light")
+
+        def _on_theme_mode_selected(self, _event: object | None = None) -> None:
+            if self._theme_mode_syncing:
+                return
+            self._set_theme_mode(self.theme_mode_var.get())
 
         def _update_theme_toggle_text(self) -> None:
-            self.theme_mode_label_var.set(
-                self._tr("🌙 Dark mode") if self.dark_mode_var.get() else self._tr("☀ Light mode")
-            )
+            self.theme_mode_label_var.set(self._tr(_THEME_MODE_LABELS[self._theme_mode_value()]))
 
         def _workflow_mode_from_controls(self) -> str:
             if bool(self.show_advanced_generation_var.get()) or bool(self.show_advanced_workflow_outputs_var.get()):
@@ -11291,7 +11393,13 @@ if GUI_AVAILABLE:
             if not output_target_memory:
                 output_target_memory = str(state.get("output_path", "") or "").strip() or "next to input"
             self.last_output_target_memory = output_target_memory
-            self.dark_mode_var.set(bool(state["dark_mode"]))
+            theme_mode = _normalize_theme_mode(state.get("theme_mode"))
+            if theme_mode is None:
+                theme_mode = "dark" if bool(state["dark_mode"]) else "light"
+            theme_mode_label = _THEME_MODE_LABELS[theme_mode]
+            self.theme_mode_var.set(theme_mode_label)
+            self.theme_mode_label_var.set(self._tr(theme_mode_label))
+            self.dark_mode_var.set(theme_mode != "light")
             self.show_batch_preview_var.set(bool(state["show_batch_preview"]))
             self.auto_optimize_large_batches_var.set(bool(state.get("auto_optimize_large_batches", True)))
             self.lazy_preview_mode_var.set(bool(state.get("lazy_preview_mode", True)))
@@ -11375,6 +11483,7 @@ if GUI_AVAILABLE:
                 if self.use_custom_output_var.get() and self.output_var.get().strip()
                 else "next to input",
                 "dark_mode": self.dark_mode_var.get(),
+                "theme_mode": self._theme_mode_value(),
                 "show_batch_preview": self.show_batch_preview_var.get(),
                 "auto_optimize_large_batches": self.auto_optimize_large_batches_var.get(),
                 "lazy_preview_mode": self.lazy_preview_mode_var.get(),
@@ -13352,7 +13461,7 @@ if GUI_AVAILABLE:
             dialog.transient(self.root)
             dialog.resizable(False, False)
             dialog_result: list[bool] = [True]
-            colors = _DARK_THEME if self.dark_mode_var.get() else _LIGHT_THEME
+            colors = _theme_palette_for_mode(self._theme_mode_value())
             dialog.configure(background=colors["bg"])
             tk.Label(
                 dialog,
@@ -13977,10 +14086,10 @@ if GUI_AVAILABLE:
                 win.minsize(min_width, min_height)
                 win.resizable(True, True)
                 win.grab_set()
-                dark = self.dark_mode_var.get()
-                bg = _DARK_THEME["bg"] if dark else _LIGHT_THEME["bg"]
-                fg = _DARK_THEME["fg"] if dark else _LIGHT_THEME["fg"]
-                entry_bg = _DARK_THEME["field_bg"] if dark else _LIGHT_THEME["field_bg"]
+                colors = _theme_palette_for_mode(self._theme_mode_value())
+                bg = colors["bg"]
+                fg = colors["fg"]
+                entry_bg = colors["field_bg"]
                 win.configure(bg=bg)
 
                 outer = ttk.Frame(win)
@@ -17060,8 +17169,23 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
 
     appearance_row = QtWidgets.QHBoxLayout()
     theme_check = QtWidgets.QCheckBox("Dark theme")
-    theme_check.setChecked(bool(qt_saved_state["dark_mode"]))
     appearance_row.addWidget(theme_check)
+    appearance_row.addWidget(QtWidgets.QLabel("Theme mode"))
+    theme_mode_combo = QtWidgets.QComboBox()
+    theme_mode_combo.addItem(_THEME_MODE_LABELS["light"], "light")
+    theme_mode_combo.addItem(_THEME_MODE_LABELS["dark"], "dark")
+    theme_mode_combo.addItem(_THEME_MODE_LABELS["high_contrast"], "high_contrast")
+    saved_theme_mode = _normalize_theme_mode(qt_saved_state.get("theme_mode"))
+    if saved_theme_mode is None:
+        saved_theme_mode = "dark" if bool(qt_saved_state["dark_mode"]) else "light"
+    theme_mode_index = theme_mode_combo.findData(saved_theme_mode)
+    if theme_mode_index < 0:
+        theme_mode_index = 0
+    theme_mode_combo.setCurrentIndex(theme_mode_index)
+    theme_check.setChecked(saved_theme_mode != "light")
+    theme_check.setToolTip("Toggle light/dark; choose High contrast for stronger accessibility contrast.")
+    theme_mode_combo.setToolTip("Choose a light, dark, or high-contrast interface palette.")
+    appearance_row.addWidget(theme_mode_combo)
     appearance_row.addWidget(QtWidgets.QLabel("UI scale"))
     ui_scale_combo = QtWidgets.QComboBox()
     ui_scale_combo.addItems(["0.9", "1.0", "1.15", "1.3", "1.5", "2.0"])
@@ -18125,6 +18249,22 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         _set_nif_scan_running(False)
         nif_scan_status_label.setText(f"Scan failed: {message}")
 
+    def _qt_theme_mode_value() -> str:
+        return _normalize_theme_mode(theme_mode_combo.currentData()) or "light"
+
+    def _sync_qt_theme_controls(mode: object) -> str:
+        normalized = _normalize_theme_mode(mode) or "light"
+        theme_mode_combo.blockSignals(True)
+        index = theme_mode_combo.findData(normalized)
+        if index < 0:
+            index = 0
+        theme_mode_combo.setCurrentIndex(index)
+        theme_mode_combo.blockSignals(False)
+        theme_check.blockSignals(True)
+        theme_check.setChecked(normalized != "light")
+        theme_check.blockSignals(False)
+        return normalized
+
     def _apply_qt_appearance(*_: object) -> None:
         scale = float(ui_scale_combo.currentText())
         scaled_font = QtGui.QFont(base_app_font)
@@ -18134,7 +18274,8 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         scaled_font.setPointSizeF(max(1.0, base_point_size * scale))
         app.setFont(scaled_font)
         palette = QtGui.QPalette()
-        if theme_check.isChecked():
+        mode = _sync_qt_theme_controls(_qt_theme_mode_value())
+        if mode == "dark":
             palette.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor("#20242b"))
             palette.setColor(QtGui.QPalette.ColorRole.WindowText, QtGui.QColor("#f1f3f5"))
             palette.setColor(QtGui.QPalette.ColorRole.Base, QtGui.QColor("#15191f"))
@@ -18145,6 +18286,17 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             palette.setColor(QtGui.QPalette.ColorRole.Highlight, QtGui.QColor("#3574b8"))
             palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, QtGui.QColor("#ffffff"))
             palette.setColor(QtGui.QPalette.ColorRole.PlaceholderText, QtGui.QColor("#b2bac5"))
+        elif mode == "high_contrast":
+            palette.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor("#000000"))
+            palette.setColor(QtGui.QPalette.ColorRole.WindowText, QtGui.QColor("#ffffff"))
+            palette.setColor(QtGui.QPalette.ColorRole.Base, QtGui.QColor("#111111"))
+            palette.setColor(QtGui.QPalette.ColorRole.AlternateBase, QtGui.QColor("#1f1f1f"))
+            palette.setColor(QtGui.QPalette.ColorRole.Text, QtGui.QColor("#ffffff"))
+            palette.setColor(QtGui.QPalette.ColorRole.Button, QtGui.QColor("#1f1f1f"))
+            palette.setColor(QtGui.QPalette.ColorRole.ButtonText, QtGui.QColor("#ffffff"))
+            palette.setColor(QtGui.QPalette.ColorRole.Highlight, QtGui.QColor("#ffd400"))
+            palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, QtGui.QColor("#000000"))
+            palette.setColor(QtGui.QPalette.ColorRole.PlaceholderText, QtGui.QColor("#d7d7d7"))
         else:
             palette.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor("#f5f6f8"))
             palette.setColor(QtGui.QPalette.ColorRole.WindowText, QtGui.QColor("#20242b"))
@@ -18158,6 +18310,19 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             palette.setColor(QtGui.QPalette.ColorRole.PlaceholderText, QtGui.QColor("#657080"))
         app.setPalette(palette)
         _persist_qt_gui_state()
+
+    def _set_qt_theme_mode(mode: object) -> None:
+        normalized = _normalize_theme_mode(mode) or "light"
+        index = theme_mode_combo.findData(normalized)
+        if index >= 0 and theme_mode_combo.currentIndex() != index:
+            theme_mode_combo.blockSignals(True)
+            theme_mode_combo.setCurrentIndex(index)
+            theme_mode_combo.blockSignals(False)
+        _apply_qt_appearance()
+        _render_nif_scan_page()
+
+    def _on_qt_theme_toggled(checked: bool) -> None:
+        _set_qt_theme_mode("dark" if checked else "light")
 
     def _show_selected_qt_preview(*_: object) -> None:
         item = preview_results_list.currentItem()
@@ -18341,6 +18506,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             truepbr_sidecar_specular_level=truepbr_specular_level.value(),
             truepbr_sidecar_roughness_scale=truepbr_roughness_scale.value(),
             dark_mode=theme_check.isChecked(),
+            theme_mode=str(theme_mode_combo.currentData() or "light"),
             ui_scale=float(ui_scale_combo.currentText()),
             show_advanced_map_strengths=advanced_controls_toggle.isChecked(),
             show_truepbr_sidecar_settings=truepbr_settings_toggle.isChecked(),
@@ -18913,8 +19079,8 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     render_deferred_button.clicked.connect(_render_deferred_now)
     use_profile_recommendation_button.clicked.connect(_apply_profile_recommendation)
     apply_profile_outputs_button.clicked.connect(_apply_profile_output_defaults)
-    theme_check.toggled.connect(_apply_qt_appearance)
-    theme_check.toggled.connect(_render_nif_scan_page)
+    theme_check.toggled.connect(_on_qt_theme_toggled)
+    theme_mode_combo.currentIndexChanged.connect(lambda *_: (_apply_qt_appearance(), _render_nif_scan_page()))
     ui_scale_combo.currentTextChanged.connect(_apply_qt_appearance)
     resume_mode_combo.currentIndexChanged.connect(_update_resume_hint)
     input_path_edit.textChanged.connect(_refresh_checkpoint_health)
@@ -18972,7 +19138,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         ("browse_output", browse_output_button),
         ("checkpoint_path", checkpoint_path_edit), ("resume_mode", resume_mode_combo),
         ("generate", generate_button), ("cancel_generation", cancel_button),
-        ("theme", theme_check), ("ui_scale", ui_scale_combo), ("tabs", tabs),
+        ("theme", theme_check), ("theme_mode", theme_mode_combo), ("ui_scale", ui_scale_combo), ("tabs", tabs),
         ("render_profile", render_profile_combo),
         ("include_diffuse", include_diffuse_check), ("include_normal", include_normal_check),
         ("include_parallax", include_parallax_check),
