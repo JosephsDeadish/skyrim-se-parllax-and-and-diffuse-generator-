@@ -4065,6 +4065,16 @@ def _workflow_preset_onboarding_text() -> str:
     )
 
 
+def _workflow_quick_start_steps_text() -> str:
+    return (
+        "Step 1: choose one renderer family (Vanilla, ENB, Community Shaders, or TruePBR).\n"
+        "Step 2: pick the input texture/folder and output target.\n"
+        "Step 3: use Suggested to auto-pick a safe family from the current file or mod-manager context, then continue to Generate or Scan.\n"
+        f"{_workflow_family_quick_check()}\n"
+        "Never mix ENB / Community Shaders / TruePBR families on the same mesh."
+    )
+
+
 def _format_short_guidance_tooltip(what_it_does: str, when_to_use_it: str, when_not_to_use_it: str) -> str:
     return "\n".join(
         (
@@ -10342,8 +10352,7 @@ if GUI_AVAILABLE:
             startup_onboarding_frame = ttk.LabelFrame(top_bar, text="Quick start", padding=6)
             startup_onboarding_label = ttk.Label(
                 startup_onboarding_frame,
-                text=_workflow_preset_onboarding_text()
-                + " Use Suggested to let the app pick a safe family from the current file or detected mod-manager context.",
+                text=_workflow_quick_start_steps_text(),
                 style="Muted.TLabel",
                 justify=tk.LEFT,
                 anchor=tk.W,
@@ -18107,9 +18116,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     startup_onboarding_layout = QtWidgets.QVBoxLayout(startup_onboarding_group)
     startup_onboarding_layout.setSpacing(6)
     startup_onboarding_text = QtWidgets.QLabel(
-        _workflow_preset_onboarding_text()
-        + "\nUse Suggested to let the app pick a safe family from the current file or detected mod-manager context."
+        _workflow_quick_start_steps_text()
     )
+    startup_onboarding_text.setObjectName("startup_onboarding_text")
     startup_onboarding_text.setWordWrap(True)
     startup_onboarding_layout.addWidget(startup_onboarding_text)
     startup_onboarding_visible = bool(qt_saved_state.get("show_startup_onboarding", True))

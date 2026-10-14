@@ -82,6 +82,7 @@ from generate_textures import (
     _nif_editor_safety_banner_text,
     compare_nif_backups,
     _workflow_preset_onboarding_text,
+    _workflow_quick_start_steps_text,
     _bind_tk_quick_start_shortcuts,
     _build_truepbr_version_note,
     _qt_preview_channel_options,
@@ -1790,6 +1791,14 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("truepbr", onboarding)
         self.assertIn("never mix enb / community shaders / truepbr families", onboarding)
 
+    def test_workflow_quick_start_steps_text_mentions_step_flow(self) -> None:
+        quick_start = _workflow_quick_start_steps_text().lower()
+        self.assertIn("step 1:", quick_start)
+        self.assertIn("step 2:", quick_start)
+        self.assertIn("step 3:", quick_start)
+        self.assertIn("suggested", quick_start)
+        self.assertIn("never mix enb / community shaders / truepbr families", quick_start)
+
     def test_short_guidance_tooltip_uses_three_sections(self) -> None:
         tooltip = _format_short_guidance_tooltip(
             "switches a control",
@@ -2274,6 +2283,12 @@ class GenerateTexturesTests(unittest.TestCase):
                     gui.root.update_idletasks()
                     banner = find_label_frame(gui.root, "Quick start")
                     self.assertTrue(banner.winfo_ismapped())
+                    label_texts = [
+                        str(child.cget("text"))
+                        for child in banner.winfo_children()
+                        if child.winfo_class() in {"TLabel", "Label"}
+                    ]
+                    self.assertTrue(any("Step 1:" in text for text in label_texts))
                     find_button(banner, "Hide").invoke()
                     gui.root.update_idletasks()
                     self.assertFalse(gui.show_startup_onboarding_var.get())
@@ -2317,6 +2332,12 @@ class GenerateTexturesTests(unittest.TestCase):
                     gui = TextureGeneratorGUI()
                     gui.root.update_idletasks()
                     banner = find_label_frame(gui.root, "Quick start")
+                    label_texts = [
+                        str(child.cget("text"))
+                        for child in banner.winfo_children()
+                        if child.winfo_class() in {"TLabel", "Label"}
+                    ]
+                    self.assertTrue(any("Step 3:" in text for text in label_texts))
                     find_button(banner, "Suggested").invoke()
                     gui.root.update_idletasks()
                     self.assertEqual(gui.render_profile_var.get(), "enb")
@@ -11053,6 +11074,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             step = state["step"]
             if step == 0:
                 self.assertTrue(w("startup_onboarding").isVisible())
+                self.assertIn("Step 1:", w("startup_onboarding_text").text())
                 self.assertEqual(w("render_profile").currentText(), "custom")
                 w("startup_onboarding_vanilla").click()
                 self.app.processEvents()
@@ -11084,6 +11106,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             step = state["step"]
             if step == 0:
                 self.assertTrue(w("startup_onboarding").isVisible())
+                self.assertIn("Step 3:", w("startup_onboarding_text").text())
                 w("startup_onboarding_suggested").click()
                 self.app.processEvents()
                 self.assertEqual(w("render_profile").currentText(), "enb")
