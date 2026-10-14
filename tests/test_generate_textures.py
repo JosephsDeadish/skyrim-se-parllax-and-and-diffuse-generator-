@@ -74,6 +74,7 @@ from generate_textures import (
     _QT_OUTPUT_GROUPS,
     _describe_qt_profile_guidance,
     _format_short_guidance_tooltip,
+    _format_qt_log_export_text,
     _resolve_app_icon_source_path,
     _nif_editor_confirmation_text,
     _nif_editor_safety_banner_text,
@@ -1735,6 +1736,10 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("what it does: switches a control", tooltip)
         self.assertIn("when to use it: you need the safe preset path", tooltip)
         self.assertIn("when not to use it: you want full manual control", tooltip)
+
+    def test_qt_log_export_text_ends_with_single_newline_when_non_empty(self) -> None:
+        self.assertEqual(_format_qt_log_export_text("line 1\nline 2\n"), "line 1\nline 2\n")
+        self.assertEqual(_format_qt_log_export_text(""), "")
 
     def test_nif_editor_safety_banner_mentions_backup_rollback_and_fallout(self) -> None:
         banner = _nif_editor_safety_banner_text().lower()
@@ -10603,6 +10608,9 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             step = state["step"]
             if step == 0:
                 self.assertTrue(w("nif_dry_run").isChecked())
+                self.assertIsNotNone(self.widget(window, "generation_log"))
+                self.assertIsNotNone(self.widget(window, "generation_log_copy"))
+                self.assertIsNotNone(self.widget(window, "generation_log_export"))
                 for theme_mode, scale, size in (
                     ("light", "0.9", (640, 480)),
                     ("dark", "1.5", (1100, 760)),

@@ -72,6 +72,7 @@ This opens a desktop interface where you can:
 - choose **Parallax mode**: `standard` (vanilla / Community Shaders Extended Materials) or `occlusion (ENB/POM)` for smoother ENBSeries POM heightmaps
 - scroll through all controls in smaller windows
 - inspect individual NIF files or mesh folders in the Qt **NIF Scan** tab using read-only diagnostics, status/text filters, and paged results
+- copy or export the Qt generation event log for diagnostics and support
 - use the Qt **NIF Editor** for flag/texture-slot edits, safe conflict remediation, and backup restore on the target chosen in NIF Scan; dry-run is enabled by default, writes require confirmation and backups, and cancellation finishes the current file first. The Tk editor retains additional advanced presets and tuning controls.
 - use keyboard shortcuts: `Ctrl+O` opens a texture, `Ctrl+Shift+O` opens a folder, `Ctrl+Enter` starts generation, and `Esc` requests cancellation
 - switch **Workflow mode** between **Beginner**, **Standard**, and **Advanced**; Beginner keeps core controls visible, Standard shows the full layout, and Advanced also enables the extra setup/output groups

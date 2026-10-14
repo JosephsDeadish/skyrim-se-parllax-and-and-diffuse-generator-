@@ -3865,6 +3865,11 @@ def _nif_editor_confirmation_text(
     return "\n".join(lines)
 
 
+def _format_qt_log_export_text(text: str) -> str:
+    normalized = text.rstrip()
+    return normalized + "\n" if normalized else ""
+
+
 def recommend_render_profile_details(
     input_path: Path | None,
     *,
@@ -18017,9 +18022,25 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     status_label.setWordWrap(True)
     generation_layout.addWidget(status_label)
 
+    event_log_header_row = QtWidgets.QHBoxLayout()
+    event_log_label = QtWidgets.QLabel("Generation event log")
+    event_log_header_row.addWidget(event_log_label)
+    event_log_header_row.addStretch(1)
+    event_log_copy_button = QtWidgets.QPushButton("Copy log")
+    event_log_copy_button.setObjectName("generation_log_copy")
+    event_log_copy_button.setToolTip("Copy the current generation log for support or bug reports.")
+    event_log_header_row.addWidget(event_log_copy_button)
+    event_log_export_button = QtWidgets.QPushButton("Export log…")
+    event_log_export_button.setObjectName("generation_log_export")
+    event_log_export_button.setToolTip("Save the current generation log to a text file.")
+    event_log_header_row.addWidget(event_log_export_button)
+    generation_layout.addLayout(event_log_header_row)
+
     event_log = QtWidgets.QPlainTextEdit()
+    event_log.setObjectName("generation_log")
     event_log.setReadOnly(True)
     event_log.setMinimumHeight(100)
+    event_log.setPlaceholderText("Generation messages, warnings, and summaries appear here.")
     generation_layout.addWidget(event_log, 1)
     generation_scroll = QtWidgets.QScrollArea()
     generation_scroll.setWidgetResizable(True)
@@ -18888,6 +18909,34 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             output_dir_edit.setText(chosen_dir)
             _refresh_checkpoint_health()
 
+    def _copy_event_log() -> None:
+        text = event_log.toPlainText().strip()
+        if not text:
+            status_label.setText("No generation log content to copy.")
+            return
+        QtWidgets.QApplication.clipboard().setText(text)
+        status_label.setText("Copied generation log to clipboard.")
+
+    def _export_event_log() -> None:
+        text = event_log.toPlainText().strip()
+        if not text:
+            status_label.setText("No generation log content to export.")
+            return
+        chosen_file, _ = QtWidgets.QFileDialog.getSaveFileName(
+            window,
+            "Export generation log",
+            str(Path.home() / "skyrim_texture_generator.log"),
+            "Text files (*.log *.txt);;All files (*)",
+        )
+        if not chosen_file:
+            return
+        try:
+            Path(chosen_file).write_text(_format_qt_log_export_text(text), encoding="utf-8")
+        except OSError as exc:
+            QtWidgets.QMessageBox.warning(window, "Generation log export failed", str(exc))
+            return
+        status_label.setText(f"Exported generation log to {chosen_file}.")
+
     def _browse_checkpoint() -> None:
         chosen_file, _ = QtWidgets.QFileDialog.getSaveFileName(
             window,
@@ -19016,6 +19065,8 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         generate_button.setEnabled(not running)
         cancel_button.setEnabled(running)
         apply_profile_outputs_button.setEnabled(not running)
+        event_log_copy_button.setEnabled(not running)
+        event_log_export_button.setEnabled(not running)
         browse_input_button.setEnabled(not running)
         browse_input_folder_button.setEnabled(not running)
         browse_output_button.setEnabled(not running)
@@ -19313,6 +19364,8 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     clear_checkpoint_button.clicked.connect(_clear_checkpoint)
     generate_button.clicked.connect(_start_generation)
     cancel_button.clicked.connect(_cancel_generation)
+    event_log_copy_button.clicked.connect(_copy_event_log)
+    event_log_export_button.clicked.connect(_export_event_log)
     pause_preview_button.clicked.connect(_pause_preview)
     resume_preview_button.clicked.connect(_resume_preview)
     render_deferred_button.clicked.connect(_render_deferred_now)
