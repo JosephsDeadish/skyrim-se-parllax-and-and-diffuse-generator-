@@ -298,6 +298,7 @@ _WORKFLOW_MODE_LABELS = {
     "standard": "Standard",
     "advanced": "Advanced",
 }
+_WORKFLOW_MODE_LABEL_TO_VALUE = {label: value for value, label in _WORKFLOW_MODE_LABELS.items()}
 
 _TEXTURE_TARGET_GAME_VALUES: tuple[str, ...] = (
     "skyrim",
@@ -331,6 +332,10 @@ def _normalize_texture_target_game(value: str | None) -> str:
 def _normalize_workflow_mode(value: object | None) -> str | None:
     normalized = str(value or "").strip().lower()
     return normalized if normalized in _WORKFLOW_MODE_VALUES else None
+
+
+def _workflow_mode_value_from_label(label: str | None) -> str | None:
+    return _WORKFLOW_MODE_LABEL_TO_VALUE.get(str(label or "").strip())
 
 
 def _infer_workflow_mode_from_state(state: Mapping[str, object]) -> str:
@@ -1085,6 +1090,7 @@ def _merge_qt_generation_gui_state(
     truepbr_sidecar_roughness_scale: float | None = None,
     dark_mode: bool | None = None,
     ui_scale: float | None = None,
+    workflow_mode: str | None = None,
     show_advanced_map_strengths: bool | None = None,
     show_truepbr_sidecar_settings: bool | None = None,
 ) -> dict[str, object]:
@@ -1142,6 +1148,8 @@ def _merge_qt_generation_gui_state(
         merged["dark_mode"] = dark_mode
     if ui_scale is not None:
         merged["ui_scale"] = ui_scale
+    if workflow_mode is not None:
+        merged["workflow_mode"] = workflow_mode
     for key, value in (
         ("qt_show_advanced_map_strengths", show_advanced_map_strengths),
         ("qt_show_truepbr_sidecar_settings", show_truepbr_sidecar_settings),
@@ -17065,6 +17073,18 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     ui_scale_combo.setCurrentIndex(scale_index)
     ui_scale_combo.setToolTip("Increase text size for high-DPI screens or smaller windows.")
     appearance_row.addWidget(ui_scale_combo)
+    workflow_mode_label = QtWidgets.QLabel("Workflow mode")
+    appearance_row.addWidget(workflow_mode_label)
+    workflow_mode_combo = QtWidgets.QComboBox()
+    workflow_mode_combo.addItems([_WORKFLOW_MODE_LABELS[value] for value in _WORKFLOW_MODE_VALUES])
+    saved_workflow_mode = _normalize_workflow_mode(qt_saved_state.get("workflow_mode"))
+    if saved_workflow_mode is None:
+        saved_workflow_mode = _infer_workflow_mode_from_state(qt_saved_state)
+    workflow_mode_combo.setCurrentText(_WORKFLOW_MODE_LABELS[saved_workflow_mode])
+    workflow_mode_combo.setToolTip(
+        "Beginner keeps advanced panels hidden, Standard keeps them collapsed, and Advanced expands them."
+    )
+    appearance_row.addWidget(workflow_mode_combo)
     appearance_row.addStretch(1)
     layout.addLayout(appearance_row)
 
@@ -17531,6 +17551,54 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     truepbr_settings_toggle.toggled.connect(_toggle_truepbr_settings)
     truepbr_overrides_enabled_check.toggled.connect(_set_truepbr_override_controls_enabled)
     _set_truepbr_override_controls_enabled(truepbr_overrides_enabled_check.isChecked())
+
+    qt_workflow_mode_syncing = False
+
+    def _current_qt_workflow_mode() -> str:
+        if not advanced_controls_toggle.isVisible() or not truepbr_settings_toggle.isVisible():
+            return "beginner"
+        if advanced_controls_toggle.isChecked() or truepbr_settings_toggle.isChecked():
+            return "advanced"
+        return "standard"
+
+    def _sync_qt_workflow_mode_selection(*_: object) -> None:
+        nonlocal qt_workflow_mode_syncing
+        if qt_workflow_mode_syncing:
+            return
+        label = _WORKFLOW_MODE_LABELS[_current_qt_workflow_mode()]
+        changed = False
+        if workflow_mode_combo.currentText() != label:
+            workflow_mode_combo.setCurrentText(label)
+            changed = True
+        if not changed:
+            _persist_qt_gui_state()
+
+    def _apply_qt_workflow_mode(mode: str) -> None:
+        nonlocal qt_workflow_mode_syncing
+        normalized = _normalize_workflow_mode(mode) or "standard"
+        label = _WORKFLOW_MODE_LABELS[normalized]
+        qt_workflow_mode_syncing = True
+        try:
+            beginner = normalized == "beginner"
+            advanced = normalized == "advanced"
+            for widget in (
+                advanced_controls_toggle,
+                advanced_controls_panel,
+                truepbr_settings_toggle,
+                truepbr_settings_panel,
+            ):
+                widget.setVisible(not beginner)
+            advanced_controls_toggle.setChecked(advanced)
+            truepbr_settings_toggle.setChecked(advanced)
+            if workflow_mode_combo.currentText() != label:
+                workflow_mode_combo.setCurrentText(label)
+        finally:
+            qt_workflow_mode_syncing = False
+        _persist_qt_gui_state()
+
+    workflow_mode_combo.currentTextChanged.connect(_apply_qt_workflow_mode)
+    advanced_controls_toggle.toggled.connect(_sync_qt_workflow_mode_selection)
+    truepbr_settings_toggle.toggled.connect(_sync_qt_workflow_mode_selection)
 
     mode_row = output_group_row + 1
     complex_format_combo = QtWidgets.QComboBox()
@@ -18276,6 +18344,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             ui_scale=float(ui_scale_combo.currentText()),
             show_advanced_map_strengths=advanced_controls_toggle.isChecked(),
             show_truepbr_sidecar_settings=truepbr_settings_toggle.isChecked(),
+            workflow_mode=_workflow_mode_value_from_label(workflow_mode_combo.currentText()),
         )
         if manager_context.manager is not None:
             state["last_mod_manager"] = manager_context.manager
@@ -18288,6 +18357,8 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             else "next to input"
         )
         save_gui_state(state)
+
+    _apply_qt_workflow_mode(saved_workflow_mode)
 
     def _apply_profile_recommendation() -> None:
         suggested_profile = _recommend_qt_render_profile(

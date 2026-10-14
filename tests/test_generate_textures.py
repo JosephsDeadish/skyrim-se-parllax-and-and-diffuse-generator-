@@ -1319,7 +1319,7 @@ class GenerateTexturesTests(unittest.TestCase):
             input_path = Path(temp_dir) / "source.dds"
             input_path.write_bytes(b"source")
             merged = _merge_qt_generation_gui_state(
-                {"dark_mode": True, "show_advanced_workflow_outputs": True},
+                {"dark_mode": True, "show_advanced_workflow_outputs": True, "workflow_mode": "standard"},
                 input_path=str(input_path),
                 output_path=str(Path(temp_dir) / "out"),
                 include_diffuse=False,
@@ -1356,6 +1356,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 truepbr_sidecar_roughness_scale=1.3,
                 dark_mode=True,
                 ui_scale=1.3,
+                workflow_mode="advanced",
                 show_advanced_map_strengths=True,
                 show_truepbr_sidecar_settings=False,
             )
@@ -1364,6 +1365,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(merged["output_path"], str(Path(temp_dir) / "out"))
         self.assertTrue(bool(merged["dark_mode"]))
         self.assertTrue(bool(merged["show_advanced_workflow_outputs"]))
+        self.assertEqual(str(merged["workflow_mode"]), "advanced")
         self.assertTrue(bool(merged["qt_show_advanced_map_strengths"]))
         self.assertFalse(bool(merged["qt_show_truepbr_sidecar_settings"]))
         self.assertFalse(bool(merged["include_diffuse"]))
@@ -1897,6 +1899,7 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertTrue(bool(loaded["use_custom_output"]))
             self.assertEqual(loaded["last_renderer"], "community_shaders")
             self.assertEqual(loaded["last_output_target"], "/tmp/out")
+            self.assertEqual(str(loaded["workflow_mode"]), "advanced")
             self.assertTrue(bool(loaded["show_advanced_workflow_outputs"]))
 
     def test_tk_advanced_workflow_visibility_round_trips_saved_settings(self) -> None:
