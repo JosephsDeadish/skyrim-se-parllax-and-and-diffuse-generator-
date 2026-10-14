@@ -73,6 +73,7 @@ from generate_textures import (
     _apply_qt_profile_output_defaults,
     _QT_OUTPUT_GROUPS,
     _describe_qt_profile_guidance,
+    _format_short_guidance_tooltip,
     _workflow_preset_onboarding_text,
     _qt_preview_channel_options,
     _inspect_qt_output_image,
@@ -1684,6 +1685,17 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("community shaders", onboarding)
         self.assertIn("truepbr", onboarding)
         self.assertIn("never mix enb / community shaders / truepbr families", onboarding)
+
+    def test_short_guidance_tooltip_uses_three_sections(self) -> None:
+        tooltip = _format_short_guidance_tooltip(
+            "switches a control",
+            "you need the safe preset path",
+            "you want full manual control",
+        ).lower()
+        self.assertEqual(len(tooltip.splitlines()), 3)
+        self.assertIn("what it does: switches a control", tooltip)
+        self.assertIn("when to use it: you need the safe preset path", tooltip)
+        self.assertIn("when not to use it: you want full manual control", tooltip)
 
     def test_qt_preview_loader_decodes_and_bounds_image_dimensions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

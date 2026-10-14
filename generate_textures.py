@@ -3775,6 +3775,16 @@ def _workflow_preset_onboarding_text() -> str:
     )
 
 
+def _format_short_guidance_tooltip(what_it_does: str, when_to_use_it: str, when_not_to_use_it: str) -> str:
+    return "\n".join(
+        (
+            f"What it does: {what_it_does.strip()}",
+            f"When to use it: {when_to_use_it.strip()}",
+            f"When not to use it: {when_not_to_use_it.strip()}",
+        )
+    )
+
+
 def recommend_render_profile_details(
     input_path: Path | None,
     *,
@@ -10049,8 +10059,11 @@ if GUI_AVAILABLE:
             _preset_label.pack(side=tk.LEFT)
             self._add_tooltip(
                 _preset_label,
-                "Presets apply conservative, workflow-safe defaults.\n"
-                "Good starting points before manual tweaks.",
+                _format_short_guidance_tooltip(
+                    "shows conservative, workflow-safe defaults for each renderer family",
+                    "you want a one-click starting point before manual tweaks",
+                    "you already have a custom workflow and do not want any defaults applied",
+                ),
             )
             _preset_vanilla_button = ttk.Button(
                 _preset_row,
@@ -10060,7 +10073,11 @@ if GUI_AVAILABLE:
             _preset_vanilla_button.pack(side=tk.LEFT, padx=(8, 2))
             self._add_tooltip(
                 _preset_vanilla_button,
-                "Safe baseline for stock Skyrim-style outputs (core files only).",
+                _format_short_guidance_tooltip(
+                    "sets the safest vanilla Skyrim baseline and keeps output families Skyrim-safe",
+                    "the mesh should stay on standard Skyrim parallax defaults",
+                    "the mesh is intentionally ENB, Community Shaders, or TruePBR",
+                ),
             )
             _preset_enb_button = ttk.Button(
                 _preset_row,
@@ -10070,7 +10087,11 @@ if GUI_AVAILABLE:
             _preset_enb_button.pack(side=tk.LEFT, padx=2)
             self._add_tooltip(
                 _preset_enb_button,
-                "Safe ENB baseline with conservative complex-material alignment.",
+                _format_short_guidance_tooltip(
+                    "sets the conservative ENB baseline with complex-material defaults aligned",
+                    "the mesh is meant for ENB complex material or POM workflows",
+                    "you need Community Shaders _cm/_c or TruePBR _rmaos/_ramos instead",
+                ),
             )
             _preset_cs_button = ttk.Button(
                 _preset_row,
@@ -10080,7 +10101,11 @@ if GUI_AVAILABLE:
             _preset_cs_button.pack(side=tk.LEFT, padx=2)
             self._add_tooltip(
                 _preset_cs_button,
-                "Safe Community Shaders Extended Materials baseline (_cm/_c workflow).",
+                _format_short_guidance_tooltip(
+                    "sets the Community Shaders Extended Materials baseline for _cm/_c workflows",
+                    "the mesh should stay on Community Shaders outputs",
+                    "you need ENB _msn/_m or TruePBR _rmaos/_ramos instead",
+                ),
             )
             _preset_truepbr_button = ttk.Button(
                 _preset_row,
@@ -10090,7 +10115,11 @@ if GUI_AVAILABLE:
             _preset_truepbr_button.pack(side=tk.LEFT, padx=2)
             self._add_tooltip(
                 _preset_truepbr_button,
-                "Safe TruePBR baseline. Community Shaders TruePBR consumes RMAOS on slot 5; keep canonical _rmaos/_ramos naming.",
+                _format_short_guidance_tooltip(
+                    "sets the TruePBR baseline and keeps canonical _rmaos/_ramos naming",
+                    "the mesh is using the Community Shaders TruePBR JSON workflow",
+                    "you need plain Community Shaders or ENB packed outputs instead",
+                ),
             )
             _preset_custom_button = ttk.Button(
                 _preset_row,
@@ -10100,7 +10129,11 @@ if GUI_AVAILABLE:
             _preset_custom_button.pack(side=tk.LEFT, padx=2)
             self._add_tooltip(
                 _preset_custom_button,
-                "Start from conservative defaults but leave workflow choices manual.",
+                _format_short_guidance_tooltip(
+                    "starts from a conservative baseline but leaves workflow choices manual",
+                    "you already know the renderer family and want to tune everything yourself",
+                    "you want one-click safe defaults with family-specific guardrails",
+                ),
             )
             _preset_hint = ttk.Label(_workflow_frame, textvariable=self.safe_preset_hint_var, style="Muted.TLabel")
             _preset_hint.grid(row=3, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
@@ -10172,14 +10205,11 @@ if GUI_AVAILABLE:
             _render_profile_label.grid(row=2, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(
                 _render_profile_label,
-                "🎯 Select target renderer preset.\n"
-                "vanilla = safest stock Skyrim SE setup.\n"
-                "community_shaders = Community Shaders Extended Materials _cm/_c workflow.\n"
-                "truepbr = Community Shaders PBR JSON-driven _rmaos/_ramos workflow.\n"
-                "enb = tool ENB preset (_msn + complex env-mask default + optional POM).\n"
-                "Presets keep format/mode/output defaults aligned to avoid conflicting combinations.\n"
-                "Community Shaders and ENB can both be installed, but each mesh/material should use one workflow at a time.\n"
-                "Changing this is the only thing that should auto-switch the mode combos.",
+                _format_short_guidance_tooltip(
+                    "locks the map names, modes, and output defaults to one renderer family",
+                    "the mesh should stay on Vanilla, ENB, Community Shaders, or TruePBR only",
+                    "you are intentionally mixing families or want to keep custom settings manual",
+                ),
             )
             _render_profile_combo = ttk.Combobox(
                 options_frame,
@@ -10192,12 +10222,11 @@ if GUI_AVAILABLE:
             _render_profile_combo.bind("<<ComboboxSelected>>", self._on_render_profile_changed)
             self._add_tooltip(
                 _render_profile_combo,
-                "🎯 Pick one renderer workflow for this texture set.\n"
-                "vanilla = safest defaults; "
-                "community_shaders = _cm/_c; truepbr = _n + _rmaos/_ramos + JSON path; enb = tool ENB preset _msn + complex env default + optional POM.\n"
-                "Prefer canonical TruePBR names (_rmaos/_ramos), not generic _orm/_mrao aliases from Blender-style exports.\n"
-                "Presets keep format/mode/output defaults aligned to avoid conflicting combinations.\n"
-                "Community Shaders and ENB can coexist, but each mesh/material should follow one workflow at a time.",
+                _format_short_guidance_tooltip(
+                    "picks the renderer workflow and keeps the format/mode/output defaults aligned",
+                    "the texture set should follow exactly one family (Vanilla, ENB, Community Shaders, or TruePBR)",
+                    "you want to mix workflows on the same mesh or leave every setting fully manual",
+                ),
             )
             self.render_profile_hint_label = ttk.Label(
                 options_frame,
@@ -17524,6 +17553,13 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     render_profile_combo = QtWidgets.QComboBox()
     render_profile_combo.addItems(_QT_RENDER_PROFILE_VALUES)
     _configure_qt_field_label(renderer_label, "&Target renderer", render_profile_combo)
+    render_profile_combo.setToolTip(
+        _format_short_guidance_tooltip(
+            "locks map names, output defaults, and parallax/env behavior to one renderer family",
+            "the file should stay entirely within Vanilla, ENB, Community Shaders, or TruePBR",
+            "you want to mix renderer families or keep every setting manual in Custom mode",
+        )
+    )
     controls_layout.addWidget(renderer_label, 0, 0)
     controls_layout.addWidget(render_profile_combo, 0, 1)
     controls_layout.addWidget(
@@ -17535,7 +17571,11 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     )
     apply_profile_outputs_button = QtWidgets.QPushButton("Apply profile map defaults")
     apply_profile_outputs_button.setToolTip(
-        "Apply renderer map defaults while keeping wetness, snow, AO, and roughness selections."
+        _format_short_guidance_tooltip(
+            "applies renderer-specific map defaults while preserving optional wetness, snow, AO, and roughness choices",
+            "the selected renderer family is correct but you want the map defaults to snap into place",
+            "you still need to change the renderer family itself or keep every map choice fully manual",
+        )
     )
     controls_layout.addWidget(apply_profile_outputs_button, 1, 2)
     profile_guidance_label = QtWidgets.QLabel()
