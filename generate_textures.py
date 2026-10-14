@@ -14366,7 +14366,7 @@ if GUI_AVAILABLE:
                 )
                 experimental_fallout_check.pack(side="left")
                 fallout_gate_frame = ttk.LabelFrame(opt_frame, text="Fallout safety gates", padding=6)
-                fallout_gate_label = ttk.Label(fallout_gate_frame, text="Opt in per operation (higher-risk writes):")
+                fallout_gate_label = ttk.Label(fallout_gate_frame, text="Opt in per operation (experimental best-effort writes only):")
                 fallout_gate_label.pack(anchor=tk.W, pady=(0, 4))
                 fallout_gate_row1 = ttk.Frame(fallout_gate_frame)
                 fallout_gate_row1.pack(fill="x")
