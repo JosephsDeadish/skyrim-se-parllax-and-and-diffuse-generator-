@@ -78,6 +78,7 @@ from generate_textures import (
     _nif_editor_confirmation_text,
     _nif_editor_safety_banner_text,
     _workflow_preset_onboarding_text,
+    _bind_tk_quick_start_shortcuts,
     _qt_preview_channel_options,
     _inspect_qt_output_image,
     _DARK_THEME,
@@ -1238,6 +1239,40 @@ class GenerateTexturesTests(unittest.TestCase):
         processing[0] = True
         self.assertEqual(root.bindings["<Escape>"](object()), "break")
         self.assertEqual(calls[-1], "cancel")
+
+    def test_tk_quick_start_shortcuts_dispatch_safe_preset_and_hide_actions(self) -> None:
+        class FakeRoot:
+            def __init__(self) -> None:
+                self.bindings = {}
+
+            def bind(self, sequence, callback, add=None) -> None:
+                self.bindings[sequence] = callback
+
+        root = FakeRoot()
+        calls = []
+        _bind_tk_quick_start_shortcuts(
+            root,
+            apply_preset=lambda profile_key: calls.append(profile_key),
+            dismiss=lambda: calls.append("dismiss"),
+        )
+        self.assertEqual(set(root.bindings), {
+            "<Control-1>",
+            "<Control-2>",
+            "<Control-3>",
+            "<Control-4>",
+            "<Control-Shift-h>",
+        })
+        for sequence, expected_action in (
+            ("<Control-1>", "vanilla"),
+            ("<Control-2>", "enb"),
+            ("<Control-3>", "community_shaders"),
+            ("<Control-4>", "truepbr"),
+        ):
+            self.assertEqual(root.bindings[sequence](object()), "break")
+            self.assertEqual(calls[-1], expected_action)
+
+        self.assertEqual(root.bindings["<Control-Shift-h>"](object()), "break")
+        self.assertEqual(calls[-1], "dismiss")
 
     def test_theme_text_colors_meet_wcag_aa_contrast(self) -> None:
         def relative_luminance(color: str) -> float:

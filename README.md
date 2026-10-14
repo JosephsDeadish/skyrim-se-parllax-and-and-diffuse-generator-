@@ -75,7 +75,7 @@ This opens a desktop interface where you can:
 - use the Qt **NIF Editor** for flag/texture-slot edits, safe conflict remediation, and backup restore on the target chosen in NIF Scan; dry-run is enabled by default, writes require confirmation and backups, and cancellation finishes the current file first. The Tk editor retains additional advanced presets and tuning controls.
 - use keyboard shortcuts: `Ctrl+O` opens a texture, `Ctrl+Shift+O` opens a folder, `Ctrl+Enter` starts generation, and `Esc` requests cancellation
 - switch **Workflow mode** between **Beginner**, **Standard**, and **Advanced**; Beginner keeps core controls visible, Standard shows the full layout, and Advanced also enables the extra setup/output groups
-- use the first-run **Quick start** banner to pick a safe renderer family (or hide it after you know which one you need)
+- use the first-run **Quick start** banner to pick a safe renderer family (keyboard: `Ctrl+1`/`2`/`3`/`4` apply safe families, `Ctrl+Shift+H` hides it once you know what you need)
 - auto-update output folder when a different input texture is selected
 - get adaptive recommended defaults based on richer image-content analysis
 - use a clearly labeled **Automatic suggestions (analyze image and set sliders)** toggle to turn auto slider updates on/off

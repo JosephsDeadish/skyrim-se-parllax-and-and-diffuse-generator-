@@ -1367,6 +1367,29 @@ def _bind_tk_main_window_shortcuts(
     root.bind("<Escape>", _cancel_if_processing, add="+")
 
 
+def _bind_tk_quick_start_shortcuts(
+    root: Any,
+    *,
+    apply_preset: Callable[[str], None],
+    dismiss: Callable[[], None],
+) -> None:
+    def _invoke(callback: Callable[[], None]) -> Callable[[object], str]:
+        def _handle(_event: object) -> str:
+            callback()
+            return "break"
+
+        return _handle
+
+    for sequence, profile_key in (
+        ("<Control-1>", "vanilla"),
+        ("<Control-2>", "enb"),
+        ("<Control-3>", "community_shaders"),
+        ("<Control-4>", "truepbr"),
+    ):
+        root.bind(sequence, _invoke(lambda key=profile_key: apply_preset(key)), add="+")
+    root.bind("<Control-Shift-h>", _invoke(dismiss), add="+")
+
+
 def discover_ui_languages(translations_dir: Path | None = None) -> tuple[str, ...]:
     resolved_dir = translations_dir or _resolve_ui_translations_dir()
     if not resolved_dir.exists():
@@ -9975,6 +9998,20 @@ if GUI_AVAILABLE:
             )
             startup_onboarding_label.pack(fill=tk.X)
             self._bind_responsive_wrap(startup_onboarding_frame, startup_onboarding_label, horizontal_padding=24, min_wrap=360)
+            startup_onboarding_shortcuts_label = ttk.Label(
+                startup_onboarding_frame,
+                text="Keyboard: Ctrl+1 Vanilla, Ctrl+2 ENB, Ctrl+3 Community Shaders, Ctrl+4 TruePBR, Ctrl+Shift+H hide.",
+                style="Muted.TLabel",
+                justify=tk.LEFT,
+                anchor=tk.W,
+            )
+            startup_onboarding_shortcuts_label.pack(fill=tk.X, pady=(2, 0))
+            self._bind_responsive_wrap(
+                startup_onboarding_frame,
+                startup_onboarding_shortcuts_label,
+                horizontal_padding=24,
+                min_wrap=360,
+            )
             startup_onboarding_button_row = ttk.Frame(startup_onboarding_frame)
             startup_onboarding_button_row.pack(fill=tk.X, pady=(4, 0))
 
@@ -9986,6 +10023,12 @@ if GUI_AVAILABLE:
             def _apply_startup_preset(profile_key: str) -> None:
                 self._apply_safe_workflow_preset(profile_key)
                 _dismiss_startup_onboarding()
+
+            _bind_tk_quick_start_shortcuts(
+                self.root,
+                apply_preset=_apply_startup_preset,
+                dismiss=_dismiss_startup_onboarding,
+            )
 
             ttk.Button(
                 startup_onboarding_button_row,
