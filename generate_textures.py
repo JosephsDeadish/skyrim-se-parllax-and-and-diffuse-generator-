@@ -206,6 +206,15 @@ def _resolve_runtime_asset_root() -> Path:
     return source_root / "assets"
 
 
+def _resolve_app_icon_source_path() -> Path:
+    asset_root = _resolve_runtime_asset_root()
+    for candidate_name in ("panda_source.png", "app_icon.png"):
+        candidate = asset_root / candidate_name
+        if candidate.is_file():
+            return candidate
+    return asset_root / "panda_source.png"
+
+
 def _resolve_ui_translations_dir() -> Path:
     asset_root = _resolve_runtime_asset_root()
     translations_dir = asset_root / "translations"
@@ -9519,52 +9528,70 @@ MODDING_WIKI_SKYRIM_URL = "https://modding.wiki/en/skyrim"
 
 
 def _create_panda_icon_image(size: int = 128) -> Image.Image:
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    c = size // 2
+    source_path = _resolve_app_icon_source_path()
+    try:
+        with Image.open(source_path) as source:
+            icon = source.convert("RGBA")
+    except Exception:
+        img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        c = size // 2
 
-    # White head / face
-    fr = int(size * 0.44)
-    d.ellipse([c - fr, c - fr, c + fr, c + fr], fill=(255, 255, 255, 255), outline=(40, 40, 40, 255), width=max(2, size // 64))
+        # White head / face
+        fr = int(size * 0.44)
+        d.ellipse([c - fr, c - fr, c + fr, c + fr], fill=(255, 255, 255, 255), outline=(40, 40, 40, 255), width=max(2, size // 64))
 
-    # Black ears (upper-left and upper-right, behind head)
-    er = int(size * 0.14)
-    eo = int(size * 0.30)
-    d.ellipse([c - eo - er, c - eo - er, c - eo + er, c - eo + er], fill=(30, 30, 30, 255))
-    d.ellipse([c + eo - er, c - eo - er, c + eo + er, c - eo + er], fill=(30, 30, 30, 255))
+        # Black ears (upper-left and upper-right, behind head)
+        er = int(size * 0.14)
+        eo = int(size * 0.30)
+        d.ellipse([c - eo - er, c - eo - er, c - eo + er, c - eo + er], fill=(30, 30, 30, 255))
+        d.ellipse([c + eo - er, c - eo - er, c + eo + er, c - eo + er], fill=(30, 30, 30, 255))
 
-    # Black eye patches
-    epw = int(size * 0.14)
-    eph = int(size * 0.16)
-    exo = int(size * 0.17)
-    eyo = int(size * -0.04)
-    d.ellipse([c - exo - epw, c + eyo - eph, c - exo + epw, c + eyo + eph], fill=(30, 30, 30, 255))
-    d.ellipse([c + exo - epw, c + eyo - eph, c + exo + epw, c + eyo + eph], fill=(30, 30, 30, 255))
+        # Black eye patches
+        epw = int(size * 0.14)
+        eph = int(size * 0.16)
+        exo = int(size * 0.17)
+        eyo = int(size * -0.04)
+        d.ellipse([c - exo - epw, c + eyo - eph, c - exo + epw, c + eyo + eph], fill=(30, 30, 30, 255))
+        d.ellipse([c + exo - epw, c + eyo - eph, c + exo + epw, c + eyo + eph], fill=(30, 30, 30, 255))
 
-    # White eye highlights inside patches
-    eyr = int(size * 0.065)
-    eycy = c + eyo
-    d.ellipse([c - exo - eyr, eycy - eyr, c - exo + eyr, eycy + eyr], fill=(255, 255, 255, 255))
-    d.ellipse([c + exo - eyr, eycy - eyr, c + exo + eyr, eycy + eyr], fill=(255, 255, 255, 255))
+        # White eye highlights inside patches
+        eyr = int(size * 0.065)
+        eycy = c + eyo
+        d.ellipse([c - exo - eyr, eycy - eyr, c - exo + eyr, eycy + eyr], fill=(255, 255, 255, 255))
+        d.ellipse([c + exo - eyr, eycy - eyr, c + exo + eyr, eycy + eyr], fill=(255, 255, 255, 255))
 
-    # Black pupils
-    pr = int(size * 0.035)
-    d.ellipse([c - exo - pr, eycy - pr, c - exo + pr, eycy + pr], fill=(10, 10, 10, 255))
-    d.ellipse([c + exo - pr, eycy - pr, c + exo + pr, eycy + pr], fill=(10, 10, 10, 255))
+        # Black pupils
+        pr = int(size * 0.035)
+        d.ellipse([c - exo - pr, eycy - pr, c - exo + pr, eycy + pr], fill=(10, 10, 10, 255))
+        d.ellipse([c + exo - pr, eycy - pr, c + exo + pr, eycy + pr], fill=(10, 10, 10, 255))
 
-    # Nose (dark oval, centre)
-    ny = c + int(size * 0.14)
-    nrx = int(size * 0.06)
-    nry = int(size * 0.035)
-    d.ellipse([c - nrx, ny - nry, c + nrx, ny + nry], fill=(50, 50, 50, 255))
+        # Nose (dark oval, centre)
+        ny = c + int(size * 0.14)
+        nrx = int(size * 0.06)
+        nry = int(size * 0.035)
+        d.ellipse([c - nrx, ny - nry, c + nrx, ny + nry], fill=(50, 50, 50, 255))
 
-    # Mouth (simple downward arc)
-    mw = int(size * 0.13)
-    my0 = ny + int(size * 0.03)
-    my1 = my0 + int(size * 0.09)
-    d.arc([c - mw, my0, c + mw, my1], start=0, end=180, fill=(50, 50, 50, 255), width=max(1, size // 80))
+        # Mouth (simple downward arc)
+        mw = int(size * 0.13)
+        my0 = ny + int(size * 0.03)
+        my1 = my0 + int(size * 0.09)
+        d.arc([c - mw, my0, c + mw, my1], start=0, end=180, fill=(50, 50, 50, 255), width=max(1, size // 80))
 
-    return img
+        return img
+
+    if icon.width == size and icon.height == size:
+        return icon
+    if icon.width != icon.height:
+        resized = ImageOps.contain(icon, (size, size), method=Image.Resampling.LANCZOS)
+        canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        canvas.paste(
+            resized,
+            ((size - resized.width) // 2, (size - resized.height) // 2),
+            resized if resized.mode == "RGBA" else None,
+        )
+        return canvas
+    return icon.resize((size, size), Image.Resampling.LANCZOS)
 
 
 _LIGHT_THEME: dict[str, str] = {
@@ -17246,6 +17273,10 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
 
     window = _QtMainWindow()
     window.setWindowTitle(f"Skyrim Texture Generator {APP_VERSION} — Qt migration preview")
+    qt_icon_path = _resolve_app_icon_source_path()
+    qt_icon = QtGui.QIcon(str(qt_icon_path))
+    app.setWindowIcon(qt_icon)
+    window.setWindowIcon(qt_icon)
     screen = app.primaryScreen()
     if screen is None:
         window.resize(920, 620)

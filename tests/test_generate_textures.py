@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
-from PIL import Image, ImageStat
+from PIL import Image, ImageOps, ImageStat
 
 from generate_textures import (
     APP_VERSION,
@@ -74,6 +74,7 @@ from generate_textures import (
     _QT_OUTPUT_GROUPS,
     _describe_qt_profile_guidance,
     _format_short_guidance_tooltip,
+    _resolve_app_icon_source_path,
     _nif_editor_confirmation_text,
     _nif_editor_safety_banner_text,
     _workflow_preset_onboarding_text,
@@ -6914,6 +6915,25 @@ class GenerateTexturesTests(unittest.TestCase):
                 if icon.getpixel((x, y))[3] == 255:
                     opaque_count += 1
         self.assertGreater(opaque_count, 0)
+
+    def test_create_panda_icon_image_uses_bundled_source_art(self) -> None:
+        source_path = _resolve_app_icon_source_path()
+        self.assertTrue(source_path.is_file(), source_path)
+        with Image.open(source_path) as source:
+            expected = source.convert("RGBA")
+            if expected.width == expected.height:
+                expected = expected.resize((64, 64), Image.Resampling.LANCZOS)
+            else:
+                fitted = ImageOps.contain(expected, (64, 64), method=Image.Resampling.LANCZOS)
+                canvas = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+                canvas.paste(
+                    fitted,
+                    ((64 - fitted.width) // 2, (64 - fitted.height) // 2),
+                    fitted if fitted.mode == "RGBA" else None,
+                )
+                expected = canvas
+        icon = _create_panda_icon_image(size=64)
+        self.assertEqual(icon.tobytes(), expected.tobytes())
 
     def test_patreon_url_is_correct(self) -> None:
         self.assertEqual(PATREON_URL, "https://www.patreon.com/cw/DeadOnTheInside")
