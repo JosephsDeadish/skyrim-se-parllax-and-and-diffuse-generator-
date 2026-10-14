@@ -1965,33 +1965,40 @@ def _resolve_game_root_from_env(env: Mapping[str, str]) -> Path | None:
 
 def _candidate_vortex_profile_dirs(env: Mapping[str, str], game_id: str | None) -> tuple[Path, ...]:
     candidates: list[Path] = []
+
+    def _collect_profile_dirs_from_root(root: Path) -> None:
+        patterns: list[Path] = []
+        if game_id:
+            patterns.extend(
+                [
+                    root / game_id / "profiles",
+                    root / "profiles" / game_id,
+                ]
+            )
+        patterns.extend([root / "profiles", root])
+        for base in patterns:
+            if not base.exists():
+                continue
+            if (base / "modlist.txt").exists():
+                candidates.append(base)
+                continue
+            try:
+                children = tuple(base.iterdir())
+            except Exception:
+                continue
+            candidates.extend(path for path in children if path.is_dir() and (path / "modlist.txt").exists())
+
     profile_dir = env.get("VORTEX_PROFILE_DIR")
     if profile_dir:
-        candidates.append(Path(profile_dir))
+        _collect_profile_dirs_from_root(Path(profile_dir))
 
     appdata = env.get("APPDATA")
     if appdata:
         roaming = Path(appdata)
         search_roots = [roaming / "Vortex", roaming / "Black Tree Gaming Ltd" / "Vortex"]
         for root in search_roots:
-            if not root.exists():
-                continue
-            patterns = []
-            if game_id:
-                patterns.extend(
-                    [
-                        root / game_id / "profiles",
-                        root / "profiles" / game_id,
-                    ]
-                )
-            patterns.extend([root / "profiles", root])
-            for base in patterns:
-                if not base.exists():
-                    continue
-                if (base / "modlist.txt").exists():
-                    candidates.append(base)
-                    continue
-                candidates.extend(path for path in base.iterdir() if path.is_dir() and (path / "modlist.txt").exists())
+            if root.exists():
+                _collect_profile_dirs_from_root(root)
 
     ordered = sorted(
         _unique_existing_paths(candidates),
