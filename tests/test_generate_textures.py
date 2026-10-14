@@ -92,6 +92,7 @@ from generate_textures import (
     _summarize_batch_texture_dimensions,
     _visible_preview_output_keys,
     build_batch_bottleneck_hints,
+    summarize_batch_nif_patch_activity,
     build_mod_manager_profile_setup_hint,
     compute_checkpoint_mismatch_flags,
     compute_checkpoint_resume_counts,
@@ -4357,6 +4358,16 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         self.assertTrue(hints)
         self.assertIn("Queue backlog spiked", hints[0])
+
+    def test_summarize_batch_nif_patch_activity_reports_repaired_and_failed_counts(self) -> None:
+        summary = summarize_batch_nif_patch_activity(
+            [
+                ("mesh_a.nif", 2, 1),
+                ("mesh_b.nif", 0, 3),
+            ]
+        )
+        self.assertEqual(summary, "Automatic NIF patching: 2 succeeded, 4 failed.")
+        self.assertIsNone(summarize_batch_nif_patch_activity([]))
 
     def test_get_generation_warnings_glow_on_stone_triggers_warning(self) -> None:
         warnings = get_generation_warnings(

@@ -709,6 +709,16 @@ def build_batch_bottleneck_hints(
     return hints[:4]
 
 
+def summarize_batch_nif_patch_activity(
+    batch_nif_patch_results: Sequence[tuple[str, int, int]],
+) -> str | None:
+    total_patched = sum(max(0, int(patched or 0)) for _, patched, _ in batch_nif_patch_results)
+    total_failed = sum(max(0, int(failed or 0)) for _, _, failed in batch_nif_patch_results)
+    if total_patched == 0 and total_failed == 0:
+        return None
+    return f"Automatic NIF patching: {total_patched} succeeded, {total_failed} failed."
+
+
 _CORE_PREVIEW_OUTPUT_KEYS = (
     "diffuse",
     "normal",
@@ -12896,12 +12906,9 @@ if GUI_AVAILABLE:
                         lines = [
                             f"Run summary: processed {total_sources} source texture(s), generated {total_outputs} file(s).",
                         ]
-                        total_nif_patched = sum(patched for _, patched, _ in self.batch_nif_patch_results)
-                        total_nif_failed = sum(failed for _, _, failed in self.batch_nif_patch_results)
-                        if total_nif_patched or total_nif_failed:
-                            lines.append(
-                                f"Automatic NIF patching: {total_nif_patched} succeeded, {total_nif_failed} failed."
-                            )
+                        nif_patch_summary = summarize_batch_nif_patch_activity(self.batch_nif_patch_results)
+                        if nif_patch_summary is not None:
+                            lines.append(nif_patch_summary)
                         if total_failed:
                             lines.append(f"Skipped {total_failed} failed source texture(s).")
                             for filename, error_message in self.batch_failures[:5]:
@@ -12999,6 +13006,7 @@ if GUI_AVAILABLE:
                     total_outputs = sum(len(output_set) for output_set in results.values())
                     resumed_cancelled = int(telemetry.get("resumed_completed_count", 0) or 0)
                     planned_cancelled = max(0, total_sources + resumed_cancelled)
+                    nif_patch_summary = summarize_batch_nif_patch_activity(self.batch_nif_patch_results)
                     self.status_var.set(
                         f"Generation cancelled. Finished {total_sources}/{planned_cancelled} source texture(s) and wrote {total_outputs} file(s)."
                     )
@@ -13012,23 +13020,39 @@ if GUI_AVAILABLE:
                         )
                         checkpoint_status = f"Checkpoint health: {self.checkpoint_health_var.get() or 'unavailable'}"
                     peak_backlog = int(getattr(self, "_max_observed_queue_backlog", 0) or 0)
+                    cancel_lines = [
+                        f"Summary focus: resumed-skipped={resumed_cancelled}, failed={len(self.batch_failures)}.",
+                    ]
+                    if nif_patch_summary is not None:
+                        cancel_lines.append(nif_patch_summary)
+                    cancel_lines.extend(
+                        [
+                            "Processing was cancelled.",
+                            (
+                                f"Summary: processed {total_sources}/{planned_cancelled}, wrote {total_outputs} files, "
+                                f"resumed-skip {resumed_cancelled}, failed {len(self.batch_failures)}."
+                            ),
+                            f"Queue health: peak event backlog {peak_backlog}.",
+                            checkpoint_status,
+                            "Use Revert Process to undo files from this run if needed.",
+                        ]
+                    )
                     messagebox.showinfo(
-                    "Generation cancelled",
-                    (
-                        f"Summary focus: resumed-skipped={resumed_cancelled}, failed={len(self.batch_failures)}.\n"
-                        "Processing was cancelled.\n"
-                        f"Summary: processed {total_sources}/{planned_cancelled}, wrote {total_outputs} files, "
-                        f"resumed-skip {resumed_cancelled}, failed {len(self.batch_failures)}.\n"
-                        f"Queue health: peak event backlog {peak_backlog}.\n"
-                        f"{checkpoint_status}\n"
-                        "Use Revert Process to undo files from this run if needed."
-                    ),
+                        "Generation cancelled",
+                        "\n".join(cancel_lines),
                         parent=self.root,
                     )
                     if telemetry:
                         self.batch_perf_hint_var.set(
-                            f"Cancelled after {float(telemetry.get('elapsed_seconds', 0.0) or 0.0):.1f}s. "
-                            "Resume mode can continue from checkpoint."
+                            (
+                                f"Cancelled after {float(telemetry.get('elapsed_seconds', 0.0) or 0.0):.1f}s. "
+                                "Resume mode can continue from checkpoint."
+                            )
+                            + (
+                                f" {nif_patch_summary}"
+                                if nif_patch_summary is not None
+                                else ""
+                            )
                         )
                         checkpoint_value = str(telemetry.get("checkpoint_path", "") or "").strip()
                         if checkpoint_value:
