@@ -1811,7 +1811,16 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("backup originals", banner)
         self.assertIn("compare against .bak", banner)
         self.assertIn("rollback path", banner)
-        self.assertIn("experimental best-effort", banner)
+        self.assertIn("fallout writes stay off unless you opt in", banner)
+
+    def test_nif_editor_safety_banner_switches_for_fallout_write_mode(self) -> None:
+        banner = _nif_editor_safety_banner_text(
+            "fallout",
+            dry_run=False,
+            experimental_fallout_write=True,
+        ).lower()
+        self.assertIn("write mode is on", banner)
+        self.assertIn("fallout writes are experimental best-effort only", banner)
 
     def test_nif_editor_confirmation_text_emphasizes_safe_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -10862,6 +10871,10 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             step = state["step"]
             if step == 0:
                 self.assertTrue(w("nif_dry_run").isChecked())
+                banner = w("nif_editor_safety_banner").text().lower()
+                self.assertIn("dry-run is on", banner)
+                self.assertIn("compare against .bak first", banner)
+                self.assertIn("fallout writes stay off unless you opt in", banner)
                 self.assertIsNotNone(self.widget(window, "generation_log"))
                 self.assertIsNotNone(self.widget(window, "generation_log_copy"))
                 self.assertIsNotNone(self.widget(window, "generation_log_export"))

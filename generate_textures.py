@@ -4075,11 +4075,22 @@ def _workflow_family_quick_check() -> str:
     )
 
 
-def _nif_editor_safety_banner_text() -> str:
+def _nif_editor_safety_banner_text(
+    target_game: str | None = None,
+    *,
+    dry_run: bool = True,
+    experimental_fallout_write: bool = False,
+) -> str:
+    normalized_game = str(target_game or "auto").strip().lower()
+    safety_mode = "Dry-run is on" if dry_run else "Write mode is on"
+    if normalized_game == "fallout" or experimental_fallout_write:
+        fallout_note = "Fallout writes are experimental best-effort only"
+    else:
+        fallout_note = "Fallout writes stay off unless you opt in"
     return (
         "Safe default: keep Dry-run and Backup originals enabled. "
-        "Compare against .bak before restore or writing. "
-        "Restore from .bak is the rollback path, and Fallout writes are experimental best-effort only."
+        f"⚠ {safety_mode}. compare against .bak first; restore from .bak is the rollback path. "
+        f"{fallout_note}."
     )
 
 
@@ -15160,7 +15171,11 @@ if GUI_AVAILABLE:
                 target_game_var.trace_add("write", _refresh_profile_guidance)
                 guarded_mode_note = ttk.Label(
                     opt_frame,
-                    text="⚠ " + _nif_editor_safety_banner_text(),
+                    text="⚠ " + _nif_editor_safety_banner_text(
+                        target_game_var.get(),
+                        dry_run=dry_run_var.get(),
+                        experimental_fallout_write=experimental_fallout_write_var.get(),
+                    ),
                     justify=tk.LEFT,
                     wraplength=860,
                     style="Status.Warning.TLabel",
@@ -15354,6 +15369,14 @@ if GUI_AVAILABLE:
                         fallout_allow_env_map_scale_check,
                     ):
                         gate_check.configure(state=gate_state)
+                    guarded_mode_note.configure(
+                        text="⚠ "
+                        + _nif_editor_safety_banner_text(
+                            target_game=selected_game,
+                            dry_run=dry_run_var.get(),
+                            experimental_fallout_write=experimental_fallout_write_var.get(),
+                        )
+                    )
 
                 for watch_var in (
                     enable_parallax_var,
@@ -15378,6 +15401,7 @@ if GUI_AVAILABLE:
                     watch_var.trace_add("write", _update_checkbox_warnings)
                 target_game_var.trace_add("write", _update_checkbox_warnings)
                 target_game_var.trace_add("write", _sync_target_game_controls)
+                dry_run_var.trace_add("write", _sync_target_game_controls)
                 experimental_fallout_write_var.trace_add("write", _sync_target_game_controls)
                 _sync_target_game_controls()
                 self._add_tooltip(
@@ -18236,6 +18260,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_note = QtWidgets.QLabel(
         "⚠ " + _nif_editor_safety_banner_text()
     )
+    nif_editor_note.setObjectName("nif_editor_safety_banner")
     nif_editor_note.setWordWrap(True)
     font = nif_editor_note.font()
     font.setBold(True)
@@ -18297,6 +18322,17 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_dry_run.setChecked(True)
     nif_editor_form.addRow(nif_editor_dry_run)
     nif_editor_layout.addLayout(nif_editor_form)
+    def _update_nif_editor_note() -> None:
+        nif_editor_note.setText(
+            "⚠ "
+            + _nif_editor_safety_banner_text(
+                nif_editor_profile.currentText(),
+                dry_run=nif_editor_dry_run.isChecked(),
+                experimental_fallout_write=nif_editor_experimental.isChecked(),
+            )
+        )
+
+    _update_nif_editor_note()
     nif_editor_actions = QtWidgets.QHBoxLayout()
     nif_editor_buttons: dict[str, Any] = {}
     for name, label in (
@@ -20234,6 +20270,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     for operation, button in nif_editor_buttons.items():
         button.clicked.connect(lambda _checked=False, name=operation: _start_nif_editor(name))
     nif_editor_cancel.clicked.connect(_cancel_nif_editor)
+    nif_editor_profile.currentTextChanged.connect(lambda *_: _update_nif_editor_note())
+    nif_editor_experimental.toggled.connect(lambda *_: _update_nif_editor_note())
+    nif_editor_dry_run.toggled.connect(lambda *_: _update_nif_editor_note())
     detected_mod_button.clicked.connect(_pick_detected_mod_folder)
     profile_setup_restore_button.clicked.connect(_restore_qt_profile_setup)
     advanced_controls_toggle.toggled.connect(_persist_qt_gui_state)
@@ -20330,6 +20369,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         ("generate", generate_button), ("cancel_generation", cancel_button),
         ("theme", theme_check), ("theme_mode", theme_mode_combo), ("ui_scale", ui_scale_combo), ("workflow_mode", workflow_mode_combo), ("tabs", tabs),
         ("render_profile", render_profile_combo),
+        ("nif_editor_safety_banner", nif_editor_note),
         ("include_diffuse", include_diffuse_check), ("include_normal", include_normal_check),
         ("include_parallax", include_parallax_check),
         ("continue_on_error", continue_on_error_check),
