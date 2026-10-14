@@ -984,6 +984,11 @@ def export_project_settings(export_path: Path, *, source_state_file: Path | None
         state = _read_gui_state_file(source_state_file)
     else:
         state = dict(_GUI_STATE_DEFAULTS)
+    export_project_settings_state(state, export_path)
+
+
+def export_project_settings_state(state: Mapping[str, object], export_path: Path) -> None:
+    """Export a project-settings state snapshot to a portable JSON file."""
     _write_gui_state_file(state, export_path)
 
 
@@ -9777,6 +9782,28 @@ if GUI_AVAILABLE:
                 anchor=tk.W,
             )
             _detected_context_label.grid(row=3, column=0, columnspan=5, sticky=tk.EW, pady=(4, 0))
+            project_settings_row = ttk.Frame(file_frame)
+            project_settings_row.grid(row=4, column=0, columnspan=5, sticky=tk.W, pady=(6, 0))
+            self.import_project_settings_button = ttk.Button(
+                project_settings_row,
+                text=self._tr("Import project settings…"),
+                command=self._import_project_settings,
+            )
+            self.import_project_settings_button.pack(side=tk.LEFT)
+            self._add_tooltip(
+                self.import_project_settings_button,
+                "Load a portable project-settings JSON snapshot into the current GUI and saved state.",
+            )
+            self.export_project_settings_button = ttk.Button(
+                project_settings_row,
+                text=self._tr("Export project settings…"),
+                command=self._export_project_settings,
+            )
+            self.export_project_settings_button.pack(side=tk.LEFT, padx=(8, 0))
+            self._add_tooltip(
+                self.export_project_settings_button,
+                "Save the current GUI snapshot to a portable project-settings JSON file.",
+            )
             file_frame.columnconfigure(1, weight=1, minsize=280)
             file_frame.columnconfigure(2, minsize=100)
             file_frame.columnconfigure(3, minsize=100)
@@ -11352,6 +11379,38 @@ if GUI_AVAILABLE:
             )
             if selected:
                 self.output_var.set(selected)
+
+        def _import_project_settings(self) -> None:
+            selected = filedialog.askopenfilename(
+                title="Import project settings",
+                filetypes=[("Project settings JSON", "*.json"), ("JSON files", "*.json"), ("All files", "*.*")],
+                initialdir=str(self._default_output_browse_dir()),
+            )
+            if not selected:
+                return
+            import_project_settings(Path(selected))
+            self._apply_persisted_gui_state()
+            self._reload_ui_translations()
+            self._apply_runtime_localization()
+            self._apply_ui_scaling()
+            self._apply_theme()
+            self._update_slider_value_labels()
+            self._update_output_location_controls()
+            self._restore_default_startup_geometry()
+            self.status_var.set(self._tr("Imported project settings from {path}.").format(path=Path(selected)))
+
+        def _export_project_settings(self) -> None:
+            selected = filedialog.asksaveasfilename(
+                title="Export project settings",
+                defaultextension=".json",
+                filetypes=[("Project settings JSON", "*.json"), ("JSON files", "*.json"), ("All files", "*.*")],
+                initialdir=str(self._default_output_browse_dir()),
+                initialfile="project-settings.json",
+            )
+            if not selected:
+                return
+            export_project_settings_state(self._build_gui_state(), Path(selected))
+            self.status_var.set(self._tr("Exported project settings to {path}.").format(path=Path(selected)))
 
         def _default_output_dir_for_path(self, path: Path) -> Path:
             return path if path.is_dir() else path.parent

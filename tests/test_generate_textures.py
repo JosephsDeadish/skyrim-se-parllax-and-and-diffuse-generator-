@@ -154,6 +154,7 @@ from generate_textures import (
     resolve_nif_editor_patch_options_for_target,
     load_gui_state,
     export_project_settings,
+    export_project_settings_state,
     import_project_settings,
     main,
     parse_args,
@@ -1866,6 +1867,34 @@ class GenerateTexturesTests(unittest.TestCase):
             with self.assertRaises(json.JSONDecodeError):
                 export_project_settings(export_state, source_state_file=source_state)
             self.assertFalse(export_state.exists())
+
+    def test_export_project_settings_state_writes_live_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_input = temp_path / "source.dds"
+            source_input.write_bytes(b"fake")
+            export_state = temp_path / "live-export.json"
+            export_project_settings_state(
+                {
+                    "input_path": str(source_input),
+                    "output_path": "/tmp/out",
+                    "use_custom_output": True,
+                    "dark_mode": True,
+                    "last_mod_manager": "Vortex",
+                    "last_mod_profile": "Default",
+                    "last_renderer": "community_shaders",
+                    "last_output_target": "/tmp/out",
+                    "show_advanced_workflow_outputs": True,
+                },
+                export_state,
+            )
+            loaded = load_gui_state(export_state)
+            self.assertEqual(loaded["input_path"], str(source_input))
+            self.assertEqual(loaded["output_path"], "/tmp/out")
+            self.assertTrue(bool(loaded["use_custom_output"]))
+            self.assertEqual(loaded["last_renderer"], "community_shaders")
+            self.assertEqual(loaded["last_output_target"], "/tmp/out")
+            self.assertTrue(bool(loaded["show_advanced_workflow_outputs"]))
 
     def test_tk_advanced_workflow_visibility_round_trips_saved_settings(self) -> None:
         self._skip_unavailable_tk_display()
