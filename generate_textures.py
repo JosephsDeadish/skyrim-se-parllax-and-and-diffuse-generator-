@@ -17812,6 +17812,40 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         "Detected MO2/Vortex context is only a recommendation hint; it never auto-selects a profile, and manual input/output choices still win."
     )
     overview_layout.addWidget(manager_context_label)
+    startup_onboarding_group = QtWidgets.QGroupBox("Quick start")
+    startup_onboarding_group.setObjectName("startup_onboarding")
+    startup_onboarding_layout = QtWidgets.QVBoxLayout(startup_onboarding_group)
+    startup_onboarding_layout.setSpacing(6)
+    startup_onboarding_text = QtWidgets.QLabel(
+        _workflow_preset_onboarding_text()
+        + "\nUse the buttons below to apply a safe starting point, then refine the profile if needed."
+    )
+    startup_onboarding_text.setWordWrap(True)
+    startup_onboarding_layout.addWidget(startup_onboarding_text)
+    startup_onboarding_visible = bool(qt_saved_state.get("show_startup_onboarding", True))
+    startup_onboarding_button_row = QtWidgets.QHBoxLayout()
+    for profile_key, label in (
+        ("vanilla", "Vanilla"),
+        ("community_shaders", "Community Shaders"),
+        ("truepbr", "TruePBR"),
+        ("enb", "ENB"),
+    ):
+        button = QtWidgets.QPushButton(label)
+        button.setObjectName(f"startup_onboarding_{profile_key}")
+        button.setToolTip(
+            f"Start with the {label} renderer family, apply safe defaults, and move to the generation tab."
+        )
+        button.clicked.connect(lambda _checked=False, value=profile_key: _apply_qt_startup_preset(value))
+        startup_onboarding_button_row.addWidget(button)
+    startup_onboarding_hide_button = QtWidgets.QPushButton("Hide")
+    startup_onboarding_hide_button.setObjectName("startup_onboarding_hide")
+    startup_onboarding_hide_button.setToolTip("Hide this quick start card and remember the dismissal for next launch.")
+    startup_onboarding_hide_button.clicked.connect(_hide_qt_startup_onboarding)
+    startup_onboarding_button_row.addWidget(startup_onboarding_hide_button)
+    startup_onboarding_button_row.addStretch(1)
+    startup_onboarding_layout.addLayout(startup_onboarding_button_row)
+    startup_onboarding_group.setVisible(startup_onboarding_visible)
+    overview_layout.addWidget(startup_onboarding_group)
     button_row = QtWidgets.QHBoxLayout()
     launch_tk_button = QtWidgets.QPushButton("Open full legacy UI (Tkinter)")
     launch_tk_button.setEnabled(GUI_AVAILABLE)
@@ -18094,6 +18128,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     controls_layout.setVerticalSpacing(8)
     renderer_label = QtWidgets.QLabel()
     render_profile_combo = QtWidgets.QComboBox()
+    render_profile_combo.setObjectName("render_profile")
     render_profile_combo.addItems(_QT_RENDER_PROFILE_VALUES)
     _configure_qt_field_label(renderer_label, "&Target renderer", render_profile_combo)
     render_profile_combo.setToolTip(
@@ -19255,6 +19290,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             dark_mode=theme_check.isChecked(),
             theme_mode=str(theme_mode_combo.currentData() or "light"),
             ui_scale=float(ui_scale_combo.currentText()),
+            show_startup_onboarding=startup_onboarding_group.isVisible(),
             show_advanced_map_strengths=advanced_controls_toggle.isChecked(),
             show_truepbr_sidecar_settings=truepbr_settings_toggle.isChecked(),
             workflow_mode=_workflow_mode_value_from_label(workflow_mode_combo.currentText()),
@@ -19325,6 +19361,21 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         }
         for key, control in output_controls.items():
             control.setChecked(defaults.get(key, False))
+
+    def _apply_qt_startup_preset(profile_key: str) -> None:
+        profile_index = render_profile_combo.findText(_normalize_render_profile(profile_key))
+        if profile_index >= 0:
+            render_profile_combo.setCurrentIndex(profile_index)
+        _apply_profile_output_defaults()
+        tabs.setCurrentWidget(generation_scroll)
+        startup_onboarding_group.hide()
+        _persist_qt_gui_state()
+        status_label.setText(f"Quick start applied: {_RENDER_PROFILE_LABELS.get(profile_key, profile_key)}.")
+
+    def _hide_qt_startup_onboarding() -> None:
+        startup_onboarding_group.hide()
+        _persist_qt_gui_state()
+        status_label.setText("Quick start dismissed.")
 
     def _effective_checkpoint_path() -> Path:
         text = checkpoint_path_edit.text().strip()

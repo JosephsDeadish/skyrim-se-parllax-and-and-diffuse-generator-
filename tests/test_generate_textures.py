@@ -10842,6 +10842,36 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             extra_patches=(mock.patch("generate_textures.detect_mod_manager_context", return_value=context),),
         )
 
+    def test_qt_startup_quick_start_banner_applies_safe_preset_and_hides(self) -> None:
+        saved_states = []
+        state = {"step": 0}
+
+        def capture_state(state_data):
+            saved_states.append(json.loads(json.dumps(state_data)))
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                self.assertTrue(w("startup_onboarding").isVisible())
+                self.assertEqual(w("render_profile").currentText(), "custom")
+                w("startup_onboarding_vanilla").click()
+                self.app.processEvents()
+                self.assertEqual(w("render_profile").currentText(), "vanilla")
+                self.assertFalse(w("startup_onboarding").isVisible())
+                self.assertEqual(w("tabs").tabText(w("tabs").currentIndex()), "Generation")
+                self.assertEqual(w("generation_status").text(), "Quick start applied: Vanilla.")
+                state["step"] = 1
+                return False
+            if step == 1 and w("generate").isEnabled():
+                self.assertTrue(saved_states)
+                self.assertFalse(saved_states[-1]["show_startup_onboarding"])
+                self.assertEqual(saved_states[-1]["render_profile"], "vanilla")
+                return True
+            return False
+
+        self.run_window(scenario, save_side_effect=capture_state)
+
     def test_actual_fallout_editor_opt_in_and_scale_gate(self) -> None:
         from tests.test_nif_patcher import _build_minimal_nif, _rewrite_user_version
         from nif_patcher import scan_nif
