@@ -10359,7 +10359,7 @@ if GUI_AVAILABLE:
                 _dismiss_startup_onboarding()
 
             def _apply_startup_suggested_preset() -> None:
-                _apply_startup_preset(self._recommended_render_profile_for_preview(self._current_preview_path()))
+                _apply_startup_preset(_render_profile_family(self._recommended_render_profile_for_preview(self._current_preview_path())))
 
             _bind_tk_quick_start_shortcuts(
                 self.root,
@@ -18114,7 +18114,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             suggested_profile = recommend_render_profile_details(preview_path, manager_context=manager_context).profile
         else:
             suggested_profile = recommend_render_profile_details(None, manager_context=manager_context).profile
-        _apply_qt_startup_preset(suggested_profile)
+        _apply_qt_startup_preset(_render_profile_family(suggested_profile))
 
     startup_onboarding_suggested_button.clicked.connect(_apply_qt_startup_suggested_preset)
     startup_onboarding_button_row.addWidget(startup_onboarding_suggested_button)
