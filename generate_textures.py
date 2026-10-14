@@ -17726,6 +17726,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     workflow_mode_label = QtWidgets.QLabel("Workflow mode")
     appearance_row.addWidget(workflow_mode_label)
     workflow_mode_combo = QtWidgets.QComboBox()
+    workflow_mode_combo.setObjectName("workflow_mode")
     workflow_mode_combo.addItems([_WORKFLOW_MODE_LABELS[value] for value in _WORKFLOW_MODE_VALUES])
     saved_workflow_mode = _normalize_workflow_mode(qt_saved_state.get("workflow_mode"))
     if saved_workflow_mode is None:
@@ -17781,6 +17782,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             ),
         )
     )
+    manager_context_label.setObjectName("manager_context_hint")
     manager_context_label.setWordWrap(True)
     manager_context_label.setToolTip(
         "Detected MO2/Vortex context is only a recommendation hint; it never auto-selects a profile, and manual input/output choices still win."
@@ -18021,6 +18023,46 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     browse_output_button.setToolTip("Choose where generated maps will be saved.")
     output_row.addWidget(browse_output_button)
     generation_layout.addLayout(output_row)
+
+    quick_switch_row = QtWidgets.QHBoxLayout()
+    detected_mod_button = QtWidgets.QPushButton("Detected Mod (Hint)")
+    detected_mod_button.setObjectName("detected_mod")
+    detected_mod_button.setToolTip(
+        _format_short_guidance_tooltip(
+            "jumps to the detected MO2/Vortex texture folder as a quick starting point",
+            "the current profile already has a detected mod texture folder and you want the fastest safe browse path",
+            "you need a different source folder, a merged output, or a manual path override",
+        )
+    )
+    quick_switch_row.addWidget(detected_mod_button)
+    profile_setup_restore_button = QtWidgets.QPushButton("Restore remembered setup")
+    profile_setup_restore_button.setObjectName("restore_profile_setup")
+    profile_setup_restore_button.setToolTip(
+        _format_short_guidance_tooltip(
+            "restores the renderer, workflow mode, and output target remembered for this profile",
+            "you are switching back to a known MO2/Vortex profile and want the last safe setup back",
+            "you are starting from scratch or intentionally changing families or output targets",
+        )
+    )
+    quick_switch_row.addWidget(profile_setup_restore_button)
+    quick_switch_row.addStretch(1)
+    generation_layout.addLayout(quick_switch_row)
+
+    profile_setup_hint_label = QtWidgets.QLabel(
+        build_mod_manager_profile_setup_hint(
+            qt_saved_state.get("profile_setup_memory"),
+            manager=manager_context.manager or str(qt_saved_state.get("last_mod_manager", "") or ""),
+            profile=manager_context.profile_name or str(qt_saved_state.get("last_mod_profile", "") or ""),
+        )
+        or "No remembered setup exists for this profile yet."
+    )
+    profile_setup_hint_label.setObjectName("profile_setup_hint")
+    profile_setup_hint_label.setWordWrap(True)
+    generation_layout.addWidget(profile_setup_hint_label)
+    detected_mod_button.setEnabled(bool(manager_context.loaded_texture_dirs))
+    profile_setup_restore_button.setEnabled(
+        profile_setup_hint_label.text() != "No remembered setup exists for this profile yet."
+    )
 
     controls_group = QtWidgets.QGroupBox("Target renderer and output maps")
     controls_layout = QtWidgets.QGridLayout(controls_group)
@@ -18948,6 +18990,126 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     def _update_resume_hint() -> None:
         resume_mode_hint.setText(_qt_resume_mode_guidance(resume_mode_combo.currentText()))
 
+    def _current_qt_profile_setup_key(state: Mapping[str, object] | None = None) -> str:
+        source_state = qt_saved_state if state is None else state
+        manager = (manager_context.manager or str(source_state.get("last_mod_manager", "") or "")).strip()
+        profile = (manager_context.profile_name or str(source_state.get("last_mod_profile", "") or "")).strip()
+        if not manager and not profile:
+            return ""
+        return _profile_setup_memory_key(manager, profile)
+
+    def _current_qt_profile_setup_entry(state: Mapping[str, object] | None = None) -> dict[str, object] | None:
+        source_state = qt_saved_state if state is None else state
+        memory = source_state.get("profile_setup_memory")
+        if not isinstance(memory, Mapping):
+            return None
+        entry = memory.get(_current_qt_profile_setup_key(source_state))
+        return entry if isinstance(entry, dict) else None
+
+    def _profile_setup_hint_text(state: Mapping[str, object] | None = None) -> str:
+        source_state = qt_saved_state if state is None else state
+        hint = build_mod_manager_profile_setup_hint(
+            source_state.get("profile_setup_memory"),
+            manager=manager_context.manager or str(source_state.get("last_mod_manager", "") or ""),
+            profile=manager_context.profile_name or str(source_state.get("last_mod_profile", "") or ""),
+        )
+        return hint or "No remembered setup exists for this profile yet."
+
+    def _refresh_mod_manager_context_hint(state: Mapping[str, object] | None = None) -> None:
+        source_state = qt_saved_state if state is None else state
+        manager_context_label.setText(
+            build_mod_manager_context_hint(
+                manager_context,
+                last_mod_manager=str(source_state.get("last_mod_manager", "") or ""),
+                last_mod_profile=str(source_state.get("last_mod_profile", "") or ""),
+                last_renderer=str(source_state.get("last_renderer", "") or ""),
+                last_output_target=str(source_state.get("last_output_target", "") or ""),
+                profile_setup_hint=_profile_setup_hint_text(source_state),
+            )
+        )
+
+    def _refresh_profile_setup_hint_label(state: Mapping[str, object] | None = None) -> None:
+        profile_setup_hint_label.setText(_profile_setup_hint_text(state))
+
+    def _update_profile_setup_restore_controls(state: Mapping[str, object] | None = None) -> None:
+        profile_setup_restore_button.setEnabled(_current_qt_profile_setup_entry(state) is not None)
+
+    def _sync_qt_profile_setup_memory(state: dict[str, object]) -> dict[str, object]:
+        key = _current_qt_profile_setup_key(state)
+        if not key:
+            return state
+        profile_setup_memory = _normalize_profile_setup_memory(state.get("profile_setup_memory"))
+        entry = dict(profile_setup_memory.get(key, {}))
+        output_target = output_dir_edit.text().strip()
+        use_custom_output = bool(output_target)
+        entry["render_profile"] = _normalize_render_profile(render_profile_combo.currentText())
+        entry["use_custom_output"] = use_custom_output
+        entry["output_target"] = output_target if use_custom_output else "next to input"
+        entry["workflow_mode"] = _workflow_mode_value_from_label(workflow_mode_combo.currentText())
+        profile_setup_memory[key] = entry
+        state["profile_setup_memory"] = profile_setup_memory
+        return state
+
+    def _pick_detected_mod_folder() -> None:
+        if not manager_context.loaded_texture_dirs:
+            QtWidgets.QMessageBox.information(
+                window,
+                "No detected mod folders",
+                "No loaded mod texture folders were detected for the current MO2/Vortex context.",
+            )
+            return
+        if len(manager_context.loaded_texture_dirs) == 1:
+            selected_path = manager_context.loaded_texture_dirs[0]
+        else:
+            selected = QtWidgets.QFileDialog.getExistingDirectory(
+                window,
+                "Select detected loaded mod texture folder",
+                str(_default_input_browse_dir()),
+            )
+            if not selected:
+                return
+            selected_path = Path(selected)
+        input_path_edit.setText(str(selected_path))
+        status_label.setText(f"Loaded detected mod texture folder: {selected_path}.")
+
+    def _restore_qt_profile_setup() -> None:
+        entry = _current_qt_profile_setup_entry()
+        if entry is None:
+            status_label.setText("No remembered setup exists for the detected mod-manager profile.")
+            return
+        render_profile = _normalize_render_profile(entry.get("render_profile"))
+        workflow_mode = _normalize_workflow_mode(entry.get("workflow_mode"))
+        use_custom_output = _coerce_bool(entry.get("use_custom_output"), False)
+        output_target = str(entry.get("output_target", "") or "").strip()
+        if workflow_mode:
+            workflow_mode_combo.setCurrentText(_WORKFLOW_MODE_LABELS[workflow_mode])
+        if use_custom_output and output_target and output_target.lower() != "next to input":
+            output_dir_edit.setText(output_target)
+        else:
+            output_dir_edit.clear()
+        if render_profile:
+            render_profile_combo.setCurrentText(render_profile)
+        _refresh_mod_manager_context_hint()
+        _refresh_profile_setup_hint_label()
+        _update_profile_setup_restore_controls()
+        profile_name = manager_context.profile_name or str(qt_saved_state.get("last_mod_profile", "") or "") or "default profile"
+        summary_bits: list[str] = []
+        if render_profile:
+            summary_bits.append(
+                f"renderer {_RENDER_PROFILE_LABELS.get(render_profile, render_profile.replace('_', ' ').title())}"
+            )
+        if workflow_mode:
+            summary_bits.append(f"workflow {_WORKFLOW_MODE_LABELS[workflow_mode]}")
+        if use_custom_output and output_target:
+            summary_bits.append(f"output {output_target}")
+        elif not use_custom_output:
+            summary_bits.append("output next to input")
+        status_label.setText(
+            f"Restored remembered setup for {profile_name}: {', '.join(summary_bits)}."
+            if summary_bits
+            else f"Restored remembered setup for {profile_name}."
+        )
+
     def _update_profile_recommendation() -> None:
         input_text = input_path_edit.text().strip()
         if input_text and Path(input_text).expanduser().is_dir():
@@ -19029,6 +19191,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         _persist_qt_gui_state()
 
     def _persist_qt_gui_state(*_: object) -> None:
+        nonlocal qt_saved_state
         state = _merge_qt_generation_gui_state(
             load_gui_state(),
             input_path=input_path_edit.text(),
@@ -19082,7 +19245,12 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             if output_dir_edit.text().strip()
             else "next to input"
         )
+        state = _sync_qt_profile_setup_memory(state)
         save_gui_state(state)
+        qt_saved_state = state
+        _refresh_mod_manager_context_hint(state)
+        _refresh_profile_setup_hint_label(state)
+        _update_profile_setup_restore_controls(state)
 
     _apply_qt_workflow_mode(saved_workflow_mode)
 
@@ -19643,6 +19811,8 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     for operation, button in nif_editor_buttons.items():
         button.clicked.connect(lambda _checked=False, name=operation: _start_nif_editor(name))
     nif_editor_cancel.clicked.connect(_cancel_nif_editor)
+    detected_mod_button.clicked.connect(_pick_detected_mod_folder)
+    profile_setup_restore_button.clicked.connect(_restore_qt_profile_setup)
     advanced_controls_toggle.toggled.connect(_persist_qt_gui_state)
     truepbr_settings_toggle.toggled.connect(_persist_qt_gui_state)
     browse_input_button.clicked.connect(_browse_input)
@@ -19717,6 +19887,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     _update_profile_recommendation()
     _update_profile_guidance()
     _update_qt_render_modes()
+    _refresh_mod_manager_context_hint()
+    _refresh_profile_setup_hint_label()
+    _update_profile_setup_restore_controls()
     _refresh_preview_state_badge()
     _refresh_checkpoint_health()
     window.setCentralWidget(root)
@@ -19728,13 +19901,16 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         ("input_path", input_path_edit), ("output_dir", output_dir_edit),
         ("browse_input", browse_input_button), ("browse_input_folder", browse_input_folder_button),
         ("browse_output", browse_output_button),
+        ("detected_mod", detected_mod_button), ("restore_profile_setup", profile_setup_restore_button),
+        ("profile_setup_hint", profile_setup_hint_label), ("manager_context_hint", manager_context_label),
         ("checkpoint_path", checkpoint_path_edit), ("resume_mode", resume_mode_combo),
         ("generate", generate_button), ("cancel_generation", cancel_button),
-        ("theme", theme_check), ("theme_mode", theme_mode_combo), ("ui_scale", ui_scale_combo), ("tabs", tabs),
+        ("theme", theme_check), ("theme_mode", theme_mode_combo), ("ui_scale", ui_scale_combo), ("workflow_mode", workflow_mode_combo), ("tabs", tabs),
         ("render_profile", render_profile_combo),
         ("include_diffuse", include_diffuse_check), ("include_normal", include_normal_check),
         ("include_parallax", include_parallax_check),
         ("continue_on_error", continue_on_error_check),
+        ("generation_status", status_label),
     ):
         control.setObjectName(name)
     _sync_operation_controls()

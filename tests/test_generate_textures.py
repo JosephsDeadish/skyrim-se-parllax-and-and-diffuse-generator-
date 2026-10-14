@@ -10631,8 +10631,8 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
         self.assertIsNotNone(widget, name)
         return widget
 
-    def run_window(self, scenario):
-        from contextlib import redirect_stderr
+    def run_window(self, scenario, *, load_state=None, save_side_effect=None, extra_patches=()):
+        from contextlib import ExitStack, redirect_stderr
         failures = []
         windows = []
         stderr = io.StringIO()
@@ -10672,11 +10672,14 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             failures.append(AssertionError(f"Unexpected Qt dialog: {args[1:]}"))
             return self.qt.QtWidgets.QMessageBox.StandardButton.Ok
 
-        with mock.patch("generate_textures.load_gui_state", return_value=dict(self.qt._GUI_STATE_DEFAULTS)), \
-             mock.patch("generate_textures.save_gui_state"), \
-             mock.patch.object(self.qt.QtWidgets.QMessageBox, "critical", side_effect=unexpected_dialog), \
-             mock.patch.object(self.qt.QtWidgets.QMessageBox, "warning", side_effect=unexpected_dialog), \
-             redirect_stderr(stderr):
+        load_state_value = dict(self.qt._GUI_STATE_DEFAULTS) if load_state is None else load_state
+        with ExitStack() as stack, redirect_stderr(stderr):
+            stack.enter_context(mock.patch("generate_textures.load_gui_state", return_value=load_state_value))
+            stack.enter_context(mock.patch("generate_textures.save_gui_state", side_effect=save_side_effect))
+            stack.enter_context(mock.patch.object(self.qt.QtWidgets.QMessageBox, "critical", side_effect=unexpected_dialog))
+            stack.enter_context(mock.patch.object(self.qt.QtWidgets.QMessageBox, "warning", side_effect=unexpected_dialog))
+            for patcher in extra_patches:
+                stack.enter_context(patcher)
             self.qt._launch_qt_migration_gui(on_ready=ready)
         for window in windows:
             window.deleteLater()
@@ -10758,6 +10761,75 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
 
         with mock.patch.object(self.qt.QtWidgets.QMessageBox, "question", side_effect=confirm):
             self.run_window(scenario)
+
+    def test_qt_detected_mod_hint_and_profile_restore(self) -> None:
+        detected_mod_dir = self.root / "mods" / "Detected Mod" / "textures"
+        detected_mod_dir.mkdir(parents=True)
+        output_dir = self.root / "output"
+        output_dir.mkdir()
+        manager = "Mod Organizer 2"
+        profile = "Main"
+        profile_key = self.qt._profile_setup_memory_key(manager, profile)
+        saved_state = dict(self.qt._GUI_STATE_DEFAULTS)
+        saved_state.update(
+            {
+                "last_mod_manager": manager,
+                "last_mod_profile": profile,
+                "profile_setup_memory": {
+                    profile_key: {
+                        "render_profile": "truepbr",
+                        "use_custom_output": True,
+                        "output_target": str(output_dir),
+                        "workflow_mode": "advanced",
+                        "target_game": "skyrim",
+                    }
+                },
+            }
+        )
+        saved_states = []
+        context = self.qt.ModManagerContext(
+            manager=manager,
+            profile_name=profile,
+            loaded_texture_dirs=(detected_mod_dir,),
+        )
+
+        def capture_state(state):
+            saved_states.append(json.loads(json.dumps(state)))
+
+        state = {"step": 0}
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                self.assertTrue(w("detected_mod").isEnabled())
+                self.assertTrue(w("restore_profile_setup").isEnabled())
+                w("detected_mod").click()
+                self.assertEqual(w("input_path").text(), str(detected_mod_dir))
+                self.assertIn("Loaded detected mod texture folder", w("generation_status").text())
+                state["step"] = 1
+            elif step == 1:
+                w("restore_profile_setup").click()
+                state["step"] = 2
+            elif step == 2 and w("generate").isEnabled():
+                self.assertEqual(w("render_profile").currentText(), "truepbr")
+                self.assertEqual(w("workflow_mode").currentText(), self.qt._WORKFLOW_MODE_LABELS["advanced"])
+                self.assertEqual(w("output_dir").text(), str(output_dir))
+                self.assertIn("Restored remembered setup", w("generation_status").text())
+                self.assertTrue(saved_states)
+                restored_entry = saved_states[-1]["profile_setup_memory"][profile_key]
+                self.assertEqual(restored_entry["render_profile"], "truepbr")
+                self.assertEqual(restored_entry["output_target"], str(output_dir))
+                self.assertEqual(restored_entry["workflow_mode"], "advanced")
+                return True
+            return False
+
+        self.run_window(
+            scenario,
+            load_state=saved_state,
+            save_side_effect=capture_state,
+            extra_patches=(mock.patch("generate_textures.detect_mod_manager_context", return_value=context),),
+        )
 
     def test_actual_fallout_editor_opt_in_and_scale_gate(self) -> None:
         from tests.test_nif_patcher import _build_minimal_nif, _rewrite_user_version
