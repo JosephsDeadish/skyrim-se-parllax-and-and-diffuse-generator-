@@ -231,6 +231,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "auto_optimize_large_batches": True,
     "lazy_preview_mode": True,
     "staged_preview_mode": True,
+    "workflow_mode": "beginner",
     "simplified_main_layout": True,
     "show_advanced_generation_controls": False,
     "show_advanced_workflow_outputs": False,
@@ -291,6 +292,13 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "nif_retry_count": 1,
 }
 
+_WORKFLOW_MODE_VALUES = ("beginner", "standard", "advanced")
+_WORKFLOW_MODE_LABELS = {
+    "beginner": "Beginner",
+    "standard": "Standard",
+    "advanced": "Advanced",
+}
+
 _TEXTURE_TARGET_GAME_VALUES: tuple[str, ...] = (
     "skyrim",
     "fallout3",
@@ -318,6 +326,38 @@ def _normalize_texture_target_game(value: str | None) -> str:
     if normalized not in _TEXTURE_TARGET_GAME_VALUES:
         return "skyrim"
     return normalized
+
+
+def _normalize_workflow_mode(value: object | None) -> str | None:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in _WORKFLOW_MODE_VALUES else None
+
+
+def _infer_workflow_mode_from_state(state: Mapping[str, object]) -> str:
+    if bool(state.get("show_advanced_generation_controls", _GUI_STATE_DEFAULTS["show_advanced_generation_controls"])):
+        return "advanced"
+    if bool(state.get("show_advanced_workflow_outputs", _GUI_STATE_DEFAULTS["show_advanced_workflow_outputs"])):
+        return "advanced"
+    if bool(state.get("simplified_main_layout", _GUI_STATE_DEFAULTS["simplified_main_layout"])):
+        return "beginner"
+    return "standard"
+
+
+def _apply_workflow_mode_to_state(state: dict[str, object], workflow_mode: str) -> None:
+    normalized = _normalize_workflow_mode(workflow_mode) or "standard"
+    state["workflow_mode"] = normalized
+    if normalized == "beginner":
+        state["simplified_main_layout"] = True
+        state["show_advanced_generation_controls"] = False
+        state["show_advanced_workflow_outputs"] = False
+    elif normalized == "standard":
+        state["simplified_main_layout"] = False
+        state["show_advanced_generation_controls"] = False
+        state["show_advanced_workflow_outputs"] = False
+    else:
+        state["simplified_main_layout"] = False
+        state["show_advanced_generation_controls"] = True
+        state["show_advanced_workflow_outputs"] = True
 
 
 def _strip_known_diffuse_suffix(stem: str) -> str:
@@ -840,6 +880,10 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         state["auto_specular"] = False
         state["auto_ao"] = False
         state["auto_roughness"] = False
+    workflow_mode = _normalize_workflow_mode(raw.get("workflow_mode"))
+    if workflow_mode is None:
+        workflow_mode = _infer_workflow_mode_from_state(state)
+    _apply_workflow_mode_to_state(state, workflow_mode)
     input_path = str(state["input_path"]).strip()
     output_path = str(state["output_path"]).strip()
     if input_path and not Path(input_path).exists():
@@ -9488,6 +9532,7 @@ if GUI_AVAILABLE:
             self.simplified_main_layout_var = tk.BooleanVar(value=True)
             self.show_advanced_generation_var = tk.BooleanVar(value=False)
             self.show_advanced_workflow_outputs_var = tk.BooleanVar(value=False)
+            self.workflow_mode_var = tk.StringVar(value=_WORKFLOW_MODE_LABELS["beginner"])
             self.batch_resume_mode_var = tk.StringVar(value="start_fresh")
             self.batch_checkpoint_path_var = tk.StringVar(value="")
             self.batch_resume_hint_var = tk.StringVar(value="Mode: start fresh — checkpoint entries are ignored.")
@@ -9501,6 +9546,7 @@ if GUI_AVAILABLE:
             self._tooltip_bg = _LIGHT_THEME["tooltip_bg"]
             self._tooltip_fg = _LIGHT_THEME["tooltip_fg"]
             self.dismissed_warnings: set[str] = set()
+            self._workflow_mode_syncing = False
 
             self.input_var = tk.StringVar()
             self.output_var = tk.StringVar()
@@ -9698,6 +9744,17 @@ if GUI_AVAILABLE:
                 variable=self.simplified_main_layout_var,
             )
             _simplified_layout_check.pack(side=tk.LEFT, padx=(8, 8))
+            _workflow_mode_label = ttk.Label(top_controls_row, text="Workflow mode")
+            _workflow_mode_label.pack(side=tk.LEFT, padx=(0, 4))
+            self.workflow_mode_combo = ttk.Combobox(
+                top_controls_row,
+                values=tuple(_WORKFLOW_MODE_LABELS.values()),
+                state="readonly",
+                width=10,
+                textvariable=self.workflow_mode_var,
+            )
+            self.workflow_mode_combo.pack(side=tk.LEFT, padx=(0, 8))
+            self.workflow_mode_combo.bind("<<ComboboxSelected>>", self._on_workflow_mode_selected)
             self._add_tooltip(_theme_top_check, "Toggle dark/light mode for comfortable long editing sessions.")
             self._add_tooltip(_language_label, "Choose the interface language from available translation files.")
             self._add_tooltip(self.language_combo, "Switch language for labels, buttons, and tooltips.")
@@ -9705,8 +9762,16 @@ if GUI_AVAILABLE:
             self._add_tooltip(self.ui_scale_combo, "Increase this on 4K/high-DPI displays if controls look too small.")
             self._add_tooltip(
                 _simplified_layout_check,
-                "Checked: Basic view with core outputs and fewer controls.\n"
-                "Uncheck for Advanced view, then enable the advanced output groups you need.",
+                "Beginner keeps the UI compact with core outputs only.\n"
+                "Standard shows the full layout, and Advanced also enables extra setup/output groups.",
+            )
+            self._add_tooltip(
+                _workflow_mode_label,
+                "Select how much of the interface to show: Beginner, Standard, or Advanced.",
+            )
+            self._add_tooltip(
+                self.workflow_mode_combo,
+                "Beginner keeps the UI compact, Standard shows the full layout, and Advanced exposes the extra setup/output groups.",
             )
             self._add_tooltip(_target_game_label, "Select Skyrim or Fallout naming mode for generated texture filenames.")
             self._add_tooltip(
@@ -10397,8 +10462,12 @@ if GUI_AVAILABLE:
             self.show_advanced_workflow_outputs_var.trace_add("write", _sync_advanced_workflow_controls)
             self.simplified_main_layout_var.trace_add("write", _sync_advanced_generation_controls)
             self.simplified_main_layout_var.trace_add("write", _sync_advanced_workflow_controls)
+            self.simplified_main_layout_var.trace_add("write", self._sync_workflow_mode_selection)
+            self.show_advanced_generation_var.trace_add("write", self._sync_workflow_mode_selection)
+            self.show_advanced_workflow_outputs_var.trace_add("write", self._sync_workflow_mode_selection)
             _sync_advanced_generation_controls()
             _sync_advanced_workflow_controls()
+            self._sync_workflow_mode_selection()
 
             options_frame.columnconfigure(2, weight=1)
             options_frame.columnconfigure(3, weight=1)
@@ -11159,6 +11228,47 @@ if GUI_AVAILABLE:
                 self._tr("🌙 Dark mode") if self.dark_mode_var.get() else self._tr("☀ Light mode")
             )
 
+        def _workflow_mode_from_controls(self) -> str:
+            if bool(self.show_advanced_generation_var.get()) or bool(self.show_advanced_workflow_outputs_var.get()):
+                return "advanced"
+            if bool(self.simplified_main_layout_var.get()):
+                return "beginner"
+            return "standard"
+
+        def _sync_workflow_mode_selection(self, *_: object) -> None:
+            if self._workflow_mode_syncing:
+                return
+            label = _WORKFLOW_MODE_LABELS[self._workflow_mode_from_controls()]
+            if self.workflow_mode_var.get() != label:
+                self.workflow_mode_var.set(label)
+
+        def _on_workflow_mode_selected(self, _event: object | None = None) -> None:
+            if self._workflow_mode_syncing:
+                return
+            self._apply_workflow_mode(self.workflow_mode_var.get())
+
+        def _apply_workflow_mode(self, workflow_mode: str) -> None:
+            normalized = _normalize_workflow_mode(workflow_mode) or "standard"
+            label = _WORKFLOW_MODE_LABELS[normalized]
+            self._workflow_mode_syncing = True
+            try:
+                if normalized == "beginner":
+                    self.simplified_main_layout_var.set(True)
+                    self.show_advanced_generation_var.set(False)
+                    self.show_advanced_workflow_outputs_var.set(False)
+                elif normalized == "standard":
+                    self.simplified_main_layout_var.set(False)
+                    self.show_advanced_generation_var.set(False)
+                    self.show_advanced_workflow_outputs_var.set(False)
+                else:
+                    self.simplified_main_layout_var.set(False)
+                    self.show_advanced_generation_var.set(True)
+                    self.show_advanced_workflow_outputs_var.set(True)
+                if self.workflow_mode_var.get() != label:
+                    self.workflow_mode_var.set(label)
+            finally:
+                self._workflow_mode_syncing = False
+
         def _apply_persisted_gui_state(self) -> None:
             state = load_gui_state()
             self.input_var.set(str(state["input_path"]))
@@ -11181,6 +11291,10 @@ if GUI_AVAILABLE:
             self.simplified_main_layout_var.set(bool(state.get("simplified_main_layout", True)))
             self.show_advanced_generation_var.set(bool(state.get("show_advanced_generation_controls", False)))
             self.show_advanced_workflow_outputs_var.set(bool(state.get("show_advanced_workflow_outputs", False)))
+            workflow_mode = _normalize_workflow_mode(state.get("workflow_mode"))
+            if workflow_mode is None:
+                workflow_mode = _infer_workflow_mode_from_state(state)
+            self.workflow_mode_var.set(_WORKFLOW_MODE_LABELS[workflow_mode])
             self.batch_resume_mode_var.set(str(state.get("batch_resume_mode", "start_fresh")))
             self.batch_checkpoint_path_var.set(str(state.get("batch_checkpoint_path", "")))
             self.auto_patch_nifs_var.set(bool(state["auto_patch_nifs"]))
@@ -11257,6 +11371,7 @@ if GUI_AVAILABLE:
                 "auto_optimize_large_batches": self.auto_optimize_large_batches_var.get(),
                 "lazy_preview_mode": self.lazy_preview_mode_var.get(),
                 "staged_preview_mode": self.staged_preview_mode_var.get(),
+                "workflow_mode": self._workflow_mode_from_controls(),
                 "simplified_main_layout": self.simplified_main_layout_var.get(),
                 "show_advanced_generation_controls": self.show_advanced_generation_var.get(),
                 "show_advanced_workflow_outputs": self.show_advanced_workflow_outputs_var.get(),

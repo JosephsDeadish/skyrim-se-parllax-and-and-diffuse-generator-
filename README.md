@@ -74,7 +74,7 @@ This opens a desktop interface where you can:
 - inspect individual NIF files or mesh folders in the Qt **NIF Scan** tab using read-only diagnostics, status/text filters, and paged results
 - use the Qt **NIF Editor** for flag/texture-slot edits, safe conflict remediation, and backup restore on the target chosen in NIF Scan; dry-run is enabled by default, writes require confirmation and backups, and cancellation finishes the current file first. The Tk editor retains additional advanced presets and tuning controls.
 - use keyboard shortcuts: `Ctrl+O` opens a texture, `Ctrl+Shift+O` opens a folder, `Ctrl+Enter` starts generation, and `Esc` requests cancellation
-- use **Basic view** to keep core controls visible, then uncheck it for Advanced options
+- switch **Workflow mode** between **Beginner**, **Standard**, and **Advanced**; Beginner keeps core controls visible, Standard shows the full layout, and Advanced also enables the extra setup/output groups
 - auto-update output folder when a different input texture is selected
 - get adaptive recommended defaults based on richer image-content analysis
 - use a clearly labeled **Automatic suggestions (analyze image and set sliders)** toggle to turn auto slider updates on/off

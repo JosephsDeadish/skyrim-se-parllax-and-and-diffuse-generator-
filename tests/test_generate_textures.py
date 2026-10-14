@@ -1294,6 +1294,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(state["last_renderer"], "")
         self.assertEqual(state["last_output_target"], "")
         self.assertFalse(bool(state["dark_mode"]))
+        self.assertEqual(str(state["workflow_mode"]), "beginner")
         self.assertTrue(bool(state["simplified_main_layout"]))
         self.assertTrue(bool(state["auto_suggestions"]))
         self.assertFalse(bool(state["qt_show_advanced_map_strengths"]))
@@ -1743,6 +1744,7 @@ class GenerateTexturesTests(unittest.TestCase):
                     "use_custom_output": True,
                     "dark_mode": True,
                     "show_batch_preview": True,
+                    "workflow_mode": "advanced",
                     "simplified_main_layout": False,
                     "show_advanced_generation_controls": True,
                     "show_advanced_workflow_outputs": True,
@@ -1787,6 +1789,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(bool(loaded["simplified_main_layout"]))
         self.assertTrue(bool(loaded["show_advanced_generation_controls"]))
         self.assertTrue(bool(loaded["show_advanced_workflow_outputs"]))
+        self.assertEqual(str(loaded["workflow_mode"]), "advanced")
         self.assertEqual(str(loaded["preview_size"]), "XL")
         self.assertEqual(str(loaded["complex_format"]), "cm")
         self.assertEqual(str(loaded["env_mask_mode"]), "complex")
@@ -1913,6 +1916,7 @@ class GenerateTexturesTests(unittest.TestCase):
             saved_state = load_gui_state(state_file)
             saved_state["simplified_main_layout"] = False
             saved_state["show_advanced_workflow_outputs"] = True
+            saved_state["workflow_mode"] = "advanced"
             first_gui = None
             restored_gui = None
             try:
@@ -1920,22 +1924,26 @@ class GenerateTexturesTests(unittest.TestCase):
                     first_gui = TextureGeneratorGUI()
                 first_gui.root.update_idletasks()
                 pbr_section = find_label_frame(first_gui.root, "Community Shaders PBR Workflow")
+                self.assertEqual(first_gui.workflow_mode_var.get(), "Advanced")
                 self.assertTrue(first_gui.show_advanced_workflow_outputs_var.get())
                 self.assertFalse(first_gui.simplified_main_layout_var.get())
                 self.assertTrue(pbr_section.grid_info())
 
                 first_gui.show_advanced_workflow_outputs_var.set(False)
                 first_gui.root.update_idletasks()
+                self.assertEqual(first_gui.workflow_mode_var.get(), "Standard")
                 self.assertFalse(pbr_section.grid_info())
                 first_gui.show_advanced_workflow_outputs_var.set(True)
                 first_gui.root.geometry("1120x820")
                 first_gui.root.update_idletasks()
+                self.assertEqual(first_gui.workflow_mode_var.get(), "Advanced")
                 self.assertTrue(pbr_section.grid_info())
 
                 save_gui_state(first_gui._build_gui_state(), state_file)
                 persisted_state = load_gui_state(state_file)
                 self.assertFalse(bool(persisted_state["simplified_main_layout"]))
                 self.assertTrue(bool(persisted_state["show_advanced_workflow_outputs"]))
+                self.assertEqual(str(persisted_state["workflow_mode"]), "advanced")
             finally:
                 if first_gui is not None:
                     first_gui.root.destroy()
@@ -1945,14 +1953,44 @@ class GenerateTexturesTests(unittest.TestCase):
                     restored_gui = TextureGeneratorGUI()
                 restored_gui.root.update_idletasks()
                 restored_pbr_section = find_label_frame(restored_gui.root, "Community Shaders PBR Workflow")
+                self.assertEqual(restored_gui.workflow_mode_var.get(), "Advanced")
                 self.assertTrue(restored_gui.show_advanced_workflow_outputs_var.get())
                 self.assertTrue(restored_pbr_section.grid_info())
                 restored_gui.simplified_main_layout_var.set(True)
                 restored_gui.root.update_idletasks()
+                self.assertEqual(restored_gui.workflow_mode_var.get(), "Beginner")
                 self.assertFalse(restored_pbr_section.grid_info())
             finally:
                 if restored_gui is not None:
                     restored_gui.root.destroy()
+
+    def test_tk_workflow_mode_selection_updates_layout_toggles(self) -> None:
+        self._skip_unavailable_tk_display()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            gui = None
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state):
+                    gui = TextureGeneratorGUI()
+                gui.root.update_idletasks()
+                self.assertEqual(gui.workflow_mode_var.get(), "Beginner")
+
+                gui._apply_workflow_mode("advanced")
+                gui.root.update_idletasks()
+                self.assertFalse(gui.simplified_main_layout_var.get())
+                self.assertTrue(gui.show_advanced_generation_var.get())
+                self.assertTrue(gui.show_advanced_workflow_outputs_var.get())
+                self.assertEqual(gui.workflow_mode_var.get(), "Advanced")
+
+                gui._apply_workflow_mode("standard")
+                gui.root.update_idletasks()
+                self.assertFalse(gui.simplified_main_layout_var.get())
+                self.assertFalse(gui.show_advanced_generation_var.get())
+                self.assertFalse(gui.show_advanced_workflow_outputs_var.get())
+                self.assertEqual(gui.workflow_mode_var.get(), "Standard")
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
 
     def test_tk_theme_scale_and_window_sizes_remain_usable(self) -> None:
         self._skip_unavailable_tk_display()
@@ -2140,6 +2178,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 "simplified_main_layout": 0,
                 "show_advanced_generation_controls": 1,
                 "show_advanced_workflow_outputs": 1,
+                "workflow_mode": "advanced",
                 "normal_strength": 500,
                 "parallax_strength": -10,
                 "glow_threshold": 999,
@@ -2157,6 +2196,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(bool(normalized["lazy_preview_mode"]))
         self.assertFalse(bool(normalized["staged_preview_mode"]))
         self.assertEqual(str(normalized["batch_resume_mode"]), "start_fresh")
+        self.assertEqual(str(normalized["workflow_mode"]), "advanced")
         self.assertFalse(bool(normalized["simplified_main_layout"]))
         self.assertTrue(bool(normalized["show_advanced_generation_controls"]))
         self.assertTrue(bool(normalized["show_advanced_workflow_outputs"]))
