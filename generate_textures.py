@@ -10324,7 +10324,8 @@ if GUI_AVAILABLE:
             startup_onboarding_frame = ttk.LabelFrame(top_bar, text="Quick start", padding=6)
             startup_onboarding_label = ttk.Label(
                 startup_onboarding_frame,
-                text=_workflow_preset_onboarding_text(),
+                text=_workflow_preset_onboarding_text()
+                + " Use Suggested to let the app pick a safe family from the current file or detected mod-manager context.",
                 style="Muted.TLabel",
                 justify=tk.LEFT,
                 anchor=tk.W,
@@ -10357,6 +10358,9 @@ if GUI_AVAILABLE:
                 self._apply_safe_workflow_preset(profile_key)
                 _dismiss_startup_onboarding()
 
+            def _apply_startup_suggested_preset() -> None:
+                _apply_startup_preset(self._recommended_render_profile_for_preview(self._current_preview_path()))
+
             _bind_tk_quick_start_shortcuts(
                 self.root,
                 apply_preset=_apply_startup_preset,
@@ -10383,6 +10387,16 @@ if GUI_AVAILABLE:
                 text="TruePBR",
                 command=lambda: _apply_startup_preset("truepbr"),
             ).pack(side=tk.LEFT, padx=4)
+            suggested_startup_button = ttk.Button(
+                startup_onboarding_button_row,
+                text="Suggested",
+                command=_apply_startup_suggested_preset,
+            )
+            suggested_startup_button.pack(side=tk.LEFT, padx=4)
+            self._add_tooltip(
+                suggested_startup_button,
+                "Apply the renderer family suggested by the current file or mod-manager context, then hide this card.",
+            )
             ttk.Button(
                 startup_onboarding_button_row,
                 text="Hide",
@@ -18063,7 +18077,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     startup_onboarding_layout.setSpacing(6)
     startup_onboarding_text = QtWidgets.QLabel(
         _workflow_preset_onboarding_text()
-        + "\nUse the buttons below to apply a safe starting point, then refine the profile if needed."
+        + "\nUse Suggested to let the app pick a safe family from the current file or detected mod-manager context."
     )
     startup_onboarding_text.setWordWrap(True)
     startup_onboarding_layout.addWidget(startup_onboarding_text)
@@ -18082,6 +18096,28 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         )
         button.clicked.connect(lambda _checked=False, value=profile_key: _apply_qt_startup_preset(value))
         startup_onboarding_button_row.addWidget(button)
+    startup_onboarding_suggested_button = QtWidgets.QPushButton("Suggested")
+    startup_onboarding_suggested_button.setObjectName("startup_onboarding_suggested")
+    startup_onboarding_suggested_button.setToolTip(
+        "Apply the family suggested by the current file or mod-manager context, then move to the generation tab."
+    )
+
+    def _apply_qt_startup_suggested_preset() -> None:
+        input_text = input_path_edit.text().strip()
+        if input_text:
+            preview_path = Path(input_text).expanduser()
+            if preview_path.is_dir():
+                preview_path = None
+        else:
+            preview_path = None
+        if preview_path is not None:
+            suggested_profile = recommend_render_profile_details(preview_path, manager_context=manager_context).profile
+        else:
+            suggested_profile = recommend_render_profile_details(None, manager_context=manager_context).profile
+        _apply_qt_startup_preset(suggested_profile)
+
+    startup_onboarding_suggested_button.clicked.connect(_apply_qt_startup_suggested_preset)
+    startup_onboarding_button_row.addWidget(startup_onboarding_suggested_button)
     startup_onboarding_hide_button = QtWidgets.QPushButton("Hide")
     startup_onboarding_hide_button.setObjectName("startup_onboarding_hide")
     startup_onboarding_hide_button.setToolTip("Hide this quick start card and remember the dismissal for next launch.")

@@ -2276,6 +2276,51 @@ class GenerateTexturesTests(unittest.TestCase):
                 if gui is not None:
                     gui.root.destroy()
 
+    def test_tk_startup_onboarding_suggested_button_uses_manager_context(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        def find_label_frame(root, title: str):
+            pending = list(root.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TLabelframe" and widget.cget("text") == title:
+                    return widget
+                pending.extend(widget.winfo_children())
+            self.fail(f"Could not find Tk section '{title}'.")
+
+        def find_button(root, title: str):
+            pending = list(root.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TButton" and str(widget.cget("text")) == title:
+                    return widget
+                pending.extend(widget.winfo_children())
+            self.fail(f"Could not find Tk button '{title}'.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            gui = None
+            context = ModManagerContext(manager="Mod Organizer 2", loaded_mods=("ENBSeries",))
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state), \
+                     mock.patch("generate_textures.detect_mod_manager_context", return_value=context), \
+                     mock.patch("generate_textures.save_gui_state") as save_state:
+                    gui = TextureGeneratorGUI()
+                    gui.root.update_idletasks()
+                    banner = find_label_frame(gui.root, "Quick start")
+                    find_button(banner, "Suggested").invoke()
+                    gui.root.update_idletasks()
+                    self.assertEqual(gui.render_profile_var.get(), "enb")
+                    self.assertFalse(gui.show_startup_onboarding_var.get())
+                    self.assertFalse(banner.winfo_ismapped())
+                    save_state.assert_called()
+                    persisted = save_state.call_args.args[0]
+                    self.assertEqual(persisted["render_profile"], "enb")
+                    self.assertFalse(bool(persisted["show_startup_onboarding"]))
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
     def test_tk_theme_scale_and_window_sizes_remain_usable(self) -> None:
         self._skip_unavailable_tk_display()
         state_file = Path(tempfile.mkdtemp()) / "gui-state.json"
@@ -10978,6 +11023,39 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             return False
 
         self.run_window(scenario, save_side_effect=capture_state)
+
+    def test_qt_startup_quick_start_suggested_button_uses_context(self) -> None:
+        saved_states = []
+        state = {"step": 0}
+        context = ModManagerContext(manager="Mod Organizer 2", loaded_mods=("ENBSeries",))
+
+        def capture_state(state_data):
+            saved_states.append(json.loads(json.dumps(state_data)))
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                self.assertTrue(w("startup_onboarding").isVisible())
+                w("startup_onboarding_suggested").click()
+                self.app.processEvents()
+                self.assertEqual(w("render_profile").currentText(), "enb")
+                self.assertFalse(w("startup_onboarding").isVisible())
+                self.assertEqual(w("generation_status").text(), "Quick start applied: ENB.")
+                state["step"] = 1
+                return False
+            if step == 1 and w("generate").isEnabled():
+                self.assertTrue(saved_states)
+                self.assertFalse(saved_states[-1]["show_startup_onboarding"])
+                self.assertEqual(saved_states[-1]["render_profile"], "enb")
+                return True
+            return False
+
+        self.run_window(
+            scenario,
+            save_side_effect=capture_state,
+            extra_patches=(mock.patch("generate_textures.detect_mod_manager_context", return_value=context),),
+        )
 
     def test_actual_fallout_editor_opt_in_and_scale_gate(self) -> None:
         from tests.test_nif_patcher import _build_minimal_nif, _rewrite_user_version
