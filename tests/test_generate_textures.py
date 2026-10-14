@@ -153,6 +153,8 @@ from generate_textures import (
     resolve_env_mask_complex_workflow,
     resolve_nif_editor_patch_options_for_target,
     load_gui_state,
+    export_project_settings,
+    import_project_settings,
     main,
     parse_args,
     run_batch_with_options,
@@ -1813,6 +1815,47 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertAlmostEqual(float(loaded["environment_mask_strength"]), 2.4)
         self.assertAlmostEqual(float(loaded["complex_strength"]), 2.2)
         self.assertAlmostEqual(float(loaded["specular_strength"]), 2.3)
+
+    def test_project_settings_import_and_export_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_input = temp_path / "source.dds"
+            source_input.write_bytes(b"fake")
+            source_state = temp_path / "source-state.json"
+            imported_state = temp_path / "imported-state.json"
+            exported_state = temp_path / "exported-state.json"
+            save_gui_state(
+                {
+                    "input_path": str(source_input),
+                    "output_path": "/tmp/out",
+                    "use_custom_output": True,
+                    "dark_mode": True,
+                    "last_mod_manager": "Mod Organizer 2",
+                    "last_mod_profile": "Main",
+                    "last_renderer": "community_shaders",
+                    "last_output_target": "/tmp/out",
+                    "render_profile": "truepbr",
+                    "show_advanced_workflow_outputs": True,
+                },
+                source_state,
+            )
+
+            import_project_settings(source_state, destination_state_file=imported_state)
+            imported = load_gui_state(imported_state)
+            self.assertEqual(imported["input_path"], str(source_input))
+            self.assertEqual(imported["output_path"], "/tmp/out")
+            self.assertTrue(bool(imported["use_custom_output"]))
+            self.assertTrue(bool(imported["dark_mode"]))
+            self.assertEqual(imported["last_mod_manager"], "Mod Organizer 2")
+            self.assertEqual(imported["last_mod_profile"], "Main")
+            self.assertEqual(imported["last_renderer"], "community_shaders")
+            self.assertEqual(imported["last_output_target"], "/tmp/out")
+
+            export_project_settings(exported_state, source_state_file=imported_state)
+            exported = load_gui_state(exported_state)
+            self.assertEqual(exported["input_path"], str(source_input))
+            self.assertEqual(exported["output_path"], "/tmp/out")
+            self.assertTrue(bool(exported["show_advanced_workflow_outputs"]))
 
     def test_tk_advanced_workflow_visibility_round_trips_saved_settings(self) -> None:
         self._skip_unavailable_tk_display()
@@ -6750,6 +6793,27 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(args.checkpoint_file, checkpoint)
         self.assertTrue(args.resume_checkpoint)
 
+    def test_parse_args_accepts_project_settings_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_file = Path(temp_dir) / "brick.dds"
+            input_file.write_bytes(b"dds")
+            import_path = Path(temp_dir) / "import.json"
+            export_path = Path(temp_dir) / "export.json"
+            with mock.patch(
+                "sys.argv",
+                [
+                    "generate_textures.py",
+                    str(input_file),
+                    "--import-project-settings",
+                    str(import_path),
+                    "--export-project-settings",
+                    str(export_path),
+                ],
+            ):
+                args = parse_args()
+        self.assertEqual(args.import_project_settings, import_path)
+        self.assertEqual(args.export_project_settings, export_path)
+
     def test_parse_args_accepts_gui_backend_qt(self) -> None:
         with mock.patch("sys.argv", ["generate_textures.py", "--gui", "--gui-backend", "qt"]):
             args = parse_args()
@@ -6764,6 +6828,42 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         qt_launch.assert_called_once()
         tk_launch.assert_not_called()
+
+    def test_main_exports_project_settings_without_launching_gui(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_input = temp_path / "source.dds"
+            source_input.write_bytes(b"fake")
+            source_state = temp_path / "gui-state.json"
+            export_state = temp_path / "exported-settings.json"
+            save_gui_state(
+                {
+                    "input_path": str(source_input),
+                    "dark_mode": True,
+                    "show_advanced_workflow_outputs": True,
+                    "render_profile": "community_shaders",
+                },
+                source_state,
+            )
+            args = SimpleNamespace(
+                gui=False,
+                input_file=None,
+                gui_backend="auto",
+                pbr_material=False,
+                import_project_settings=None,
+                export_project_settings=export_state,
+            )
+            with mock.patch("generate_textures.parse_args", return_value=args), \
+                 mock.patch("generate_textures.GUI_STATE_FILE", source_state), \
+                 mock.patch("generate_textures._launch_qt_migration_gui") as qt_launch, \
+                 mock.patch("generate_textures._launch_tk_gui") as tk_launch:
+                self.assertEqual(main(), 0)
+            exported = load_gui_state(export_state)
+            self.assertEqual(exported["input_path"], str(source_input))
+            self.assertTrue(bool(exported["dark_mode"]))
+            self.assertTrue(bool(exported["show_advanced_workflow_outputs"]))
+            qt_launch.assert_not_called()
+            tk_launch.assert_not_called()
 
     def test_main_auto_prefers_qt_when_tk_unavailable(self) -> None:
         args = mock.Mock(gui=True, input_file=None, gui_backend="auto")

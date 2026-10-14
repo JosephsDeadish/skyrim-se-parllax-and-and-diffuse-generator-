@@ -950,21 +950,45 @@ def load_gui_state(state_file: Path = GUI_STATE_FILE) -> dict[str, object]:
     try:
         if not state_file.exists():
             return dict(_GUI_STATE_DEFAULTS)
-        raw = json.loads(state_file.read_text(encoding="utf-8"))
-        if not isinstance(raw, Mapping):
-            return dict(_GUI_STATE_DEFAULTS)
-        return _normalize_gui_state(raw)
+        return _read_gui_state_file(state_file)
     except Exception:
         return dict(_GUI_STATE_DEFAULTS)
 
 
 def save_gui_state(state: Mapping[str, object], state_file: Path = GUI_STATE_FILE) -> None:
-    normalized = _normalize_gui_state(state)
     try:
-        state_file.parent.mkdir(parents=True, exist_ok=True)
-        state_file.write_text(json.dumps(normalized, indent=2, sort_keys=True), encoding="utf-8")
+        _write_gui_state_file(state, state_file)
     except Exception:
         pass
+
+
+def _read_gui_state_file(state_file: Path) -> dict[str, object]:
+    raw = json.loads(state_file.read_text(encoding="utf-8"))
+    if not isinstance(raw, Mapping):
+        raise ValueError(f"Invalid GUI state file format: {state_file}")
+    return _normalize_gui_state(raw)
+
+
+def _write_gui_state_file(state: Mapping[str, object], state_file: Path) -> None:
+    normalized = _normalize_gui_state(state)
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    state_file.write_text(json.dumps(normalized, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def export_project_settings(export_path: Path, *, source_state_file: Path | None = None) -> None:
+    """Export the persisted GUI state to a portable project-settings JSON file."""
+    source_state_file = GUI_STATE_FILE if source_state_file is None else source_state_file
+    _write_gui_state_file(load_gui_state(source_state_file), export_path)
+
+
+def import_project_settings(import_path: Path, *, destination_state_file: Path | None = None) -> None:
+    """Import a project-settings JSON file into the persisted GUI state store."""
+    destination_state_file = GUI_STATE_FILE if destination_state_file is None else destination_state_file
+    if not import_path.exists():
+        raise FileNotFoundError(f"Project settings file does not exist: {import_path}")
+    if not import_path.is_file():
+        raise ValueError(f"Project settings path must be a file: {import_path}")
+    _write_gui_state_file(_read_gui_state_file(import_path), destination_state_file)
 
 
 def _merge_qt_generation_gui_state(
@@ -9241,6 +9265,24 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=None,
         help="Write batch performance telemetry JSON to this path for folder runs.",
+    )
+    parser.add_argument(
+        "--import-project-settings",
+        type=Path,
+        default=None,
+        help=(
+            "Import persisted GUI/project settings from this JSON file into the default state store "
+            "before launching the GUI."
+        ),
+    )
+    parser.add_argument(
+        "--export-project-settings",
+        type=Path,
+        default=None,
+        help=(
+            "Export the current persisted GUI/project settings JSON to this file. "
+            "When used without an input file, this acts as a settings-only utility."
+        ),
     )
     parser.add_argument("--gui", action="store_true", help="Launch graphical interface.")
     parser.add_argument(
@@ -18703,6 +18745,16 @@ def main() -> int:
         report = run_acceptance(sys.modules[__name__], acceptance_report_path)
         return 0 if report["passed"] else 1
     args = _apply_cli_pbr_overrides(args)
+    import_settings_path = getattr(args, "import_project_settings", None)
+    if isinstance(import_settings_path, (str, os.PathLike)):
+        import_project_settings(Path(import_settings_path))
+        print(f"Imported project settings from {Path(import_settings_path)}")
+    export_settings_path = getattr(args, "export_project_settings", None)
+    if isinstance(export_settings_path, (str, os.PathLike)):
+        export_project_settings(Path(export_settings_path))
+        print(f"Exported project settings to {Path(export_settings_path)}")
+        if args.input_file is None and not args.gui:
+            return 0
     if args.gui or args.input_file is None:
         backend = str(getattr(args, "gui_backend", "auto") or "auto").strip().lower()
         if backend not in {"auto", "tk", "qt"}:
