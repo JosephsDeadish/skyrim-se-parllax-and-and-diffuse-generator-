@@ -6783,6 +6783,198 @@ def batch_patch_nif(
     return [patch_nif(p, opts) for p in nif_paths]
 
 
+def _collect_cli_nif_detail_texts(values: object) -> list[str]:
+    if values is None:
+        return []
+    if isinstance(values, str):
+        text = values.strip()
+        return [text] if text else []
+    try:
+        iterator = iter(values)
+    except TypeError:
+        text = str(values).strip()
+        return [text] if text else []
+    texts: list[str] = []
+    for value in iterator:
+        text = str(value).strip()
+        if text and text not in texts:
+            texts.append(text)
+    return texts
+
+
+def _summarize_cli_nif_slot_state(validation: object) -> str | None:
+    messages: list[str] = []
+    messages.extend(_collect_cli_nif_detail_texts(getattr(validation, "skip_reasons", ())))
+    messages.extend(_collect_cli_nif_detail_texts(getattr(validation, "issues", ())))
+    messages.extend(_collect_cli_nif_detail_texts(getattr(validation, "suggestions", ())))
+
+    slot_notes: list[str] = []
+
+    def _append(note: str) -> None:
+        if note and note not in slot_notes:
+            slot_notes.append(note)
+
+    for message in messages:
+        lower = message.lower()
+        if "slot 3" in lower or "parallax" in lower:
+            if "missing on disk" in lower or "unresolved" in lower:
+                _append("slot 3 parallax is unresolved")
+            elif "empty" in lower:
+                _append("slot 3 parallax is empty")
+            elif "points at the diffuse" in lower:
+                _append("slot 3 points at the diffuse texture")
+            elif "points at the normal" in lower:
+                _append("slot 3 points at the normal texture")
+            elif "height map" in lower or "expected _p.dds" in lower:
+                _append("slot 3 needs a dedicated _p.dds height map")
+            elif "parallax-focused" in lower:
+                _append("slot 3 needs a supported parallax shader layout")
+        if "slot 5" in lower or "environment mask" in lower or "environment mapping" in lower:
+            if "missing on disk" in lower or "unresolved" in lower:
+                _append("slot 5 environment mask is unresolved")
+            elif "empty" in lower:
+                _append("slot 5 environment mask is empty")
+            elif "not enabled" in lower:
+                _append("slot 5 is populated but environment mapping is off")
+            elif "does not look like an environment mask" in lower or "suffix" in lower:
+                _append("slot 5 suffix does not match the active renderer family")
+            elif "truepbr" in lower:
+                _append("slot 5 looks like a TruePBR packed map")
+        if "slot 4" in lower or "cubemap" in lower:
+            if "missing on disk" in lower or "unresolved" in lower:
+                _append("slot 4 cubemap is unresolved")
+            elif "empty" in lower:
+                _append("slot 4 cubemap is empty")
+            elif "not enabled" in lower:
+                _append("slot 4 is populated but environment mapping is off")
+            elif "looks like a cubemap" in lower:
+                _append("slot 4 is using a cubemap path")
+        if "slot 1" in lower or "normal" in lower:
+            if "not a .dds" in lower or "source/authoring texture extension" in lower:
+                _append("slot 1 normal map is not a runtime .dds texture")
+            elif "does not look like a normal map" in lower:
+                _append("slot 1 path does not look like a normal map")
+            elif "missing" in lower and "normal" in lower:
+                _append("slot 1 normal map is unresolved")
+        if len(slot_notes) >= 4:
+            break
+
+    if getattr(validation, "has_havok", False):
+        _append("Havok animation graph is present")
+
+    if not slot_notes:
+        return "no obvious slot mismatches detected"
+    return "; ".join(slot_notes[:4])
+
+
+def _collect_cli_nif_probably_incompatible_renderer_lines(validation: object) -> list[str]:
+    renderer_verdicts = getattr(validation, "renderer_verdicts", None) or {}
+    if not renderer_verdicts:
+        return []
+    renderer_labels = {
+        "vanilla": "Vanilla parallax",
+        "enb": "ENB complex material/POM",
+        "community_shaders": "Community Shaders parallax",
+        "truepbr": "TruePBR",
+    }
+    uncertain_markers = (
+        "won't work yet",
+        "cannot verify",
+        "can't verify",
+        "matching json entry",
+    )
+    warnings: list[str] = []
+    for renderer_key in ("vanilla", "enb", "community_shaders", "truepbr"):
+        verdict = str(renderer_verdicts.get(renderer_key, "") or "").strip()
+        if not verdict:
+            continue
+        verdict_lower = verdict.lower()
+        if any(marker in verdict_lower for marker in uncertain_markers):
+            warnings.append(f"{renderer_labels.get(renderer_key, renderer_key)}: {verdict}")
+    return warnings
+
+
+def _build_cli_nif_validation_detail_lines(validation: object) -> list[str]:
+    shader_count = max(0, int(getattr(validation, "shader_count", 0) or 0))
+    ready_count = max(0, int(getattr(validation, "ready_count", 0) or 0))
+    needs_patch_count = max(0, int(getattr(validation, "needs_patch_count", 0) or 0))
+    skip_count = max(0, int(getattr(validation, "skip_count", 0) or 0))
+    lines: list[str] = []
+
+    if shader_count <= 0:
+        lines.append("What this file needs: no supported BSLightingShaderProperty blocks were found.")
+    else:
+        status_bits: list[str] = [f"{ready_count}/{shader_count} ready"]
+        if needs_patch_count:
+            status_bits.append(f"{needs_patch_count} need patching")
+        if skip_count:
+            status_bits.append(f"{skip_count} blocked")
+        lines.append("What this file needs: " + "; ".join(status_bits) + ".")
+
+    detected_profile = str(getattr(validation, "detected_game_profile", "") or "").strip()
+    if detected_profile:
+        lines.append(f"Detected profile: {detected_profile}")
+
+    slot_summary = _summarize_cli_nif_slot_state(validation)
+    if slot_summary:
+        lines.append(f"Slot / workflow state: {slot_summary}.")
+
+    renderer_verdicts = getattr(validation, "renderer_verdicts", None) or {}
+    if renderer_verdicts:
+        lines.append("Shader-family fit:")
+        for renderer_key in ("vanilla", "enb", "community_shaders", "truepbr"):
+            verdict = str(renderer_verdicts.get(renderer_key, "") or "").strip()
+            if verdict:
+                lines.append(f"- {verdict}")
+        probably_incompatible = _collect_cli_nif_probably_incompatible_renderer_lines(validation)
+        if probably_incompatible:
+            lines.append("Probably incompatible:")
+            lines.extend(f"- {warning}" for warning in probably_incompatible)
+
+    skip_reasons = _collect_cli_nif_detail_texts(getattr(validation, "skip_reasons", ()))
+    issues = _collect_cli_nif_detail_texts(getattr(validation, "issues", ()))
+    suggestions = _collect_cli_nif_detail_texts(getattr(validation, "suggestions", ()))
+
+    if skip_reasons:
+        lines.append("Skip reasons:")
+        lines.extend(f"- {text}" for text in skip_reasons[:5])
+    if issues:
+        lines.append("Issues:")
+        lines.extend(f"- {text}" for text in issues[:5])
+    if suggestions:
+        lines.append("Suggestions:")
+        lines.extend(f"- {text}" for text in suggestions[:5])
+
+    mismatch_source = next(
+        (text for text in [*skip_reasons, *issues] if text),
+        "",
+    )
+    if mismatch_source:
+        lines.append(f"Likely mismatch: {mismatch_source}")
+
+    conflict_report = tuple(getattr(validation, "conflict_report", ()) or ())
+    if conflict_report:
+        safe_actions: list[str] = []
+        for group in conflict_report:
+            for action in _collect_cli_nif_detail_texts(getattr(group, "suggested_actions", ())):
+                if action not in safe_actions:
+                    safe_actions.append(action)
+            if len(safe_actions) >= 3:
+                break
+        lines.append("Safe fix path: compare against the sibling .nif.bak backup first, then apply only supported fixes.")
+        if safe_actions:
+            lines.extend(f"  - {action}" for action in safe_actions[:3])
+    else:
+        lines.append("Safe fix path: compare against the sibling .nif.bak backup first and restore from it if the preview looks better.")
+
+    if detected_profile.lower() == "fallout" or any("fallout" in text.lower() for text in suggestions):
+        lines.append("Experimental fix path: Fallout writes stay opt-in; test one mesh first and leave dry-run enabled until the preview matches.")
+    else:
+        lines.append("Experimental fix path: only switch renderer families on purpose; do not mix ENB, Community Shaders, and TruePBR outputs on the same mesh.")
+
+    return lines
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -7138,10 +7330,8 @@ def _main() -> None:  # pragma: no cover
             print(f"[{status}] {nif.name}: "
                   f"{v.ready_count}/{v.shader_count} shaders ready for parallax "
                   f"(profile={v.detected_game_profile})")
-            for issue in v.issues:
-                print(f"  ⚠ {issue}")
-            for sug in v.suggestions:
-                print(f"  → {sug}")
+            for line in _build_cli_nif_validation_detail_lines(v):
+                print(f"  {line}")
             if args.conflict_report and v.conflict_report:
                 print("  Conflict report:")
                 for group in v.conflict_report:

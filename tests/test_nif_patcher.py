@@ -7133,6 +7133,23 @@ class TestCliArgumentValidation(unittest.TestCase):
                 nif_patcher_main()
         self.assertIn("NIF patch compatibility report", out.getvalue())
 
+    def test_validate_cli_prints_explainability_summary_before_conflict_report(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            nif_path = _write_nif(Path(td), texture_paths=["textures\\arch\\stone_n.dds"] + [""] * 8)
+            out = io.StringIO()
+            with mock.patch(
+                "sys.argv",
+                ["nif_patcher.py", str(nif_path), "--validate", "--conflict-report"],
+            ):
+                with redirect_stdout(out):
+                    nif_patcher_main()
+        text = out.getvalue()
+        self.assertIn("What this file needs:", text)
+        self.assertIn("Safe fix path:", text)
+        self.assertIn("Experimental fix path:", text)
+        self.assertIn("Conflict report:", text)
+        self.assertLess(text.index("What this file needs:"), text.index("Conflict report:"))
+
 
 if __name__ == "__main__":
     unittest.main()
