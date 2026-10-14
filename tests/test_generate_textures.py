@@ -3925,6 +3925,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("probably incompatible", message.lower())
         self.assertIn("ENB", message)
         self.assertIn("TruePBR", message)
+        self.assertIn("Quick check:", message)
 
     def test_describe_render_profile_default_outputs_mentions_auto_checked_outputs(self) -> None:
         summary = describe_render_profile_default_outputs("enb")

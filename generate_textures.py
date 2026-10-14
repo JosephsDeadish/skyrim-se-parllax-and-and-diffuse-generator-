@@ -4068,6 +4068,13 @@ def _format_short_guidance_tooltip(what_it_does: str, when_to_use_it: str, when_
     )
 
 
+def _workflow_family_quick_check() -> str:
+    return (
+        "Quick check: Vanilla = Skyrim-safe parallax, ENB = ENB/POM, Community Shaders = _cm/_c, "
+        "TruePBR = _rmaos/_ramos + JSON."
+    )
+
+
 def _nif_editor_safety_banner_text() -> str:
     return (
         "Safe default: keep Dry-run and Backup originals enabled. "
@@ -4375,6 +4382,7 @@ def build_render_profile_family_mismatch_warning(
         [
             "This is probably incompatible: ENB, Community Shaders, and TruePBR are separate families and should not be mixed on the same mesh.",
             "Use the suggested family or switch the mesh on purpose before export.",
+            _workflow_family_quick_check(),
         ]
     )
     return "\n\n".join(lines)
