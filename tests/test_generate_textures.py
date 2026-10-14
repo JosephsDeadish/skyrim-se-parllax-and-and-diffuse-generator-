@@ -1812,23 +1812,47 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("experimental best-effort", banner)
 
     def test_nif_editor_confirmation_text_emphasizes_safe_defaults(self) -> None:
-        patch_message = _nif_editor_confirmation_text("patch", 2, experimental_fallout_write=True).lower()
-        self.assertIn("apply patch edits to 2 nif files", patch_message)
-        self.assertIn("dry-run first", patch_message)
-        self.assertIn("best-effort", patch_message)
-        self.assertIn("⚠ write mode", patch_message)
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            backed_up = root / "with_backup.nif"
+            backed_up.write_bytes(b"nif")
+            backed_up.with_suffix(".nif.bak").write_bytes(b"backup")
+            missing_backup = root / "missing_backup.nif"
+            missing_backup.write_bytes(b"nif")
 
-        restore_message = _nif_editor_confirmation_text("restore", 1).lower()
-        self.assertIn("restore 1 nif file", restore_message)
-        self.assertIn("rollback path", restore_message)
-        self.assertIn("overwrite the current .nif files", restore_message)
-        self.assertIn("⚠ restore / rollback", restore_message)
+            patch_message = _nif_editor_confirmation_text(
+                "patch",
+                2,
+                nif_paths=[backed_up, missing_backup],
+                experimental_fallout_write=True,
+            ).lower()
+            self.assertIn("apply patch edits to 2 nif files", patch_message)
+            self.assertIn("rollback path: 1/2 selected nifs have sibling .nif.bak backups", patch_message)
+            self.assertIn("dry-run first", patch_message)
+            self.assertIn("best-effort", patch_message)
+            self.assertIn("⚠ write mode", patch_message)
 
-        unpatch_message = _nif_editor_confirmation_text("unpatch", 3, experimental_fallout_write=True).lower()
-        self.assertIn("remove the selected features from 3 nif files", unpatch_message)
-        self.assertIn("destructive write", unpatch_message)
-        self.assertIn("⚠ fallout writes are experimental best-effort only.", unpatch_message)
-        self.assertIn("continue with destructive write mode?", unpatch_message)
+            restore_message = _nif_editor_confirmation_text(
+                "restore",
+                1,
+                nif_paths=[backed_up],
+            ).lower()
+            self.assertIn("restore 1 nif file", restore_message)
+            self.assertIn("rollback path: all selected nifs have sibling .nif.bak backups", restore_message)
+            self.assertIn("overwrite the current .nif files", restore_message)
+            self.assertIn("⚠ restore / rollback", restore_message)
+
+            unpatch_message = _nif_editor_confirmation_text(
+                "unpatch",
+                3,
+                nif_paths=[backed_up, missing_backup],
+                experimental_fallout_write=True,
+            ).lower()
+            self.assertIn("remove the selected features from 3 nif files", unpatch_message)
+            self.assertIn("rollback path: 1/2 selected nifs have sibling .nif.bak backups", unpatch_message)
+            self.assertIn("destructive write", unpatch_message)
+            self.assertIn("⚠ fallout writes are experimental best-effort only.", unpatch_message)
+            self.assertIn("continue with destructive write mode?", unpatch_message)
 
     def test_nif_editor_confirmation_title_matches_action(self) -> None:
         self.assertEqual(_nif_editor_confirmation_title("patch"), "Confirm NIF write mode")

@@ -4021,6 +4021,25 @@ def _describe_nif_backup_state(nif_path: Path) -> str:
     return "Rollback path: no sibling .nif.bak backup found; keep dry-run on until one is created."
 
 
+def _describe_nif_backup_selection_state(nif_paths: Sequence[Path]) -> str:
+    resolved_paths = [Path(path) for path in nif_paths if str(path).strip()]
+    total = len(resolved_paths)
+    if total <= 0:
+        return "Rollback path: no NIFs selected yet."
+    backed_up = sum(path.with_suffix(".nif.bak").is_file() for path in resolved_paths)
+    if backed_up == 0:
+        return (
+            "Rollback path: none of the selected NIFs has a sibling .nif.bak backup; "
+            "keep dry-run on until backups exist."
+        )
+    if backed_up == total:
+        return "Rollback path: all selected NIFs have sibling .nif.bak backups."
+    return (
+        f"Rollback path: {backed_up}/{total} selected NIFs have sibling .nif.bak backups; "
+        "compare the backed-up files first and keep dry-run on for the missing ones."
+    )
+
+
 def _nif_editor_confirmation_title(action: str) -> str:
     normalized_action = str(action or "").strip().lower()
     if normalized_action == "restore":
@@ -4034,27 +4053,37 @@ def _nif_editor_confirmation_text(
     action: str,
     file_count: int,
     *,
+    nif_paths: Sequence[Path] | None = None,
     experimental_fallout_write: bool = False,
 ) -> str:
     noun = "NIF file" if int(file_count) == 1 else "NIF files"
     normalized_action = str(action or "").strip().lower()
+    backup_state = _describe_nif_backup_selection_state(nif_paths) if nif_paths is not None else None
     lines: list[str]
     if normalized_action == "restore":
         lines = [
             "⚠ RESTORE / ROLLBACK",
             f"Restore {int(file_count)} {noun} from sibling .nif.bak backups?",
             "",
-            "This is the rollback path after a write preview and will overwrite the current .nif files.",
-            "Dry-run first and backups enabled are the safe default.",
-            "Continue with restore mode?",
         ]
+        if backup_state is not None:
+            lines.extend((backup_state, ""))
+        lines.extend(
+            [
+                "This is the rollback path after a write preview and will overwrite the current .nif files.",
+                "Dry-run first and backups enabled are the safe default.",
+                "Continue with restore mode?",
+            ]
+        )
     elif normalized_action == "unpatch":
         lines = [
             "⚠ DESTRUCTIVE WRITE",
             f"Remove the selected features from {int(file_count)} {noun}?",
             "",
-            "This is a destructive write operation. Dry-run first and backups enabled are the safe default.",
         ]
+        if backup_state is not None:
+            lines.extend((backup_state, ""))
+        lines.append("This is a destructive write operation. Dry-run first and backups enabled are the safe default.")
         if experimental_fallout_write:
             lines.append("⚠ Fallout writes are experimental best-effort only.")
         lines.append("Continue with destructive write mode?")
@@ -4063,9 +4092,13 @@ def _nif_editor_confirmation_text(
             "⚠ WRITE MODE",
             f"Apply patch edits to {int(file_count)} {noun}?",
             "",
-            "Dry-run first and backups enabled are the safe default. "
-            "Write mode modifies the meshes on disk and relies on .nif.bak backups for rollback.",
         ]
+        if backup_state is not None:
+            lines.extend((backup_state, ""))
+        lines.append(
+            "Dry-run first and backups enabled are the safe default. "
+            "Write mode modifies the meshes on disk and relies on .nif.bak backups for rollback."
+        )
         if experimental_fallout_write:
             lines.append("⚠ Fallout writes are experimental best-effort only.")
         lines.append("Continue with write mode?")
@@ -16335,6 +16368,7 @@ if GUI_AVAILABLE:
                             _nif_editor_confirmation_text(
                                 "patch",
                                 len(nifs),
+                                nif_paths=nifs,
                                 experimental_fallout_write=experimental_fallout_write_var.get(),
                             ),
                             parent=win,
@@ -16544,6 +16578,7 @@ if GUI_AVAILABLE:
                             _nif_editor_confirmation_text(
                                 "patch",
                                 len(nifs),
+                                nif_paths=nifs,
                                 experimental_fallout_write=experimental_fallout_write_var.get(),
                             ),
                             parent=win,
@@ -16692,6 +16727,7 @@ if GUI_AVAILABLE:
                             _nif_editor_confirmation_text(
                                 "unpatch",
                                 len(nifs),
+                                nif_paths=nifs,
                                 experimental_fallout_write=experimental_fallout_write_var.get(),
                             ),
                             parent=win,
@@ -16784,7 +16820,7 @@ if GUI_AVAILABLE:
                         return
                     proceed = messagebox.askyesno(
                         "Restore from backups",
-                        _nif_editor_confirmation_text("restore", len(nifs)),
+                        _nif_editor_confirmation_text("restore", len(nifs), nif_paths=nifs),
                         parent=win,
                     )
                     if not proceed:
@@ -18704,11 +18740,12 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         options = build_nif_patch_options_for_nif_editor(**values)
         if not options.dry_run:
             if operation == "restore":
-                prompt = _nif_editor_confirmation_text("restore", len(paths))
+                prompt = _nif_editor_confirmation_text("restore", len(paths), nif_paths=paths)
             else:
                 prompt = _nif_editor_confirmation_text(
                     operation,
                     len(paths),
+                    nif_paths=paths,
                     experimental_fallout_write=nif_editor_experimental.isChecked(),
                 )
             title = _nif_editor_confirmation_title(operation)
