@@ -1857,6 +1857,16 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(exported["output_path"], "/tmp/out")
             self.assertTrue(bool(exported["show_advanced_workflow_outputs"]))
 
+    def test_export_project_settings_raises_on_invalid_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_state = temp_path / "broken-state.json"
+            source_state.write_text("not json", encoding="utf-8")
+            export_state = temp_path / "exported-settings.json"
+            with self.assertRaises(json.JSONDecodeError):
+                export_project_settings(export_state, source_state_file=source_state)
+            self.assertFalse(export_state.exists())
+
     def test_tk_advanced_workflow_visibility_round_trips_saved_settings(self) -> None:
         self._skip_unavailable_tk_display()
 

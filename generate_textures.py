@@ -978,7 +978,13 @@ def _write_gui_state_file(state: Mapping[str, object], state_file: Path) -> None
 def export_project_settings(export_path: Path, *, source_state_file: Path | None = None) -> None:
     """Export the persisted GUI state to a portable project-settings JSON file."""
     source_state_file = GUI_STATE_FILE if source_state_file is None else source_state_file
-    _write_gui_state_file(load_gui_state(source_state_file), export_path)
+    if source_state_file.exists():
+        if not source_state_file.is_file():
+            raise ValueError(f"Project settings source path must be a file: {source_state_file}")
+        state = _read_gui_state_file(source_state_file)
+    else:
+        state = dict(_GUI_STATE_DEFAULTS)
+    _write_gui_state_file(state, export_path)
 
 
 def import_project_settings(import_path: Path, *, destination_state_file: Path | None = None) -> None:
