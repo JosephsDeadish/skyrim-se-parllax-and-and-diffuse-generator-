@@ -48,6 +48,7 @@ from generate_textures import (
     _should_refresh_qt_nif_scan_page,
     _format_qt_nif_scan_page_summary,
     _qt_nif_scan_status_color,
+    _nif_editor_confirmation_title,
     _preview_qt_nif_auto_remediation,
     discover_plugin_conflict_context_from_manager,
     discover_ui_languages,
@@ -1803,11 +1804,24 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("apply patch edits to 2 nif files", patch_message)
         self.assertIn("dry-run first", patch_message)
         self.assertIn("best-effort", patch_message)
+        self.assertIn("⚠ write mode", patch_message)
 
         restore_message = _nif_editor_confirmation_text("restore", 1).lower()
         self.assertIn("restore 1 nif file", restore_message)
         self.assertIn("rollback path", restore_message)
         self.assertIn("overwrite the current .nif files", restore_message)
+        self.assertIn("⚠ restore / rollback", restore_message)
+
+        unpatch_message = _nif_editor_confirmation_text("unpatch", 3, experimental_fallout_write=True).lower()
+        self.assertIn("remove the selected features from 3 nif files", unpatch_message)
+        self.assertIn("destructive write", unpatch_message)
+        self.assertIn("⚠ fallout writes are experimental best-effort only.", unpatch_message)
+        self.assertIn("continue with destructive write mode?", unpatch_message)
+
+    def test_nif_editor_confirmation_title_matches_action(self) -> None:
+        self.assertEqual(_nif_editor_confirmation_title("patch"), "Confirm NIF write mode")
+        self.assertEqual(_nif_editor_confirmation_title("unpatch"), "Confirm destructive unpatch")
+        self.assertEqual(_nif_editor_confirmation_title("restore"), "Confirm NIF restore")
 
     def test_qt_preview_loader_decodes_and_bounds_image_dimensions(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

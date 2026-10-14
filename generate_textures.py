@@ -4012,6 +4012,15 @@ def _nif_editor_safety_banner_text() -> str:
     )
 
 
+def _nif_editor_confirmation_title(action: str) -> str:
+    normalized_action = str(action or "").strip().lower()
+    if normalized_action == "restore":
+        return "Confirm NIF restore"
+    if normalized_action == "unpatch":
+        return "Confirm destructive unpatch"
+    return "Confirm NIF write mode"
+
+
 def _nif_editor_confirmation_text(
     action: str,
     file_count: int,
@@ -4023,6 +4032,7 @@ def _nif_editor_confirmation_text(
     lines: list[str]
     if normalized_action == "restore":
         lines = [
+            "⚠ RESTORE / ROLLBACK",
             f"Restore {int(file_count)} {noun} from sibling .nif.bak backups?",
             "",
             "This is the rollback path after a write preview and will overwrite the current .nif files.",
@@ -4031,22 +4041,24 @@ def _nif_editor_confirmation_text(
         ]
     elif normalized_action == "unpatch":
         lines = [
+            "⚠ DESTRUCTIVE WRITE",
             f"Remove the selected features from {int(file_count)} {noun}?",
             "",
             "This is a destructive write operation. Dry-run first and backups enabled are the safe default.",
         ]
         if experimental_fallout_write:
-            lines.append("Fallout writes are experimental best-effort only.")
-        lines.append("Continue with write mode?")
+            lines.append("⚠ Fallout writes are experimental best-effort only.")
+        lines.append("Continue with destructive write mode?")
     else:
         lines = [
+            "⚠ WRITE MODE",
             f"Apply patch edits to {int(file_count)} {noun}?",
             "",
             "Dry-run first and backups enabled are the safe default. "
             "Write mode modifies the meshes on disk and relies on .nif.bak backups for rollback.",
         ]
         if experimental_fallout_write:
-            lines.append("Fallout writes are experimental best-effort only.")
+            lines.append("⚠ Fallout writes are experimental best-effort only.")
         lines.append("Continue with write mode?")
     return "\n".join(lines)
 
@@ -18686,8 +18698,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                     len(paths),
                     experimental_fallout_write=nif_editor_experimental.isChecked(),
                 )
+            title = _nif_editor_confirmation_title(operation)
             answer = QtWidgets.QMessageBox.question(
-                window, "Confirm NIF writes",
+                window, title,
                 prompt,
                 QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
                 QtWidgets.QMessageBox.StandardButton.No,
