@@ -730,6 +730,7 @@ class TestQtNifValidationScan(unittest.TestCase):
         self.assertIn("What this file needs:", preview)
         self.assertIn("Safe fix path:", preview)
         self.assertIn("Rollback path:", preview)
+        self.assertIn("Rollback path: no sibling .nif.bak backup found", preview)
         self.assertIn("Would disable environment mapping.", preview)
         self.assertIn("Dry run complete.", preview)
         remediate.assert_called_once_with(
@@ -756,6 +757,7 @@ class TestQtNifValidationScan(unittest.TestCase):
         self.assertIn("No conflict-code remediation is available", preview)
         self.assertIn("What this file needs:", preview)
         self.assertIn("Rollback path:", preview)
+        self.assertIn("Rollback path: no sibling .nif.bak backup found", preview)
         remediate.assert_not_called()
 
     def test_remediation_preview_reports_when_no_safe_steps_are_proposed(self) -> None:
@@ -779,6 +781,7 @@ class TestQtNifValidationScan(unittest.TestCase):
         self.assertIn("No non-destructive automatic remediation is available.", preview)
         self.assertIn("Safe fix path:", preview)
         self.assertIn("Rollback path:", preview)
+        self.assertIn("Rollback path: no sibling .nif.bak backup found", preview)
 
     def test_remediation_preview_requires_nif_patcher(self) -> None:
         with mock.patch("generate_textures.NIF_PATCHER_AVAILABLE", False):
@@ -827,8 +830,12 @@ class TestQtNifValidationScan(unittest.TestCase):
             ],
         )
 
-        with mock.patch("generate_textures.validate_nif_for_parallax", return_value=validation):
-            rows, cancelled = _scan_nif_validation_rows([Path("mesh.nif")])
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"fixture")
+            nif_path.with_suffix(".nif.bak").write_bytes(b"backup")
+            with mock.patch("generate_textures.validate_nif_for_parallax", return_value=validation):
+                rows, cancelled = _scan_nif_validation_rows([nif_path])
 
         self.assertFalse(cancelled)
         self.assertEqual(len(rows), 1)
@@ -843,6 +850,7 @@ class TestQtNifValidationScan(unittest.TestCase):
         self.assertIn("Grouped conflict codes:", details)
         self.assertIn("examples:", details)
         self.assertIn("fix actions:", details)
+        self.assertIn("Rollback path: sibling backup found", details)
 
     def test_scan_validation_rows_mark_fully_ready_uncertain_results_as_probably_incompatible(self) -> None:
         validation = SimpleNamespace(
@@ -861,12 +869,16 @@ class TestQtNifValidationScan(unittest.TestCase):
             conflict_report=[],
         )
 
-        with mock.patch("generate_textures.validate_nif_for_parallax", return_value=validation):
-            rows, cancelled = _scan_nif_validation_rows([Path("mesh.nif")])
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"fixture")
+            with mock.patch("generate_textures.validate_nif_for_parallax", return_value=validation):
+                rows, cancelled = _scan_nif_validation_rows([nif_path])
 
         self.assertFalse(cancelled)
         self.assertEqual(rows[0]["status"], "PROBABLY INCOMPATIBLE")
         self.assertIn("Probably incompatible", rows[0]["details"])
+        self.assertIn("Rollback path: no sibling .nif.bak backup found", rows[0]["details"])
 
     def test_scan_selected_result_details_have_empty_selection_guidance(self) -> None:
         self.assertIn("Select a scan result", _format_qt_nif_scan_detail(None))

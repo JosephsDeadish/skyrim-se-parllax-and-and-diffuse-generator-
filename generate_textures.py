@@ -4012,6 +4012,15 @@ def _nif_editor_safety_banner_text() -> str:
     )
 
 
+def _describe_nif_backup_state(nif_path: Path) -> str:
+    backup_path = nif_path.with_suffix(".nif.bak")
+    if backup_path.is_file():
+        return f"Rollback path: sibling backup found ({backup_path.name}); compare against it before writing."
+    if backup_path.exists():
+        return f"Rollback path: backup path exists but is not a file ({backup_path.name}); fix it before writing."
+    return "Rollback path: no sibling .nif.bak backup found; keep dry-run on until one is created."
+
+
 def _nif_editor_confirmation_title(action: str) -> str:
     normalized_action = str(action or "").strip().lower()
     if normalized_action == "restore":
@@ -7034,9 +7043,11 @@ def _scan_nif_validation_rows(
         if is_cancelled is not None and is_cancelled():
             cancelled = True
             break
+        backup_state = _describe_nif_backup_state(nif_path)
         try:
             validation = validate_nif_for_parallax(nif_path)
             details = _build_qt_nif_validation_detail_lines(validation)
+            details.append(backup_state)
             shader_count = int(getattr(validation, "shader_count", 0) or 0)
             ready_count = int(getattr(validation, "ready_count", 0) or 0)
             skip_count = int(getattr(validation, "skip_count", 0) or 0)
@@ -7052,7 +7063,7 @@ def _scan_nif_validation_rows(
             detail_text = "\n".join(details)
         except Exception as exc:
             status = "FAIL"
-            detail_text = f"Scan failed: {exc}"
+            detail_text = f"Scan failed: {exc}\n{backup_state}"
         row = {
             "status": status,
             "file_name": nif_path.name,
@@ -7327,6 +7338,7 @@ def _preview_qt_nif_auto_remediation(nif_path: str | os.PathLike[str]) -> str:
             "No NIF file was written.",
             "",
             *_build_qt_nif_validation_detail_lines(validation, include_conflict_report=False),
+            _describe_nif_backup_state(path),
             "",
             f"No conflict-code remediation is available for {path.name}.",
             "Rollback path: restore the sibling .nif.bak backup if the preview looks better.",
@@ -7347,6 +7359,7 @@ def _preview_qt_nif_auto_remediation(nif_path: str | os.PathLike[str]) -> str:
         "No NIF file was written.",
         "",
         *_build_qt_nif_validation_detail_lines(validation, include_conflict_report=False),
+        _describe_nif_backup_state(path),
         "",
     ]
     lines.extend(f"Conflict: {code}" for code in conflict_codes)
