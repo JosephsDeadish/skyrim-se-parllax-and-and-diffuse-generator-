@@ -80,6 +80,7 @@ from generate_textures import (
     _resolve_app_icon_source_path,
     _nif_editor_confirmation_text,
     _nif_editor_safety_banner_text,
+    compare_nif_backups,
     _workflow_preset_onboarding_text,
     _bind_tk_quick_start_shortcuts,
     _build_truepbr_version_note,
@@ -1808,6 +1809,7 @@ class GenerateTexturesTests(unittest.TestCase):
         banner = _nif_editor_safety_banner_text().lower()
         self.assertIn("dry-run", banner)
         self.assertIn("backup originals", banner)
+        self.assertIn("compare against .bak", banner)
         self.assertIn("rollback path", banner)
         self.assertIn("experimental best-effort", banner)
 
@@ -4087,6 +4089,28 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual([row[1] for row in rows], ["first.nif"])
             self.assertEqual(first_mesh.read_bytes(), b"old-first")
             self.assertEqual(second_mesh.read_bytes(), b"new-second")
+
+    def test_compare_nif_backups_reports_match_diff_and_missing_backup_states(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            match_mesh = root / "match.nif"
+            match_mesh.write_bytes(b"same")
+            match_mesh.with_suffix(".nif.bak").write_bytes(b"same")
+
+            diff_mesh = root / "diff.nif"
+            diff_mesh.write_bytes(b"current")
+            diff_mesh.with_suffix(".nif.bak").write_bytes(b"backup")
+
+            missing_mesh = root / "missing.nif"
+            missing_mesh.write_bytes(b"current")
+
+            rows = compare_nif_backups([match_mesh, diff_mesh, missing_mesh])
+
+        self.assertEqual(rows[0], ("OK", "match.nif", "Current file matches match.nif.bak; restore would be a no-op."))
+        self.assertEqual(rows[1][0], "WARN")
+        self.assertIn("Current file differs from diff.nif.bak", rows[1][2])
+        self.assertIn("Compare before restoring or writing.", rows[1][2])
+        self.assertEqual(rows[2], ("SKIP", "missing.nif", "No .nif.bak backup found."))
 
     def test_should_apply_preview_recommendations_disabled_when_processing(self) -> None:
         self.assertFalse(should_apply_preview_recommendations(
@@ -10543,6 +10567,21 @@ class TestQtNifEditorRunner(unittest.TestCase):
         self.assertEqual(self.run_operation([path], self.options(), operation="restore")["success"], 1)
         self.assertEqual(path.read_bytes(), original)
 
+    def test_compare_operation_reports_matching_backup_without_writing(self) -> None:
+        path = self.make_nif()
+        original = path.read_bytes()
+        path.with_suffix(".nif.bak").write_bytes(original)
+
+        summary = self.run_operation([path], self.options(dry_run=False), operation="compare")
+
+        self.assertTrue(summary["dry_run"])
+        self.assertEqual(summary["operation"], "compare")
+        self.assertEqual(summary["success"], 1)
+        self.assertEqual(summary["warnings"], 0)
+        self.assertEqual(summary["results"][0]["status"], "OK")
+        self.assertIn("restore would be a no-op", summary["results"][0]["message"])
+        self.assertEqual(path.read_bytes(), original)
+
     def test_tristate_keep_enable_disable_and_all_texture_slots(self) -> None:
         from nif_patcher import scan_nif
         path = self.make_nif()
@@ -10759,6 +10798,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
         path = self.root / "mesh.nif"
         original = _build_minimal_nif()
         path.write_bytes(original)
+        path.with_suffix(".nif.bak").write_bytes(original)
         state = {"step": 0}
         confirmations = []
 
@@ -10786,6 +10826,14 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
                     self.app.processEvents()
                 w("nif_scan_path").setText(str(path))
                 w("nif_texture_diffuse").setText("textures\\edited.dds")
+                w("nif_editor_compare").click()
+                self.assertFalse(w("generate").isEnabled())
+                self.assertFalse(w("nif_scan_start").isEnabled())
+                state["step"] = 0.5
+            elif step == 0.5 and w("generate").isEnabled():
+                self.assertEqual(window.property("nif_editor_summary")["operation"], "compare")
+                self.assertEqual(window.property("nif_editor_summary")["results"][0]["status"], "OK")
+                self.assertIn("restore would be a no-op", w("nif_editor_results").toPlainText())
                 w("nif_editor_patch").click()
                 self.assertFalse(w("generate").isEnabled())
                 self.assertFalse(w("nif_scan_start").isEnabled())

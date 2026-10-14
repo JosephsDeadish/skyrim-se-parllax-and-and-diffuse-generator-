@@ -604,6 +604,51 @@ def restore_nif_backups(
     return results
 
 
+def compare_nif_backups(
+    nif_paths: list[Path],
+    *,
+    should_cancel: Callable[[], bool] | None = None,
+) -> list[tuple[str, str, str]]:
+    """Compare ``.nif`` files against sibling ``.nif.bak`` backups without writing."""
+    results: list[tuple[str, str, str]] = []
+    for nif_path in nif_paths:
+        if should_cancel is not None and should_cancel():
+            break
+        backup_path = nif_path.with_suffix(".nif.bak")
+        if not backup_path.exists():
+            results.append(("SKIP", nif_path.name, "No .nif.bak backup found."))
+            continue
+        try:
+            current_bytes = nif_path.read_bytes()
+            backup_bytes = backup_path.read_bytes()
+        except Exception as exc:
+            results.append(("FAIL", nif_path.name, f"Compare failed: {exc}"))
+            continue
+        if current_bytes == backup_bytes:
+            results.append(
+                (
+                    "OK",
+                    nif_path.name,
+                    f"Current file matches {backup_path.name}; restore would be a no-op.",
+                )
+            )
+            continue
+        current_size = len(current_bytes)
+        backup_size = len(backup_bytes)
+        if current_size == backup_size:
+            size_note = f"same size ({current_size} bytes), different bytes"
+        else:
+            size_note = f"{current_size} bytes vs {backup_size} bytes"
+        results.append(
+            (
+                "WARN",
+                nif_path.name,
+                f"Current file differs from {backup_path.name} ({size_note}). Compare before restoring or writing.",
+            )
+        )
+    return results
+
+
 def should_apply_preview_recommendations(*, auto_suggestions_enabled: bool, is_processing: bool) -> bool:
     """Return whether preview navigation should auto-apply recommendations.
 
@@ -4008,6 +4053,7 @@ def _format_short_guidance_tooltip(what_it_does: str, when_to_use_it: str, when_
 def _nif_editor_safety_banner_text() -> str:
     return (
         "Safe default: keep Dry-run and Backup originals enabled. "
+        "Compare against .bak before restore or writing. "
         "Restore from .bak is the rollback path, and Fallout writes are experimental best-effort only."
     )
 
@@ -16859,6 +16905,51 @@ if GUI_AVAILABLE:
 
                     _start_nif_editor_worker(_restore_worker, "Restore")
 
+                def _run_compare_backups() -> None:
+                    nifs = _resolve_nifs()
+                    _clear_log()
+                    if not nifs:
+                        _show_no_nifs("No NIF files found at the selected path.")
+                        return
+                    if _is_running[0]:
+                        status_var.set("Another operation is in progress. Please wait.")
+                        return
+                    _is_running[0] = True
+                    _cancel_requested[0] = False
+                    _set_ops_active(False)
+                    status_var.set(f"Compare phase (READ-ONLY): checking sibling .nif.bak backups for {len(nifs)} NIF file(s)…")
+                    progress_bar.configure(maximum=max(1, len(nifs)))
+                    progress_var.set(0.0)
+
+                    def _compare_worker(nif_list=nifs) -> None:
+                        match = diff = skip = fail = 0
+                        for index, (row_status, file_name, details) in enumerate(
+                            compare_nif_backups(nif_list, should_cancel=lambda: _cancel_requested[0]),
+                            start=1,
+                        ):
+                            if _cancel_requested[0]:
+                                break
+                            _safe_add_row(row_status, file_name, details)
+                            if row_status == "OK":
+                                match += 1
+                            elif row_status == "WARN":
+                                diff += 1
+                            elif row_status == "SKIP":
+                                skip += 1
+                            else:
+                                fail += 1
+                            _safe_progress(float(index))
+                        if _cancel_requested[0]:
+                            _safe_status(
+                                f"Compare cancelled — {match} matched, {diff} differed, {skip} skipped, {fail} failed before stop."
+                            )
+                        else:
+                            _safe_status(
+                                f"Compare complete — {match} matched, {diff} differed, {skip} skipped, {fail} failed."
+                            )
+
+                    _start_nif_editor_worker(_compare_worker, "Compare")
+
                 scan_button = ttk.Button(btn_frame, text="Scan NIFs", command=_scan_nifs)
                 op_row1 = ttk.Frame(btn_frame)
                 op_row1.pack(fill="x", pady=(0, 4))
@@ -16893,6 +16984,8 @@ if GUI_AVAILABLE:
                 rerun_auto_fix_conflicts_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 unpatch_button = ttk.Button(btn_frame, text="Remove features (unpatch)", command=_run_unpatch)
                 unpatch_button.pack(in_=op_row2, side="left", padx=(0, 6))
+                compare_button = ttk.Button(btn_frame, text="Compare with .bak", command=_run_compare_backups)
+                compare_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 restore_button = ttk.Button(btn_frame, text="Restore from .bak", command=_run_restore_backups)
                 restore_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 clear_button = ttk.Button(btn_frame, text="Clear log", command=_clear_log)
@@ -16918,6 +17011,7 @@ if GUI_AVAILABLE:
                         auto_fix_button,
                         rerun_auto_fix_conflicts_button,
                         unpatch_button,
+                        compare_button,
                         restore_button,
                         clear_button,
                     ]
@@ -16937,6 +17031,10 @@ if GUI_AVAILABLE:
                 self._add_tooltip(
                     unpatch_button,
                     "Remove selected flags/slots (destructive).\nUse dry-run first, keep backups enabled, and restore from .bak if you need rollback safety.",
+                )
+                self._add_tooltip(
+                    compare_button,
+                    "Read-only compare of the current NIFs against sibling .nif.bak backups.\nUse this before restore or any destructive write.",
                 )
                 self._add_tooltip(
                     restore_button,
@@ -17218,7 +17316,7 @@ def run_nif_editor_operation(
     on_result: Callable[[object], None] | None = None,
 ) -> dict[str, object]:
     """Run the Qt editor's bounded, backup-protected per-file operations."""
-    if operation not in {"patch", "remediate", "restore"}:
+    if operation not in {"patch", "remediate", "restore", "compare"}:
         raise ValueError(f"Unknown NIF editor operation: {operation}")
     options = replace(options, backup=True, strict_pre_write_validation=True)
     rows: list[dict[str, str]] = []
@@ -17232,7 +17330,9 @@ def run_nif_editor_operation(
             on_progress(index, len(nif_paths), str(path))
         try:
             notes: tuple[str, ...] = ()
-            if operation == "restore":
+            if operation == "compare":
+                status, _, message = compare_nif_backups([path])[0]
+            elif operation == "restore":
                 if options.dry_run:
                     status = "OK" if path.with_suffix(".nif.bak").is_file() else "SKIP"
                     message = "Would restore sibling .nif.bak; no file written." if status == "OK" else "No .nif.bak backup found."
@@ -17268,9 +17368,10 @@ def run_nif_editor_operation(
     return {
         "total": len(nif_paths), "processed": len(rows), "cancelled": cancelled,
         "success": sum(row["status"] == "OK" for row in rows),
+        "warnings": sum(row["status"] == "WARN" for row in rows),
         "failed": sum(row["status"] == "FAIL" for row in rows),
         "skipped": sum(row["status"] == "SKIP" for row in rows), "results": rows,
-        "dry_run": options.dry_run, "operation": operation,
+        "dry_run": bool(options.dry_run or operation == "compare"), "operation": operation,
     }
 
 
@@ -18079,7 +18180,12 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_layout.addLayout(nif_editor_form)
     nif_editor_actions = QtWidgets.QHBoxLayout()
     nif_editor_buttons: dict[str, Any] = {}
-    for name, label in (("patch", "Apply edits"), ("remediate", "Apply safe fixes"), ("restore", "Restore backups")):
+    for name, label in (
+        ("patch", "Apply edits"),
+        ("remediate", "Apply safe fixes"),
+        ("compare", "Compare with .bak"),
+        ("restore", "Restore backups"),
+    ):
         button = QtWidgets.QPushButton(label)
         button.setObjectName(f"nif_editor_{name}")
         nif_editor_buttons[name] = button
@@ -18089,6 +18195,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     )
     nif_editor_buttons["remediate"].setToolTip(
         "Apply supported safe-fix remediation. Compare the preview against the sibling .nif.bak before writing, and keep dry-run on until the result looks right."
+    )
+    nif_editor_buttons["compare"].setToolTip(
+        "Read-only compare of the current NIFs against sibling .nif.bak backups. Use this before restore or any destructive write."
     )
     nif_editor_buttons["restore"].setToolTip(
         "Restore the selected NIFs from matching sibling .nif.bak backups. This is the rollback path after a write preview."
@@ -18738,7 +18847,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         for name, gate in nif_editor_gates.items():
             values[f"fallout_allow_{name}"] = nif_editor_experimental.isChecked() and gate.isChecked()
         options = build_nif_patch_options_for_nif_editor(**values)
-        if not options.dry_run:
+        if operation != "compare" and not options.dry_run:
             if operation == "restore":
                 prompt = _nif_editor_confirmation_text("restore", len(paths), nif_paths=paths)
             else:
@@ -18758,10 +18867,18 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             if answer != QtWidgets.QMessageBox.StandardButton.Yes:
                 return
         nif_editor_results.clear()
-        mode_label = "DRY-RUN" if options.dry_run else "WRITE MODE"
+        mode_label = (
+            "COMPARE"
+            if operation == "compare"
+            else ("DRY-RUN" if options.dry_run else "WRITE MODE")
+        )
+        status_note = (
+            "This is read-only and does not modify backups."
+            if operation == "compare"
+            else "Backups stay on and dry-run is the safe default."
+        )
         nif_editor_status.setText(
-            f"Starting {mode_label} {operation} on {len(paths)} NIF file(s)… "
-            "Backups stay on and dry-run is the safe default."
+            f"Starting {mode_label} on {len(paths)} NIF file(s)… {status_note}"
         )
         nif_editor_worker = _QtNifEditorWorker(paths, options, operation)
         nif_editor_thread = QtCore.QThread(window)
@@ -18775,11 +18892,25 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
 
         def _finished(payload: object) -> None:
             window.setProperty("nif_editor_summary", payload)
+            payload_operation = str(payload.get("operation", operation) if isinstance(payload, dict) else operation)
+            if payload_operation == "compare":
+                completion_label = "Compare"
+            else:
+                completion_label = "Dry-run" if options.dry_run else "Write"
+            if payload_operation == "compare" and isinstance(payload, dict):
+                outcome_detail = (
+                    f"matched={payload['success']}, differed={payload.get('warnings', 0)}, "
+                    f"skipped={payload['skipped']}, failed={payload['failed']}"
+                )
+            else:
+                outcome_detail = (
+                    f"processed={payload['processed']}/{payload['total']}, "
+                    f"success={payload['success']}, failed={payload['failed']}, skipped={payload['skipped']}"
+                )
             nif_editor_status.setText(
-                f"{'Dry-run' if options.dry_run else 'Write'} "
+                f"{completion_label} "
                 f"{'cancelled' if payload['cancelled'] else 'complete'}: "
-                f"processed={payload['processed']}/{payload['total']}, "
-                f"success={payload['success']}, failed={payload['failed']}, skipped={payload['skipped']}."
+                f"{outcome_detail}."
             )
 
         def _cleanup() -> None:
