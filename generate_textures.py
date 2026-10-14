@@ -3986,6 +3986,7 @@ def build_render_profile_brief_message(
     recommended_profile: str,
     *,
     recommendation: RenderProfileRecommendation | None = None,
+    selected_profile: str | None = None,
 ) -> str:
     normalized = _normalize_render_profile(recommended_profile)
     if normalized == "auto":
@@ -4000,6 +4001,17 @@ def build_render_profile_brief_message(
     )
     if recommendation is not None:
         message = f"{message} {_format_render_profile_brief_summary(recommendation)}"
+    selected_normalized = _normalize_render_profile(selected_profile) if selected_profile is not None else ""
+    if selected_normalized and selected_normalized not in {"auto", "custom"}:
+        if _render_profile_family(selected_normalized) != _render_profile_family(normalized):
+            selected_label = _RENDER_PROFILE_LABELS.get(
+                selected_normalized,
+                selected_normalized.replace("_", " ").title(),
+            )
+            message = (
+                f"{message} ⚠ Probably incompatible with selected {selected_label} preset. "
+                "Switch families before export."
+            )
     return message
 
 
@@ -13639,11 +13651,23 @@ if GUI_AVAILABLE:
             preview_path = self._current_preview_path()
             recommendation = self._recommended_render_profile_details_for_preview(preview_path)
             recommended_profile = recommendation.profile
+            selected_profile = _normalize_render_profile(self.render_profile_var.get())
             message = build_render_profile_brief_message(
                 recommended_profile,
                 recommendation=recommendation,
+                selected_profile=selected_profile,
             )
-            selected_profile = _normalize_render_profile(self.render_profile_var.get())
+            is_mismatch = (
+                selected_profile not in {"auto", "custom"}
+                and _render_profile_family(selected_profile) != _render_profile_family(recommended_profile)
+            )
+            if hasattr(self, "render_profile_hint_label"):
+                try:
+                    self.render_profile_hint_label.configure(
+                        style="Status.Warning.TLabel" if is_mismatch else "Muted.TLabel"
+                    )
+                except Exception:
+                    pass
             if selected_profile == "auto":
                 self.render_profile_suggestion_var.set(message)
                 if apply_auto:
@@ -19572,6 +19596,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     def _update_profile_recommendation() -> None:
         input_text = input_path_edit.text().strip()
         if input_text and Path(input_text).expanduser().is_dir():
+            profile_recommendation_label.setStyleSheet("")
             profile_recommendation_label.setText(
                 "Folder input: choose a profile explicitly; a single suggestion may not fit every texture."
             )
@@ -19582,6 +19607,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             manager_context=manager_context,
         )
         if recommendation is None:
+            profile_recommendation_label.setStyleSheet("")
             profile_recommendation_label.setText("Select a texture file to see a renderer suggestion.")
             use_profile_recommendation_button.setEnabled(False)
             return
@@ -19590,9 +19616,20 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             suggested_profile,
             suggested_profile.replace("_", " ").title(),
         )
+        selected_profile = render_profile_combo.currentText()
+        mismatch_note = ""
+        if _render_profile_family(_normalize_render_profile(selected_profile)) != _render_profile_family(suggested_profile):
+            selected_label = _RENDER_PROFILE_LABELS.get(
+                _normalize_render_profile(selected_profile),
+                selected_profile.replace("_", " ").title(),
+            )
+            mismatch_note = (
+                f" ⚠ Probably incompatible with selected {selected_label} preset. Switch families before export."
+            )
+        profile_recommendation_label.setStyleSheet("font-weight: 600;" if mismatch_note else "")
         profile_recommendation_label.setText(
-            f"Suggested for this file: {profile_label}. {_format_render_profile_brief_summary(recommendation)} "
-            "Confirm your installed renderer before exporting."
+            f"Suggested for this file: {profile_label}. {_format_render_profile_brief_summary(recommendation)}"
+            f"{mismatch_note} Confirm your installed renderer before exporting."
         )
         use_profile_recommendation_button.setEnabled(
             qt_worker_thread is None and render_profile_combo.findText(suggested_profile) >= 0

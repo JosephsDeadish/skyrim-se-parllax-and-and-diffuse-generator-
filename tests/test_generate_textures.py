@@ -3989,6 +3989,20 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("Why this was recommended:", message)
         self.assertIn("Why not the others:", message)
 
+    def test_build_render_profile_brief_message_warns_on_selected_family_mismatch(self) -> None:
+        recommendation = recommend_render_profile_details(
+            Path("textures/architecture/stone_rmaos.dds"),
+            detected_role="environment_mask",
+            detected_suffix="_rmaos",
+        )
+        message = build_render_profile_brief_message(
+            recommendation.profile,
+            recommendation=recommendation,
+            selected_profile="enb",
+        )
+        self.assertIn("probably incompatible", message.lower())
+        self.assertIn("Switch families before export.", message)
+
     def test_build_render_profile_family_mismatch_warning_marks_probable_incompatibility(self) -> None:
         recommendation = recommend_render_profile_details(
             Path("textures/architecture/stone_rmaos.dds"),
