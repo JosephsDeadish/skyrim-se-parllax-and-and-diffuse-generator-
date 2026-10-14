@@ -3613,6 +3613,9 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("Custom mode: enable", hint)
         self.assertIn("ENB Complex Material", hint)
         self.assertIn("Parallax", hint)
+        self.assertIn("Family note:", hint)
+        self.assertIn("TruePBR", hint)
+        self.assertIn("Parallax note:", hint)
 
     def test_build_render_profile_mode_controls_hint_reports_locked_state(self) -> None:
         hint = build_render_profile_mode_controls_hint(
@@ -3624,6 +3627,8 @@ class GenerateTexturesTests(unittest.TestCase):
             }
         )
         self.assertIn("locks mode selectors", hint)
+        self.assertIn("Community Shaders", hint)
+        self.assertIn("Parallax note:", hint)
 
     def test_resolve_nif_patch_defaults_for_render_profile_returns_expected_toggles(self) -> None:
         vanilla = resolve_nif_patch_defaults_for_render_profile("vanilla")

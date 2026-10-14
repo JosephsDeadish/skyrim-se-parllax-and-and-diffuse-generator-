@@ -3804,8 +3804,16 @@ def resolve_render_profile_mode_control_states(
 
 
 def build_render_profile_mode_controls_hint(control_states: Mapping[str, bool | str]) -> str:
+    family_note = (
+        "Family note: ENB uses _msn/_m outputs, Community Shaders uses _cm/_c outputs, and TruePBR uses "
+        "_rmaos/_ramos plus JSON sidecars."
+    )
+    parallax_note = "Parallax note: standard keeps the vanilla height workflow; occlusion is ENB/POM-specific."
     if bool(control_states.get("locked")):
-        return "Renderer preset locks mode selectors to prevent conflicting GUI combinations."
+        return (
+            "Renderer preset locks mode selectors to prevent conflicting GUI combinations. "
+            f"{family_note} {parallax_note}"
+        )
     disabled_controls: list[str] = []
     if str(control_states.get("complex_format")) == "disabled":
         disabled_controls.append("ENB Complex Material")
@@ -3814,10 +3822,20 @@ def build_render_profile_mode_controls_hint(control_states: Mapping[str, bool | 
     if str(control_states.get("parallax_mode")) == "disabled":
         disabled_controls.append("Parallax")
     if not disabled_controls:
-        return "Custom mode: all mode selectors are available."
+        return f"Custom mode: all mode selectors are available. {family_note} {parallax_note}"
     if len(disabled_controls) == 3:
-        return "Custom mode: enable ENB Complex Material, Environment mask, or Parallax outputs to unlock mode selectors."
-    return "Custom mode: enable " + ", ".join(disabled_controls) + " output(s) to unlock matching mode selectors."
+        return (
+            "Custom mode: enable ENB Complex Material, Environment mask, or Parallax outputs to unlock mode selectors. "
+            f"{family_note} {parallax_note}"
+        )
+    return (
+        "Custom mode: enable "
+        + ", ".join(disabled_controls)
+        + " output(s) to unlock matching mode selectors. "
+        + family_note
+        + " "
+        + parallax_note
+    )
 
 
 def describe_render_profile_default_outputs(profile: str) -> str:
@@ -10729,9 +10747,11 @@ if GUI_AVAILABLE:
             _complex_fmt_label.grid(row=3, column=0, sticky=tk.W, pady=8)
             self._add_tooltip(
                 _complex_fmt_label,
-                "🏷 Output format for complex-material maps.\n"
-                "'cm' = Community Shaders Extended Materials packed map (env reflection / glossiness / metallic / height; _cm default, _c/_C via custom name).\n"
-                "'msn' = ENB complex material (normal RGB + specular alpha).",
+                _format_short_guidance_tooltip(
+                    "'cm' packs Community Shaders Extended Materials channels; 'msn' packs ENB complex material channels",
+                    "use 'cm' for Community Shaders _cm/_c workflows or 'msn' for ENB complex material / POM",
+                    "do not use 'cm' for ENB meshes or keep 'msn' for Community Shaders _cm/_c outputs",
+                ),
             )
             self.complex_format_combo = ttk.Combobox(
                 options_frame,
@@ -10744,18 +10764,25 @@ if GUI_AVAILABLE:
             self.complex_format_combo.bind("<<ComboboxSelected>>", self._on_complex_format_changed)
             self._add_tooltip(
                 self.complex_format_combo,
-                "🏷 Choose map type:\n"
-                "'cm' for Community Shaders Extended Materials setups (_cm default, _c/_C optional via custom naming).\n"
-                "'msn' for ENB complex material setups.\n"
-                "Quick start for Community Shaders: set Target renderer=community_shaders and keep format=cm.\n"
-                "Do not use 'cm' together with ENB _m/_msn outputs.",
+                _format_short_guidance_tooltip(
+                    "chooses the packed complex-material format",
+                    "use 'cm' for Community Shaders Extended Materials or 'msn' for ENB complex material",
+                    "do not mix 'cm' with ENB outputs or keep 'msn' when the mesh should stay on Community Shaders",
+                ),
             )
 
             _env_mode_row = ttk.Frame(options_frame)
             _env_mode_row.grid(row=3, column=2, columnspan=2, sticky=tk.W, padx=(20, 4), pady=8)
             _env_mode_label = ttk.Label(_env_mode_row, text="Env mask mode")
             _env_mode_label.pack(side=tk.LEFT)
-            self._add_tooltip(_env_mode_label, "Choose slot-5 encoding: standard (_m greyscale) or complex (packed RGBA, renderer-specific).")
+            self._add_tooltip(
+                _env_mode_label,
+                _format_short_guidance_tooltip(
+                    "chooses how slot 5 is encoded",
+                    "use standard for greyscale _m workflows or complex for packed RGBA renderer workflows",
+                    "do not use complex for meshes that expect a vanilla/greyscale _m mask",
+                ),
+            )
             self.env_mask_mode_combo = ttk.Combobox(
                 _env_mode_row,
                 textvariable=self.env_mask_mode_var,
@@ -10765,7 +10792,14 @@ if GUI_AVAILABLE:
             )
             self.env_mask_mode_combo.pack(side=tk.LEFT, padx=(6, 0))
             self.env_mask_mode_combo.bind("<<ComboboxSelected>>", self._on_env_mask_mode_changed)
-            self._add_tooltip(self.env_mask_mode_combo, "standard: vanilla/ENB _m greyscale. complex: packed RGBA map. Match this to Target renderer.")
+            self._add_tooltip(
+                self.env_mask_mode_combo,
+                _format_short_guidance_tooltip(
+                    "chooses standard greyscale or packed RGBA slot-5 output",
+                    "use standard for vanilla Skyrim and most ENB _m masks; use complex only when the renderer expects packed channels",
+                    "do not pick complex if the mesh should stay on a simple _m greyscale mask",
+                ),
+            )
             _env_mode_hint_label = ttk.Label(
                 options_frame,
                 text="standard = vanilla Skyrim SE  |  complex = packed RGBA (renderer-specific channels)",
@@ -10774,7 +10808,11 @@ if GUI_AVAILABLE:
             _env_mode_hint_label.grid(row=3, column=4, sticky=tk.W, padx=(4, 0))
             self._add_tooltip(
                 _env_mode_hint_label,
-                "Use standard for most vanilla/ENB workflows. Use complex only when your chosen renderer/workflow expects packed slot-5 channels.",
+                _format_short_guidance_tooltip(
+                    "shows the slot-5 family names side by side",
+                    "you want a quick reminder that standard = greyscale _m and complex = packed RGBA",
+                    "you already know the slot-5 encoding and do not need a family reminder",
+                ),
             )
 
             _normal_label = ttk.Label(options_frame, text="Normal strength")
@@ -10797,10 +10835,24 @@ if GUI_AVAILABLE:
 
             _parallax_label = ttk.Label(options_frame, text="Parallax strength")
             _parallax_label.grid(row=5, column=0, sticky=tk.W, pady=8)
-            self._add_tooltip(_parallax_label, "🏔 Controls height-map (parallax/_p) depth contrast.\nSets the height data written to the _p texture.\nFor CS TruePBR the depth of the in-game effect is controlled by 'displacement_scale' in the JSON sidecar — this slider sets the source height strength, not the TruePBR displacement scale directly.")
+            self._add_tooltip(
+                _parallax_label,
+                _format_short_guidance_tooltip(
+                    "controls the source height strength written into the _p texture",
+                    "use it to tune the generated parallax source map; TruePBR in-game depth still comes from the JSON displacement_scale",
+                    "do not rely on it as a substitute for ENB/POM settings or TruePBR JSON tuning",
+                ),
+            )
             self.parallax_scale = ttk.Scale(options_frame, from_=0.1, to=10.0, variable=self.parallax_strength_var, command=lambda _: self._on_slider_changed())
             self.parallax_scale.grid(row=5, column=1, columnspan=2, sticky=tk.EW)
-            self._add_tooltip(self.parallax_scale, "Increase for deeper height data in the _p file; decrease for subtler relief.\nFor TruePBR, adjust displacement_scale in the generated JSON sidecar for in-game depth.")
+            self._add_tooltip(
+                self.parallax_scale,
+                _format_short_guidance_tooltip(
+                    "adjusts the strength of the generated parallax height data",
+                    "you want a stronger or subtler _p source map before export",
+                    "you are looking for in-game depth controls in TruePBR; that lives in the generated JSON sidecar",
+                ),
+            )
             self.parallax_strength_display_label = ttk.Label(options_frame, textvariable=self.parallax_strength_display_var)
             self.parallax_strength_display_label.grid(row=5, column=3, sticky=tk.W, padx=8)
             self.auto_parallax_check = ttk.Checkbutton(options_frame, text="Auto", variable=self.auto_parallax_suggestion_var, command=self._on_auto_slider_preference_changed)
@@ -18563,8 +18615,27 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     mode_controls_hint = QtWidgets.QLabel()
     mode_controls_hint.setWordWrap(True)
     controls_layout.addWidget(mode_controls_hint, mode_row, 2, 3, 1)
-    for control in (complex_format_combo, env_mask_mode_combo, parallax_mode_combo):
-        control.setToolTip("Renderer presets select compatible modes. Custom mode exposes manual choices.")
+    complex_format_combo.setToolTip(
+        _format_short_guidance_tooltip(
+            "chooses the packed complex-material format",
+            "use 'msn' for ENB complex material or 'cm' for Community Shaders Extended Materials",
+            "do not use 'cm' when the mesh should stay on ENB outputs or keep 'msn' for Community Shaders _cm/_c",
+        )
+    )
+    env_mask_mode_combo.setToolTip(
+        _format_short_guidance_tooltip(
+            "chooses standard greyscale or packed RGBA slot-5 output",
+            "use standard for vanilla Skyrim and most ENB _m masks; use complex only when the renderer expects packed channels",
+            "do not pick complex if the mesh should stay on a simple _m greyscale mask",
+        )
+    )
+    parallax_mode_combo.setToolTip(
+        _format_short_guidance_tooltip(
+            "chooses standard height or ENB/POM occlusion",
+            "use standard for the usual Skyrim-safe height workflow; use occlusion only when ENB/POM is intentional",
+            "do not switch to occlusion if the mesh should remain a vanilla or Community Shaders height workflow",
+        )
+    )
     generation_layout.addWidget(controls_group)
     generation_layout.addWidget(advanced_controls_toggle)
     generation_layout.addWidget(advanced_controls_panel)
