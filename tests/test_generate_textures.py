@@ -1343,6 +1343,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(state["theme_mode"]), "light")
         self.assertEqual(str(state["workflow_mode"]), "beginner")
         self.assertTrue(bool(state["simplified_main_layout"]))
+        self.assertTrue(bool(state["show_startup_onboarding"]))
         self.assertTrue(bool(state["auto_suggestions"]))
         self.assertFalse(bool(state["qt_show_advanced_map_strengths"]))
         self.assertFalse(bool(state["qt_show_truepbr_sidecar_settings"]))
@@ -1833,6 +1834,7 @@ class GenerateTexturesTests(unittest.TestCase):
                     "use_custom_output": True,
                     "theme_mode": "high_contrast",
                     "show_batch_preview": True,
+                    "show_startup_onboarding": False,
                     "workflow_mode": "advanced",
                     "simplified_main_layout": False,
                     "show_advanced_generation_controls": True,
@@ -1876,6 +1878,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(loaded["theme_mode"]), "high_contrast")
         self.assertTrue(bool(loaded["dark_mode"]))
         self.assertTrue(bool(loaded["show_batch_preview"]))
+        self.assertFalse(bool(loaded["show_startup_onboarding"]))
         self.assertFalse(bool(loaded["simplified_main_layout"]))
         self.assertTrue(bool(loaded["show_advanced_generation_controls"]))
         self.assertTrue(bool(loaded["show_advanced_workflow_outputs"]))
@@ -1930,6 +1933,7 @@ class GenerateTexturesTests(unittest.TestCase):
                     "last_output_target": "/tmp/out",
                     "render_profile": "truepbr",
                     "show_advanced_workflow_outputs": True,
+                    "show_startup_onboarding": False,
                 },
                 source_state,
             )
@@ -1945,12 +1949,14 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(imported["last_mod_profile"], "Main")
             self.assertEqual(imported["last_renderer"], "community_shaders")
             self.assertEqual(imported["last_output_target"], "/tmp/out")
+            self.assertFalse(bool(imported["show_startup_onboarding"]))
 
             export_project_settings(exported_state, source_state_file=imported_state)
             exported = load_gui_state(exported_state)
             self.assertEqual(exported["input_path"], str(source_input))
             self.assertEqual(exported["output_path"], "/tmp/out")
             self.assertTrue(bool(exported["show_advanced_workflow_outputs"]))
+            self.assertFalse(bool(exported["show_startup_onboarding"]))
 
     def test_export_project_settings_raises_on_invalid_source(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2082,6 +2088,48 @@ class GenerateTexturesTests(unittest.TestCase):
                 self.assertFalse(gui.show_advanced_generation_var.get())
                 self.assertFalse(gui.show_advanced_workflow_outputs_var.get())
                 self.assertEqual(gui.workflow_mode_var.get(), "Standard")
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_startup_onboarding_banner_can_be_dismissed(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        def find_label_frame(root, title: str):
+            pending = list(root.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TLabelframe" and widget.cget("text") == title:
+                    return widget
+                pending.extend(widget.winfo_children())
+            self.fail(f"Could not find Tk section '{title}'.")
+
+        def find_button(root, title: str):
+            pending = list(root.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TButton" and str(widget.cget("text")) == title:
+                    return widget
+                pending.extend(widget.winfo_children())
+            self.fail(f"Could not find Tk button '{title}'.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            gui = None
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state), \
+                     mock.patch("generate_textures.save_gui_state") as save_state:
+                    gui = TextureGeneratorGUI()
+                    gui.root.update_idletasks()
+                    banner = find_label_frame(gui.root, "Quick start")
+                    self.assertTrue(banner.winfo_ismapped())
+                    find_button(banner, "Hide").invoke()
+                    gui.root.update_idletasks()
+                    self.assertFalse(gui.show_startup_onboarding_var.get())
+                    self.assertFalse(banner.winfo_ismapped())
+                    save_state.assert_called()
+                    persisted = save_state.call_args.args[0]
+                    self.assertFalse(bool(persisted["show_startup_onboarding"]))
             finally:
                 if gui is not None:
                     gui.root.destroy()

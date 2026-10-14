@@ -235,6 +235,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "last_mod_profile": "",
     "last_renderer": "",
     "last_output_target": "",
+    "show_startup_onboarding": True,
     "dark_mode": False,
     "theme_mode": "light",
     "show_batch_preview": False,
@@ -876,6 +877,7 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         "auto_optimize_large_batches",
         "lazy_preview_mode",
         "staged_preview_mode",
+        "show_startup_onboarding",
         "simplified_main_layout",
         "show_advanced_generation_controls",
         "show_advanced_workflow_outputs",
@@ -9687,6 +9689,7 @@ if GUI_AVAILABLE:
             self.auto_optimize_large_batches_var = tk.BooleanVar(value=True)
             self.lazy_preview_mode_var = tk.BooleanVar(value=True)
             self.staged_preview_mode_var = tk.BooleanVar(value=True)
+            self.show_startup_onboarding_var = tk.BooleanVar(value=True)
             self.simplified_main_layout_var = tk.BooleanVar(value=True)
             self.show_advanced_generation_var = tk.BooleanVar(value=False)
             self.show_advanced_workflow_outputs_var = tk.BooleanVar(value=False)
@@ -9961,6 +9964,56 @@ if GUI_AVAILABLE:
                 _help_button,
                 "Open the renderer/channel guide with ENB vs Community Shaders mappings, TruePBR workflow notes, and Skyrim wiki links.",
             )
+
+            startup_onboarding_frame = ttk.LabelFrame(top_bar, text="Quick start", padding=6)
+            startup_onboarding_label = ttk.Label(
+                startup_onboarding_frame,
+                text=_workflow_preset_onboarding_text(),
+                style="Muted.TLabel",
+                justify=tk.LEFT,
+                anchor=tk.W,
+            )
+            startup_onboarding_label.pack(fill=tk.X)
+            self._bind_responsive_wrap(startup_onboarding_frame, startup_onboarding_label, horizontal_padding=24, min_wrap=360)
+            startup_onboarding_button_row = ttk.Frame(startup_onboarding_frame)
+            startup_onboarding_button_row.pack(fill=tk.X, pady=(4, 0))
+
+            def _dismiss_startup_onboarding() -> None:
+                self.show_startup_onboarding_var.set(False)
+                startup_onboarding_frame.pack_forget()
+                self._save_persisted_gui_state()
+
+            def _apply_startup_preset(profile_key: str) -> None:
+                self._apply_safe_workflow_preset(profile_key)
+                _dismiss_startup_onboarding()
+
+            ttk.Button(
+                startup_onboarding_button_row,
+                text="Vanilla",
+                command=lambda: _apply_startup_preset("vanilla"),
+            ).pack(side=tk.LEFT, padx=(0, 4))
+            ttk.Button(
+                startup_onboarding_button_row,
+                text="ENB",
+                command=lambda: _apply_startup_preset("enb"),
+            ).pack(side=tk.LEFT, padx=4)
+            ttk.Button(
+                startup_onboarding_button_row,
+                text="Community Shaders",
+                command=lambda: _apply_startup_preset("community_shaders"),
+            ).pack(side=tk.LEFT, padx=4)
+            ttk.Button(
+                startup_onboarding_button_row,
+                text="TruePBR",
+                command=lambda: _apply_startup_preset("truepbr"),
+            ).pack(side=tk.LEFT, padx=4)
+            ttk.Button(
+                startup_onboarding_button_row,
+                text="Hide",
+                command=_dismiss_startup_onboarding,
+            ).pack(side=tk.RIGHT)
+            if self.show_startup_onboarding_var.get():
+                startup_onboarding_frame.pack(fill=tk.X, pady=(6, 0))
 
             file_frame = ttk.LabelFrame(wrapper, text="Files", padding=10)
             file_frame.pack(fill=tk.X, padx=4, pady=4)
@@ -11517,6 +11570,7 @@ if GUI_AVAILABLE:
             self.auto_optimize_large_batches_var.set(bool(state.get("auto_optimize_large_batches", True)))
             self.lazy_preview_mode_var.set(bool(state.get("lazy_preview_mode", True)))
             self.staged_preview_mode_var.set(bool(state.get("staged_preview_mode", True)))
+            self.show_startup_onboarding_var.set(bool(state.get("show_startup_onboarding", True)))
             self.simplified_main_layout_var.set(bool(state.get("simplified_main_layout", True)))
             self.show_advanced_generation_var.set(bool(state.get("show_advanced_generation_controls", False)))
             self.show_advanced_workflow_outputs_var.set(bool(state.get("show_advanced_workflow_outputs", False)))
@@ -11601,6 +11655,7 @@ if GUI_AVAILABLE:
                 "auto_optimize_large_batches": self.auto_optimize_large_batches_var.get(),
                 "lazy_preview_mode": self.lazy_preview_mode_var.get(),
                 "staged_preview_mode": self.staged_preview_mode_var.get(),
+                "show_startup_onboarding": self.show_startup_onboarding_var.get(),
                 "workflow_mode": self._workflow_mode_from_controls(),
                 "simplified_main_layout": self.simplified_main_layout_var.get(),
                 "show_advanced_generation_controls": self.show_advanced_generation_var.get(),
