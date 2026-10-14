@@ -17028,7 +17028,7 @@ if GUI_AVAILABLE:
                     command=_rerun_conflict_patch,
                 )
                 rerun_patch_conflicts_button.pack(in_=op_row1, side="left", padx=(0, 6))
-                patch_button = ttk.Button(btn_frame, text="Apply patch", command=_run_patch)
+                patch_button = ttk.Button(btn_frame, text="Apply patch (dry-run first)", command=_run_patch)
                 patch_button.pack(in_=op_row1, side="left", padx=(0, 6))
                 auto_fix_button = ttk.Button(
                     btn_frame,
@@ -17042,11 +17042,11 @@ if GUI_AVAILABLE:
                     command=_rerun_conflict_auto_remediate,
                 )
                 rerun_auto_fix_conflicts_button.pack(in_=op_row2, side="left", padx=(0, 6))
-                unpatch_button = ttk.Button(btn_frame, text="Remove features (unpatch)", command=_run_unpatch)
+                unpatch_button = ttk.Button(btn_frame, text="⚠ Remove features (destructive)", command=_run_unpatch)
                 unpatch_button.pack(in_=op_row2, side="left", padx=(0, 6))
-                compare_button = ttk.Button(btn_frame, text="Compare with .bak", command=_run_compare_backups)
+                compare_button = ttk.Button(btn_frame, text="Compare with .bak (read-only)", command=_run_compare_backups)
                 compare_button.pack(in_=op_row2, side="left", padx=(0, 6))
-                restore_button = ttk.Button(btn_frame, text="Restore from .bak", command=_run_restore_backups)
+                restore_button = ttk.Button(btn_frame, text="↩ Restore from .bak", command=_run_restore_backups)
                 restore_button.pack(in_=op_row2, side="left", padx=(0, 6))
                 clear_button = ttk.Button(btn_frame, text="Clear log", command=_clear_log)
                 clear_button.pack(in_=op_row2, side="left", padx=(0, 6))
@@ -17079,10 +17079,21 @@ if GUI_AVAILABLE:
                 self._add_tooltip(scan_button, "Read-only analysis pass. No file changes are written.")
                 self._add_tooltip(rerun_conflicts_button, "Incremental scan: run only files that previously had conflicts/failures.")
                 self._add_tooltip(rerun_patch_conflicts_button, "Incremental patch: patch only files that previously had conflicts/failures.")
-                self._add_tooltip(patch_button, "Apply selected slot/flag edits to disk.\nUse Scan first to confirm conflicts and expected actions.")
+                self._add_tooltip(
+                    patch_button,
+                    _format_short_guidance_tooltip(
+                        "applies the selected slot and flag edits to disk",
+                        "the scan preview already shows the right conflict/fix path and backups are enabled",
+                        "you still need to review conflicts or want to stay in dry-run preview only",
+                    ),
+                )
                 self._add_tooltip(
                     auto_fix_button,
-                    "Apply safe best-effort fixes from detected conflict families.\nCross-block drift and other high-risk families stay manual-review no-op by design.",
+                    _format_short_guidance_tooltip(
+                        "applies safe best-effort fixes from detected conflict families",
+                        "the scan has identified a supported conflict family and you want the safe fix path",
+                        "you need a manual cross-block fix or want to compare before any write",
+                    ),
                 )
                 self._add_tooltip(
                     rerun_auto_fix_conflicts_button,
@@ -17090,15 +17101,27 @@ if GUI_AVAILABLE:
                 )
                 self._add_tooltip(
                     unpatch_button,
-                    "Remove selected flags/slots (destructive).\nUse dry-run first, keep backups enabled, and restore from .bak if you need rollback safety.",
+                    _format_short_guidance_tooltip(
+                        "removes selected flags and slots from the mesh and writes the result to disk",
+                        "you intentionally want to roll a NIF back to a simpler workflow after confirming the backup path",
+                        "you still need a preview, compare, or any non-destructive inspection first",
+                    ),
                 )
                 self._add_tooltip(
                     compare_button,
-                    "Read-only compare of the current NIFs against sibling .nif.bak backups.\nUse this before restore or any destructive write.",
+                    _format_short_guidance_tooltip(
+                        "compares the current NIF against the sibling .nif.bak backup without writing",
+                        "you want to inspect what changed before restore or any destructive write",
+                        "you are ready to edit the file and do not need the read-only diff first",
+                    ),
                 )
                 self._add_tooltip(
                     restore_button,
-                    "Restore .nif files from matching .nif.bak backups in the same folder.\nThis is the rollback path after a write preview.",
+                    _format_short_guidance_tooltip(
+                        "restores the current NIF from the matching sibling .nif.bak backup",
+                        "you want the rollback path after a write preview or a failed write",
+                        "you still need to inspect the diff or keep the current file unchanged",
+                    ),
                 )
                 self._add_tooltip(clear_button, "Clear result rows from the log.")
                 self._add_tooltip(export_report_button, "Export the currently filtered result rows to a text report.")
@@ -18241,26 +18264,42 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_actions = QtWidgets.QHBoxLayout()
     nif_editor_buttons: dict[str, Any] = {}
     for name, label in (
-        ("patch", "Apply edits"),
+        ("patch", "Apply edits (dry-run first)"),
         ("remediate", "Apply safe fixes"),
-        ("compare", "Compare with .bak"),
-        ("restore", "Restore backups"),
+        ("compare", "Compare with .bak (read-only)"),
+        ("restore", "↩ Restore backups"),
     ):
         button = QtWidgets.QPushButton(label)
         button.setObjectName(f"nif_editor_{name}")
         nif_editor_buttons[name] = button
         nif_editor_actions.addWidget(button)
     nif_editor_buttons["patch"].setToolTip(
-        "Dry-run first, then write the selected NIFs after confirmation. Backups are mandatory and write mode is intentionally loud."
+        _format_short_guidance_tooltip(
+            "applies the selected edits to the NIF after confirmation",
+            "the preview is correct and you have already checked the rollback path",
+            "you still need a dry-run preview or want to keep the mesh unchanged",
+        )
     )
     nif_editor_buttons["remediate"].setToolTip(
-        "Apply supported safe-fix remediation. Compare the preview against the sibling .nif.bak before writing, and keep dry-run on until the result looks right."
+        _format_short_guidance_tooltip(
+            "applies the supported safe-fix remediation path",
+            "the preview already shows a supported conflict family and you want the non-destructive fix path",
+            "you need a manual or experimental fix, or you still want to compare before writing",
+        )
     )
     nif_editor_buttons["compare"].setToolTip(
-        "Read-only compare of the current NIFs against sibling .nif.bak backups. Use this before restore or any destructive write."
+        _format_short_guidance_tooltip(
+            "compares the current NIFs against sibling .nif.bak backups without writing",
+            "you want to inspect the diff before restore or any destructive write",
+            "you are ready to edit and do not need the read-only diff first",
+        )
     )
     nif_editor_buttons["restore"].setToolTip(
-        "Restore the selected NIFs from matching sibling .nif.bak backups. This is the rollback path after a write preview."
+        _format_short_guidance_tooltip(
+            "restores the selected NIFs from matching sibling .nif.bak backups",
+            "you need the rollback path after a write preview or failed write",
+            "you still need to inspect the diff or keep the current file unchanged",
+        )
     )
     nif_editor_cancel = QtWidgets.QPushButton("Cancel edit")
     nif_editor_cancel.setObjectName("nif_editor_cancel")

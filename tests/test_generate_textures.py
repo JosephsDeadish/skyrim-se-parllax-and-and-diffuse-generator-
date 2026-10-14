@@ -10820,6 +10820,9 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
                 self.assertIsNotNone(self.widget(window, "generation_log"))
                 self.assertIsNotNone(self.widget(window, "generation_log_copy"))
                 self.assertIsNotNone(self.widget(window, "generation_log_export"))
+                self.assertIn("dry-run first", w("nif_editor_patch").text().lower())
+                self.assertIn("read-only", w("nif_editor_compare").text().lower())
+                self.assertIn("restore", w("nif_editor_restore").text().lower())
                 for theme_mode, scale, size in (
                     ("light", "0.9", (640, 480)),
                     ("dark", "1.5", (1100, 760)),
