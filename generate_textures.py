@@ -235,6 +235,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "last_mod_profile": "",
     "last_renderer": "",
     "last_output_target": "",
+    "profile_setup_memory": {},
     "show_startup_onboarding": True,
     "dark_mode": False,
     "theme_mode": "light",
@@ -371,6 +372,76 @@ def _normalize_workflow_mode(value: object | None) -> str | None:
 
 def _workflow_mode_value_from_label(label: str | None) -> str | None:
     return _WORKFLOW_MODE_LABEL_TO_VALUE.get(str(label or "").strip())
+
+
+def _profile_setup_memory_key(manager: str | None, profile: str | None) -> str:
+    normalized_manager = str(manager or "").strip() or "unknown manager"
+    normalized_profile = str(profile or "").strip() or "default profile"
+    return f"{normalized_manager}::{normalized_profile}"
+
+
+def _normalize_profile_setup_memory(raw: object | None) -> dict[str, dict[str, object]]:
+    if not isinstance(raw, Mapping):
+        return {}
+    normalized: dict[str, dict[str, object]] = {}
+    for raw_key, raw_value in raw.items():
+        if not isinstance(raw_key, str):
+            continue
+        key = raw_key.strip()
+        if not key or not isinstance(raw_value, Mapping):
+            continue
+        entry: dict[str, object] = {}
+        render_profile = _normalize_render_profile(raw_value.get("render_profile"))
+        if render_profile:
+            entry["render_profile"] = render_profile
+        output_target = str(raw_value.get("output_target", "") or "").strip()
+        if output_target:
+            entry["output_target"] = output_target
+        use_custom_output_default = bool(output_target and output_target.lower() != "next to input")
+        entry["use_custom_output"] = _coerce_bool(raw_value.get("use_custom_output"), use_custom_output_default)
+        workflow_mode = _normalize_workflow_mode(raw_value.get("workflow_mode"))
+        if workflow_mode:
+            entry["workflow_mode"] = workflow_mode
+        target_game = _normalize_texture_target_game(str(raw_value.get("target_game", "") or ""))
+        if target_game:
+            entry["target_game"] = target_game
+        if entry:
+            normalized[key] = entry
+    return normalized
+
+
+def build_mod_manager_profile_setup_hint(
+    profile_setup_memory: Mapping[str, object] | None,
+    *,
+    manager: str | None,
+    profile: str | None,
+) -> str:
+    if not profile_setup_memory:
+        return ""
+    entry = profile_setup_memory.get(_profile_setup_memory_key(manager, profile))
+    if not isinstance(entry, Mapping):
+        return ""
+    details: list[str] = []
+    renderer = _normalize_render_profile(entry.get("render_profile"))
+    if renderer:
+        details.append(
+            f"renderer {_RENDER_PROFILE_LABELS.get(renderer, renderer.replace('_', ' ').title())}"
+        )
+    use_custom_output = _coerce_bool(entry.get("use_custom_output"), False)
+    output_target = str(entry.get("output_target", "") or "").strip()
+    if use_custom_output and output_target:
+        details.append(f"output {output_target}")
+    elif output_target:
+        details.append("output next to input")
+    workflow_mode = _normalize_workflow_mode(entry.get("workflow_mode"))
+    if workflow_mode:
+        details.append(f"workflow mode {_WORKFLOW_MODE_LABELS[workflow_mode]}")
+    target_game = _normalize_texture_target_game(str(entry.get("target_game", "") or ""))
+    if target_game and target_game != "skyrim":
+        details.append(f"target game {target_game}")
+    if not details:
+        return ""
+    return f"Remembered setup for this profile: {', '.join(details)}. Use the restore button to reapply it quickly."
 
 
 def _infer_workflow_mode_from_state(state: Mapping[str, object]) -> str:
@@ -870,6 +941,7 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
     state["last_mod_profile"] = str(raw.get("last_mod_profile", state["last_mod_profile"]) or "").strip()
     state["last_renderer"] = str(raw.get("last_renderer", state["last_renderer"]) or "").strip()
     state["last_output_target"] = str(raw.get("last_output_target", state["last_output_target"]) or "").strip()
+    state["profile_setup_memory"] = _normalize_profile_setup_memory(raw.get("profile_setup_memory"))
     for key in (
         "use_custom_output",
         "dark_mode",
@@ -1543,6 +1615,7 @@ def build_mod_manager_context_hint(
     last_mod_profile: str = "",
     last_renderer: str = "",
     last_output_target: str = "",
+    profile_setup_hint: str = "",
 ) -> str:
     summary = (
         context.summary
@@ -1566,6 +1639,9 @@ def build_mod_manager_context_hint(
     normalized_output_target = last_output_target.strip()
     if normalized_output_target:
         remembered_bits.append(f"output target {normalized_output_target}")
+    normalized_profile_setup_hint = profile_setup_hint.strip()
+    if normalized_profile_setup_hint:
+        summary = f"{summary}\n{normalized_profile_setup_hint}"
     if remembered_bits:
         return f"{summary}\nLast remembered mod setup: {', '.join(remembered_bits)}"
     return summary
@@ -9710,6 +9786,7 @@ if GUI_AVAILABLE:
             self.last_mod_profile_memory = ""
             self.last_renderer_memory = ""
             self.last_output_target_memory = ""
+            self.profile_setup_memory: dict[str, dict[str, object]] = {}
             self.last_input_browse_dir: Path | None = None
             self.preview_size_var = tk.StringVar(value="Medium")
             self.preview_refresh_after_id: str | None = None
@@ -10141,11 +10218,22 @@ if GUI_AVAILABLE:
                 self.export_project_settings_button,
                 "Save the current GUI snapshot to a portable project-settings JSON file.",
             )
+            self.profile_setup_restore_button = ttk.Button(
+                project_settings_row,
+                text=self._tr("Restore remembered setup"),
+                command=self._restore_profile_setup_for_current_context,
+            )
+            self.profile_setup_restore_button.pack(side=tk.LEFT, padx=(8, 0))
+            self._add_tooltip(
+                self.profile_setup_restore_button,
+                "Reapply the renderer, workflow mode, target game, and output target remembered for the detected mod-manager profile.",
+            )
             file_frame.columnconfigure(1, weight=1, minsize=280)
             file_frame.columnconfigure(2, minsize=100)
             file_frame.columnconfigure(3, minsize=100)
             file_frame.columnconfigure(4, minsize=100)
             self._update_output_location_controls()
+            self._update_profile_setup_restore_controls()
             self.detected_mod_button.configure(
                 state=(tk.NORMAL if self.manager_context.loaded_texture_dirs else tk.DISABLED)
             )
@@ -11676,6 +11764,50 @@ if GUI_AVAILABLE:
             dismissed = state.get("dismissed_warnings", [])
             if isinstance(dismissed, list):
                 self.dismissed_warnings = set(str(w) for w in dismissed if isinstance(w, str))
+            self.profile_setup_memory = state.get("profile_setup_memory", {}) if isinstance(
+                state.get("profile_setup_memory", {}),
+                dict,
+            ) else {}
+            self._refresh_detected_context_hint()
+            self._update_profile_setup_restore_controls()
+
+        def _current_profile_setup_key(self) -> str:
+            manager = (self.manager_context.manager or self.last_mod_manager_memory).strip()
+            profile = (self.manager_context.profile_name or self.last_mod_profile_memory).strip()
+            if not manager and not profile:
+                return ""
+            return _profile_setup_memory_key(manager, profile)
+
+        def _current_profile_setup_entry(self) -> dict[str, object] | None:
+            key = self._current_profile_setup_key()
+            if not key:
+                return None
+            entry = self.profile_setup_memory.get(key)
+            return entry if isinstance(entry, dict) else None
+
+        def _update_profile_setup_restore_controls(self) -> None:
+            button = getattr(self, "profile_setup_restore_button", None)
+            if button is None:
+                return
+            button.configure(state=tk.NORMAL if self._current_profile_setup_entry() else tk.DISABLED)
+
+        def _sync_current_profile_setup_memory(self) -> None:
+            key = self._current_profile_setup_key()
+            if not key:
+                return
+            self.profile_setup_memory[key] = {
+                "render_profile": _normalize_render_profile(self.render_profile_var.get()),
+                "use_custom_output": bool(self.use_custom_output_var.get()),
+                "output_target": (
+                    self.output_var.get().strip()
+                    if self.use_custom_output_var.get() and self.output_var.get().strip()
+                    else "next to input"
+                ),
+                "workflow_mode": self._workflow_mode_from_controls(),
+                "target_game": _normalize_texture_target_game(self.target_game_var.get()),
+            }
+
+        def _refresh_detected_context_hint(self) -> None:
             self.detected_context_var.set(
                 build_mod_manager_context_hint(
                     self.manager_context,
@@ -11683,10 +11815,16 @@ if GUI_AVAILABLE:
                     last_mod_profile=self.last_mod_profile_memory,
                     last_renderer=self.last_renderer_memory,
                     last_output_target=self.last_output_target_memory,
+                    profile_setup_hint=build_mod_manager_profile_setup_hint(
+                        self.profile_setup_memory,
+                        manager=self.manager_context.manager or self.last_mod_manager_memory,
+                        profile=self.manager_context.profile_name or self.last_mod_profile_memory,
+                    ),
                 )
             )
 
         def _build_gui_state(self) -> dict[str, object]:
+            self._sync_current_profile_setup_memory()
             return {
                 "input_path": self.input_var.get().strip(),
                 "output_path": self.output_var.get().strip(),
@@ -11755,10 +11893,13 @@ if GUI_AVAILABLE:
                 "ao_strength": self.ao_strength_var.get(),
                 "roughness_strength": self.roughness_strength_var.get(),
                 "dismissed_warnings": sorted(self.dismissed_warnings),
+                "profile_setup_memory": self.profile_setup_memory,
             }
 
         def _save_persisted_gui_state(self) -> None:
-            save_gui_state(self._build_gui_state())
+            state = self._build_gui_state()
+            self._refresh_detected_context_hint()
+            save_gui_state(state)
 
         def _on_window_close(self) -> None:
             self._save_persisted_gui_state()
@@ -11907,6 +12048,49 @@ if GUI_AVAILABLE:
             can_edit = is_custom and not self.is_processing
             self.output_entry.configure(state="normal" if can_edit else "disabled")
             self.output_button.configure(state=tk.NORMAL if can_edit else tk.DISABLED)
+
+        def _restore_profile_setup_for_current_context(self) -> None:
+            entry = self._current_profile_setup_entry()
+            if entry is None:
+                self.status_var.set("No remembered setup exists for the detected mod-manager profile.")
+                return
+            render_profile = _normalize_render_profile(entry.get("render_profile"))
+            workflow_mode = _normalize_workflow_mode(entry.get("workflow_mode"))
+            target_game = _normalize_texture_target_game(str(entry.get("target_game", "") or ""))
+            use_custom_output = _coerce_bool(entry.get("use_custom_output"), False)
+            output_target = str(entry.get("output_target", "") or "").strip()
+            if workflow_mode:
+                self._apply_workflow_mode(workflow_mode)
+            if target_game:
+                self.target_game_var.set(target_game)
+            self.use_custom_output_var.set(use_custom_output)
+            if use_custom_output and output_target and output_target.lower() != "next to input":
+                self.output_var.set(output_target)
+            self._toggle_custom_output_location()
+            if render_profile:
+                self.render_profile_var.set(render_profile)
+                self._on_render_profile_changed()
+            self._update_output_location_controls()
+            self._save_persisted_gui_state()
+            profile_name = self.manager_context.profile_name or self.last_mod_profile_memory or "default profile"
+            summary_bits: list[str] = []
+            if render_profile:
+                summary_bits.append(
+                    f"renderer {_RENDER_PROFILE_LABELS.get(render_profile, render_profile.replace('_', ' ').title())}"
+                )
+            if workflow_mode:
+                summary_bits.append(f"workflow {_WORKFLOW_MODE_LABELS[workflow_mode]}")
+            if target_game and target_game != "skyrim":
+                summary_bits.append(f"target game {target_game}")
+            if use_custom_output and output_target:
+                summary_bits.append(f"output {output_target}")
+            elif not use_custom_output:
+                summary_bits.append("output next to input")
+            self.status_var.set(
+                f"Restored remembered setup for {profile_name}: {', '.join(summary_bits)}."
+                if summary_bits
+                else f"Restored remembered setup for {profile_name}."
+            )
 
         def _toggle_custom_output_location(self) -> None:
             input_value = self.input_var.get().strip()
@@ -17479,6 +17663,11 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             last_mod_profile=str(qt_saved_state.get("last_mod_profile", "") or ""),
             last_renderer=str(qt_saved_state.get("last_renderer", "") or ""),
             last_output_target=str(qt_saved_state.get("last_output_target", "") or ""),
+            profile_setup_hint=build_mod_manager_profile_setup_hint(
+                qt_saved_state.get("profile_setup_memory"),
+                manager=manager_context.manager or str(qt_saved_state.get("last_mod_manager", "") or ""),
+                profile=manager_context.profile_name or str(qt_saved_state.get("last_mod_profile", "") or ""),
+            ),
         )
     )
     manager_context_label.setWordWrap(True)

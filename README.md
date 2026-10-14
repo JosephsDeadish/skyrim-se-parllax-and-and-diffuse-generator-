@@ -34,7 +34,7 @@ When the tool is launched from **MO2** or **Vortex**, it now tries to detect the
 - **Vortex**: looks for the active profile/staging layout, reads `modlist.txt` plus `plugins.txt`/`loadorder.txt` when present, and exposes detected managed texture folders in the GUI.
 - Renderer auto-detect now uses loaded mod names plus concrete runtime markers from that MO2/Vortex context (for example `d3d11.dll`/`enbseries.ini`, `SKSE/Plugins/CommunityShaders.dll`, and `SKSE/Plugins/PBRNifPatcher.dll`) to better infer `ENB`, `Community Shaders`, or `TruePBR` defaults when texture path hints are unclear.
 - Context detection now also surfaces body/skeleton compatibility hints (for example `CBBE`, `3BA`, `UNP`, `BHUNP`, `HIMBO`, `SAM`, and `XPMSSE`) from enabled mod/plugin/load-order names.
-- The GUI shows the detected context under the file picker and adds a **Detected Mod (Hint)** button for faster browsing.
+- The GUI shows the detected context under the file picker, remembers the last renderer/output setup per mod-manager profile, and adds **Detected Mod (Hint)** plus **Restore remembered setup** buttons for faster switching.
 
 ## Usage
 
@@ -66,6 +66,7 @@ This opens a desktop interface where you can:
 - tune map-pixel strengths separately from the Qt TruePBR material-sidecar overrides, which are opt-in and do not create Community Shaders `PBRTextureSets` landscape JSON
 - choose the **Env mask mode**: `standard` (greyscale, vanilla Skyrim SE) or `complex` (RGBA packed, renderer-specific)
 - choose the **Target renderer** profile (**default: `custom`**) — includes `custom`, `vanilla`, `community_shaders`, `truepbr`, and `enb`
+- when switching MO2/Vortex profiles, use the remembered setup/restore controls to reapply the last renderer + output choice for that profile instead of re-entering it manually
 - use the Terrain profile for individual texture maps; it does not build tiled landscape layers or terrain feature sets
 - generation applies renderer guardrails before processing so locked/auto-detected profiles automatically realign complex format, env mask mode, and parallax mode when they conflict
 - toggle **Emboss depth** for edge-ridge normal generation on flat printed assets (books/cards/scrolls/posters)

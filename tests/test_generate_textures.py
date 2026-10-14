@@ -90,6 +90,7 @@ from generate_textures import (
     _summarize_batch_texture_dimensions,
     _visible_preview_output_keys,
     build_batch_bottleneck_hints,
+    build_mod_manager_profile_setup_hint,
     compute_checkpoint_mismatch_flags,
     compute_checkpoint_resume_counts,
     compute_processing_queue_event_budget,
@@ -1366,6 +1367,29 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(normalized["last_renderer"], "community_shaders")
         self.assertEqual(normalized["last_output_target"], "next to input")
 
+    def test_normalize_gui_state_preserves_profile_setup_memory(self) -> None:
+        normalized = _normalize_gui_state(
+            {
+                "profile_setup_memory": {
+                    "Mod Organizer 2::Main": {
+                        "render_profile": "community shaders",
+                        "output_target": "D:/Skyrim/Output",
+                        "use_custom_output": True,
+                        "workflow_mode": "advanced",
+                        "target_game": "fallout4",
+                    }
+                }
+            }
+        )
+        memory = normalized["profile_setup_memory"]
+        self.assertIn("Mod Organizer 2::Main", memory)
+        entry = memory["Mod Organizer 2::Main"]
+        self.assertEqual(entry["render_profile"], "community_shaders")
+        self.assertEqual(entry["output_target"], "D:/Skyrim/Output")
+        self.assertTrue(entry["use_custom_output"])
+        self.assertEqual(entry["workflow_mode"], "advanced")
+        self.assertEqual(entry["target_game"], "fallout4")
+
     def test_load_gui_state_defaults_when_file_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             state = load_gui_state(Path(temp_dir) / "missing-state.json")
@@ -1375,6 +1399,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(state["last_mod_profile"], "")
         self.assertEqual(state["last_renderer"], "")
         self.assertEqual(state["last_output_target"], "")
+        self.assertEqual(state["profile_setup_memory"], {})
         self.assertFalse(bool(state["dark_mode"]))
         self.assertEqual(str(state["theme_mode"]), "light")
         self.assertEqual(str(state["workflow_mode"]), "beginner")
@@ -1397,6 +1422,28 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("Main", message)
         self.assertIn("renderer Community Shaders", message)
         self.assertIn("output target next to input", message)
+
+    def test_build_mod_manager_profile_setup_hint_tracks_current_profile_setup(self) -> None:
+        hint = build_mod_manager_profile_setup_hint(
+            {
+                "Mod Organizer 2::Main": {
+                    "render_profile": "community_shaders",
+                    "output_target": "D:/Skyrim/Output",
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                }
+            },
+            manager="Mod Organizer 2",
+            profile="Main",
+        )
+        self.assertIn("renderer Community Shaders", hint)
+        self.assertIn("output D:/Skyrim/Output", hint)
+        self.assertIn("workflow mode Advanced", hint)
+        self.assertIn("target game fallout4", hint)
+        message = build_mod_manager_context_hint(None, profile_setup_hint=hint)
+        self.assertIn("Remembered setup for this profile", message)
+        self.assertIn(hint, message)
 
     def test_qt_generation_settings_merge_with_shared_gui_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
