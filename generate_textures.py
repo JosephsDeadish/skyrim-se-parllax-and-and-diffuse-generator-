@@ -1436,6 +1436,7 @@ def _merge_qt_generation_gui_state(
     resume_mode: str,
     checkpoint_path: str,
     include_rmaos: bool | None = None,
+    include_pbr_texture_sets: bool | None = None,
     include_complex: bool | None = None,
     include_wetness_mask: bool | None = None,
     include_snow_mask: bool | None = None,
@@ -1484,6 +1485,7 @@ def _merge_qt_generation_gui_state(
     )
     optional_outputs = {
         "include_rmaos": include_rmaos,
+        "include_pbr_texture_sets": include_pbr_texture_sets,
         "include_complex": include_complex,
         "include_wetness_mask": include_wetness_mask,
         "include_snow_mask": include_snow_mask,

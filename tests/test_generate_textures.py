@@ -1681,6 +1681,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 resume_mode="resume",
                 checkpoint_path=str(Path(temp_dir) / "checkpoint.json"),
                 include_rmaos=True,
+                include_pbr_texture_sets=True,
                 include_complex=True,
                 include_wetness_mask=True,
                 include_snow_mask=True,
@@ -1729,6 +1730,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(bool(merged["include_glow"]))
         self.assertTrue(bool(merged["include_environment_mask"]))
         self.assertTrue(bool(merged["include_rmaos"]))
+        self.assertTrue(bool(merged["include_pbr_texture_sets"]))
         self.assertTrue(bool(merged["include_complex"]))
         self.assertTrue(bool(merged["include_wetness_mask"]))
         self.assertTrue(bool(merged["include_snow_mask"]))
