@@ -10694,7 +10694,7 @@ class ParallaxOcclusionTests(unittest.TestCase):
                 temp_path, include_complex=True, complex_format="cm"
             )
             ids = [w[0] for w in warnings]
-            self.assertIn("output_folder_has_msn_files", ids)
+            self.assertIn("output_folder_has_enb_files", ids)
 
     def test_get_output_folder_format_warnings_cm_vs_msn_conflict(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -10704,7 +10704,7 @@ class ParallaxOcclusionTests(unittest.TestCase):
                 temp_path, include_complex=True, complex_format="msn"
             )
             ids = [w[0] for w in warnings]
-            self.assertIn("output_folder_has_cm_files", ids)
+            self.assertIn("output_folder_has_community_shaders_files", ids)
 
     def test_get_output_folder_format_warnings_c_vs_msn_conflict(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -10714,7 +10714,7 @@ class ParallaxOcclusionTests(unittest.TestCase):
                 temp_path, include_complex=True, complex_format="msn"
             )
             ids = [w[0] for w in warnings]
-            self.assertIn("output_folder_has_cm_files", ids)
+            self.assertIn("output_folder_has_community_shaders_files", ids)
 
     def test_get_output_folder_format_warnings_uppercase_C_vs_msn_conflict(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -10724,7 +10724,7 @@ class ParallaxOcclusionTests(unittest.TestCase):
                 temp_path, include_complex=True, complex_format="msn"
             )
             ids = [w[0] for w in warnings]
-            self.assertIn("output_folder_has_cm_files", ids)
+            self.assertIn("output_folder_has_community_shaders_files", ids)
 
     def test_get_output_folder_format_warnings_matching_format_no_warning(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -10740,9 +10740,57 @@ class ParallaxOcclusionTests(unittest.TestCase):
             temp_path = Path(temp_dir)
             (temp_path / "stone_msn.dds").write_bytes(b"fake")
             warnings = get_output_folder_format_warnings(
-                temp_path, include_complex=False, complex_format="cm"
+                temp_path, include_complex=False, complex_format="cm", render_profile="enb"
             )
             self.assertEqual(warnings, [])
+
+    def test_get_output_folder_format_warnings_truepbr_files_conflict_with_enb_family(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            (temp_path / "stone_rmaos.dds").write_bytes(b"fake")
+            warnings = get_output_folder_format_warnings(
+                temp_path, include_complex=False, complex_format="msn", render_profile="enb"
+            )
+            ids = [w[0] for w in warnings]
+            self.assertIn("output_folder_has_truepbr_files", ids)
+
+    def test_get_output_folder_format_warnings_cs_aux_files_conflict_with_truepbr_family(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            (temp_path / "stone_wt.dds").write_bytes(b"fake")
+            warnings = get_output_folder_format_warnings(
+                temp_path, include_complex=False, complex_format="msn", render_profile="truepbr"
+            )
+            ids = [w[0] for w in warnings]
+            self.assertIn("output_folder_has_community_shaders_files", ids)
+
+    def test_get_output_folder_format_warnings_complex_env_mask_mode_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            Image.new("RGBA", (4, 4), color=(10, 20, 30, 255)).save(temp_path / "stone_m.png")
+            warnings = get_output_folder_format_warnings(
+                temp_path,
+                include_complex=False,
+                complex_format="msn",
+                include_environment_mask=True,
+                env_mask_mode="standard",
+            )
+            ids = [w[0] for w in warnings]
+            self.assertIn("output_folder_has_complex_env_mask_files", ids)
+
+    def test_get_output_folder_format_warnings_standard_env_mask_mode_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            Image.new("L", (4, 4), color=128).save(temp_path / "stone_m.png")
+            warnings = get_output_folder_format_warnings(
+                temp_path,
+                include_complex=False,
+                complex_format="msn",
+                include_environment_mask=True,
+                env_mask_mode="complex",
+            )
+            ids = [w[0] for w in warnings]
+            self.assertIn("output_folder_has_standard_env_mask_files", ids)
 
     def test_get_output_folder_format_warnings_empty_folder_no_warning(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -12878,8 +12926,8 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             widget("generate").click()
             self.assertEqual(len(recorded_warnings), 1)
             self.assertEqual(recorded_warnings[0][0], "Output Folder Warning")
-            self.assertEqual(recorded_warnings[0][1], "output_folder_has_msn_files")
-            self.assertIn("_msn", recorded_warnings[0][2])
+            self.assertEqual(recorded_warnings[0][1], "output_folder_has_enb_files")
+            self.assertIn("ENB `_msn`", recorded_warnings[0][2])
             self.assertTrue(widget("generate").isEnabled())
             return True
 

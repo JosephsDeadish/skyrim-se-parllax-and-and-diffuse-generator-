@@ -5657,6 +5657,49 @@ def _normalize_parallax_mode_key(value: str | None, default: str = "standard") -
     return default
 
 
+def _output_family_label(family: str) -> str:
+    normalized = str(family or "").strip().lower()
+    return _RENDER_PROFILE_LABELS.get(normalized, normalized.replace("_", " ").title())
+
+
+def _resolve_output_folder_family(
+    *,
+    render_profile: str,
+    include_complex: bool,
+    complex_format: str,
+    include_environment_mask: bool,
+    include_rmaos: bool,
+    include_wetness_mask: bool,
+    include_snow_mask: bool,
+    env_mask_mode: str,
+) -> str:
+    normalized_profile = _normalize_render_profile(render_profile)
+    if normalized_profile not in {"auto", "custom"}:
+        return _render_profile_family(normalized_profile)
+    if include_rmaos:
+        return "truepbr"
+    if include_complex:
+        return "community_shaders" if _normalize_complex_format(complex_format) == "cm" else "enb"
+    if include_wetness_mask or include_snow_mask:
+        return "community_shaders"
+    if include_environment_mask and _normalize_env_mask_mode(env_mask_mode) == "complex":
+        return "enb"
+    return "vanilla"
+
+
+def _classify_output_env_mask_mode(path: Path) -> str | None:
+    try:
+        with Image.open(path) as image:
+            bands = image.getbands()
+    except Exception:
+        return None
+    if any(channel in bands for channel in ("R", "G", "B")):
+        return "complex"
+    if "L" in bands:
+        return "standard"
+    return None
+
+
 def resolve_render_profile_mode_selection(
     current_modes: Mapping[str, str],
     *,
@@ -9667,54 +9710,112 @@ def get_output_folder_format_warnings(
     *,
     include_complex: bool,
     complex_format: str,
+    include_environment_mask: bool = False,
+    env_mask_mode: str = "standard",
+    include_rmaos: bool = False,
+    include_wetness_mask: bool = False,
+    include_snow_mask: bool = False,
+    render_profile: str = "custom",
 ) -> list[tuple[str, str]]:
-    """Return (warning_id, message) pairs when the output folder contains complex-material files
-    that use a different naming convention than the one currently selected.
-
-    Checks for the presence of *_msn.dds / *_cm.dds / *_c.dds files that conflict with
-    ``complex_format``.
-    """
+    """Return output-folder safety warnings for mixed renderer-family exports."""
     warnings: list[tuple[str, str]] = []
-    if not include_complex or not output_dir.is_dir():
+    if not output_dir.is_dir():
         return warnings
 
-    normalized_format = complex_format.strip().lower()
+    selected_family = _resolve_output_folder_family(
+        render_profile=render_profile,
+        include_complex=include_complex,
+        complex_format=complex_format,
+        include_environment_mask=include_environment_mask,
+        include_rmaos=include_rmaos,
+        include_wetness_mask=include_wetness_mask,
+        include_snow_mask=include_snow_mask,
+        env_mask_mode=env_mask_mode,
+    )
+    selected_family_label = _output_family_label(selected_family)
+    normalized_env_mask_mode = _normalize_env_mask_mode(env_mask_mode)
 
-    # Scan for existing complex material files in the output folder (non-recursive).
-    msn_files = list(output_dir.glob("*_msn.dds")) + list(output_dir.glob("*_msn.png"))
-    cm_files = (
-        list(output_dir.glob("*_cm.dds"))
-        + list(output_dir.glob("*_cm.png"))
-        + list(output_dir.glob("*_c.dds"))
-        + list(output_dir.glob("*_c.png"))
-        + list(output_dir.glob("*_C.dds"))
-        + list(output_dir.glob("*_C.png"))
+    try:
+        existing_files = [path for path in output_dir.iterdir() if path.is_file()]
+    except Exception:
+        return warnings
+
+    enb_files: list[Path] = []
+    community_shaders_files: list[Path] = []
+    truepbr_files: list[Path] = []
+    standard_env_mask_files: list[Path] = []
+    complex_env_mask_files: list[Path] = []
+
+    for path in existing_files:
+        lowered = path.name.lower()
+        if lowered.endswith(("_msn.dds", "_msn.png")):
+            enb_files.append(path)
+            continue
+        if lowered.endswith(("_cm.dds", "_cm.png", "_c.dds", "_c.png", "_wt.dds", "_wt.png", "_sm.dds", "_sm.png")):
+            community_shaders_files.append(path)
+            continue
+        if lowered.endswith(("_rmaos.dds", "_rmaos.png", "_ramos.dds", "_ramos.png")):
+            truepbr_files.append(path)
+            continue
+        if lowered.endswith(("_m.dds", "_m.png")):
+            env_mask_kind = _classify_output_env_mask_mode(path)
+            if env_mask_kind == "standard":
+                standard_env_mask_files.append(path)
+            elif env_mask_kind == "complex":
+                complex_env_mask_files.append(path)
+
+    def _append_family_warning(warning_id: str, family_label: str, files: list[Path], tip: str) -> None:
+        if not files or selected_family == warning_id.removeprefix("output_folder_has_").removesuffix("_files"):
+            return
+        sample = files[0].name
+        count = len(files)
+        warnings.append((
+            warning_id,
+            f"The output folder contains {count} existing {family_label} file(s) (e.g. {sample}), "
+            f"but the current family is {selected_family_label}.\n\n"
+            f"Mixing {family_label} outputs with {selected_family_label} outputs in the same folder can cause the wrong "
+            "variant to be reused or silently overwrite a previous run.\n\n"
+            f"Tip: {tip}",
+        ))
+
+    _append_family_warning(
+        "output_folder_has_enb_files",
+        "ENB `_msn`",
+        enb_files,
+        "Use a separate output folder for ENB or clear the existing `_msn` files before switching families.",
+    )
+    _append_family_warning(
+        "output_folder_has_community_shaders_files",
+        "Community Shaders `_cm`/`_c`/`_wt`/`_sm`",
+        community_shaders_files,
+        "Use a separate output folder for Community Shaders or clear the existing CS files before switching families.",
+    )
+    _append_family_warning(
+        "output_folder_has_truepbr_files",
+        "TruePBR `_rmaos`/`_ramos`",
+        truepbr_files,
+        "Use a separate output folder for TruePBR or clear the existing `_rmaos`/`_ramos` files before switching families.",
     )
 
-    if normalized_format == "cm" and msn_files:
-        sample = msn_files[0].name
-        count = len(msn_files)
-        warnings.append((
-            "output_folder_has_msn_files",
-            f"The output folder contains {count} existing '_msn' complex-material file(s) (e.g. {sample}), "
-            f"but you are about to generate packed '_cm'/'_c' format files.\n\n"
-            "Mixing _msn and _cm/_c formats in the same folder can cause Skyrim SE / ENB to load the wrong variant, "
-            "producing incorrect shading or missing effects in-game.\n\n"
-            "Tip: Change the Complex Material Format to 'msn' to match existing files, "
-            "or clear the output folder before switching formats.",
-        ))
-    elif normalized_format == "msn" and cm_files:
-        sample = cm_files[0].name
-        count = len(cm_files)
-        warnings.append((
-            "output_folder_has_cm_files",
-            f"The output folder contains {count} existing '_cm'/'_c' complex-material file(s) (e.g. {sample}), "
-            f"but you are about to generate '_msn' format files.\n\n"
-            "Mixing _cm/_c and _msn formats in the same folder can cause Skyrim SE / ENB to load the wrong variant, "
-            "producing incorrect shading or missing effects in-game.\n\n"
-            "Tip: Change the Complex Material Format to 'cm' to match existing files, "
-            "or clear the output folder before switching formats.",
-        ))
+    if include_environment_mask:
+        if normalized_env_mask_mode == "standard" and complex_env_mask_files:
+            sample = complex_env_mask_files[0].name
+            warnings.append((
+                "output_folder_has_complex_env_mask_files",
+                f"The output folder contains {len(complex_env_mask_files)} existing complex `_m` environment-mask file(s) (e.g. {sample}), "
+                "but you are about to generate standard greyscale `_m` files.\n\n"
+                "Mixing standard and complex `_m` files in the same folder can silently overwrite the wrong environment-mask variant.\n\n"
+                "Tip: Switch Env mask mode to 'complex' to match existing files, or clear the output folder before changing modes.",
+            ))
+        elif normalized_env_mask_mode == "complex" and standard_env_mask_files:
+            sample = standard_env_mask_files[0].name
+            warnings.append((
+                "output_folder_has_standard_env_mask_files",
+                f"The output folder contains {len(standard_env_mask_files)} existing standard `_m` environment-mask file(s) (e.g. {sample}), "
+                "but you are about to generate complex `_m` files.\n\n"
+                "Mixing standard and complex `_m` files in the same folder can silently overwrite the wrong environment-mask variant.\n\n"
+                "Tip: Switch Env mask mode to 'standard' to match existing files, or clear the output folder before changing modes.",
+            ))
 
     return warnings
 
@@ -16453,6 +16554,12 @@ if GUI_AVAILABLE:
                         _effective_output_dir,
                         include_complex=include_complex,
                         complex_format=self.complex_format_var.get(),
+                        include_environment_mask=include_environment_mask,
+                        env_mask_mode=self.env_mask_mode_var.get(),
+                        include_rmaos=include_rmaos,
+                        include_wetness_mask=include_wetness_mask,
+                        include_snow_mask=include_snow_mask,
+                        render_profile=str(_guardrails["effective_profile"]),
                     )
                     for warning_id, message in folder_warnings:
                         if not self._show_dismissible_warning_dialog("Output Folder Warning", warning_id, message):
@@ -22878,6 +22985,12 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                     effective_output_dir,
                     include_complex=include_complex_check.isChecked(),
                     complex_format=str(complex_format_combo.currentData() or "msn"),
+                    include_environment_mask=include_environment_mask_check.isChecked(),
+                    env_mask_mode=str(env_mask_mode_combo.currentData() or "standard"),
+                    include_rmaos=include_rmaos_check.isChecked(),
+                    include_wetness_mask=include_wetness_mask_check.isChecked(),
+                    include_snow_mask=include_snow_mask_check.isChecked(),
+                    render_profile=render_profile_combo.currentText(),
                 )
             )
         for warning_id, message in warnings:
