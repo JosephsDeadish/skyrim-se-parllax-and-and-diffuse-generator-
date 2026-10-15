@@ -76,6 +76,7 @@ from generate_textures import (
     _describe_qt_profile_guidance,
     _detect_renderer_version_hints,
     _format_short_guidance_tooltip,
+    _format_qt_preview_channel_note,
     _format_qt_log_export_text,
     _resolve_app_icon_source_path,
     _nif_editor_confirmation_text,
@@ -1812,6 +1813,18 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("what it does: switches a control", tooltip)
         self.assertIn("when to use it: you need the safe preset path", tooltip)
         self.assertIn("when not to use it: you want full manual control", tooltip)
+
+    def test_qt_preview_channel_note_formatter_includes_legends_and_viewing_state(self) -> None:
+        note = _format_qt_preview_channel_note(
+            "complex_material",
+            "enb",
+            inspection="channels RGBA",
+            viewing_label="Alpha",
+        ).lower()
+        self.assertIn("channel meanings:", note)
+        self.assertIn("enb _msn", note)
+        self.assertIn("inspection: channels rgba", note)
+        self.assertIn("viewing: alpha.", note)
 
     def test_qt_log_export_text_ends_with_single_newline_when_non_empty(self) -> None:
         self.assertEqual(_format_qt_log_export_text("line 1\nline 2\n"), "line 1\nline 2\n")

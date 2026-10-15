@@ -1433,6 +1433,21 @@ def _describe_qt_output_channels(output_key: str, render_profile: str) -> str:
     return "RGB image output."
 
 
+def _format_qt_preview_channel_note(
+    output_key: str,
+    render_profile: str,
+    *,
+    inspection: str | None = None,
+    viewing_label: str | None = None,
+) -> str:
+    lines = [f"Channel meanings: {_describe_qt_output_channels(output_key, render_profile)}"]
+    if inspection:
+        lines.append(f"Inspection: {inspection.strip()}")
+    if viewing_label:
+        lines.append(f"Viewing: {viewing_label.strip()}.")
+    return " ".join(lines)
+
+
 def _connect_qt_worker_thread_lifecycle(
     worker: Any,
     thread: Any,
@@ -18975,10 +18990,13 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     preview_channel_row.addWidget(QtWidgets.QLabel("View channel"))
     preview_channel_combo = QtWidgets.QComboBox()
     preview_channel_combo.addItem("Composite", None)
+    preview_channel_combo.setToolTip(
+        "Choose an output channel to inspect. The note below explains the channel meanings for the selected output."
+    )
     preview_channel_row.addWidget(preview_channel_combo)
     preview_channel_row.addStretch(1)
     preview_layout.addLayout(preview_channel_row)
-    preview_channel_note = QtWidgets.QLabel("Select an output to see its channel meanings.")
+    preview_channel_note = QtWidgets.QLabel("Select an output to see its channel meanings and inspection summary.")
     preview_channel_note.setWordWrap(True)
     preview_layout.addWidget(preview_channel_note)
     preview_image_label = QtWidgets.QLabel("Select a generated output to preview it.")
@@ -19502,7 +19520,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         if item is None:
             preview_image_label.setPixmap(QtGui.QPixmap())
             preview_image_label.setText("Select a generated output to preview it.")
-            preview_channel_note.setText("Select an output to see its channel meanings.")
+            preview_channel_note.setText("Select an output to see its channel meanings and inspection summary.")
             return
         image_path = str(item.data(QtCore.Qt.ItemDataRole.UserRole) or "")
         output_key = str(item.data(QtCore.Qt.ItemDataRole.UserRole + 1) or "")
@@ -19524,18 +19542,32 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                 )
             )
             preview_channel_note.setText(
-                _describe_qt_output_channels(output_key, render_profile_combo.currentText())
+                _format_qt_preview_channel_note(
+                    output_key,
+                    render_profile_combo.currentText(),
+                    inspection=None,
+                    viewing_label=preview_channel_combo.currentText(),
+                )
             )
             inspection = _inspect_qt_output_image(image_path, output_key)
             preview_channel_note.setText(
-                f"{preview_channel_note.text()} {inspection} "
-                f"Viewing: {preview_channel_combo.currentText()}."
+                _format_qt_preview_channel_note(
+                    output_key,
+                    render_profile_combo.currentText(),
+                    inspection=inspection,
+                    viewing_label=preview_channel_combo.currentText(),
+                )
             )
         except Exception as exc:
             preview_image_label.setPixmap(QtGui.QPixmap())
             preview_image_label.setText(f"Preview unavailable: {exc}")
             preview_channel_note.setText(
-                _describe_qt_output_channels(output_key, render_profile_combo.currentText())
+                _format_qt_preview_channel_note(
+                    output_key,
+                    render_profile_combo.currentText(),
+                    inspection=str(exc),
+                    viewing_label=preview_channel_combo.currentText(),
+                )
             )
 
     def _update_qt_preview_channels(*_: object) -> None:
