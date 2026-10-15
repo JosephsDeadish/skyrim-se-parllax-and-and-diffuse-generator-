@@ -153,6 +153,7 @@ from generate_textures import (
     recommend_generation_settings,
     recommend_render_profile,
     recommend_render_profile_details,
+    RenderProfileRecommendation,
     resolve_nif_patch_defaults_for_render_profile,
     resolve_render_profile_guardrails,
     resolve_render_profile_mode_control_states,
@@ -3997,6 +3998,23 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("Confidence:", message)
         self.assertIn("Why this was recommended:", message)
         self.assertIn("Why not the others:", message)
+
+    def test_build_render_profile_messages_warn_on_low_confidence(self) -> None:
+        recommendation = RenderProfileRecommendation(
+            profile="vanilla",
+            confidence=0.56,
+            confidence_label="low",
+            recommendation_reason="No renderer-specific markers were found, so vanilla-safe defaults are the least risky choice.",
+            why_not_others=("Not ENB: ENB uses `_msn` or `_m`, not `_cm/_c`.", "Not TruePBR: TruePBR uses `_rmaos/_ramos` plus JSON sidecars, not `_cm/_c`."),
+            evidence=("no renderer-family markers",),
+            source="default fallback",
+        )
+
+        brief_message = build_render_profile_brief_message(recommendation.profile, recommendation=recommendation)
+        detailed_message = build_render_profile_recommendation_message(recommendation.profile, recommendation=recommendation)
+
+        self.assertIn("probably incompatible", brief_message.lower())
+        self.assertIn("probably incompatible", detailed_message.lower())
 
     def test_build_render_profile_brief_message_warns_on_selected_family_mismatch(self) -> None:
         recommendation = recommend_render_profile_details(

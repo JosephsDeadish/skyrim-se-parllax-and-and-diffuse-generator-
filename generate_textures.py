@@ -3980,6 +3980,9 @@ def build_render_profile_recommendation_message(
     ]
     if recommendation is not None:
         lines.extend(_format_render_profile_recommendation_detail_lines(recommendation))
+        uncertainty_notice = _render_profile_uncertainty_notice(recommendation)
+        if uncertainty_notice is not None:
+            lines.append(uncertainty_notice)
         lines.append("")
     lines.extend([
         describe_render_profile_output_recommendation(normalized),
@@ -4484,6 +4487,9 @@ def _format_render_profile_brief_summary(recommendation: RenderProfileRecommenda
         summary.append(f"Signals: {'; '.join(_clean_clause(text) for text in recommendation.evidence[:2])}.")
     if recommendation.why_not_others:
         summary.append(f"Why not the others: {' '.join(_clean_clause(text) for text in recommendation.why_not_others)}.")
+    uncertainty_notice = _render_profile_uncertainty_notice(recommendation)
+    if uncertainty_notice is not None:
+        summary.append(uncertainty_notice)
     return " ".join(summary)
 
 
@@ -4498,6 +4504,14 @@ def _format_render_profile_recommendation_detail_lines(recommendation: RenderPro
     if recommendation.why_not_others:
         lines.append(f"- Why not the others: {' '.join(recommendation.why_not_others)}")
     return lines
+
+
+def _render_profile_uncertainty_notice(recommendation: RenderProfileRecommendation) -> str | None:
+    if recommendation.confidence >= 0.70:
+        return None
+    if recommendation.confidence >= 0.55:
+        return "⚠ Probably incompatible until you confirm the installed renderer/config version."
+    return "⚠ Probably incompatible: confidence is very low, so verify the installed renderer/config version before export."
 
 
 def _describe_nif_workflow_state_for_guidance(
