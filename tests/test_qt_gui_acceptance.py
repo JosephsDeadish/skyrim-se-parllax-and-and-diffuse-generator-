@@ -121,6 +121,11 @@ class TestQtGuiAcceptance(unittest.TestCase):
             (900, 660, "1.15", False), (960, 700, "2.0", True),
         ))
 
+    def test_window_size_tolerance_only_allows_two_pixel_layout_rounding(self):
+        self.assertTrue(acceptance._dimensions_within_tolerance((902, 660), (900, 660)))
+        self.assertFalse(acceptance._dimensions_within_tolerance((903, 660), (900, 660)))
+        self.assertFalse(acceptance._dimensions_within_tolerance((900,), (900, 660)))
+
     @unittest.skipUnless(gt.QT_GUI_AVAILABLE, "Optional PySide6 unavailable")
     def test_actual_qt_timeout_records_screenshot_and_safely_exits(self):
         path = self.root / "timeout.json"

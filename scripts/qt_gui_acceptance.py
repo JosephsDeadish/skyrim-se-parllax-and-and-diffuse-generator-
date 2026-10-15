@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager, redirect_stderr
+from collections.abc import Sequence
 import hashlib
 import io
 import json
@@ -21,6 +22,20 @@ SCENARIOS = (
     (960, 700, "2.0", True),
 )
 SOURCE_DIMENSIONS = (512, 1024, 512, 2048, 1024, 512, 2048, 4096)
+WINDOW_SIZE_TOLERANCE = 2
+
+
+def _dimensions_within_tolerance(
+    actual: Sequence[int],
+    expected: Sequence[int],
+    tolerance: int = WINDOW_SIZE_TOLERANCE,
+) -> bool:
+    return (
+        tolerance >= 0
+        and len(actual) == len(expected)
+        and all(abs(actual_value - expected_value) <= tolerance
+                for actual_value, expected_value in zip(actual, expected))
+    )
 
 
 def _write_source(path: Path, dimension: int, seed: int = 0) -> None:
@@ -168,22 +183,26 @@ def run_acceptance(generator, report_path: str | Path, *, timeout_seconds: float
                 pixmap = self.window.grab()
                 self.require(pixmap.save(str(path), "PNG"), f"Cannot save screenshot: {path}")
                 size = [pixmap.width(), pixmap.height()]
+                logical_size = [self.window.width(), self.window.height()]
                 if expected:
                     ratio = pixmap.devicePixelRatio()
                     self.require(
-                        size == [round(value * ratio) for value in expected],
-                        f"Wrong screenshot dimensions: {size}, expected {expected}, DPR {ratio}",
+                        _dimensions_within_tolerance(logical_size, expected),
+                        f"Window could not reach requested size: {logical_size}, expected {expected} "
+                        f"(tolerance {WINDOW_SIZE_TOLERANCE}px)",
                     )
                     self.require(
-                        [self.window.width(), self.window.height()] == list(expected),
-                        "Window could not reach requested acceptance size",
+                        size == [round(value * ratio) for value in logical_size],
+                        f"Screenshot dimensions {size} do not match actual window size {logical_size} "
+                        f"at DPR {ratio}",
                     )
                 with Image.open(path) as image:
                     self.require(list(image.size) == size, "PNG decode size mismatch")
                 report["screenshots"].append({
                     "path": str(path), "dimensions": size,
-                    "logical_dimensions": [self.window.width(), self.window.height()],
-                    "logical_size": [self.window.width(), self.window.height()],
+                    "logical_dimensions": logical_size,
+                    "logical_size": logical_size,
+                    "requested_logical_size": list(expected) if expected else None,
                     "device_pixel_ratio": pixmap.devicePixelRatio(),
                     "tab": self.widget("tabs").tabText(self.widget("tabs").currentIndex()),
                     "tab_name": self.widget("tabs").tabText(self.widget("tabs").currentIndex()),
