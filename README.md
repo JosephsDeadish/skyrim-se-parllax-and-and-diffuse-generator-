@@ -349,6 +349,7 @@ Qt editor regressions exercise synthetic Skyrim and Fallout meshes, including dr
 The **Auto-patch NIFs after generation** checkbox (off by default) triggers NIF patching automatically after each generation run.
 For safety, parallax auto-patching skips known-problem cases by default (Havok-attached meshes, skinned/alpha meshes, decal/anisotropic/soft-lighting variants, and single-pass shader blocks).
 For CLI runs, `nif_patcher.py --target-game auto|skyrim|fallout` now makes profile intent explicit. Fallout writes require `--experimental-fallout-write` and default to guarded flag/texture-slot patching.
+CLI patching is dry-run by default; add `--write` when you are ready to apply changes after reviewing the preview and backups.
 If you explicitly accept higher-risk Fallout writes, per-operation safety gates are available:
 `--fallout-allow-parallax-scale`, `--fallout-allow-fix-mesh-lighting`, `--fallout-allow-spec-strength`, `--fallout-allow-spec-color`, and `--fallout-allow-env-map-scale`.
 The NIF Editor now exposes matching controls (**NIF game profile** + **Enable experimental Fallout writes**) and per-operation Fallout safety gate checkboxes so GUI patch/remediation behavior aligns with CLI behavior.

@@ -7,7 +7,7 @@ import shutil
 import struct
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -7132,6 +7132,43 @@ class TestCliArgumentValidation(unittest.TestCase):
             with redirect_stdout(out):
                 nif_patcher_main()
         self.assertIn("NIF patch compatibility report", out.getvalue())
+
+    def test_cli_defaults_to_dry_run_and_write_flag_opts_in(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"nif")
+            dry_run_result = NifPatchResult(nif_path=nif_path, success=True, already_up_to_date=False, message="Would patch.")
+
+            with (
+                mock.patch("nif_patcher.patch_nif", return_value=dry_run_result) as patch_mock,
+                mock.patch("sys.argv", ["nif_patcher.py", str(nif_path), "--parallax", "textures\\stone_p.dds"]),
+            ):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    nif_patcher_main()
+
+        self.assertTrue(patch_mock.call_args.args[1].dry_run)
+        self.assertIn("files would change (dry-run)", stdout.getvalue())
+        self.assertEqual(stderr.getvalue(), "")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"nif")
+            write_result = NifPatchResult(nif_path=nif_path, success=True, already_up_to_date=False, message="Patched.")
+
+            with (
+                mock.patch("nif_patcher.patch_nif", return_value=write_result) as patch_mock,
+                mock.patch("sys.argv", ["nif_patcher.py", str(nif_path), "--write", "--parallax", "textures\\stone_p.dds"]),
+            ):
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    nif_patcher_main()
+
+        self.assertFalse(patch_mock.call_args.args[1].dry_run)
+        self.assertIn("WRITE MODE ENABLED", stderr.getvalue())
+        self.assertIn("files modified", stdout.getvalue())
 
     def test_validate_cli_prints_explainability_summary_before_conflict_report(self) -> None:
         with tempfile.TemporaryDirectory() as td:

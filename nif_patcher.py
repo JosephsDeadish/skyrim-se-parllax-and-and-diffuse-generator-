@@ -7035,8 +7035,20 @@ def _main() -> None:  # pragma: no cover
                         help="Clear slot 4 cubemap texture path.")
     parser.add_argument("--no-backup", action="store_true",
                         help="Skip .nif.bak backup.")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Preview changes without writing.")
+    dry_run_group = parser.add_mutually_exclusive_group()
+    dry_run_group.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        help="Preview changes without writing (default).",
+    )
+    dry_run_group.add_argument(
+        "--write",
+        dest="dry_run",
+        action="store_false",
+        help="Write changes to disk after validation and backup checks.",
+    )
+    parser.set_defaults(dry_run=True)
     parser.add_argument(
         "--dry-run-diff",
         action="store_true",
@@ -7282,6 +7294,12 @@ def _main() -> None:  # pragma: no cover
         )
         sys.exit(1)
 
+    if not args.validate and not args.dry_run:
+        print(
+            "WRITE MODE ENABLED: this run may modify NIF files on disk. Review compare/backups before relying on the result.",
+            file=sys.stderr,
+        )
+
     nif_files: list[Path] = []
     for p in args.nif:
         if p.is_dir():
@@ -7470,7 +7488,7 @@ def _main() -> None:  # pragma: no cover
         fallout_allow_env_map_scale=args.fallout_allow_env_map_scale,
     )
 
-    ok = 0
+    changed_count = 0
     for nif in nif_files:
         res = patch_nif(nif, opts)
         status = "OK" if res.success else "FAIL"
@@ -7480,9 +7498,12 @@ def _main() -> None:  # pragma: no cover
         for warning in res.warnings:
             print(f"       warning: {warning}")
         if res.success and not res.already_up_to_date:
-            ok += 1
+            changed_count += 1
 
-    print(f"\n{ok}/{len(nif_files)} files modified.")
+    if args.dry_run:
+        print(f"\n{changed_count}/{len(nif_files)} files would change (dry-run).")
+    else:
+        print(f"\n{changed_count}/{len(nif_files)} files modified.")
 
 
 if __name__ == "__main__":
