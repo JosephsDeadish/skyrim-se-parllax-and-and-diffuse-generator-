@@ -5506,6 +5506,26 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertIn("plugin(s)", context.summary)
             self.assertIn("load-order", context.summary)
 
+    def test_detect_mod_manager_context_flags_nonstandard_mo2_layouts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            instance_root = temp_path / "Portable MO2"
+            textures_dir = instance_root / "mods" / "Texture Pack" / "textures"
+            tool_dir = instance_root / "mods" / "Skyrim Texture Generator"
+            profile_dir = instance_root / "profiles" / "Default"
+            textures_dir.mkdir(parents=True)
+            tool_dir.mkdir(parents=True)
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "modlist.txt").write_text("+Texture Pack\n", encoding="utf-8")
+
+            context = detect_mod_manager_context(
+                {"MO_PROFILE": "Default"},
+                executable_path=tool_dir / "generate_textures.exe",
+            )
+
+            self.assertEqual(context.manager, "Mod Organizer 2")
+            self.assertIn("nonstandard MO2 layout detected at Portable MO2", context.summary)
+
     def test_detect_mod_manager_context_detects_body_and_skeleton_hints(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -5600,6 +5620,37 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
             self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
             self.assertEqual(context.staging_root, staging_root.resolve())
+
+    def test_detect_mod_manager_context_finds_portable_vortex_profiles_near_staging_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            profile_root = temp_path / "Vortex Profiles (Portable)"
+            profile_dir = profile_root / "Skyrim Special Edition" / "profiles" / "Main"
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "modlist.txt").write_text("+Texture Pack\n", encoding="utf-8")
+            (profile_dir / "plugins.txt").write_text("*Skyrim.esm\n", encoding="utf-8")
+            (profile_dir / "loadorder.txt").write_text("Skyrim.esm\n", encoding="utf-8")
+
+            staging_root = temp_path / "Vortex Mods (Portable)" / "Skyrim Special Edition"
+            textures_dir = staging_root / "Texture Pack" / "textures"
+            meshes_dir = staging_root / "Texture Pack" / "meshes"
+            tool_dir = staging_root / "Skyrim Texture Generator"
+            textures_dir.mkdir(parents=True)
+            meshes_dir.mkdir(parents=True)
+            tool_dir.mkdir(parents=True)
+
+            context = detect_mod_manager_context(
+                {},
+                executable_path=tool_dir / "generate_textures.exe",
+            )
+
+            self.assertEqual(context.manager, "Vortex")
+            self.assertEqual(context.profile_name, "Main")
+            self.assertEqual(context.loaded_mods, ("Texture Pack",))
+            self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
+            self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
+            self.assertEqual(context.staging_root, staging_root.resolve())
+            self.assertIn("portable Vortex profile root detected near the executable", context.summary)
 
     def test_detect_mod_manager_context_resolves_vortex_profile_root_to_nested_profile_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -1651,6 +1651,7 @@ class ModManagerContext:
     detected_body_profiles: tuple[str, ...] = ()
     detected_skeleton_profiles: tuple[str, ...] = ()
     renderer_version_hints: tuple[str, ...] = ()
+    layout_hint: str | None = None
 
     @property
     def summary(self) -> str:
@@ -1675,6 +1676,8 @@ class ModManagerContext:
             details.append(f"skeleton hints {', '.join(self.detected_skeleton_profiles)}")
         if self.renderer_version_hints:
             details.append(f"version hints {', '.join(self.renderer_version_hints)}")
+        if self.layout_hint:
+            details.append(self.layout_hint)
         if self.game_root is not None:
             details.append(f"game root {self.game_root}")
         details.append("advisory only: explicit folder and output choices always win")
@@ -2018,9 +2021,24 @@ def _looks_like_vortex_root_name(name: str) -> bool:
     return normalized_name.startswith("vortexmods") or normalized_name.startswith("blacktreegamingltdvortex") or normalized_name == "vortex"
 
 
-def _candidate_vortex_profile_dirs(env: Mapping[str, str], game_id: str | None) -> tuple[Path, ...]:
+def _looks_like_vortex_profile_root_name(name: str) -> bool:
+    normalized_name = _normalize_path_name(name)
+    return (
+        normalized_name == "profiles"
+        or normalized_name == "profile"
+        or "vortex" in normalized_name and "profiles" in normalized_name
+    )
+
+
+def _candidate_vortex_profile_dirs(
+    env: Mapping[str, str],
+    game_id: str | None,
+    *,
+    executable_path: Path | None = None,
+) -> tuple[tuple[Path, ...], str | None]:
     candidates: list[Path] = []
     game_folder_variants = _vortex_game_folder_variants(game_id)
+    layout_hint: str | None = None
 
     def _collect_profile_dirs_from_root(root: Path) -> None:
         patterns: list[Path] = []
@@ -2044,6 +2062,28 @@ def _candidate_vortex_profile_dirs(env: Mapping[str, str], game_id: str | None) 
                 continue
             candidates.extend(path for path in children if path.is_dir() and (path / "modlist.txt").exists())
 
+    def _collect_profile_dirs_from_neighbor_roots(start: Path) -> None:
+        nonlocal layout_hint
+        for candidate in (start, *start.parents):
+            if not candidate.exists():
+                continue
+            if not (_looks_like_vortex_root_name(candidate.name) or _path_name_matches_any_variant(candidate.name, game_folder_variants)):
+                continue
+            parent = candidate.parent
+            if not parent.exists():
+                continue
+            try:
+                sibling_dirs = tuple(parent.iterdir())
+            except Exception:
+                continue
+            for sibling in sibling_dirs:
+                if sibling.is_dir() and _looks_like_vortex_profile_root_name(sibling.name):
+                    layout_hint = (
+                        layout_hint
+                        or "portable Vortex profile root detected near the executable"
+                    )
+                    _collect_profile_dirs_from_root(sibling)
+
     profile_dir = env.get("VORTEX_PROFILE_DIR")
     if profile_dir:
         _collect_profile_dirs_from_root(Path(profile_dir))
@@ -2056,12 +2096,15 @@ def _candidate_vortex_profile_dirs(env: Mapping[str, str], game_id: str | None) 
             if root.exists():
                 _collect_profile_dirs_from_root(root)
 
+    if executable_path is not None:
+        _collect_profile_dirs_from_neighbor_roots(executable_path.parent)
+
     ordered = sorted(
         _unique_existing_paths(candidates),
         key=lambda path: path.stat().st_mtime if path.exists() else 0.0,
         reverse=True,
     )
-    return tuple(path for path in ordered if (path / "modlist.txt").exists())
+    return tuple(path for path in ordered if (path / "modlist.txt").exists()), layout_hint
 
 
 def _detect_mo2_context(
@@ -2103,6 +2146,9 @@ def _detect_mo2_context(
     detected_body_profiles = _detect_profile_hints(detection_sources, _BODY_PROFILE_HINTS)
     detected_skeleton_profiles = _detect_profile_hints(detection_sources, _SKELETON_PROFILE_HINTS)
     renderer_version_hints = _detect_renderer_version_hints(detection_sources)
+    layout_hint = None
+    if instance_root is not None and instance_root.name not in {"MO2", "Mod Organizer 2"}:
+        layout_hint = f"nonstandard MO2 layout detected at {instance_root.name}"
 
     output_dir = instance_root / "overwrite" if instance_root is not None else None
     return ModManagerContext(
@@ -2120,6 +2166,7 @@ def _detect_mo2_context(
         detected_body_profiles=detected_body_profiles,
         detected_skeleton_profiles=detected_skeleton_profiles,
         renderer_version_hints=renderer_version_hints,
+        layout_hint=layout_hint,
     )
 
 
@@ -2147,7 +2194,7 @@ def _detect_vortex_context(
     env_signals = any(key.startswith("VORTEX") for key in env)
     game_root = _resolve_game_root_from_env(env)
     game_id = env.get("VORTEX_GAME_ID") or env.get("GAME_ID") or "skyrimse"
-    profile_dirs = _candidate_vortex_profile_dirs(env, game_id)
+    profile_dirs, profile_layout_hint = _candidate_vortex_profile_dirs(env, game_id, executable_path=executable_path)
     staging_root = None
     if env.get("VORTEX_STAGING_DIR"):
         staging_root = Path(env["VORTEX_STAGING_DIR"])
@@ -2187,6 +2234,9 @@ def _detect_vortex_context(
     detected_body_profiles = _detect_profile_hints(detection_sources, _BODY_PROFILE_HINTS)
     detected_skeleton_profiles = _detect_profile_hints(detection_sources, _SKELETON_PROFILE_HINTS)
     renderer_version_hints = _detect_renderer_version_hints(detection_sources)
+    layout_hint = profile_layout_hint
+    if layout_hint is None and staging_root is not None and staging_root.name not in {"Vortex Mods", "Black Tree Gaming Ltd", "Vortex"}:
+        layout_hint = f"nonstandard Vortex staging root detected at {staging_root.name}"
 
     return ModManagerContext(
         manager="Vortex",
@@ -2203,6 +2253,7 @@ def _detect_vortex_context(
         detected_body_profiles=detected_body_profiles,
         detected_skeleton_profiles=detected_skeleton_profiles,
         renderer_version_hints=renderer_version_hints,
+        layout_hint=layout_hint,
     )
 
 
