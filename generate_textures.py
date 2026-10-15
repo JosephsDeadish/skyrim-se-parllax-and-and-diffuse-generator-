@@ -20202,7 +20202,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             suggested_profile = recommend_render_profile_details(None, manager_context=manager_context).profile
         _apply_qt_startup_preset(_render_profile_family(suggested_profile))
 
-    startup_onboarding_guided_button.clicked.connect(_apply_qt_startup_guided_step)
+    startup_onboarding_guided_button.clicked.connect(
+        lambda _checked=False: _apply_qt_startup_guided_step()
+    )
     startup_onboarding_suggested_button.clicked.connect(_apply_qt_startup_suggested_preset)
     startup_onboarding_button_row.addWidget(startup_onboarding_suggested_button)
     startup_onboarding_hide_button = QtWidgets.QPushButton("Hide")
