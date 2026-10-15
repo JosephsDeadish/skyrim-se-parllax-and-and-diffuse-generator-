@@ -57,6 +57,7 @@ from generate_textures import (
     load_ui_translations,
     _normalize_nif_editor_texture_input_path,
     _load_nif_patcher_exports,
+    ModManagerContext,
     _normalize_render_profile,
     NIF_PATCHER_AVAILABLE,
     _normalize_nif_result_details,
@@ -7799,6 +7800,115 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(run_with_options_mock.call_args.kwargs["complex_format"]), "msn")
         self.assertEqual(str(run_with_options_mock.call_args.kwargs["env_mask_mode"]), "complex")
         self.assertEqual(str(run_with_options_mock.call_args.kwargs["parallax_mode"]), "occlusion")
+
+    def test_main_auto_render_profile_uses_mod_manager_context_from_input_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            instance_root = temp_path / "MO2"
+            input_file = instance_root / "overwrite" / "textures" / "brick.dds"
+            (instance_root / "mods").mkdir(parents=True)
+            profile_dir = instance_root / "profiles" / "Default"
+            profile_dir.mkdir(parents=True)
+            input_file.parent.mkdir(parents=True, exist_ok=True)
+            input_file.write_bytes(b"dds")
+            (profile_dir / "modlist.txt").write_text("+Community Shaders\n", encoding="utf-8")
+            (profile_dir / "plugins.txt").write_text("*Skyrim.esm\n", encoding="utf-8")
+            (profile_dir / "loadorder.txt").write_text("Skyrim.esm\n", encoding="utf-8")
+            args = mock.Mock(
+                gui=False,
+                input_file=input_file,
+                output_dir=None,
+                diffuse_name=None,
+                normal_name=None,
+                parallax_name=None,
+                glow_name=None,
+                environment_mask_name=None,
+                rmaos_name=None,
+                complex_name=None,
+                normal_strength=None,
+                parallax_strength=None,
+                glow_threshold=None,
+                environment_mask_strength=None,
+                rmaos_strength=None,
+                complex_strength=None,
+                specular_strength=None,
+                complex_format="msn",
+                environment_mask_mode="standard",
+                emboss_mode=False,
+                relief_mode=False,
+                parallax_mode="standard",
+                no_diffuse=False,
+                no_normal=False,
+                no_parallax=False,
+                glow_map=False,
+                environment_mask=False,
+                rmaos=False,
+                complex_material=False,
+                pbr_material=False,
+                render_profile="auto",
+            )
+            stderr = io.StringIO()
+            with mock.patch("generate_textures.parse_args", return_value=args), \
+                 mock.patch("generate_textures.run_with_options", return_value={}) as run_with_options_mock, \
+                 mock.patch("sys.stderr", stderr):
+                exit_code = main()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Detected Mod (Hint): detected Mod Organizer 2 context", stderr.getvalue())
+        self.assertIn("advisory only", stderr.getvalue())
+        run_with_options_mock.assert_called_once()
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["render_profile"]), "auto")
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["complex_format"]), "cm")
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["env_mask_mode"]), "standard")
+
+    def test_main_auto_render_profile_keeps_vanilla_defaults_without_mod_manager_context(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_file = temp_path / "brick.dds"
+            input_file.write_bytes(b"dds")
+            args = mock.Mock(
+                gui=False,
+                input_file=input_file,
+                output_dir=None,
+                diffuse_name=None,
+                normal_name=None,
+                parallax_name=None,
+                glow_name=None,
+                environment_mask_name=None,
+                rmaos_name=None,
+                complex_name=None,
+                normal_strength=None,
+                parallax_strength=None,
+                glow_threshold=None,
+                environment_mask_strength=None,
+                rmaos_strength=None,
+                complex_strength=None,
+                specular_strength=None,
+                complex_format="msn",
+                environment_mask_mode="standard",
+                emboss_mode=False,
+                relief_mode=False,
+                parallax_mode="standard",
+                no_diffuse=False,
+                no_normal=False,
+                no_parallax=False,
+                glow_map=False,
+                environment_mask=False,
+                rmaos=False,
+                complex_material=False,
+                pbr_material=False,
+                render_profile="auto",
+            )
+            stderr = io.StringIO()
+            with mock.patch("generate_textures.parse_args", return_value=args), \
+                 mock.patch("generate_textures.detect_mod_manager_context", return_value=ModManagerContext()), \
+                 mock.patch("generate_textures.run_with_options", return_value={}) as run_with_options_mock, \
+                 mock.patch("sys.stderr", stderr):
+                exit_code = main()
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stderr.getvalue(), "")
+        run_with_options_mock.assert_called_once()
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["render_profile"]), "auto")
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["complex_format"]), "msn")
 
     def test_run_cli_handles_missing_gui_dependencies_without_traceback(self) -> None:
         with mock.patch("generate_textures.main", side_effect=RuntimeError("GUI dependencies are unavailable in this environment.")):

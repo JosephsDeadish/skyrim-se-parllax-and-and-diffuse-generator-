@@ -2305,6 +2305,17 @@ def detect_mod_manager_context(
     return _detect_vortex_context(resolved_env, executable_path=resolved_executable)
 
 
+def _resolve_cli_mod_manager_context(input_path: Path | None) -> ModManagerContext | None:
+    candidate_contexts: list[ModManagerContext] = []
+    if input_path is not None:
+        candidate_contexts.append(detect_mod_manager_context(executable_path=input_path))
+    candidate_contexts.append(detect_mod_manager_context())
+    for context in candidate_contexts:
+        if context.manager is not None:
+            return context
+    return None
+
+
 _PLUGIN_MESH_PATH_RE = re.compile(rb"meshes\\[ -~]{1,260}?\.nif", re.IGNORECASE)
 _PLUGIN_MESH_SUBRECORDS = {b"MODL", b"MOD2", b"MOD3", b"MOD4", b"DMDL", b"DNAM", b"MNAM"}
 
@@ -20811,9 +20822,11 @@ def main() -> int:
             return 0
         raise RuntimeError("GUI dependencies are unavailable in this environment.")
 
+    cli_mod_manager_context = _resolve_cli_mod_manager_context(args.input_file)
+    if cli_mod_manager_context is not None:
+        print(build_mod_manager_context_hint(cli_mod_manager_context), file=sys.stderr)
+
     if getattr(args, "pbr_material", False):
-        cli_recommended_profile: str | None = None
-    elif args.input_file.is_dir():
         cli_recommended_profile: str | None = None
     else:
         role_info = identify_skyrim_texture_role(args.input_file)
@@ -20825,6 +20838,7 @@ def main() -> int:
             detected_suffix=role_info["suffix"] if role_info is not None else None,
             material_type=material_type,
             workflow_profile=workflow_profile,
+            manager_context=cli_mod_manager_context,
         )
     cli_guardrails = resolve_render_profile_guardrails(
         selected_profile=getattr(args, "render_profile", "auto"),

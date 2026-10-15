@@ -140,6 +140,7 @@ Optional arguments:
 - `--snow-mask-strength` (snow mask strength, 0.1–3.0; default: 1.0)
 - `--pbr-material` (shortcut for the app's Community Shaders Extended Materials packed output: enables complex material, forces `--complex-format cm`, and keeps compatible standard env/parallax modes; not an ENB workflow)
 - `--render-profile` (`auto`, `custom`, `vanilla`, `performance`, `vr`, `terrain`, `architecture`, `characters`, `community_shaders`, `truepbr`, `enb`)
+  - `auto` now also consults detected MO2/Vortex context from the launch environment or input-path location, so the CLI gets the same renderer/version advisory hints as the GUI when it can recognize a mod-manager profile
 
 ## Pre-release validation
 
