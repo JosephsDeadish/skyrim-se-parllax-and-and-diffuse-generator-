@@ -1404,8 +1404,9 @@ class GenerateTexturesTests(unittest.TestCase):
     def test_normalize_gui_state_preserves_profile_setup_memory(self) -> None:
         normalized = _normalize_gui_state(
             {
+                "last_profile_setup_key": "Mod Organizer 2::Main::Architecture",
                 "profile_setup_memory": {
-                    "Mod Organizer 2::Main": {
+                    "Mod Organizer 2::Main::Architecture": {
                         "render_profile": "community shaders",
                         "output_target": "D:/Skyrim/Output",
                         "use_custom_output": True,
@@ -1415,9 +1416,10 @@ class GenerateTexturesTests(unittest.TestCase):
                 }
             }
         )
+        self.assertEqual(normalized["last_profile_setup_key"], "Mod Organizer 2::Main::Architecture")
         memory = normalized["profile_setup_memory"]
-        self.assertIn("Mod Organizer 2::Main", memory)
-        entry = memory["Mod Organizer 2::Main"]
+        self.assertIn("Mod Organizer 2::Main::Architecture", memory)
+        entry = memory["Mod Organizer 2::Main::Architecture"]
         self.assertEqual(entry["render_profile"], "community_shaders")
         self.assertEqual(entry["output_target"], "D:/Skyrim/Output")
         self.assertTrue(entry["use_custom_output"])
@@ -1488,6 +1490,32 @@ class GenerateTexturesTests(unittest.TestCase):
         message = build_mod_manager_context_hint(None, profile_setup_hint=hint)
         self.assertIn("Remembered setup for this profile", message)
         self.assertIn(hint, message)
+
+    def test_build_mod_manager_profile_setup_hint_prefers_selected_named_preset(self) -> None:
+        hint = build_mod_manager_profile_setup_hint(
+            {
+                "Mod Organizer 2::Main": {
+                    "render_profile": "vanilla",
+                    "output_target": "next to input",
+                    "use_custom_output": False,
+                    "workflow_mode": "standard",
+                    "target_game": "skyrim",
+                },
+                "Mod Organizer 2::Main::Architecture": {
+                    "render_profile": "community_shaders",
+                    "output_target": "D:/Skyrim/Output",
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                },
+            },
+            manager="Mod Organizer 2",
+            profile="Main",
+            selected_key="Mod Organizer 2::Main::Architecture",
+        )
+        self.assertIn("preset Architecture", hint)
+        self.assertIn("renderer Community Shaders", hint)
+        self.assertIn("output D:/Skyrim/Output", hint)
 
     def test_startup_guidance_prefers_saved_setup_then_detected_folder_then_suggestion(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1560,10 +1588,48 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertIn("Why this was recommended:", suggested_text)
             self.assertIn("Why not the others:", suggested_text)
 
+    def test_startup_guidance_action_respects_selected_named_preset(self) -> None:
+        memory = {
+            "Mod Organizer 2::Main": {
+                "render_profile": "vanilla",
+                "output_target": "next to input",
+                "use_custom_output": False,
+                "workflow_mode": "standard",
+                "target_game": "skyrim",
+            },
+            "Mod Organizer 2::Main::Architecture": {
+                "render_profile": "community_shaders",
+                "output_target": "D:/Skyrim/Output",
+                "use_custom_output": True,
+                "workflow_mode": "advanced",
+                "target_game": "fallout4",
+            },
+        }
+        action = resolve_startup_guidance_action(
+            None,
+            profile_setup_memory=memory,
+            selected_profile_setup_key="Mod Organizer 2::Main::Architecture",
+            last_mod_manager="Mod Organizer 2",
+            last_mod_profile="Main",
+            current_render_profile="community_shaders",
+            current_workflow_mode="advanced",
+            current_output_target="D:/Skyrim/Output",
+            current_use_custom_output=True,
+            current_target_game="fallout4",
+        )
+        self.assertEqual(action, "browse_input_folder")
+
     def test_profile_setup_memory_items_include_descriptive_labels(self) -> None:
         items = _profile_setup_memory_items(
             {
                 "Mod Organizer 2::Main": {
+                    "render_profile": "truepbr",
+                    "output_target": "D:/Skyrim/Output",
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                },
+                "Mod Organizer 2::Main::Architecture": {
                     "render_profile": "truepbr",
                     "output_target": "D:/Skyrim/Output",
                     "use_custom_output": True,
@@ -1579,10 +1645,15 @@ class GenerateTexturesTests(unittest.TestCase):
                 },
             }
         )
-        self.assertEqual([key for key, _ in items], ["Mod Organizer 2::Alt", "Mod Organizer 2::Main"])
+        self.assertEqual(
+            [key for key, _ in items],
+            ["Mod Organizer 2::Alt", "Mod Organizer 2::Main", "Mod Organizer 2::Main::Architecture"],
+        )
         self.assertIn("renderer Community Shaders", items[0][1])
         self.assertIn("workflow mode Beginner", items[0][1])
+        self.assertIn("current setup", items[1][1])
         self.assertIn("renderer Community Shaders PBR", items[1][1])
+        self.assertIn("preset Architecture", items[2][1])
         self.assertIn("output D:/Skyrim/Output", items[1][1])
         self.assertIn("workflow mode Advanced", items[1][1])
         self.assertIn("target game fallout4", items[1][1])
@@ -2666,6 +2737,65 @@ class GenerateTexturesTests(unittest.TestCase):
                 self.assertFalse(restored_entry["use_custom_output"])
                 self.assertEqual(restored_entry["output_target"], "next to input")
                 self.assertEqual(restored_entry["target_game"], "skyrim")
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_profile_setup_switcher_restores_named_preset_for_same_profile(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "output"
+            output_dir.mkdir()
+            manager = "Mod Organizer 2"
+            profile = "Main"
+            current_key = _profile_setup_memory_key(manager, profile)
+            named_key = _profile_setup_memory_key(manager, profile, "Architecture")
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            saved_state["last_mod_manager"] = manager
+            saved_state["last_mod_profile"] = profile
+            saved_state["profile_setup_memory"] = {
+                current_key: {
+                    "render_profile": "vanilla",
+                    "output_target": "",
+                    "use_custom_output": False,
+                    "workflow_mode": "standard",
+                    "target_game": "skyrim",
+                },
+                named_key: {
+                    "render_profile": "community_shaders",
+                    "output_target": str(output_dir),
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                },
+            }
+            gui = None
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state), mock.patch(
+                    "generate_textures.detect_mod_manager_context",
+                    return_value=ModManagerContext(manager=manager, profile_name=profile),
+                ):
+                    gui = TextureGeneratorGUI()
+                gui.root.update_idletasks()
+                values = tuple(gui.profile_setup_choice_combo["values"])
+                self.assertEqual(len(values), 2)
+                self.assertTrue(any("current setup" in value for value in values))
+                self.assertTrue(any("preset Architecture" in value for value in values))
+                named_label = next(value for value in values if "preset Architecture" in value)
+                gui.profile_setup_choice_var.set(named_label)
+                gui._refresh_detected_context_hint()
+                gui._update_profile_setup_restore_controls()
+                self.assertTrue(gui.profile_setup_restore_button.instate(("!disabled",)))
+                gui.profile_setup_restore_button.invoke()
+                gui.root.update_idletasks()
+                self.assertEqual(gui.render_profile_var.get(), "community_shaders")
+                self.assertEqual(gui.workflow_mode_var.get(), "Advanced")
+                self.assertTrue(gui.use_custom_output_var.get())
+                self.assertEqual(gui.output_var.get(), str(output_dir))
+                self.assertEqual(gui.target_game_var.get(), "fallout4")
+                self.assertIn("preset Architecture", gui.profile_setup_hint_var.get())
+                self.assertIn("preset Architecture", gui.status_var.get())
             finally:
                 if gui is not None:
                     gui.root.destroy()
@@ -11999,6 +12129,76 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
                 self.assertFalse(restored_entry["use_custom_output"])
                 self.assertEqual(restored_entry["output_target"], "next to input")
                 self.assertEqual(restored_entry["target_game"], "skyrim")
+                return True
+            return False
+
+        self.run_window(
+            scenario,
+            load_state=saved_state,
+            save_side_effect=capture_state,
+            extra_patches=(mock.patch("generate_textures.detect_mod_manager_context", return_value=context),),
+        )
+
+    def test_qt_profile_setup_switcher_restores_named_preset_for_same_profile(self) -> None:
+        manager = "Mod Organizer 2"
+        profile = "Main"
+        current_key = self.qt._profile_setup_memory_key(manager, profile)
+        named_key = self.qt._profile_setup_memory_key(manager, profile, "Architecture")
+        output_dir = self.root / "output"
+        output_dir.mkdir(exist_ok=True)
+        saved_state = dict(self.qt._GUI_STATE_DEFAULTS)
+        saved_state.update(
+            {
+                "last_mod_manager": manager,
+                "last_mod_profile": profile,
+                "profile_setup_memory": {
+                    current_key: {
+                        "render_profile": "vanilla",
+                        "use_custom_output": False,
+                        "output_target": "",
+                        "workflow_mode": "standard",
+                        "target_game": "skyrim",
+                    },
+                    named_key: {
+                        "render_profile": "community_shaders",
+                        "use_custom_output": True,
+                        "output_target": str(output_dir),
+                        "workflow_mode": "advanced",
+                        "target_game": "fallout4",
+                    },
+                },
+            }
+        )
+        saved_states = []
+        context = self.qt.ModManagerContext(manager=manager, profile_name=profile, loaded_texture_dirs=())
+        state = {"step": 0}
+
+        def capture_state(state_data):
+            saved_states.append(json.loads(json.dumps(state_data)))
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            combo = w("profile_setup_choice")
+            step = state["step"]
+            if step == 0:
+                self.assertGreaterEqual(combo.count(), 2)
+                labels = [combo.itemText(i) for i in range(combo.count())]
+                self.assertTrue(any("current setup" in label for label in labels))
+                self.assertTrue(any("preset Architecture" in label for label in labels))
+                named_index = combo.findData(named_key)
+                self.assertGreaterEqual(named_index, 0)
+                combo.setCurrentIndex(named_index)
+                self.assertTrue(w("restore_profile_setup").isEnabled())
+                w("restore_profile_setup").click()
+                state["step"] = 1
+            elif step == 1 and w("generate").isEnabled():
+                self.assertEqual(w("render_profile").currentText(), "community_shaders")
+                self.assertEqual(w("workflow_mode").currentText(), self.qt._WORKFLOW_MODE_LABELS["advanced"])
+                self.assertEqual(w("target_game").currentText(), "fallout4")
+                self.assertEqual(w("output_dir").text(), str(output_dir))
+                self.assertIn("preset Architecture", w("generation_status").text())
+                self.assertTrue(saved_states)
+                self.assertEqual(saved_states[-1]["last_profile_setup_key"], named_key)
                 return True
             return False
 

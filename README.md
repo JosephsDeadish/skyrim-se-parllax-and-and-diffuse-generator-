@@ -68,7 +68,7 @@ This opens a desktop interface where you can:
 - choose the **Env mask mode**: `standard` (greyscale, vanilla Skyrim SE) or `complex` (RGBA packed, renderer-specific)
 - choose the **Target renderer** profile (**default: `custom`**) — includes `custom`, `vanilla`, `community_shaders`, `truepbr`, and `enb`
 - choose the **Target game** (`skyrim` or Fallout) so filename suffixes and default outputs match the intended family
-- when switching MO2/Vortex profiles, use the remembered setup/restore controls to reapply the last renderer + target game + output choice for that profile instead of re-entering it manually
+- when switching MO2/Vortex profiles, use the remembered setup/restore controls to reapply the last renderer + target game + output choice for that profile, and save multiple named presets when you want alternate safe setups
 - use the Terrain profile for individual texture maps; it does not build tiled landscape layers or terrain feature sets
 - the complex material, environment mask, and parallax mode controls spell out which output family they belong to so you can spot ENB / CS / TruePBR mismatches before export
 - generation applies renderer guardrails before processing so locked/auto-detected profiles automatically realign complex format, env mask mode, and parallax mode when they conflict
@@ -460,7 +460,7 @@ Do not mix ENB / Community Shaders / TruePBR families on the same mesh unless yo
    - Confirm slot 2 uses `_g.dds`-style emissive path and `SLSF2_Glow_Map` alignment.
    - Review `flag_glow_map.*` and `path_slot_glow.*` conflicts.
 5. **Wrong preset / wrong renderer / wrong folder**
-   - Use the Suggested preset or the first-run quick start buttons (including **Next safe step**) to get back to the correct family or a restored saved setup.
+   - Use the Suggested preset, the saved-setups dropdown, or the first-run quick start buttons (including **Next safe step**) to get back to the correct family or a restored saved setup/preset.
    - If the preview or scan still looks wrong, compare against the sibling `.nif.bak` before writing and restore instead of forcing the change.
    - Make sure the selected input folder is the source texture set, not a generated-output folder from a previous run.
 6. **Large batch run is too slow or reruns unexpectedly**
