@@ -20038,6 +20038,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     layout.setContentsMargins(14, 14, 14, 14)
     layout.setSpacing(10)
 
+    appearance_layout = QtWidgets.QVBoxLayout()
+    appearance_layout.setContentsMargins(0, 0, 0, 0)
+    appearance_layout.setSpacing(4)
     appearance_row = QtWidgets.QHBoxLayout()
     theme_check = QtWidgets.QCheckBox("Dark theme")
     appearance_row.addWidget(theme_check)
@@ -20081,20 +20084,25 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         "Beginner keeps advanced panels hidden, Standard keeps them collapsed, and Advanced expands them."
     )
     appearance_row.addWidget(workflow_mode_combo)
+    appearance_row.addStretch(1)
+    appearance_layout.addLayout(appearance_row)
+
+    appearance_actions_row = QtWidgets.QHBoxLayout()
     startup_onboarding_show_button = QtWidgets.QPushButton("Show quick start")
     startup_onboarding_show_button.setObjectName("startup_onboarding_show")
     startup_onboarding_show_button.setToolTip("Reopen the quick start card if you hide it for later.")
     startup_onboarding_show_button.clicked.connect(lambda: _show_qt_startup_onboarding())
-    appearance_row.addWidget(startup_onboarding_show_button)
+    appearance_actions_row.addWidget(startup_onboarding_show_button)
     startup_onboarding_wizard_button = QtWidgets.QPushButton("Wizard…")
     startup_onboarding_wizard_button.setObjectName("startup_onboarding_wizard")
     startup_onboarding_wizard_button.setToolTip(
         "Open the guided first-run wizard with recommendation rationale and safe family buttons."
     )
     startup_onboarding_wizard_button.clicked.connect(lambda: _show_qt_startup_wizard())
-    appearance_row.addWidget(startup_onboarding_wizard_button)
-    appearance_row.addStretch(1)
-    layout.addLayout(appearance_row)
+    appearance_actions_row.addWidget(startup_onboarding_wizard_button)
+    appearance_actions_row.addStretch(1)
+    appearance_layout.addLayout(appearance_actions_row)
+    layout.addLayout(appearance_layout)
 
     banner = QtWidgets.QLabel(
         "Qt migration bootstrap is now available.\n"
