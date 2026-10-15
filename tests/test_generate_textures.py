@@ -11910,6 +11910,119 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
         with mock.patch("generate_textures.run_with_options", side_effect=slow_generate):
             self.run_window(scenario)
 
+    def test_qt_dismissible_warning_dialog_remembers_and_skips_repeats(self) -> None:
+        parent = self.qt.QtWidgets.QWidget()
+        self.addCleanup(parent.deleteLater)
+        dismissed_warnings: set[str] = set()
+        persisted: list[list[str]] = []
+
+        def persist() -> None:
+            persisted.append(sorted(dismissed_warnings))
+
+        with mock.patch.object(
+            self.qt.QtWidgets.QDialog,
+            "exec",
+            return_value=self.qt.QtWidgets.QDialog.DialogCode.Accepted,
+        ), mock.patch.object(self.qt.QtWidgets.QCheckBox, "isChecked", return_value=True):
+            self.assertTrue(
+                self.qt._show_qt_dismissible_warning_dialog(
+                    parent,
+                    "Generation Warning",
+                    "glow_non_magical",
+                    "Glow map enabled for a stone texture.",
+                    dismissed_warnings,
+                    persist,
+                )
+            )
+
+        self.assertIn("glow_non_magical", dismissed_warnings)
+        self.assertEqual(persisted, [["glow_non_magical"]])
+        with mock.patch.object(
+            self.qt.QtWidgets.QDialog,
+            "exec",
+            side_effect=AssertionError("dismissed warnings should not show the dialog again"),
+        ):
+            self.assertTrue(
+                self.qt._show_qt_dismissible_warning_dialog(
+                    parent,
+                    "Generation Warning",
+                    "glow_non_magical",
+                    "Glow map enabled for a stone texture.",
+                    dismissed_warnings,
+                    persist,
+                )
+            )
+
+    def test_qt_generation_sanity_warning_blocks_before_worker_start(self) -> None:
+        recorded_warnings: list[tuple[str, str, str]] = []
+
+        def capture_warning(parent, title, warning_id, message, dismissed_warnings, persist):
+            recorded_warnings.append((title, warning_id, message))
+            return False
+
+        state = dict(self.qt._GUI_STATE_DEFAULTS)
+        state.update(
+            {
+                "input_path": str(self.root / "stone_wall.dds"),
+                "include_glow": True,
+                "qt_render_profile": "custom",
+            }
+        )
+
+        def scenario(window):
+            widget = lambda name: self.widget(window, name)
+            widget("generate").click()
+            self.assertEqual(len(recorded_warnings), 1)
+            self.assertEqual(recorded_warnings[0][0], "Generation Warning")
+            self.assertEqual(recorded_warnings[0][1], "glow_non_magical")
+            self.assertIn("stone", recorded_warnings[0][2].lower())
+            self.assertTrue(widget("generate").isEnabled())
+            return True
+
+        self.run_window(
+            scenario,
+            load_state=state,
+            extra_patches=(mock.patch("generate_textures._show_qt_dismissible_warning_dialog", side_effect=capture_warning),),
+        )
+
+    def test_qt_generation_output_folder_warning_blocks_before_worker_start(self) -> None:
+        output_dir = self.root / "output"
+        output_dir.mkdir()
+        (output_dir / "legacy_msn.dds").write_bytes(b"")
+        recorded_warnings: list[tuple[str, str, str]] = []
+
+        def capture_warning(parent, title, warning_id, message, dismissed_warnings, persist):
+            recorded_warnings.append((title, warning_id, message))
+            return False
+
+        state = dict(self.qt._GUI_STATE_DEFAULTS)
+        state.update(
+            {
+                "input_path": str(self.root / "plain_source.dds"),
+                "output_path": str(output_dir),
+                "include_complex": True,
+                "include_normal": True,
+                "complex_format": "cm",
+                "qt_render_profile": "custom",
+            }
+        )
+
+        def scenario(window):
+            widget = lambda name: self.widget(window, name)
+            widget("generate").click()
+            self.assertEqual(len(recorded_warnings), 1)
+            self.assertEqual(recorded_warnings[0][0], "Output Folder Warning")
+            self.assertEqual(recorded_warnings[0][1], "output_folder_has_msn_files")
+            self.assertIn("_msn", recorded_warnings[0][2])
+            self.assertTrue(widget("generate").isEnabled())
+            return True
+
+        self.run_window(
+            scenario,
+            load_state=state,
+            extra_patches=(mock.patch("generate_textures._show_qt_dismissible_warning_dialog", side_effect=capture_warning),),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

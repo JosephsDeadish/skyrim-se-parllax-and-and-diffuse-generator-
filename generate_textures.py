@@ -4789,6 +4789,59 @@ def build_render_profile_family_mismatch_warning(
     return "\n\n".join(lines)
 
 
+def _show_qt_dismissible_warning_dialog(
+    parent: QtWidgets.QWidget,
+    title: str,
+    warning_id: str,
+    message: str,
+    dismissed_warnings: set[str],
+    persist_dismissed_warnings: Callable[[], None] | None = None,
+) -> bool:
+    if warning_id in dismissed_warnings:
+        return True
+
+    dialog = QtWidgets.QDialog(parent)
+    dialog.setObjectName(f"{warning_id}_warning_dialog")
+    dialog.setWindowTitle(title)
+    dialog.setModal(True)
+    dialog.setMinimumWidth(540)
+
+    layout = QtWidgets.QVBoxLayout(dialog)
+    layout.setContentsMargins(16, 16, 16, 16)
+    layout.setSpacing(10)
+
+    message_label = QtWidgets.QLabel(f"⚠ {message}", dialog)
+    message_label.setObjectName(f"{warning_id}_warning_message")
+    message_label.setWordWrap(True)
+    layout.addWidget(message_label)
+
+    dismiss_check = QtWidgets.QCheckBox("Don't show this warning again", dialog)
+    dismiss_check.setObjectName(f"{warning_id}_warning_dismiss")
+    layout.addWidget(dismiss_check)
+
+    button_row = QtWidgets.QHBoxLayout()
+    button_row.addStretch(1)
+    continue_button = QtWidgets.QPushButton("Continue anyway", dialog)
+    continue_button.setObjectName(f"{warning_id}_warning_continue")
+    continue_button.setDefault(True)
+    continue_button.clicked.connect(dialog.accept)
+    cancel_button = QtWidgets.QPushButton("Cancel generation", dialog)
+    cancel_button.setObjectName(f"{warning_id}_warning_cancel")
+    cancel_button.clicked.connect(dialog.reject)
+    button_row.addWidget(continue_button)
+    button_row.addWidget(cancel_button)
+    layout.addLayout(button_row)
+
+    result = dialog.exec()
+    if result != QtWidgets.QDialog.DialogCode.Accepted:
+        return False
+    if dismiss_check.isChecked():
+        dismissed_warnings.add(warning_id)
+        if persist_dismissed_warnings is not None:
+            persist_dismissed_warnings()
+    return True
+
+
 def _format_render_profile_brief_summary(recommendation: RenderProfileRecommendation) -> str:
     def _clean_clause(text: str) -> str:
         return text.strip().rstrip(".")
@@ -18627,6 +18680,10 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     _qt_application = app
     qt_saved_state = load_gui_state()
     manager_context = detect_mod_manager_context()
+    qt_dismissed_warnings: set[str] = set()
+    raw_qt_dismissed_warnings = qt_saved_state.get("dismissed_warnings", [])
+    if isinstance(raw_qt_dismissed_warnings, list):
+        qt_dismissed_warnings = {str(w) for w in raw_qt_dismissed_warnings if isinstance(w, str)}
 
     class _QtMainWindow(QtWidgets.QMainWindow):
         def closeEvent(self, event: Any) -> None:
@@ -20493,6 +20550,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             else "next to input"
         )
         state = _sync_qt_profile_setup_memory(state)
+        state["dismissed_warnings"] = sorted(qt_dismissed_warnings)
         save_gui_state(state)
         qt_saved_state = state
         _refresh_mod_manager_context_hint(state)
@@ -20871,16 +20929,71 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                 recommendation,
             )
             if mismatch_warning is not None:
-                response = QtWidgets.QMessageBox.question(
-                    window,
-                    "Renderer family mismatch",
-                    mismatch_warning,
-                    QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
-                    QtWidgets.QMessageBox.StandardButton.No,
+                warnings = [("renderer_family_mismatch", mismatch_warning)]
+            else:
+                warnings = []
+        else:
+            warnings = []
+        input_path = Path(input_text)
+        context_source = select_generation_context_source(input_path, [input_path] if input_path.is_file() else [])
+        role_info = identify_skyrim_texture_role(context_source)
+        warnings.extend(
+            get_generation_warnings(
+                classify_material_type(context_source),
+                source_role=role_info["role"] if role_info is not None else None,
+                source_hint=role_info["hint"] if role_info is not None else None,
+                source_suffix=role_info["suffix"] if role_info is not None else None,
+                include_diffuse=include_diffuse_check.isChecked(),
+                include_normal=include_normal_check.isChecked(),
+                include_glow=include_glow_check.isChecked(),
+                include_environment_mask=include_environment_mask_check.isChecked(),
+                include_rmaos=include_rmaos_check.isChecked(),
+                include_wetness_mask=include_wetness_mask_check.isChecked(),
+                include_snow_mask=include_snow_mask_check.isChecked(),
+                env_mask_mode=str(env_mask_mode_combo.currentData() or "standard"),
+                env_mask_strength=float(advanced_strength_controls["environment_mask_strength"].value()),
+                include_parallax=include_parallax_check.isChecked(),
+                parallax_strength=float(advanced_strength_controls["parallax_strength"].value()),
+                include_complex=include_complex_check.isChecked(),
+                complex_format=str(complex_format_combo.currentData() or "msn"),
+                parallax_mode=str(parallax_mode_combo.currentData() or "standard"),
+                emboss_mode=bool(qt_saved_state.get("emboss_mode", False)),
+                relief_mode=bool(qt_saved_state.get("relief_mode", False)),
+            )
+        )
+        output_dir_text = output_dir_edit.text().strip()
+        effective_output_dir = Path(output_dir_text) if output_dir_text else (
+            input_path if input_path.is_dir() else input_path.parent
+        )
+        if effective_output_dir.is_dir():
+            warnings.extend(
+                get_output_folder_format_warnings(
+                    effective_output_dir,
+                    include_complex=include_complex_check.isChecked(),
+                    complex_format=str(complex_format_combo.currentData() or "msn"),
                 )
-                if response != QtWidgets.QMessageBox.StandardButton.Yes:
-                    status_label.setText("Generation cancelled due to renderer family mismatch.")
-                    return
+            )
+        for warning_id, message in warnings:
+            if warning_id == "renderer_family_mismatch":
+                warning_title = "Renderer family mismatch"
+            elif warning_id.startswith("output_folder_"):
+                warning_title = "Output Folder Warning"
+            else:
+                warning_title = "Generation Warning"
+            if not _show_qt_dismissible_warning_dialog(
+                window,
+                warning_title,
+                warning_id,
+                message,
+                qt_dismissed_warnings,
+                _persist_qt_gui_state,
+            ):
+                status_label.setText(
+                    "Generation cancelled due to renderer family mismatch."
+                    if warning_id == "renderer_family_mismatch"
+                    else "Generation cancelled after a safety warning."
+                )
+                return
         options = {
             "input_path": input_text,
             "output_dir": output_dir_edit.text().strip(),

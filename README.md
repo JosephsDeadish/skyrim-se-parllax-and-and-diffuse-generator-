@@ -72,6 +72,7 @@ This opens a desktop interface where you can:
 - use the Terrain profile for individual texture maps; it does not build tiled landscape layers or terrain feature sets
 - the complex material, environment mask, and parallax mode controls spell out which output family they belong to so you can spot ENB / CS / TruePBR mismatches before export
 - generation applies renderer guardrails before processing so locked/auto-detected profiles automatically realign complex format, env mask mode, and parallax mode when they conflict
+- generation now shows dismissible safety warnings for renderer-family mismatches, suspicious source textures, and conflicting output-folder formats; remembered dismissals persist per warning ID
 - toggle **Emboss depth** for edge-ridge normal generation on flat printed assets (books/cards/scrolls/posters)
 - choose **Parallax mode**: `standard` (vanilla / Community Shaders Extended Materials) or `occlusion (ENB/POM)` for smoother ENBSeries POM heightmaps
 - scroll through all controls in smaller windows
