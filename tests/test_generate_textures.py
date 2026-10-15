@@ -63,6 +63,7 @@ from generate_textures import (
     NIF_PATCHER_AVAILABLE,
     _normalize_nif_result_details,
     _preferred_dds_formats_for_output,
+    build_pbr_texture_sets_output_path,
     _RENDER_PROFILE_GUI_VALUES,
     _run_cli,
     _normalize_gui_state,
@@ -1176,7 +1177,7 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_qt_output_groups_cover_each_map_choice_once(self) -> None:
         flattened = [key for _, keys in _QT_OUTPUT_GROUPS for key in keys]
-        self.assertEqual(len(flattened), 11)
+        self.assertEqual(len(flattened), 12)
         self.assertEqual(len(flattened), len(set(flattened)))
         self.assertEqual(
             set(flattened),
@@ -1192,6 +1193,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 "snow_mask",
                 "ao",
                 "roughness",
+                "pbr_texture_sets",
             },
         )
         self.assertEqual(_QT_OUTPUT_GROUPS[0][0], "Core maps")
@@ -6151,6 +6153,21 @@ class GenerateTexturesTests(unittest.TestCase):
 
             self.assertEqual(rmaos_path.name, "brick_rmaos.dds")
 
+    def test_build_pbr_texture_sets_output_path_uses_project_root_and_json_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "mod" / "textures" / "landscape" / "landscape.dds"
+            input_path.parent.mkdir(parents=True, exist_ok=True)
+            input_path.write_bytes(b"stub")
+
+            json_path = build_pbr_texture_sets_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "mod" / "textures" / "landscape",
+            )
+
+            self.assertEqual(json_path.parent, temp_path / "mod" / "PBRTextureSets")
+            self.assertEqual(json_path.name, "landscape.json")
+
     def test_build_complex_output_path_uses_msn_default_name_and_extension(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -6197,6 +6214,69 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(glow_path.name, "brick_g.dds")
             self.assertEqual(environment_mask_path.name, "brick_m.dds")
             self.assertEqual(complex_path.name, "brick_msn.dds")
+
+    def test_run_with_options_writes_pbr_texture_sets_for_terrain_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "mod" / "textures" / "landscape" / "snowfield.png"
+            input_path.parent.mkdir(parents=True, exist_ok=True)
+            _sample_image().save(input_path)
+
+            outputs = run_with_options(
+                input_file=input_path,
+                output_dir=input_path.parent,
+                include_diffuse=False,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_rmaos=False,
+                include_complex=False,
+                include_wetness_mask=False,
+                include_snow_mask=False,
+                include_ao=False,
+                include_roughness=False,
+                include_pbr_texture_sets=True,
+                render_profile="truepbr",
+            )
+
+            self.assertIn("pbr_texture_sets", outputs)
+            json_path = outputs["pbr_texture_sets"]
+            self.assertEqual(json_path.parent, temp_path / "mod" / "PBRTextureSets")
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            self.assertAlmostEqual(payload["roughnessScale"], 1.1, places=3)
+            self.assertAlmostEqual(payload["displacementScale"], 0.08, places=3)
+            self.assertAlmostEqual(payload["specularLevel"], 0.04, places=3)
+
+    def test_run_with_options_skips_pbr_texture_sets_for_non_terrain_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "mod" / "textures" / "architecture" / "brick.png"
+            input_path.parent.mkdir(parents=True, exist_ok=True)
+            _sample_image().save(input_path)
+            stderr = io.StringIO()
+
+            with mock.patch("sys.stderr", stderr):
+                outputs = run_with_options(
+                    input_file=input_path,
+                    output_dir=input_path.parent,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_rmaos=False,
+                    include_complex=False,
+                    include_wetness_mask=False,
+                    include_snow_mask=False,
+                    include_ao=False,
+                    include_roughness=False,
+                    include_pbr_texture_sets=True,
+                    render_profile="truepbr",
+                )
+
+            self.assertEqual(outputs, {})
+            self.assertIn("terrain-only", stderr.getvalue())
 
     def test_collect_source_textures_from_directory_skips_generated_suffixes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -8110,6 +8190,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 roughness_strength=None,
                 complex_material=False,
                 pbr_material=False,
+                pbr_texture_sets=False,
                 render_profile="auto",
                 batch_workers=1,
             )
@@ -8176,6 +8257,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 roughness_strength=None,
                 complex_material=False,
                 pbr_material=False,
+                pbr_texture_sets=False,
                 render_profile="auto",
                 batch_workers=2,
                 checkpoint_file=checkpoint,
@@ -8235,6 +8317,14 @@ class GenerateTexturesTests(unittest.TestCase):
             with mock.patch("sys.argv", ["generate_textures.py", str(input_file), "--pbr-material"]):
                 args = parse_args()
         self.assertTrue(args.pbr_material)
+
+    def test_parse_args_accepts_pbr_texture_sets_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_file = Path(temp_dir) / "landscape.dds"
+            input_file.write_bytes(b"dds")
+            with mock.patch("sys.argv", ["generate_textures.py", str(input_file), "--pbr-texture-sets"]):
+                args = parse_args()
+        self.assertTrue(args.pbr_texture_sets)
 
     def test_parse_args_accepts_render_profile_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -8298,7 +8388,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(args.gui_backend), "qt")
 
     def test_main_routes_to_qt_backend_when_requested(self) -> None:
-        args = mock.Mock(gui=True, input_file=None, gui_backend="qt")
+        args = mock.Mock(gui=True, input_file=None, gui_backend="qt", pbr_texture_sets=False)
         with mock.patch("generate_textures.parse_args", return_value=args):
             with mock.patch("generate_textures._launch_qt_migration_gui") as qt_launch:
                 with mock.patch("generate_textures._launch_tk_gui") as tk_launch:
@@ -8328,6 +8418,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 input_file=None,
                 gui_backend="auto",
                 pbr_material=False,
+                pbr_texture_sets=False,
                 import_project_settings=None,
                 export_project_settings=export_state,
             )
@@ -8344,7 +8435,7 @@ class GenerateTexturesTests(unittest.TestCase):
             tk_launch.assert_not_called()
 
     def test_main_auto_prefers_qt_when_tk_unavailable(self) -> None:
-        args = mock.Mock(gui=True, input_file=None, gui_backend="auto")
+        args = mock.Mock(gui=True, input_file=None, gui_backend="auto", pbr_texture_sets=False)
         with mock.patch("generate_textures.parse_args", return_value=args):
             with mock.patch("generate_textures.GUI_AVAILABLE", False):
                 with mock.patch("generate_textures.QT_GUI_AVAILABLE", True):
@@ -8354,7 +8445,7 @@ class GenerateTexturesTests(unittest.TestCase):
         qt_launch.assert_called_once()
 
     def test_main_frozen_qt_executable_defaults_to_qt_on_double_click(self) -> None:
-        args = SimpleNamespace(gui=False, input_file=None, gui_backend="auto", pbr_material=False)
+        args = SimpleNamespace(gui=False, input_file=None, gui_backend="auto", pbr_material=False, pbr_texture_sets=False)
         with mock.patch("generate_textures.parse_args", return_value=args), \
              mock.patch.object(sys, "frozen", True, create=True), \
              mock.patch.object(sys, "executable", "/packaged/generate_textures_qt.exe"), \
@@ -8369,7 +8460,7 @@ class GenerateTexturesTests(unittest.TestCase):
     def test_main_frozen_qt_executable_honors_explicit_backend_overrides(self) -> None:
         for backend in ("tk", "qt"):
             with self.subTest(backend=backend):
-                args = SimpleNamespace(gui=True, input_file=None, gui_backend=backend, pbr_material=False)
+                args = SimpleNamespace(gui=True, input_file=None, gui_backend=backend, pbr_material=False, pbr_texture_sets=False)
                 with mock.patch("generate_textures.parse_args", return_value=args), \
                      mock.patch.object(sys, "frozen", True, create=True), \
                      mock.patch.object(sys, "executable", "/packaged/generate_textures_qt.exe"), \
@@ -8387,7 +8478,7 @@ class GenerateTexturesTests(unittest.TestCase):
             (False, "/source/generate_textures_qt.exe"),
         ):
             with self.subTest(frozen=frozen, executable=executable):
-                args = SimpleNamespace(gui=False, input_file=None, gui_backend="auto", pbr_material=False)
+                args = SimpleNamespace(gui=False, input_file=None, gui_backend="auto", pbr_material=False, pbr_texture_sets=False)
                 with mock.patch("generate_textures.parse_args", return_value=args), \
                      mock.patch.object(sys, "frozen", frozen, create=True), \
                      mock.patch.object(sys, "executable", executable), \
@@ -8431,6 +8522,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 environment_mask=False,
                 complex_material=False,
                 pbr_material=True,
+                pbr_texture_sets=False,
                 render_profile="auto",
             )
             with mock.patch("generate_textures.parse_args", return_value=args):
@@ -8481,6 +8573,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 rmaos=False,
                 complex_material=False,
                 pbr_material=False,
+                pbr_texture_sets=False,
                 render_profile="enb",
             )
             with mock.patch("generate_textures.parse_args", return_value=args):
@@ -8537,6 +8630,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 rmaos=False,
                 complex_material=False,
                 pbr_material=False,
+                pbr_texture_sets=False,
                 render_profile="auto",
             )
             stderr = io.StringIO()
@@ -8588,6 +8682,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 rmaos=False,
                 complex_material=False,
                 pbr_material=False,
+                pbr_texture_sets=False,
                 render_profile="auto",
             )
             stderr = io.StringIO()
@@ -8620,7 +8715,7 @@ class GenerateTexturesTests(unittest.TestCase):
         class FakeTclError(Exception):
             pass
 
-        args = mock.Mock(gui=True, input_file=None)
+        args = mock.Mock(gui=True, input_file=None, pbr_texture_sets=False)
         with mock.patch("generate_textures.parse_args", return_value=args):
             with mock.patch("generate_textures.GUI_AVAILABLE", True):
                 with mock.patch("generate_textures.tk", mock.Mock(TclError=FakeTclError)):
@@ -10513,6 +10608,38 @@ class ParallaxOcclusionTests(unittest.TestCase):
         }
         for warning_id in env_mask_specific:
             self.assertNotIn(warning_id, ids, f"False-positive: {warning_id} fired with RMAOS only")
+
+    def test_get_generation_warnings_pbr_texture_sets_non_terrain_warns(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=True,
+            include_pbr_texture_sets=True,
+            include_environment_mask=False,
+            include_complex=False,
+            include_glow=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            render_profile="truepbr",
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("truepbr_landscape_non_terrain", ids)
+
+    def test_get_generation_warnings_pbr_texture_sets_profile_mismatch_warns(self) -> None:
+        warnings = get_generation_warnings(
+            "terrain",
+            include_normal=True,
+            include_pbr_texture_sets=True,
+            include_environment_mask=False,
+            include_complex=False,
+            include_glow=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            render_profile="enb",
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("truepbr_landscape_family_mismatch", ids)
 
     def test_msn_with_normal_output_triggers_warning(self) -> None:
         warnings = get_generation_warnings(

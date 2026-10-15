@@ -270,6 +270,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "include_glow": False,
     "include_environment_mask": False,
     "include_rmaos": False,
+    "include_pbr_texture_sets": False,
     "include_complex": False,
     "include_wetness_mask": False,
     "include_snow_mask": False,
@@ -1211,6 +1212,7 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         "include_glow",
         "include_environment_mask",
         "include_rmaos",
+        "include_pbr_texture_sets",
         "include_complex",
         "include_wetness_mask",
         "include_snow_mask",
@@ -1621,6 +1623,8 @@ def _describe_qt_output_channels(output_key: str, render_profile: str) -> str:
     profile = str(render_profile or "custom").strip().lower()
     if key == "rmaos":
         return "TruePBR RMAOS: R roughness · G metallic · B ambient occlusion · A non-metal reflectance."
+    if key == "pbr_texture_sets":
+        return "TruePBR landscape JSON: JSON metadata file, not a pixel channel map."
     if key == "complex_material":
         if profile == "enb":
             return "ENB _msn: R/G/B tangent-space normal XYZ · A specular intensity."
@@ -1648,6 +1652,13 @@ def _describe_qt_output_family_warning(output_key: str, render_profile: str) -> 
             return (
                 "Probably incompatible: TruePBR RMAOS is a TruePBR-family output, so the selected renderer "
                 "does not normally use this map."
+            )
+        return None
+    if key == "pbr_texture_sets":
+        if profile not in {"truepbr", "custom"}:
+            return (
+                "Probably incompatible: TruePBR landscape JSON belongs to the TruePBR family, so the selected "
+                "renderer normally should not mix this export with other families."
             )
         return None
     if key == "complex_material":
@@ -3470,6 +3481,7 @@ _QT_OUTPUT_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "environment_mask",
             "rmaos",
+            "pbr_texture_sets",
             "complex",
             "wetness_mask",
             "snow_mask",
@@ -3667,6 +3679,7 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": False,
+        "include_pbr_texture_sets": False,
         "include_wetness_mask": False,
         "include_snow_mask": False,
         "include_complex": False,
@@ -3680,6 +3693,7 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": False,
+        "include_pbr_texture_sets": False,
         "include_wetness_mask": False,
         "include_snow_mask": False,
         "include_complex": False,
@@ -3693,6 +3707,7 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": False,
+        "include_pbr_texture_sets": False,
         "include_wetness_mask": False,
         "include_snow_mask": False,
         "include_complex": False,
@@ -3706,6 +3721,7 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": False,
+        "include_pbr_texture_sets": False,
         "include_wetness_mask": False,
         "include_snow_mask": False,
         "include_complex": False,
@@ -3732,6 +3748,7 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": True,
         "include_rmaos": False,
+        "include_pbr_texture_sets": False,
         "include_wetness_mask": False,
         "include_snow_mask": False,
         "include_complex": False,
@@ -3745,6 +3762,7 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": False,
+        "include_pbr_texture_sets": False,
         "include_wetness_mask": False,
         "include_snow_mask": False,
         "include_complex": False,
@@ -3758,6 +3776,7 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": False,
+        "include_pbr_texture_sets": False,
         "include_wetness_mask": False,
         "include_snow_mask": False,
         "include_complex": True,
@@ -3771,6 +3790,7 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": False,
         "include_rmaos": True,
+        "include_pbr_texture_sets": False,
         "include_wetness_mask": False,
         "include_snow_mask": False,
         "include_complex": False,
@@ -3784,6 +3804,7 @@ _RENDER_PROFILE_OUTPUT_DEFAULTS: dict[str, dict[str, bool]] = {
         "include_glow": False,
         "include_environment_mask": True,
         "include_rmaos": False,
+        "include_pbr_texture_sets": False,
         "include_wetness_mask": False,
         "include_snow_mask": False,
         "include_complex": True,
@@ -3799,6 +3820,7 @@ _RENDER_PROFILE_OUTPUT_LABELS: dict[str, str] = {
     "include_glow": "glow/_g",
     "include_environment_mask": "vanilla/enb env mask/_m",
     "include_rmaos": "community shaders pbr/_rmaos/_ramos",
+    "include_pbr_texture_sets": "landscape PBRTextureSets JSON",
     "include_wetness_mask": "community shaders wetness/_wt",
     "include_snow_mask": "community shaders snow/_sm",
     "include_complex": "complex material (_msn/_cm)",
@@ -4334,6 +4356,7 @@ def describe_render_profile_files_to_create(profile: str) -> str:
     elif normalized == "truepbr":
         suffix_map["include_environment_mask"] = "<stem>_rmaos.dds (or <stem>_ramos.dds)"
         suffix_map["include_complex"] = "<stem>_rmaos.dds (or <stem>_ramos.dds)"
+        suffix_map["include_pbr_texture_sets"] = "Data/PBRTextureSets/<TXST_EDID>.json"
     elif normalized == "enb":
         suffix_map["include_normal"] = "<stem>_msn.dds"
         suffix_map["include_complex"] = "<stem>_msn.dds"
@@ -4346,7 +4369,10 @@ def describe_render_profile_files_to_create(profile: str) -> str:
                 files.append(file_hint)
     if not files:
         return "Suggested files: none by default for this profile."
-    return f"Suggested files: {', '.join(files)}."
+    summary = f"Suggested files: {', '.join(files)}."
+    if normalized == "truepbr":
+        summary += " Optional landscape export: Data/PBRTextureSets/<TXST_EDID>.json."
+    return summary
 
 
 def build_render_profile_recommendation_message(
@@ -4423,7 +4449,7 @@ def build_render_profile_recommendation_message(
             "- Legacy alias note: if you imported older _orm/_orms/_mrao/_mra assets, normalize them to _rmaos/_ramos naming before shipping to keep workflows unambiguous.",
             "- Core mesh tuning: Specular Level controls non-metal reflectance, Roughness Scale controls surface smoothness, and Displacement Scale controls parallax/displacement depth.",
             "- Colour-space rule of thumb: save in-game colour textures as sRGB; save data textures like normal/displacement/RMAOS in linear space.",
-            "- Landscape workflow: use Data/PBRTextureSets/<TXST_EDID>.json with roughnessScale, displacementScale, and specularLevel values.",
+            "- Landscape workflow: this tool can export Data/PBRTextureSets/<TXST_EDID>.json with roughnessScale, displacementScale, and specularLevel values. It does not build tiled landscape layers; that export is separate and opt-in.",
             "- Material-object workflow: use Data/PBRMaterialObjects/<EDID>.json with single-pass records; PBR MATOs only render on PBR-enabled surfaces.",
             "- Feature compatibility: subsurface scattering conflicts with dual-layer material; glint conflicts with fuzz and dual-layer; fuzz conflicts with glint and dual-layer; hair model is a standalone shading model; dual-layer material works with parallax/emission but not glint/fuzz/subsurface.",
             f"- Reference: {MODDING_WIKI_SKYRIM_URL}",
@@ -4577,13 +4603,13 @@ def _workflow_preset_onboarding_text() -> str:
     if None in {vanilla, enb, community_shaders, truepbr, custom}:
         return (
             "If you're unsure, start with the family that matches the mesh/output: Vanilla for Skyrim-safe outputs, "
-            "ENB for ENB/POM, Community Shaders for _cm/_c, and TruePBR for _rmaos/_ramos plus JSON sidecars. "
+            "ENB for ENB/POM, Community Shaders for _cm/_c, and TruePBR for _rmaos/_ramos plus JSON sidecars and optional landscape JSON. "
             "Never mix ENB / Community Shaders / TruePBR families on the same mesh unless you're intentionally switching pipelines."
         )
     return (
         f"If you're unsure, start with the family that matches the mesh/output: {vanilla.family_name} for Skyrim-safe outputs, "
         f"{enb.family_name} for ENB/POM, {community_shaders.family_name} for _cm/_c workflows, "
-        f"and {truepbr.family_name} for _rmaos/_ramos plus JSON sidecars. "
+        f"and {truepbr.family_name} for _rmaos/_ramos plus JSON sidecars and optional landscape JSON. "
         f"Use {custom.family_name} only when you already know the workflow and want manual control. "
         f"Never mix {enb.family_name} / {community_shaders.family_name} / {truepbr.family_name} families on the same mesh unless you're intentionally switching pipelines."
     )
@@ -7238,6 +7264,17 @@ def _find_textures_root(path: Path) -> Path | None:
     return None
 
 
+def _path_before_component(path: Path, component: str) -> Path | None:
+    parts = list(path.parts)
+    lowered = [part.lower() for part in parts]
+    if component.lower() not in lowered:
+        return None
+    index = lowered.index(component.lower())
+    if index <= 0:
+        return Path(".")
+    return Path(*parts[:index])
+
+
 def _build_truepbr_texture_identifier(texture_path: Path, textures_root: Path | None) -> str:
     normalized_stem = _normalize_texture_family_stem(texture_path)
     if textures_root is None:
@@ -7251,6 +7288,59 @@ def _build_truepbr_texture_identifier(texture_path: Path, textures_root: Path | 
         return normalized_stem
     relative_parts[-1] = normalized_stem
     return Path(*relative_parts).as_posix()
+
+
+def _resolve_pbr_texture_sets_output_root(input_path: Path, output_dir: Path | None) -> Path:
+    if output_dir is not None:
+        output_root = _path_before_component(output_dir, "textures")
+        return output_root if output_root is not None else output_dir
+    textures_root = _find_textures_root(input_path)
+    if textures_root is not None:
+        return textures_root.parent
+    return input_path.parent
+
+
+def build_pbr_texture_sets_output_path(
+    input_path: Path,
+    output_dir: Path | None,
+) -> Path:
+    """Return the output path for a TruePBR landscape ``PBRTextureSets`` JSON file."""
+    base_output_dir = _resolve_pbr_texture_sets_output_root(input_path, output_dir)
+    json_dir = base_output_dir / "PBRTextureSets"
+    json_dir.mkdir(parents=True, exist_ok=True)
+    return json_dir / f"{_normalize_texture_family_stem(input_path)}.json"
+
+
+def write_pbr_texture_sets_json(
+    texture_path: Path,
+    *,
+    output_dir: Path | None = None,
+    material_overrides: Mapping[str, object] | None = None,
+) -> Path:
+    """Write a minimal Community Shaders TruePBR landscape texture-set JSON file."""
+    payload: dict[str, float] = {
+        "roughnessScale": 1.1,
+        "displacementScale": 0.08,
+        "specularLevel": 0.04,
+    }
+    if material_overrides:
+        allowed_override_keys = {"roughness_scale", "displacement_scale", "specular_level", "parallax"}
+        for key, value in material_overrides.items():
+            if key not in allowed_override_keys:
+                raise ValueError(f"Unsupported PBRTextureSets override: {key}")
+            if key == "parallax":
+                continue
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+                raise ValueError(f"PBRTextureSets override '{key}' must be numeric.")
+            if key == "roughness_scale":
+                payload["roughnessScale"] = float(value)
+            elif key == "displacement_scale":
+                payload["displacementScale"] = float(value)
+            elif key == "specular_level":
+                payload["specularLevel"] = float(value)
+    json_path = build_pbr_texture_sets_output_path(texture_path, output_dir)
+    json_path.write_text(json.dumps(payload, indent=4), encoding="utf-8")
+    return json_path
 
 
 def write_rmaos_json_sidecar(
@@ -7635,6 +7725,7 @@ def _collect_planned_output_paths(
     include_snow_mask: bool = False,
     include_ao: bool = False,
     include_roughness: bool = False,
+    include_pbr_texture_sets: bool = False,
     target_game: str = "skyrim",
 ) -> dict[str, Path]:
     planned: dict[str, Path] = {}
@@ -7682,6 +7773,8 @@ def _collect_planned_output_paths(
             rmaos_name=rmaos_name,
             target_game=target_game,
         )
+    if include_pbr_texture_sets:
+        planned["pbr_texture_sets"] = build_pbr_texture_sets_output_path(input_file, output_dir)
     if include_wetness_mask:
         planned["wetness_mask"] = build_wetness_mask_output_path(
             input_path=input_file,
@@ -9149,6 +9242,8 @@ def get_generation_warnings(
     relief_mode: bool = False,
     include_wetness_mask: bool = False,
     include_snow_mask: bool = False,
+    include_pbr_texture_sets: bool = False,
+    render_profile: str | None = None,
     source_size: tuple[int, int] | None = None,
 ) -> list[tuple[str, str]]:
     """Return a list of (warning_id, human-readable message) pairs for suspicious generation choices.
@@ -9161,9 +9256,30 @@ def get_generation_warnings(
     normalized_complex_format = complex_format.strip().lower()
     normalized_parallax_mode = parallax_mode.strip().lower()
     normalized_source_suffix = (source_suffix or "").strip().lower()
+    normalized_render_profile = _normalize_render_profile(render_profile) if render_profile is not None else None
     is_enb_complex_combo = include_complex and normalized_complex_format == "msn" and env_mask_mode == "complex"
 
     organic_types = {"plants", "cloth", "skin"}
+
+    if include_pbr_texture_sets:
+        if material_type != "terrain":
+            warnings.append((
+                "truepbr_landscape_non_terrain",
+                "Landscape PBRTextureSets JSON is terrain-only.\n\n"
+                f"This source is classified as '{material_type}', so the export is being treated as a mismatch and should stay off for non-terrain textures.\n\n"
+                "Tip: Use the separate TruePBR landscape JSON checkbox only for terrain/landscape texture sets.",
+            ))
+        elif normalized_render_profile not in {None, "auto", "custom", "truepbr"}:
+            profile_label = _RENDER_PROFILE_LABELS.get(
+                normalized_render_profile,
+                (normalized_render_profile or "").replace("_", " ").title() or "Custom",
+            )
+            warnings.append((
+                "truepbr_landscape_family_mismatch",
+                "Landscape PBRTextureSets JSON belongs to the TruePBR family.\n\n"
+                f"The selected renderer profile is '{profile_label}', which risks mixing renderer families if you export this terrain JSON alongside a non-TruePBR workflow.\n\n"
+                "Tip: Switch to TruePBR or Custom before exporting the landscape JSON.",
+            ))
 
     if include_glow and material_type in {"stone", "wood", "plants", "metal", "sand", "snow", "cloth"}:
         warnings.append((
@@ -9878,6 +9994,7 @@ def run_with_options(
     include_roughness: bool = False,
     roughness_strength: float | None = None,
     roughness_name: str | None = None,
+    include_pbr_texture_sets: bool = False,
     truepbr_material_overrides: Mapping[str, object] | None = None,
 ) -> dict[str, Path]:
     if include_environment_mask and include_rmaos:
@@ -9896,11 +10013,29 @@ def run_with_options(
         include_snow_mask,
         include_ao,
         include_roughness,
+        include_pbr_texture_sets,
     )):
         raise ValueError("Select at least one output.")
     if parallax_mode not in {"standard", "occlusion"}:
         raise ValueError("parallax_mode must be 'standard' or 'occlusion'.")
     normalized_target_game = _normalize_texture_target_game(target_game)
+    resolved_material_type = classify_material_type(input_file)
+    pbr_texture_sets_selected = include_pbr_texture_sets and resolved_material_type == "terrain"
+    if include_pbr_texture_sets and not pbr_texture_sets_selected:
+        print(
+            f"[TruePBR landscape] PBRTextureSets JSON export is terrain-only; skipping for '{resolved_material_type}' source {input_file.name}.",
+            file=sys.stderr,
+        )
+    selected_render_profile = _normalize_render_profile(render_profile)
+    if include_pbr_texture_sets and selected_render_profile not in {None, "auto", "custom", "truepbr"}:
+        selected_profile_label = _RENDER_PROFILE_LABELS.get(
+            selected_render_profile,
+            (selected_render_profile or "").replace("_", " ").title() or "Custom",
+        )
+        print(
+            f"[TruePBR landscape] Selected renderer profile '{selected_profile_label}' does not match the TruePBR landscape JSON family.",
+            file=sys.stderr,
+        )
     planned_paths = _collect_planned_output_paths(
         input_file=input_file,
         output_dir=output_dir,
@@ -9929,6 +10064,7 @@ def run_with_options(
         include_snow_mask=include_snow_mask,
         include_ao=include_ao,
         include_roughness=include_roughness,
+        include_pbr_texture_sets=pbr_texture_sets_selected,
         target_game=normalized_target_game,
     )
     _validate_output_path_conflicts(planned_paths)
@@ -9951,8 +10087,6 @@ def run_with_options(
             analysis_source.thumbnail((512, 512), Image.Resampling.NEAREST)
         recommended = recommend_generation_settings(analysis_source, input_path=input_file)
         del analysis_source
-        # Derive material type for material-aware outputs (e.g. TruePBR JSON sidecar).
-        resolved_material_type = classify_material_type(input_file)
         resolved_normal_strength = normal_strength if normal_strength is not None else float(recommended["normal_strength"])
         resolved_parallax_strength = parallax_strength if parallax_strength is not None else float(recommended["parallax_strength"])
         resolved_glow_threshold = glow_threshold if glow_threshold is not None else int(recommended["glow_threshold"])
@@ -10096,6 +10230,13 @@ def run_with_options(
                 parallax_enabled=include_parallax,
                 material_type=resolved_material_type,
                 glow_enabled=include_glow,
+                material_overrides=truepbr_material_overrides,
+            )
+
+        if pbr_texture_sets_selected:
+            outputs["pbr_texture_sets"] = write_pbr_texture_sets_json(
+                input_file,
+                output_dir=output_dir,
                 material_overrides=truepbr_material_overrides,
             )
 
@@ -10247,6 +10388,7 @@ def run_batch_with_options(
     include_roughness: bool = False,
     roughness_strength: float | None = None,
     roughness_name: str | None = None,
+    include_pbr_texture_sets: bool = False,
     progress_callback: Callable[[int, int, Path], None] | None = None,
     error_callback: Callable[[int, int, Path, Exception], None] | None = None,
     continue_on_error: bool = False,
@@ -10309,6 +10451,7 @@ def run_batch_with_options(
         "include_roughness": include_roughness,
         "roughness_strength": roughness_strength,
         "roughness_name": roughness_name,
+        "include_pbr_texture_sets": include_pbr_texture_sets,
     }
 
     def _write_checkpoint_state() -> None:
@@ -10438,6 +10581,7 @@ def run_batch_with_options(
             include_environment_mask=include_environment_mask,
             include_rmaos=include_rmaos,
             include_complex=include_complex,
+            include_pbr_texture_sets=include_pbr_texture_sets,
             render_profile=render_profile,
             target_game=target_game,
             include_wetness_mask=include_wetness_mask,
@@ -10603,6 +10747,11 @@ def parse_args() -> argparse.Namespace:
         dest="rmaos",
         action="store_true",
         help="Generate dedicated TruePBR RMAOS output (_rmaos or _ramos via custom name) with JSON sidecar.",
+    )
+    parser.add_argument(
+        "--pbr-texture-sets",
+        action="store_true",
+        help="Generate terrain-only TruePBR landscape JSON under Data/PBRTextureSets (terrain inputs only).",
     )
     parser.add_argument(
         "--environment-mask-mode",
@@ -11060,6 +11209,7 @@ if GUI_AVAILABLE:
             self.include_glow_var = tk.BooleanVar(value=False)
             self.include_environment_mask_var = tk.BooleanVar(value=False)
             self.include_rmaos_var = tk.BooleanVar(value=False)
+            self.include_pbr_texture_sets_var = tk.BooleanVar(value=False)
             self.include_wetness_mask_var = tk.BooleanVar(value=False)
             self.include_snow_mask_var = tk.BooleanVar(value=False)
             self.include_ao_var = tk.BooleanVar(value=False)
@@ -11860,6 +12010,18 @@ if GUI_AVAILABLE:
             _snow_mask_check = ttk.Checkbutton(_custom_section, text="Snow Mask / _sm (Community Shaders)", variable=self.include_snow_mask_var, command=self._refresh_preview)
             _snow_mask_check.grid(row=1, column=0, sticky=tk.W)
             self._add_tooltip(_snow_mask_check, "❄ Generate a Community Shaders Dynamic Snow mask (_sm.dds).\nMarks where snow accumulates in supported shader/mod setups; this is workflow-specific, not a universal vanilla slot.")
+            _pbr_texture_sets_check = ttk.Checkbutton(
+                _custom_section,
+                text="Landscape PBRTextureSets JSON",
+                variable=self.include_pbr_texture_sets_var,
+                command=self._refresh_preview,
+            )
+            _pbr_texture_sets_check.grid(row=2, column=0, sticky=tk.W)
+            self._add_tooltip(
+                _pbr_texture_sets_check,
+                "Generate the terrain-only Community Shaders TruePBR landscape JSON under Data/PBRTextureSets.\n"
+                "Use this for terrain/landscape inputs only; it does not replace mesh-side PBRNifPatcher sidecars.",
+            )
             _advanced_workflow_toggle = ttk.Checkbutton(
                 _workflow_frame,
                 text="Show Advanced outputs (Basic view keeps core outputs)",
@@ -11970,6 +12132,7 @@ if GUI_AVAILABLE:
                 _glow_check,
                 _env_mask_check,
                 _rmaos_check,
+                _pbr_texture_sets_check,
                 _wetness_mask_check,
                 _snow_mask_check,
                 _complex_check,
@@ -12401,6 +12564,7 @@ if GUI_AVAILABLE:
                 if not show_advanced_workflow:
                     for advanced_var in (
                         self.include_rmaos_var,
+                        self.include_pbr_texture_sets_var,
                         self.include_wetness_mask_var,
                         self.include_snow_mask_var,
                         self.include_ao_var,
@@ -13369,6 +13533,7 @@ if GUI_AVAILABLE:
             self.include_glow_var.set(bool(state["include_glow"]))
             self.include_environment_mask_var.set(bool(state["include_environment_mask"]))
             self.include_rmaos_var.set(bool(state["include_rmaos"]))
+            self.include_pbr_texture_sets_var.set(bool(state["include_pbr_texture_sets"]))
             self.include_wetness_mask_var.set(bool(state["include_wetness_mask"]))
             self.include_snow_mask_var.set(bool(state["include_snow_mask"]))
             self.include_ao_var.set(bool(state["include_ao"]))
@@ -13565,6 +13730,7 @@ if GUI_AVAILABLE:
                 "include_glow": self.include_glow_var.get(),
                 "include_environment_mask": self.include_environment_mask_var.get(),
                 "include_rmaos": self.include_rmaos_var.get(),
+                "include_pbr_texture_sets": self.include_pbr_texture_sets_var.get(),
                 "include_wetness_mask": self.include_wetness_mask_var.get(),
                 "include_snow_mask": self.include_snow_mask_var.get(),
                 "include_ao": self.include_ao_var.get(),
@@ -14355,6 +14521,7 @@ if GUI_AVAILABLE:
                 "glow": bool(generation_kwargs["include_glow"]),
                 "environment_mask": bool(generation_kwargs["include_environment_mask"]),
                 "rmaos": bool(generation_kwargs["include_rmaos"]),
+                "pbr_texture_sets": bool(generation_kwargs.get("include_pbr_texture_sets", False)),
                 "ao": bool(generation_kwargs.get("include_ao", False)),
                 "roughness": bool(generation_kwargs.get("include_roughness", False)),
                 "complex_material": bool(generation_kwargs["include_complex"]),
@@ -14422,6 +14589,13 @@ if GUI_AVAILABLE:
                             input_path=input_file,
                             output_dir=generation_kwargs["output_dir"],
                             target_game=str(generation_kwargs.get("target_game", "skyrim")),
+                        )
+                    )
+                if includes["pbr_texture_sets"]:
+                    expected_paths.append(
+                        build_pbr_texture_sets_output_path(
+                            input_file,
+                            generation_kwargs["output_dir"],
                         )
                     )
                 if includes["ao"]:
@@ -15884,6 +16058,7 @@ if GUI_AVAILABLE:
             env_mask_mode: str,
             env_mask_strength: float,
             include_parallax: bool,
+            include_pbr_texture_sets: bool,
             include_complex: bool,
             parallax_mode: str,
             emboss_mode: bool = False,
@@ -15908,6 +16083,7 @@ if GUI_AVAILABLE:
                 env_mask_mode=env_mask_mode,
                 env_mask_strength=env_mask_strength,
                 include_parallax=include_parallax,
+                include_pbr_texture_sets=include_pbr_texture_sets,
                 parallax_strength=parallax_strength,
                 include_complex=include_complex,
                 complex_format=self.complex_format_var.get(),
@@ -15965,6 +16141,7 @@ if GUI_AVAILABLE:
                 include_glow = self.include_glow_var.get()
                 include_environment_mask = self.include_environment_mask_var.get()
                 include_rmaos = self.include_rmaos_var.get()
+                include_pbr_texture_sets = self.include_pbr_texture_sets_var.get()
                 include_wetness_mask = bool(self.include_wetness_mask_var.get())
                 include_snow_mask = bool(self.include_snow_mask_var.get())
                 include_ao = bool(self.include_ao_var.get())
@@ -15977,6 +16154,7 @@ if GUI_AVAILABLE:
                     include_glow,
                     include_environment_mask,
                     include_rmaos,
+                    include_pbr_texture_sets,
                     include_wetness_mask,
                     include_snow_mask,
                     include_ao,
@@ -16250,6 +16428,7 @@ if GUI_AVAILABLE:
                     include_glow=include_glow,
                     include_environment_mask=include_environment_mask,
                     include_rmaos=include_rmaos,
+                    include_pbr_texture_sets=include_pbr_texture_sets,
                     include_wetness_mask=include_wetness_mask,
                     include_snow_mask=include_snow_mask,
                     env_mask_mode=self.env_mask_mode_var.get(),
@@ -16325,6 +16504,7 @@ if GUI_AVAILABLE:
                     "include_glow": include_glow,
                     "include_environment_mask": include_environment_mask,
                     "include_rmaos": include_rmaos,
+                    "include_pbr_texture_sets": include_pbr_texture_sets,
                     "include_wetness_mask": include_wetness_mask,
                     "wetness_mask_strength": float(state.get("wetness_mask_strength", 1.0)),
                     "include_snow_mask": include_snow_mask,
@@ -19058,6 +19238,7 @@ def _apply_qt_profile_output_defaults(
         "include_glow",
         "include_environment_mask",
         "include_rmaos",
+        "include_pbr_texture_sets",
         "include_complex",
     }
     for key in renderer_output_keys.intersection(defaults):
@@ -19079,9 +19260,10 @@ def _describe_qt_profile_guidance(profile: str) -> str:
     )
     if normalized_profile == "terrain":
         guidance += (
-            " Terrain mode generates maps for individual textures; it does not build tiled landscape "
-            "layers or Community Shaders terrain feature sets."
+            " Terrain mode generates maps for individual textures; landscape PBRTextureSets JSON is a separate optional export, not a tiled terrain generator."
         )
+    elif normalized_profile == "truepbr":
+        guidance += " TruePBR can also export optional landscape PBRTextureSets JSON for terrain workflows."
     guidance += " Profile selection does not change checked outputs; use Apply profile map defaults to do that."
     guidance += f" {_workflow_preset_onboarding_text()}"
     return guidance
@@ -20546,11 +20728,19 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     include_glow_check = QtWidgets.QCheckBox("Glow")
     include_environment_mask_check = QtWidgets.QCheckBox("Environment mask (_m)")
     include_rmaos_check = QtWidgets.QCheckBox("TruePBR RMAOS (_rmaos)")
+    include_pbr_texture_sets_check = QtWidgets.QCheckBox("Landscape PBRTextureSets JSON")
     include_complex_check = QtWidgets.QCheckBox("Complex material (_msn/_cm)")
     include_wetness_mask_check = QtWidgets.QCheckBox("Wetness mask (_wt)")
     include_snow_mask_check = QtWidgets.QCheckBox("Dynamic snow mask (_sm)")
     include_ao_check = QtWidgets.QCheckBox("Standalone AO (_ao)")
     include_roughness_check = QtWidgets.QCheckBox("Standalone roughness (_rough)")
+    include_pbr_texture_sets_check.setToolTip(
+        _format_short_guidance_tooltip(
+            "exports a terrain-only TruePBR landscape JSON file under Data/PBRTextureSets",
+            "the source is a landscape/terrain texture set and you want the separate TruePBR landscape data file",
+            "the source is not terrain or you only want the image maps",
+        )
+    )
     output_controls = {
         "diffuse": include_diffuse_check,
         "normal": include_normal_check,
@@ -20558,6 +20748,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         "glow": include_glow_check,
         "environment_mask": include_environment_mask_check,
         "rmaos": include_rmaos_check,
+        "pbr_texture_sets": include_pbr_texture_sets_check,
         "complex": include_complex_check,
         "wetness_mask": include_wetness_mask_check,
         "snow_mask": include_snow_mask_check,
@@ -20582,7 +20773,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     workflow_note = QtWidgets.QLabel(
         "Vanilla/ENB _m and TruePBR _rmaos are separate Slot 5 workflows. "
         "Community Shaders _cm is Extended Materials, not TruePBR. "
-        "_wt/_sm are shader-specific; terrain selection does not generate layered landscape sets."
+        "_wt/_sm are shader-specific; terrain selection does not generate layered landscape sets unless you also export the separate PBRTextureSets JSON."
     )
     workflow_note.setWordWrap(True)
     controls_layout.addWidget(workflow_note, output_group_row, 0, 1, 4)
@@ -20945,6 +21136,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     include_glow_check.setChecked(bool(qt_saved_state["include_glow"]))
     include_environment_mask_check.setChecked(bool(qt_saved_state["include_environment_mask"]))
     include_rmaos_check.setChecked(bool(qt_saved_state["include_rmaos"]))
+    include_pbr_texture_sets_check.setChecked(bool(qt_saved_state["include_pbr_texture_sets"]))
     include_complex_check.setChecked(bool(qt_saved_state["include_complex"]))
     include_wetness_mask_check.setChecked(bool(qt_saved_state["include_wetness_mask"]))
     include_snow_mask_check.setChecked(bool(qt_saved_state["include_snow_mask"]))
@@ -22002,6 +22194,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             resume_mode=resume_mode_combo.currentText(),
             checkpoint_path=checkpoint_path_edit.text(),
             include_rmaos=include_rmaos_check.isChecked(),
+            include_pbr_texture_sets=include_pbr_texture_sets_check.isChecked(),
             include_complex=include_complex_check.isChecked(),
             include_wetness_mask=include_wetness_mask_check.isChecked(),
             include_snow_mask=include_snow_mask_check.isChecked(),
@@ -22083,6 +22276,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                 "include_glow": include_glow_check,
                 "include_environment_mask": include_environment_mask_check,
                 "include_rmaos": include_rmaos_check,
+                "include_pbr_texture_sets": include_pbr_texture_sets_check,
                 "include_complex": include_complex_check,
                 "include_wetness_mask": include_wetness_mask_check,
                 "include_snow_mask": include_snow_mask_check,
@@ -22101,6 +22295,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             "include_glow": include_glow_check,
             "include_environment_mask": include_environment_mask_check,
             "include_rmaos": include_rmaos_check,
+            "include_pbr_texture_sets": include_pbr_texture_sets_check,
             "include_complex": include_complex_check,
             "include_wetness_mask": include_wetness_mask_check,
             "include_snow_mask": include_snow_mask_check,
@@ -22620,6 +22815,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             include_glow_check.isChecked(),
             include_environment_mask_check.isChecked(),
             include_rmaos_check.isChecked(),
+            include_pbr_texture_sets_check.isChecked(),
             include_complex_check.isChecked(),
             include_wetness_mask_check.isChecked(),
             include_snow_mask_check.isChecked(),
@@ -22658,6 +22854,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                 include_glow=include_glow_check.isChecked(),
                 include_environment_mask=include_environment_mask_check.isChecked(),
                 include_rmaos=include_rmaos_check.isChecked(),
+                include_pbr_texture_sets=include_pbr_texture_sets_check.isChecked(),
                 include_wetness_mask=include_wetness_mask_check.isChecked(),
                 include_snow_mask=include_snow_mask_check.isChecked(),
                 env_mask_mode=str(env_mask_mode_combo.currentData() or "standard"),
@@ -22713,6 +22910,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             "include_glow": include_glow_check.isChecked(),
             "include_environment_mask": include_environment_mask_check.isChecked(),
             "include_rmaos": include_rmaos_check.isChecked(),
+            "include_pbr_texture_sets": include_pbr_texture_sets_check.isChecked(),
             "include_complex": include_complex_check.isChecked(),
             "include_wetness_mask": include_wetness_mask_check.isChecked(),
             "include_snow_mask": include_snow_mask_check.isChecked(),
@@ -23247,6 +23445,7 @@ def main() -> int:
         include_roughness=args.roughness_map,
         roughness_strength=args.roughness_strength,
         include_complex=args.complex_material,
+        include_pbr_texture_sets=args.pbr_texture_sets,
         render_profile=getattr(args, "render_profile", "auto"),
         target_game=args.target_game,
     )
