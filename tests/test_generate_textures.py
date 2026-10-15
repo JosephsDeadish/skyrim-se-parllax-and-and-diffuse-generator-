@@ -1839,6 +1839,17 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("inspection: channels rgba", note)
         self.assertIn("viewing: alpha.", note)
 
+    def test_qt_preview_channel_note_warns_when_output_family_mismatches(self) -> None:
+        note = _format_qt_preview_channel_note(
+            "complex_material",
+            "truepbr",
+            inspection="channels RGBA",
+            viewing_label="Composite",
+        ).lower()
+        self.assertIn("probably incompatible", note)
+        self.assertIn("truepbr does not use complex material outputs", note)
+        self.assertIn("channel meanings:", note)
+
     def test_qt_log_export_text_ends_with_single_newline_when_non_empty(self) -> None:
         self.assertEqual(_format_qt_log_export_text("line 1\nline 2\n"), "line 1\nline 2\n")
         self.assertEqual(_format_qt_log_export_text(""), "")

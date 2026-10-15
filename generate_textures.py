@@ -1433,6 +1433,38 @@ def _describe_qt_output_channels(output_key: str, render_profile: str) -> str:
     return "RGB image output."
 
 
+def _describe_qt_output_family_warning(output_key: str, render_profile: str) -> str | None:
+    key = str(output_key or "").strip().lower()
+    profile = _normalize_render_profile(render_profile)
+    if profile in {"auto", "custom"}:
+        return None
+    if key == "rmaos":
+        if profile != "truepbr":
+            return (
+                "Probably incompatible: TruePBR RMAOS is a TruePBR-family output, so the selected renderer "
+                "does not normally use this map."
+            )
+        return None
+    if key == "complex_material":
+        if profile == "truepbr":
+            return (
+                "Probably incompatible: TruePBR does not use complex material outputs; use _rmaos/_ramos and "
+                "the JSON sidecar workflow instead."
+            )
+        if profile == "vanilla":
+            return (
+                "Probably incompatible: vanilla Skyrim workflows do not normally use complex material outputs; "
+                "pick ENB or Community Shaders instead."
+            )
+        return None
+    if key in {"wetness_mask", "snow_mask"} and profile != "community_shaders":
+        return (
+            "Probably incompatible: wetness and snow masks are Community Shaders outputs, so this renderer family "
+            "usually should not use this map."
+        )
+    return None
+
+
 def _format_qt_preview_channel_note(
     output_key: str,
     render_profile: str,
@@ -1441,6 +1473,9 @@ def _format_qt_preview_channel_note(
     viewing_label: str | None = None,
 ) -> str:
     lines = [f"Channel meanings: {_describe_qt_output_channels(output_key, render_profile)}"]
+    family_warning = _describe_qt_output_family_warning(output_key, render_profile)
+    if family_warning:
+        lines.append(family_warning)
     if inspection:
         lines.append(f"Inspection: {inspection.strip()}")
     if viewing_label:
