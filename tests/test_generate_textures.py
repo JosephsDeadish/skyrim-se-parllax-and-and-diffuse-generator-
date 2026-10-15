@@ -78,6 +78,7 @@ from generate_textures import (
     _format_short_guidance_tooltip,
     _format_qt_preview_channel_note,
     _format_qt_log_export_text,
+    _qt_migration_status_text,
     _resolve_app_icon_source_path,
     _nif_editor_confirmation_text,
     _nif_editor_safety_banner_text,
@@ -1870,6 +1871,14 @@ class GenerateTexturesTests(unittest.TestCase):
         ).lower()
         self.assertIn("🚨 write mode is on", banner)
         self.assertIn("🧪 fallout writes are experimental best-effort only", banner)
+
+    def test_qt_migration_status_text_summarizes_scope_and_remaining_parity(self) -> None:
+        status = _qt_migration_status_text().lower()
+        self.assertIn("qt migration preview scope", status)
+        self.assertIn("overview, generation, nif scan, nif editor, batch/resume, and status tabs are available", status)
+        self.assertIn("restore/compare flows", status)
+        self.assertIn("generation rows and queue/preview parity are still being ported from tkinter", status)
+        self.assertIn("tkinter ui remains the full-featured release path", status)
 
     def test_nif_editor_confirmation_text_emphasizes_safe_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -11128,6 +11137,10 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
                 self.assertIn("dry-run is on", banner)
                 self.assertIn("compare against .bak first", banner)
                 self.assertIn("fallout writes stay off unless you opt in", banner)
+                self.assertIn("experimental fallout writes", w("nif_experimental").toolTip().lower())
+                self.assertIn("dry-run", w("nif_dry_run").toolTip().lower())
+                self.assertIn("experimental fallout parallax scale", w("nif_fallout_allow_parallax_scale").toolTip().lower())
+                self.assertIn("qt migration preview scope", self.widget(window, "qt_migration_status").toPlainText().lower())
                 self.assertIsNotNone(self.widget(window, "generation_log"))
                 self.assertIsNotNone(self.widget(window, "generation_log_copy"))
                 self.assertIsNotNone(self.widget(window, "generation_log_export"))

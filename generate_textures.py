@@ -4250,6 +4250,18 @@ def _format_short_guidance_tooltip(what_it_does: str, when_to_use_it: str, when_
     )
 
 
+def _qt_migration_status_text() -> str:
+    return "\n".join(
+        (
+            "Qt migration preview scope:",
+            "• Overview, Generation, NIF Scan, NIF Editor, Batch/Resume, and Status tabs are available",
+            "• Read-only scans, safe-fix previews, restore/compare flows, dry-run-first writes, and .bak rollback remain wired up",
+            "• Generation rows and queue/preview parity are still being ported from Tkinter",
+            "• The Tkinter UI remains the full-featured release path while migration continues",
+        )
+    )
+
+
 def _workflow_family_quick_check() -> str:
     return (
         "Quick check: Vanilla = Skyrim-safe parallax, ENB = ENB/POM, Community Shaders = _cm/_c, "
@@ -18620,18 +18632,39 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_form.addRow("Target game", nif_editor_profile)
     nif_editor_experimental = QtWidgets.QCheckBox("Opt in to experimental Fallout writes (best-effort)")
     nif_editor_experimental.setObjectName("nif_experimental")
+    nif_editor_experimental.setToolTip(
+        _format_short_guidance_tooltip(
+            "unlocks the Fallout-only write gates for the current mesh",
+            "you intentionally need best-effort Fallout writes and will keep dry-run and backups on",
+            "you are staying on the Skyrim-safe path or still want read-only preview/compare behavior",
+        )
+    )
     nif_editor_form.addRow(nif_editor_experimental)
     nif_editor_gates: dict[str, Any] = {}
     for name in ("parallax_scale", "fix_mesh_lighting", "spec_strength", "spec_color", "env_map_scale"):
         gate = QtWidgets.QCheckBox("Allow Fallout " + name.replace("_", " ") + " (experimental)")
         gate.setObjectName(f"nif_fallout_allow_{name}")
         gate.setEnabled(False)
+        gate.setToolTip(
+            _format_short_guidance_tooltip(
+                f"allows the experimental Fallout {name.replace('_', ' ')} write path",
+                "you have explicitly opted into Fallout writes for this mesh and need this specific adjustment",
+                "you are keeping the mesh in the supported Skyrim-safe path or have not enabled Fallout writes",
+            )
+        )
         nif_editor_experimental.toggled.connect(gate.setEnabled)
         nif_editor_gates[name] = gate
         nif_editor_form.addRow(gate)
     nif_editor_dry_run = QtWidgets.QCheckBox("Dry-run (no writes, including restore)")
     nif_editor_dry_run.setObjectName("nif_dry_run")
     nif_editor_dry_run.setChecked(True)
+    nif_editor_dry_run.setToolTip(
+        _format_short_guidance_tooltip(
+            "keeps patch, remediate, and restore actions read-only",
+            "you are previewing a mesh change or comparing against backups before any write",
+            "you are ready to perform a confirmed write or restore and have already checked the rollback path",
+        )
+    )
     nif_editor_form.addRow(nif_editor_dry_run)
     nif_editor_layout.addLayout(nif_editor_form)
     def _update_nif_editor_note() -> None:
@@ -19255,13 +19288,14 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     status_layout = QtWidgets.QVBoxLayout(status_tab)
     status_layout.setSpacing(8)
     status_box = QtWidgets.QPlainTextEdit()
+    status_box.setObjectName("qt_migration_status")
     status_box.setReadOnly(True)
     status_lines = [
         f"Tkinter available: {'yes' if GUI_AVAILABLE else 'no'}",
         f"Qt available: {'yes' if QT_GUI_AVAILABLE else 'no'}",
         f"NIF patcher available: {'yes' if NIF_PATCHER_AVAILABLE else 'no'}",
         "",
-        "Migration next step: incrementally port generation rows and queue/preview flows from Tkinter to Qt.",
+        _qt_migration_status_text(),
     ]
     if not NIF_PATCHER_AVAILABLE and NIF_PATCHER_IMPORT_ERROR:
         status_lines.extend(["", f"NIF patcher import warning: {NIF_PATCHER_IMPORT_ERROR}"])
