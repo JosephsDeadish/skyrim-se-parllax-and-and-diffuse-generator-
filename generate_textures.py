@@ -1963,16 +1963,54 @@ def _resolve_game_root_from_env(env: Mapping[str, str]) -> Path | None:
     return None
 
 
+def _normalize_path_name(value: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
+
+
+def _vortex_game_folder_variants(game_id: str | None) -> tuple[str, ...]:
+    normalized_game_id = _normalize_path_name(game_id)
+    if not normalized_game_id:
+        return ()
+    variant_names: dict[str, tuple[str, ...]] = {
+        "skyrimse": ("skyrimse", "Skyrim Special Edition", "Skyrim SE"),
+        "skyrimvr": ("skyrimvr", "Skyrim VR"),
+        "fallout3": ("fallout3", "Fallout 3", "FO3"),
+        "falloutnv": ("falloutnv", "Fallout New Vegas", "New Vegas", "FNV"),
+        "fallout4": ("fallout4", "Fallout 4", "FO4"),
+        "fallout76": ("fallout76", "Fallout 76", "FO76"),
+    }
+    variants = variant_names.get(normalized_game_id, (normalized_game_id,))
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for variant in variants:
+        token = _normalize_path_name(variant)
+        if token and token not in seen:
+            seen.add(token)
+            ordered.append(variant)
+    return tuple(ordered)
+
+
+def _path_name_matches_any_variant(name: str, variants: Sequence[str]) -> bool:
+    normalized_name = _normalize_path_name(name)
+    return any(normalized_name == _normalize_path_name(variant) for variant in variants)
+
+
+def _looks_like_vortex_root_name(name: str) -> bool:
+    normalized_name = _normalize_path_name(name)
+    return normalized_name.startswith("vortexmods") or normalized_name.startswith("blacktreegamingltdvortex") or normalized_name == "vortex"
+
+
 def _candidate_vortex_profile_dirs(env: Mapping[str, str], game_id: str | None) -> tuple[Path, ...]:
     candidates: list[Path] = []
+    game_folder_variants = _vortex_game_folder_variants(game_id)
 
     def _collect_profile_dirs_from_root(root: Path) -> None:
         patterns: list[Path] = []
-        if game_id:
+        for game_folder in game_folder_variants:
             patterns.extend(
                 [
-                    root / game_id / "profiles",
-                    root / "profiles" / game_id,
+                    root / game_folder / "profiles",
+                    root / "profiles" / game_folder,
                 ]
             )
         patterns.extend([root / "profiles", root])
@@ -2068,12 +2106,17 @@ def _detect_mo2_context(
 
 
 def _infer_vortex_staging_root(executable_path: Path, game_id: str | None) -> Path | None:
+    game_folder_variants = _vortex_game_folder_variants(game_id)
     for candidate in (executable_path.parent, *executable_path.parents):
-        if game_id and candidate.name.lower() == game_id.lower():
+        if game_folder_variants and _path_name_matches_any_variant(candidate.name, game_folder_variants):
             return candidate
-        if candidate.name.lower() == "vortex mods":
-            for child in candidate.iterdir():
-                if child.is_dir() and (not game_id or child.name.lower() == game_id.lower()):
+        if _looks_like_vortex_root_name(candidate.name):
+            try:
+                children = tuple(candidate.iterdir())
+            except Exception:
+                continue
+            for child in children:
+                if child.is_dir() and (not game_folder_variants or _path_name_matches_any_variant(child.name, game_folder_variants)):
                     return child
     return None
 

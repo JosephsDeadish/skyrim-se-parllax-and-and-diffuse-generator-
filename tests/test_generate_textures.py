@@ -5514,6 +5514,40 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(context.output_dir, (tool_dir / "generated_textures").resolve())
             self.assertTrue(context.summary.startswith("Detected Mod (Hint): detected Vortex context"))
 
+    def test_detect_mod_manager_context_handles_portable_vortex_alias_layouts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            profile_root = temp_path / "Portable Vortex Profiles"
+            profile_dir = profile_root / "Skyrim Special Edition" / "profiles" / "Main"
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "modlist.txt").write_text("+Texture Pack\n", encoding="utf-8")
+            (profile_dir / "plugins.txt").write_text("*Skyrim.esm\n", encoding="utf-8")
+            (profile_dir / "loadorder.txt").write_text("Skyrim.esm\n", encoding="utf-8")
+
+            staging_root = temp_path / "Vortex Mods (Portable)" / "Skyrim Special Edition"
+            textures_dir = staging_root / "Texture Pack" / "textures"
+            meshes_dir = staging_root / "Texture Pack" / "meshes"
+            tool_dir = staging_root / "Skyrim Texture Generator"
+            textures_dir.mkdir(parents=True)
+            meshes_dir.mkdir(parents=True)
+            tool_dir.mkdir(parents=True)
+
+            context = detect_mod_manager_context(
+                {
+                    "VORTEX_PROFILE_DIR": str(profile_root),
+                    "VORTEX_PROFILE": "Main",
+                    "VORTEX_GAME_ID": "skyrimse",
+                },
+                executable_path=tool_dir / "generate_textures.exe",
+            )
+
+            self.assertEqual(context.manager, "Vortex")
+            self.assertEqual(context.profile_name, "Main")
+            self.assertEqual(context.loaded_mods, ("Texture Pack",))
+            self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
+            self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
+            self.assertEqual(context.staging_root, staging_root.resolve())
+
     def test_detect_mod_manager_context_resolves_vortex_profile_root_to_nested_profile_dirs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
