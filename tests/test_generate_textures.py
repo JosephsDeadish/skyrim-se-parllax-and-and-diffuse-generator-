@@ -8758,6 +8758,7 @@ class GenerateTexturesTests(unittest.TestCase):
         fake_gui.status_var = _Var("")
         fake_gui.batch_perf_hint_var = _Var("")
         fake_gui.show_batch_preview_var = _Var(show_batch_preview)
+        fake_gui.show_advanced_workflow_outputs_var = _Var(False)
         fake_gui.batch_nif_patch_results = []
         fake_gui.batch_failures = []
         fake_gui.root = _Root()
