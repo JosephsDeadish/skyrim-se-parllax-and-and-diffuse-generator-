@@ -797,6 +797,51 @@ def summarize_batch_nif_patch_activity(
     return f"Automatic NIF patching: {total_patched} succeeded, {total_failed} failed."
 
 
+def _batch_source_display_label(input_root: Path | None, source_path: Path) -> str:
+    if input_root is not None and input_root.is_dir():
+        try:
+            return str(source_path.resolve().relative_to(input_root.resolve()))
+        except Exception:
+            pass
+    label = source_path.name.strip()
+    return label if label else str(source_path)
+
+
+def _summarize_batch_source_folders(
+    source_paths: Sequence[Path],
+    input_root: Path | None,
+    *,
+    limit: int = 3,
+) -> list[str]:
+    if input_root is None or not input_root.is_dir():
+        return []
+    try:
+        resolved_root = input_root.resolve()
+    except Exception:
+        return []
+    folder_counts: dict[str, int] = defaultdict(int)
+    for source_path in source_paths:
+        try:
+            relative = source_path.resolve().relative_to(resolved_root)
+        except Exception:
+            continue
+        folder_name = relative.parts[0] if len(relative.parts) > 1 else "(root)"
+        folder_counts[folder_name] += 1
+    if not folder_counts:
+        return []
+    ordered = sorted(folder_counts.items(), key=lambda item: (-item[1], item[0].lower()))
+    total_sources = sum(folder_counts.values())
+    lines = [
+        f"Folder summary: {total_sources} source texture(s) across {len(folder_counts)} top-level folder(s).",
+        "Top folders: "
+        + ", ".join(f"{folder} ({count})" for folder, count in ordered[: max(1, limit)])
+        + ".",
+    ]
+    if len(ordered) > limit:
+        lines.append(f"... and {len(ordered) - limit} more top-level folder(s).")
+    return lines
+
+
 _CORE_PREVIEW_OUTPUT_KEYS = (
     "diffuse",
     "normal",
@@ -9926,6 +9971,7 @@ def run_batch_with_options(
     results: dict[Path, dict[str, Path]] = {}
     total = len(input_files)
     batch_metrics = _summarize_batch_texture_dimensions(input_files)
+    folder_summary_lines = _summarize_batch_source_folders(input_files, input_path)
     workers = _resolve_batch_workers(
         batch_workers,
         total,
@@ -9968,6 +10014,7 @@ def run_batch_with_options(
                 "max_source_megapixels": float(batch_metrics.get("max_megapixels", 0.0) or 0.0),
                 "source_files_4k_or_above": int(batch_metrics.get("high_res_4k_count", 0) or 0),
                 "source_files_8k_or_above": int(batch_metrics.get("high_res_8k_count", 0) or 0),
+                "folder_summary_lines": folder_summary_lines,
             },
             "per_file_duration_seconds": [round(value, 6) for value in durations],
         }
@@ -13581,6 +13628,7 @@ if GUI_AVAILABLE:
                 auto_patch_nifs = bool(generation_call_kwargs.pop("auto_patch_nifs", False))
                 manager_context = generation_call_kwargs.pop("manager_context", None)
                 batch_metrics = _summarize_batch_texture_dimensions(input_files)
+                folder_summary_lines = _summarize_batch_source_folders(input_files, input_root)
                 high_res_4k_count = int(batch_metrics.get("high_res_4k_count", 0) or 0)
                 high_res_8k_count = int(batch_metrics.get("high_res_8k_count", 0) or 0)
                 max_source_dim = int(batch_metrics.get("max_dimension", 0) or 0)
@@ -13597,6 +13645,7 @@ if GUI_AVAILABLE:
                             "max_source_megapixels": max_source_megapixels,
                             "resumed_completed_count": resumed_completed_count,
                             "checkpoint_path": str(checkpoint_path),
+                            "folder_summary_lines": folder_summary_lines,
                         })))
                         return
                     elapsed_seconds = max(0.0, time.perf_counter() - started_at)
@@ -13604,7 +13653,11 @@ if GUI_AVAILABLE:
                     if index > 1 and elapsed_seconds > 0.0:
                         avg_so_far = elapsed_seconds / max(1, index - 1)
                         eta_seconds = max(0.0, avg_so_far * (total - index + 1))
-                    self.processing_queue.put(("progress", (index, total, input_file, elapsed_seconds, eta_seconds)))
+                    display_label = _batch_source_display_label(input_root, input_file)
+                    self.processing_queue.put((
+                        "progress",
+                        (index, total, input_file, elapsed_seconds, eta_seconds, display_label),
+                    ))
                     file_started = time.perf_counter()
                     try:
                         outputs = run_with_options(
@@ -13632,7 +13685,7 @@ if GUI_AVAILABLE:
                             )
                             patched = sum(1 for result in nif_patch_results if getattr(result, "success", False))
                             failed = sum(1 for result in nif_patch_results if not getattr(result, "success", False))
-                            self.processing_queue.put(("nif_patch", (input_file.name, patched, failed)))
+                            self.processing_queue.put(("nif_patch", (display_label, patched, failed)))
                         results[input_file] = outputs
                         self._record_created_outputs(list(outputs.values()))
                         completed_checkpoint_files.add(str(input_file.resolve()))
@@ -13643,7 +13696,10 @@ if GUI_AVAILABLE:
                             resumed_completed_count=resumed_completed_count,
                         )
                     except Exception as exc:
-                        self.processing_queue.put(("file_error", (index, total, input_file.name, str(exc))))
+                        self.processing_queue.put((
+                            "file_error",
+                            (index, total, input_file.name, str(exc), display_label),
+                        ))
                     finally:
                         per_file_durations.append(max(0.0, time.perf_counter() - file_started))
                 elapsed_seconds = max(0.0, time.perf_counter() - started_at)
@@ -13659,6 +13715,7 @@ if GUI_AVAILABLE:
                     "max_source_megapixels": max_source_megapixels,
                     "resumed_completed_count": resumed_completed_count,
                     "checkpoint_path": str(checkpoint_path),
+                    "folder_summary_lines": folder_summary_lines,
                 })))
             except Exception as exc:
                 self.processing_queue.put(("error", str(exc)))
@@ -13713,10 +13770,12 @@ if GUI_AVAILABLE:
                         index, total, current_path = payload[0], payload[1], payload[2]
                         elapsed_seconds = float(payload[3]) if len(payload) >= 4 else 0.0
                         eta_seconds = float(payload[4]) if len(payload) >= 5 else 0.0
+                        display_label = str(payload[5]).strip() if len(payload) >= 6 and str(payload[5]).strip() else ""
                     else:
                         index, total, current_path = 0, 0, Path("unknown")
                         elapsed_seconds = 0.0
                         eta_seconds = 0.0
+                        display_label = ""
                     now = time.monotonic()
                     last_status_at = float(getattr(self, "_last_batch_status_update_at", 0.0) or 0.0)
                     last_status_index = int(getattr(self, "_last_batch_status_update_index", 0) or 0)
@@ -13729,8 +13788,9 @@ if GUI_AVAILABLE:
                         high_res_8k_count=max(0, int(getattr(self, "_active_batch_high_res_8k_count", 0) or 0)),
                     )
                     if should_update_status:
+                        display_name = display_label or Path(current_path).name
                         progress_message = (
-                            f"Processing {index}/{total}: {current_path.name} "
+                            f"Processing {index}/{total}: {display_name} "
                             f"(elapsed {elapsed_seconds:.1f}s, eta {eta_seconds:.1f}s)"
                         )
                         self.status_var.set(progress_message)
@@ -13760,9 +13820,10 @@ if GUI_AVAILABLE:
                         self.status_var.set(nif_patch_message)
                         self._append_generation_log(nif_patch_message)
                 elif event_type == "file_error":
-                    index, total, filename, error_message = payload
-                    self.batch_failures.append((filename, error_message))
-                    error_message_text = f"Skipped failed file {index}/{total}: {filename}"
+                    index, total, filename, error_message = payload[:4]
+                    display_label = str(payload[4]).strip() if len(payload) >= 5 and str(payload[4]).strip() else filename
+                    self.batch_failures.append((display_label, error_message))
+                    error_message_text = f"Skipped failed file {index}/{total}: {display_label}"
                     self.status_var.set(error_message_text)
                     self._append_generation_log(error_message_text)
                 elif event_type == "done":
@@ -13800,6 +13861,14 @@ if GUI_AVAILABLE:
                                 lines.append(f"...and {total_failed - 5} more.")
                     checkpoint_health_available = False
                     if telemetry:
+                        folder_summary_source = telemetry.get("folder_summary_lines", []) or []
+                        folder_summary_lines = [
+                            str(value).strip()
+                            for value in folder_summary_source
+                            if str(value).strip()
+                        ]
+                        if folder_summary_lines:
+                            lines.extend(folder_summary_lines)
                         elapsed = float(telemetry.get("elapsed_seconds", 0.0) or 0.0)
                         avg_file = float(telemetry.get("avg_file_seconds", 0.0) or 0.0)
                         max_file = float(telemetry.get("max_file_seconds", 0.0) or 0.0)
@@ -13914,6 +13983,14 @@ if GUI_AVAILABLE:
                     ]
                     if nif_patch_summary is not None:
                         cancel_lines.append(nif_patch_summary)
+                    folder_summary_source = telemetry.get("folder_summary_lines", []) or []
+                    folder_summary_lines = [
+                        str(value).strip()
+                        for value in folder_summary_source
+                        if str(value).strip()
+                    ]
+                    if folder_summary_lines:
+                        cancel_lines.extend(folder_summary_lines)
                     cancel_lines.extend(
                         [
                             "Processing was cancelled.",
@@ -18446,6 +18523,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                     ]
                     total = len(pending_files)
                     batch_metrics = _summarize_batch_texture_dimensions(pending_files)
+                    folder_summary_lines = _summarize_batch_source_folders(pending_files, input_path)
                     include_flags = {
                         "diffuse": include_diffuse,
                         "normal": include_normal,
@@ -18486,6 +18564,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                                 "failed": 0,
                                 "resumed_completed": resumed_completed_count,
                                 "checkpoint_path": str(checkpoint_path),
+                                "folder_summary_lines": folder_summary_lines,
                                 "bottleneck_hints": [],
                                 "results": [],
                                 "failures": [],
@@ -18503,6 +18582,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                                     "failed": len(failures),
                                     "resumed_completed": resumed_completed_count,
                                     "checkpoint_path": str(checkpoint_path),
+                                    "folder_summary_lines": folder_summary_lines,
                                     "bottleneck_hints": [],
                                     "results": result_rows,
                                     "failures": failures,
@@ -18512,7 +18592,8 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                         elapsed = max(0.0, time.perf_counter() - start_time)
                         avg = elapsed / max(1, index - 1)
                         eta = avg * max(0, total - index + 1)
-                        self.progress.emit(index, total, str(source_path), elapsed, eta)
+                        display_label = _batch_source_display_label(input_path, source_path)
+                        self.progress.emit(index, total, display_label, elapsed, eta)
                         try:
                             outputs = run_with_options(
                                 input_file=source_path,
@@ -18556,10 +18637,10 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                                 total_files_considered=len(all_files),
                                 generation_options=checkpoint_generation_options,
                             )
-                            self.event.emit("file_done", {"source": str(source_path), "outputs": output_payload})
+                            self.event.emit("file_done", {"source": display_label, "outputs": output_payload})
                         except Exception as exc:
                             failures.append((str(source_path), str(exc)))
-                            self.event.emit("file_error", {"source": str(source_path), "error": str(exc)})
+                            self.event.emit("file_error", {"source": display_label, "error": str(exc)})
                             if not continue_on_error:
                                 raise
 
@@ -18584,6 +18665,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                             "failed": len(failures),
                             "resumed_completed": resumed_completed_count,
                             "checkpoint_path": str(checkpoint_path),
+                            "folder_summary_lines": folder_summary_lines,
                             "deferred_preview": sorted(deferred_keys),
                             "bottleneck_hints": bottleneck_hints,
                             "results": result_rows,
@@ -18592,7 +18674,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                     )
                     return
 
-                self.progress.emit(1, 1, str(input_path), 0.0, 0.0)
+                self.progress.emit(1, 1, _batch_source_display_label(input_path, input_path), 0.0, 0.0)
                 outputs = run_with_options(
                     input_file=input_path,
                     output_dir=output_dir,
@@ -18625,7 +18707,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                 )
                 output_payload = {name: str(path) for name, path in outputs.items()}
                 result_rows.append({"source": str(input_path), "outputs": output_payload})
-                self.event.emit("file_done", {"source": str(input_path), "outputs": output_payload})
+                self.event.emit("file_done", {"source": _batch_source_display_label(input_path, input_path), "outputs": output_payload})
                 self.finished.emit(
                     {
                         "cancelled": False,
@@ -18634,6 +18716,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                         "failed": 0,
                         "resumed_completed": 0,
                         "checkpoint_path": str(checkpoint_path),
+                        "folder_summary_lines": [],
                         "deferred_preview": [],
                         "bottleneck_hints": [],
                         "results": result_rows,
@@ -21054,8 +21137,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         def _on_progress(index: int, total: int, current_path: str, elapsed: float, eta: float) -> None:
             if total > 0:
                 progress_bar.setValue(min(100, int((index / max(1, total)) * 100)))
+            display_path = str(current_path).strip() or Path(str(current_path)).name
             status_label.setText(
-                f"Processing {index}/{total}: {Path(current_path).name} (elapsed {elapsed:.1f}s, eta {eta:.1f}s)"
+                f"Processing {index}/{total}: {display_path} (elapsed {elapsed:.1f}s, eta {eta:.1f}s)"
             )
 
         def _on_event(event_name: str, payload: object) -> None:
@@ -21094,11 +21178,11 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                         preview_results_list.takeItem(0)
                     if preview_results_list.count():
                         preview_results_list.setCurrentRow(preview_results_list.count() - 1)
-                    _append_event_log(f"[done] {Path(source).name}: wrote {len(outputs)} output(s)")
+                    _append_event_log(f"[done] {source or Path(source).name}: wrote {len(outputs)} output(s)")
             elif event_name == "file_error" and isinstance(payload, dict):
                 source = str(payload.get("source", "") or "")
                 error = str(payload.get("error", "") or "")
-                _append_event_log(f"[error] {Path(source).name}: {error}")
+                _append_event_log(f"[error] {source or Path(source).name}: {error}")
 
         def _cleanup_worker() -> None:
             nonlocal qt_worker_thread, qt_worker
@@ -21131,6 +21215,14 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                 batch_bottleneck_label.setText("Post-run hints: " + " | ".join(hint_lines))
             else:
                 batch_bottleneck_label.setText("Post-run hints: none")
+            folder_summary_lines = []
+            if isinstance(payload, dict):
+                folder_summary_source = payload.get("folder_summary_lines", []) or []
+                folder_summary_lines = [
+                    str(value).strip()
+                    for value in folder_summary_source
+                    if str(value).strip()
+                ]
             preview_auto_speed_off = False
             _refresh_preview_state_badge()
             status_label.setText(
@@ -21141,6 +21233,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                 )
             )
             _append_event_log(status_label.text())
+            if folder_summary_lines:
+                for line in folder_summary_lines:
+                    _append_event_log(f"[summary] {line}")
             if failed > 0:
                 _append_event_log("[summary] review event log entries tagged [error] for failed files.")
 

@@ -40,6 +40,7 @@ from generate_textures import (
     _load_qt_preview_png,
     _recommend_qt_render_profile,
     _bind_tk_main_window_shortcuts,
+    _batch_source_display_label,
     _describe_qt_output_channels,
     _choose_qt_input_path,
     _should_render_nif_editor_results,
@@ -106,6 +107,7 @@ from generate_textures import (
     _visible_preview_output_keys,
     build_batch_bottleneck_hints,
     summarize_batch_nif_patch_activity,
+    _summarize_batch_source_folders,
     build_mod_manager_profile_setup_hint,
     compute_checkpoint_mismatch_flags,
     compute_checkpoint_resume_counts,
@@ -8234,7 +8236,27 @@ class GenerateTexturesTests(unittest.TestCase):
         fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False)
         fake_gui.batch_nif_patch_results = [("stone.dds", 2, 1)]
         fake_gui.batch_failures = [("broken.dds", "decode error")]
-        fake_gui.processing_queue.put(("done", {Path("stone.dds"): {"diffuse": Path("stone_out.dds")}}))
+        fake_gui.processing_queue.put((
+            "done",
+            (
+                {Path("stone.dds"): {"diffuse": Path("stone_out.dds")}},
+                {
+                    "folder_summary_lines": [
+                        "Folder summary: 1 source texture(s) across 1 top-level folder(s).",
+                        "Top folders: (root) (1).",
+                    ],
+                    "elapsed_seconds": 1.2,
+                    "avg_file_seconds": 1.2,
+                    "max_file_seconds": 1.2,
+                    "high_res_4k_count": 0,
+                    "high_res_8k_count": 0,
+                    "max_source_dimension": 0,
+                    "max_source_megapixels": 0.0,
+                    "resumed_completed_count": 0,
+                    "checkpoint_path": "",
+                },
+            ),
+        ))
 
         with mock.patch("generate_textures.messagebox.showinfo") as showinfo:
             TextureGeneratorGUI._poll_processing_queue(fake_gui)
@@ -8246,18 +8268,66 @@ class GenerateTexturesTests(unittest.TestCase):
         shown_message = showinfo.call_args.args[1]
         self.assertIn("Automatic NIF patching: 2 succeeded, 1 failed.", shown_message)
         self.assertIn("broken.dds: decode error", shown_message)
+        self.assertIn("Folder summary: 1 source texture(s) across 1 top-level folder(s).", shown_message)
         fake_gui._refresh_preview.assert_called_once()
+
+    def test_batch_source_helpers_report_relative_labels_and_folder_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            architecture = root / "architecture"
+            clutter = root / "clutter"
+            architecture.mkdir()
+            clutter.mkdir()
+            source_paths = [
+                architecture / "stone.dds",
+                architecture / "trim.dds",
+                clutter / "barrel.dds",
+                root / "root_file.dds",
+            ]
+            for path in source_paths:
+                path.write_text("x", encoding="utf-8")
+
+            self.assertEqual(
+                Path(_batch_source_display_label(root, source_paths[0])),
+                Path("architecture") / "stone.dds",
+            )
+
+            summary_lines = _summarize_batch_source_folders(source_paths, root)
+            self.assertEqual(
+                summary_lines[0],
+                "Folder summary: 4 source texture(s) across 3 top-level folder(s).",
+            )
+            self.assertIn("architecture (2)", summary_lines[1])
+            self.assertIn("clutter (1)", summary_lines[1])
+            self.assertIn("(root) (1)", summary_lines[1])
+
+    def test_gui_processing_queue_progress_and_failure_labels_prefer_relative_paths(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False)
+        fake_gui.processing_queue.put(
+            ("file_error", (2, 3, "broken.dds", "decode error", "textures/architecture/broken.dds"))
+        )
+
+        TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        self.assertEqual(
+            fake_gui.batch_failures,
+            [("textures/architecture/broken.dds", "decode error")],
+        )
+        self.assertIn("Skipped failed file 2/3: textures/architecture/broken.dds", fake_gui.status_var.get())
+        self.assertEqual(fake_gui.root.after_calls[0][0], 100)
 
     def test_gui_processing_queue_smoke_progress_event_updates_status_and_preview(self) -> None:
         if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
             self.skipTest("GUI queue polling is unavailable in this environment.")
         fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=True)
         current = Path("textures/stone.dds")
-        fake_gui.processing_queue.put(("progress", (1, 3, current)))
+        fake_gui.processing_queue.put(("progress", (1, 3, current, 0.5, 1.0, "textures/stone.dds")))
 
         TextureGeneratorGUI._poll_processing_queue(fake_gui)
 
-        self.assertIn("Processing 1/3: stone.dds", fake_gui.status_var.get())
+        self.assertIn("Processing 1/3: textures/stone.dds", fake_gui.status_var.get())
         fake_gui._set_preview_source_by_path.assert_called_once_with(current)
         self.assertEqual(fake_gui.root.after_calls[0][0], 100)
 
