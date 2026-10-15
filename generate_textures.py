@@ -4194,6 +4194,7 @@ def _workflow_preset_onboarding_text() -> str:
 
 def _workflow_quick_start_steps_text() -> str:
     return (
+        f"{_workflow_preset_onboarding_text()}\n"
         "Step 1: choose one renderer family (Vanilla, ENB, Community Shaders, or TruePBR).\n"
         "Step 2: pick the input texture/folder and output target.\n"
         "Step 3: use Suggested to auto-pick a safe family from the current file or mod-manager context, then continue to Generate or Scan.\n"
@@ -10556,26 +10557,62 @@ if GUI_AVAILABLE:
                 dismiss=_dismiss_startup_onboarding,
             )
 
-            ttk.Button(
+            startup_vanilla_button = ttk.Button(
                 startup_onboarding_button_row,
                 text="Vanilla",
                 command=lambda: _apply_startup_preset("vanilla"),
-            ).pack(side=tk.LEFT, padx=(0, 4))
-            ttk.Button(
+            )
+            startup_vanilla_button.pack(side=tk.LEFT, padx=(0, 4))
+            self._add_tooltip(
+                startup_vanilla_button,
+                _format_short_guidance_tooltip(
+                    "starts the quick-start flow on the safest Skyrim baseline",
+                    "you want standard parallax or a family-safe starting point",
+                    "you are intentionally using ENB, Community Shaders, or TruePBR instead",
+                ),
+            )
+            startup_enb_button = ttk.Button(
                 startup_onboarding_button_row,
                 text="ENB",
                 command=lambda: _apply_startup_preset("enb"),
-            ).pack(side=tk.LEFT, padx=4)
-            ttk.Button(
+            )
+            startup_enb_button.pack(side=tk.LEFT, padx=4)
+            self._add_tooltip(
+                startup_enb_button,
+                _format_short_guidance_tooltip(
+                    "starts the quick-start flow on the ENB family",
+                    "the mesh is meant for ENB complex material or POM",
+                    "you need Community Shaders _cm/_c or TruePBR _rmaos/_ramos instead",
+                ),
+            )
+            startup_cs_button = ttk.Button(
                 startup_onboarding_button_row,
                 text="Community Shaders",
                 command=lambda: _apply_startup_preset("community_shaders"),
-            ).pack(side=tk.LEFT, padx=4)
-            ttk.Button(
+            )
+            startup_cs_button.pack(side=tk.LEFT, padx=4)
+            self._add_tooltip(
+                startup_cs_button,
+                _format_short_guidance_tooltip(
+                    "starts the quick-start flow on the Community Shaders family",
+                    "the mesh should stay on _cm/_c Extended Materials outputs",
+                    "you want ENB or TruePBR outputs instead",
+                ),
+            )
+            startup_truepbr_button = ttk.Button(
                 startup_onboarding_button_row,
                 text="TruePBR",
                 command=lambda: _apply_startup_preset("truepbr"),
-            ).pack(side=tk.LEFT, padx=4)
+            )
+            startup_truepbr_button.pack(side=tk.LEFT, padx=4)
+            self._add_tooltip(
+                startup_truepbr_button,
+                _format_short_guidance_tooltip(
+                    "starts the quick-start flow on the Community Shaders TruePBR family",
+                    "the mesh is using the JSON-driven _rmaos/_ramos workflow",
+                    "you need plain Community Shaders or ENB packed outputs instead",
+                ),
+            )
             suggested_startup_button = ttk.Button(
                 startup_onboarding_button_row,
                 text="Suggested",
@@ -10584,13 +10621,26 @@ if GUI_AVAILABLE:
             suggested_startup_button.pack(side=tk.LEFT, padx=4)
             self._add_tooltip(
                 suggested_startup_button,
-                "Apply the renderer family suggested by the current file or mod-manager context, then hide this card.",
+                _format_short_guidance_tooltip(
+                    "applies the renderer family suggested by the current file or mod-manager context",
+                    "you are not sure which family to start with and want the safest guided path",
+                    "you already know the family and want to choose Vanilla, ENB, Community Shaders, or TruePBR manually",
+                ),
             )
-            ttk.Button(
+            startup_hide_button = ttk.Button(
                 startup_onboarding_button_row,
                 text="Hide",
                 command=_dismiss_startup_onboarding,
-            ).pack(side=tk.RIGHT)
+            )
+            startup_hide_button.pack(side=tk.RIGHT)
+            self._add_tooltip(
+                startup_hide_button,
+                _format_short_guidance_tooltip(
+                    "hides the quick-start card until you reopen it",
+                    "you already picked a family and want more room for the main controls",
+                    "you still need the quick-start decision tree visible while choosing a renderer family",
+                ),
+            )
             _add_tooltip(
                 startup_onboarding_show_button,
                 "Reopen the quick start card if you hide it for later.",
@@ -18334,14 +18384,22 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         button = QtWidgets.QPushButton(label)
         button.setObjectName(f"startup_onboarding_{profile_key}")
         button.setToolTip(
-            f"Start with the {label} renderer family, apply safe defaults, and move to the generation tab."
+            _format_short_guidance_tooltip(
+                f"starts the quick-start flow on the {label} renderer family",
+                "the mesh should stay on this renderer family",
+                "you need one of the other renderer families instead",
+            )
         )
         button.clicked.connect(lambda _checked=False, value=profile_key: _apply_qt_startup_preset(value))
         startup_onboarding_button_row.addWidget(button)
     startup_onboarding_suggested_button = QtWidgets.QPushButton("Suggested")
     startup_onboarding_suggested_button.setObjectName("startup_onboarding_suggested")
     startup_onboarding_suggested_button.setToolTip(
-        "Apply the family suggested by the current file or mod-manager context, then move to the generation tab."
+        _format_short_guidance_tooltip(
+            "applies the family suggested by the current file or mod-manager context",
+            "you are unsure which family to start with and want the safest guided path",
+            "you already know the family and want to pick it manually",
+        )
     )
 
     def _apply_qt_startup_suggested_preset() -> None:

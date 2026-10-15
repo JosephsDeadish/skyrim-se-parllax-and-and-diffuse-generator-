@@ -1805,6 +1805,7 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_workflow_quick_start_steps_text_mentions_step_flow(self) -> None:
         quick_start = _workflow_quick_start_steps_text().lower()
+        self.assertIn("if you're unsure", quick_start)
         self.assertIn("step 1:", quick_start)
         self.assertIn("step 2:", quick_start)
         self.assertIn("step 3:", quick_start)
@@ -2349,6 +2350,7 @@ class GenerateTexturesTests(unittest.TestCase):
                         for child in banner.winfo_children()
                         if child.winfo_class() in {"TLabel", "Label"}
                     ]
+                    self.assertTrue(any("If you're unsure" in text for text in label_texts))
                     self.assertTrue(any("Step 1:" in text for text in label_texts))
                     self.assertTrue(any("Step 4:" in text for text in label_texts))
                     self.assertTrue(any("Step 5:" in text for text in label_texts))
@@ -11259,6 +11261,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             step = state["step"]
             if step == 0:
                 self.assertTrue(w("startup_onboarding").isVisible())
+                self.assertIn("If you're unsure", w("startup_onboarding_text").text())
                 self.assertIn("Step 1:", w("startup_onboarding_text").text())
                 self.assertIn("Step 4:", w("startup_onboarding_text").text())
                 self.assertIn("Step 5:", w("startup_onboarding_text").text())
@@ -11303,6 +11306,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             step = state["step"]
             if step == 0:
                 self.assertTrue(w("startup_onboarding").isVisible())
+                self.assertIn("If you're unsure", w("startup_onboarding_text").text())
                 self.assertIn("Step 3:", w("startup_onboarding_text").text())
                 self.assertIn("Step 4:", w("startup_onboarding_text").text())
                 self.assertIn("Step 5:", w("startup_onboarding_text").text())
