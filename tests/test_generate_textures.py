@@ -4027,6 +4027,12 @@ class GenerateTexturesTests(unittest.TestCase):
             ),
             "community_shaders",
         )
+        noisy_temp_path = Path("/tmp/tmpqjvr25tr/MO2/overwrite/textures/neutral_asset.dds")
+        self.assertIsNone(detect_workflow_profile(noisy_temp_path))
+        self.assertEqual(
+            recommend_render_profile(noisy_temp_path, manager_context=context),
+            "community_shaders",
+        )
 
     def test_recommend_render_profile_detects_truepbr_from_rmaos_suffix(self) -> None:
         self.assertEqual(

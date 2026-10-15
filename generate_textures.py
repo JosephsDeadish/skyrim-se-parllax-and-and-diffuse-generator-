@@ -2186,6 +2186,17 @@ def _normalize_profile_hint_source(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
 
+def _path_hint_matches(path: str | Path, token: str) -> bool:
+    source = str(path).replace("\\", "/")
+    normalized_token = _normalize_profile_hint_source(token)
+    camel_case_source = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", source)
+    camel_case_source = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", camel_case_source)
+    return any(
+        f" {normalized_token} " in f" {_normalize_profile_hint_source(candidate)} "
+        for candidate in (source, camel_case_source)
+    )
+
+
 def _hint_token_matches_source(source: str, token: str) -> bool:
     normalized_source = _normalize_profile_hint_source(source)
     normalized_token = _normalize_profile_hint_source(token)
@@ -3306,12 +3317,11 @@ def detect_workflow_profile(path: Path) -> str | None:
     truepbr_suffixes = tuple(f"{suffix}.dds" for suffix in (*TRUEPBR_ENV_MASK_SUFFIXES, *LEGACY_TRUEPBR_ENV_MASK_SUFFIXES))
     if name.endswith(truepbr_suffixes):
         return "truepbr"
-    combined = " ".join(Path(normalized).parts).lower()
     for profile, tokens in _RENDER_PROFILE_PATH_HINTS.items():
-        if any(token in combined for token in tokens):
+        if any(_path_hint_matches(normalized, token) for token in tokens):
             return profile
     for profile, tokens in _WORKFLOW_PROFILE_TOKENS.items():
-        if any(token in combined for token in tokens):
+        if any(_path_hint_matches(normalized, token) for token in tokens):
             return profile
     return None
 
@@ -5125,9 +5135,8 @@ def recommend_render_profile_details(
             source_label = "material fallback"
             matched_evidence.append("material type `paper`")
         elif input_path is not None:
-            combined = " ".join(input_path.parts).lower()
             for profile, tokens in _RENDER_PROFILE_PATH_HINTS.items():
-                matched_token = next((token for token in tokens if token in combined), None)
+                matched_token = next((token for token in tokens if _path_hint_matches(input_path, token)), None)
                 if matched_token is None:
                     continue
                 matched_profile = profile
