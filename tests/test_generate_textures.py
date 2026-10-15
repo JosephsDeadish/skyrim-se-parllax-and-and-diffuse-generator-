@@ -1856,8 +1856,8 @@ class GenerateTexturesTests(unittest.TestCase):
             dry_run=False,
             experimental_fallout_write=True,
         ).lower()
-        self.assertIn("write mode is on", banner)
-        self.assertIn("fallout writes are experimental best-effort only", banner)
+        self.assertIn("🚨 write mode is on", banner)
+        self.assertIn("🧪 fallout writes are experimental best-effort only", banner)
 
     def test_nif_editor_confirmation_text_emphasizes_safe_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1878,7 +1878,7 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertIn("rollback path: 1/2 selected nifs have sibling .nif.bak backups", patch_message)
             self.assertIn("dry-run first", patch_message)
             self.assertIn("best-effort", patch_message)
-            self.assertIn("⚠ write mode", patch_message)
+            self.assertIn("🚨 write mode", patch_message)
 
             restore_message = _nif_editor_confirmation_text(
                 "restore",
@@ -1898,8 +1898,8 @@ class GenerateTexturesTests(unittest.TestCase):
             ).lower()
             self.assertIn("remove the selected features from 3 nif files", unpatch_message)
             self.assertIn("rollback path: 1/2 selected nifs have sibling .nif.bak backups", unpatch_message)
-            self.assertIn("destructive write", unpatch_message)
-            self.assertIn("⚠ fallout writes are experimental best-effort only.", unpatch_message)
+            self.assertIn("🚨 destructive write", unpatch_message)
+            self.assertIn("🧪 fallout writes are experimental best-effort only.", unpatch_message)
             self.assertIn("continue with destructive write mode?", unpatch_message)
 
     def test_nif_editor_confirmation_title_matches_action(self) -> None:

@@ -4177,14 +4177,14 @@ def _nif_editor_safety_banner_text(
     experimental_fallout_write: bool = False,
 ) -> str:
     normalized_game = str(target_game or "auto").strip().lower()
-    safety_mode = "Dry-run is on" if dry_run else "Write mode is on"
+    safety_mode = "Dry-run is on" if dry_run else "🚨 Write mode is on"
     if normalized_game == "fallout" or experimental_fallout_write:
-        fallout_note = "Fallout writes are experimental best-effort only"
+        fallout_note = "🧪 Fallout writes are experimental best-effort only"
     else:
         fallout_note = "Fallout writes stay off unless you opt in"
     return (
         "Safe default: keep Dry-run and Backup originals enabled. "
-        f"⚠ {safety_mode}. compare against .bak first; restore from .bak is the rollback path. "
+        f"{safety_mode}. Compare against .bak first; restore from .bak is the rollback path. "
         f"{fallout_note}."
     )
 
@@ -4254,7 +4254,7 @@ def _nif_editor_confirmation_text(
         )
     elif normalized_action == "unpatch":
         lines = [
-            "⚠ DESTRUCTIVE WRITE",
+            "🚨 DESTRUCTIVE WRITE",
             f"Remove the selected features from {int(file_count)} {noun}?",
             "",
         ]
@@ -4262,11 +4262,11 @@ def _nif_editor_confirmation_text(
             lines.extend((backup_state, ""))
         lines.append("This is a destructive write operation. Dry-run first and backups enabled are the safe default.")
         if experimental_fallout_write:
-            lines.append("⚠ Fallout writes are experimental best-effort only.")
+            lines.append("🧪 Fallout writes are experimental best-effort only.")
         lines.append("Continue with destructive write mode?")
     else:
         lines = [
-            "⚠ WRITE MODE",
+            "🚨 WRITE MODE",
             f"Apply patch edits to {int(file_count)} {noun}?",
             "",
         ]
@@ -4277,7 +4277,7 @@ def _nif_editor_confirmation_text(
             "Write mode modifies the meshes on disk and relies on .nif.bak backups for rollback."
         )
         if experimental_fallout_write:
-            lines.append("⚠ Fallout writes are experimental best-effort only.")
+            lines.append("🧪 Fallout writes are experimental best-effort only.")
         lines.append("Continue with write mode?")
     return "\n".join(lines)
 
@@ -15312,7 +15312,7 @@ if GUI_AVAILABLE:
                 target_game_var.trace_add("write", _refresh_profile_guidance)
                 guarded_mode_note = ttk.Label(
                     opt_frame,
-                    text="⚠ " + _nif_editor_safety_banner_text(
+                    text=_nif_editor_safety_banner_text(
                         target_game_var.get(),
                         dry_run=dry_run_var.get(),
                         experimental_fallout_write=experimental_fallout_write_var.get(),
@@ -15510,9 +15510,14 @@ if GUI_AVAILABLE:
                         fallout_allow_env_map_scale_check,
                     ):
                         gate_check.configure(state=gate_state)
+                    guarded_mode_risky = (
+                        selected_game == "fallout"
+                        or not dry_run_var.get()
+                        or experimental_fallout_write_var.get()
+                    )
                     guarded_mode_note.configure(
-                        text="⚠ "
-                        + _nif_editor_safety_banner_text(
+                        style=("Status.Error.TLabel" if guarded_mode_risky else "Status.Warning.TLabel"),
+                        text=_nif_editor_safety_banner_text(
                             target_game=selected_game,
                             dry_run=dry_run_var.get(),
                             experimental_fallout_write=experimental_fallout_write_var.get(),
@@ -18405,7 +18410,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_content = QtWidgets.QWidget()
     nif_editor_layout = QtWidgets.QVBoxLayout(nif_editor_content)
     nif_editor_note = QtWidgets.QLabel(
-        "⚠ " + _nif_editor_safety_banner_text()
+        _nif_editor_safety_banner_text()
     )
     nif_editor_note.setObjectName("nif_editor_safety_banner")
     nif_editor_note.setWordWrap(True)
@@ -18471,8 +18476,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_layout.addLayout(nif_editor_form)
     def _update_nif_editor_note() -> None:
         nif_editor_note.setText(
-            "⚠ "
-            + _nif_editor_safety_banner_text(
+            _nif_editor_safety_banner_text(
                 nif_editor_profile.currentText(),
                 dry_run=nif_editor_dry_run.isChecked(),
                 experimental_fallout_write=nif_editor_experimental.isChecked(),
