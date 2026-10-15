@@ -4836,6 +4836,36 @@ def _format_qt_log_export_text(text: str) -> str:
     return _format_log_export_text(text)
 
 
+def build_diagnostics_bundle_text(
+    state: Mapping[str, object],
+    log_text: str,
+    *,
+    context_summary: str = "",
+    title: str = "Skyrim Texture Generator diagnostics bundle",
+) -> str:
+    normalized_state = _normalize_gui_state(state)
+    normalized_log = _format_log_export_text(log_text).rstrip()
+    lines = [
+        title,
+        "=" * len(title),
+        f"App version: {APP_VERSION}",
+        f"Generated (UTC): {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}",
+    ]
+    if context_summary.strip():
+        lines.extend(("", "Detected mod context:", context_summary.strip()))
+    lines.extend(
+        (
+            "",
+            "GUI state:",
+            json.dumps(normalized_state, indent=2, sort_keys=True, ensure_ascii=False),
+            "",
+            "Generation event log:",
+            normalized_log if normalized_log else "(empty)",
+        )
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def recommend_render_profile_details(
     input_path: Path | None,
     *,
@@ -12132,6 +12162,20 @@ if GUI_AVAILABLE:
                 self.generation_log_export_button,
                 "Save the current generation log to a text file.",
             )
+            self.generation_log_bundle_export_button = ttk.Button(
+                generation_log_header,
+                text="Export bundle…",
+                command=self._export_diagnostics_bundle,
+            )
+            self.generation_log_bundle_export_button.pack(side=tk.RIGHT, padx=(4, 0))
+            self._add_tooltip(
+                self.generation_log_bundle_export_button,
+                _format_short_guidance_tooltip(
+                    "saves the current log plus GUI state as one support bundle",
+                    "you want to report a bug, ask for help, or compare saved settings",
+                    "you only need the plain log text and do not want your current GUI state attached",
+                ),
+            )
             generation_log_body = ttk.Frame(generation_log_frame)
             generation_log_body.pack(fill=tk.BOTH, expand=True)
             self.generation_log_text = tk.Text(generation_log_body, wrap=tk.WORD, height=7)
@@ -13333,6 +13377,32 @@ if GUI_AVAILABLE:
                 self.status_var.set(f"Generation log export failed: {exc}")
                 return
             self.status_var.set(self._tr("Exported generation log to {path}.").format(path=Path(selected)))
+
+        def _export_diagnostics_bundle(self) -> None:
+            text_widget = getattr(self, "generation_log_text", None)
+            if text_widget is None:
+                return
+            bundle_text = build_diagnostics_bundle_text(
+                self._build_gui_state(),
+                text_widget.get("1.0", "end-1c"),
+                context_summary=self.detected_context_var.get(),
+            )
+            selected = filedialog.asksaveasfilename(
+                title="Export diagnostics bundle",
+                defaultextension=".txt",
+                filetypes=[("Text files", "*.txt *.log"), ("All files", "*.*")],
+                initialdir=str(self._default_output_browse_dir()),
+                initialfile="skyrim_texture_generator_diagnostics.txt",
+            )
+            if not selected:
+                return
+            try:
+                Path(selected).write_text(bundle_text, encoding="utf-8")
+            except OSError as exc:
+                messagebox.showwarning("Diagnostics bundle export failed", str(exc), parent=self.root)
+                self.status_var.set(f"Diagnostics bundle export failed: {exc}")
+                return
+            self.status_var.set(self._tr("Exported diagnostics bundle to {path}.").format(path=Path(selected)))
 
         def _default_output_dir_for_path(self, path: Path) -> Path:
             return path if path.is_dir() else path.parent
@@ -20217,6 +20287,16 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     event_log_export_button.setObjectName("generation_log_export")
     event_log_export_button.setToolTip("Save the current generation log to a text file.")
     event_log_header_row.addWidget(event_log_export_button)
+    event_log_bundle_export_button = QtWidgets.QPushButton("Export bundle…")
+    event_log_bundle_export_button.setObjectName("generation_log_bundle_export")
+    event_log_bundle_export_button.setToolTip(
+        _format_short_guidance_tooltip(
+            "saves the current log plus GUI state as one support bundle",
+            "you want to report a bug, ask for help, or compare saved settings",
+            "you only need the plain log text and do not want your current GUI state attached",
+        )
+    )
+    event_log_header_row.addWidget(event_log_bundle_export_button)
     generation_layout.addLayout(event_log_header_row)
 
     event_log = QtWidgets.QPlainTextEdit()
@@ -21458,6 +21538,28 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             return
         status_label.setText(f"Exported generation log to {chosen_file}.")
 
+    def _export_diagnostics_bundle() -> None:
+        text = event_log.toPlainText()
+        chosen_file, _ = QtWidgets.QFileDialog.getSaveFileName(
+            window,
+            "Export diagnostics bundle",
+            str(Path.home() / "skyrim_texture_generator_diagnostics.txt"),
+            "Text files (*.txt *.log);;All files (*)",
+        )
+        if not chosen_file:
+            return
+        try:
+            bundle_text = build_diagnostics_bundle_text(
+                load_gui_state(),
+                text,
+                context_summary=manager_context.summary,
+            )
+            Path(chosen_file).write_text(bundle_text, encoding="utf-8")
+        except OSError as exc:
+            QtWidgets.QMessageBox.warning(window, "Diagnostics bundle export failed", str(exc))
+            return
+        status_label.setText(f"Exported diagnostics bundle to {chosen_file}.")
+
     def _browse_checkpoint() -> None:
         chosen_file, _ = QtWidgets.QFileDialog.getSaveFileName(
             window,
@@ -21588,6 +21690,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         apply_profile_outputs_button.setEnabled(not running)
         event_log_copy_button.setEnabled(not running)
         event_log_export_button.setEnabled(not running)
+        event_log_bundle_export_button.setEnabled(not running)
         browse_input_button.setEnabled(not running)
         browse_input_folder_button.setEnabled(not running)
         browse_output_button.setEnabled(not running)
@@ -21971,6 +22074,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     cancel_button.clicked.connect(_cancel_generation)
     event_log_copy_button.clicked.connect(_copy_event_log)
     event_log_export_button.clicked.connect(_export_event_log)
+    event_log_bundle_export_button.clicked.connect(_export_diagnostics_bundle)
     pause_preview_button.clicked.connect(_pause_preview)
     resume_preview_button.clicked.connect(_resume_preview)
     render_deferred_button.clicked.connect(_render_deferred_now)

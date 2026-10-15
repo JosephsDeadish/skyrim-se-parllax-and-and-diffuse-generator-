@@ -87,6 +87,7 @@ from generate_textures import (
     _format_log_export_text,
     _format_qt_preview_channel_note,
     _format_qt_log_export_text,
+    build_diagnostics_bundle_text,
     _qt_migration_status_text,
     _resolve_app_icon_source_path,
     _nif_editor_confirmation_text,
@@ -2043,6 +2044,26 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("when to use it: you need the safe preset path", tooltip)
         self.assertIn("when not to use it: you want full manual control", tooltip)
 
+    def test_diagnostics_bundle_text_includes_state_context_and_log(self) -> None:
+        bundle = build_diagnostics_bundle_text(
+            {
+                "render_profile": "enb",
+                "show_startup_onboarding": False,
+                "last_renderer": "enb",
+                "last_output_target": "next to input",
+            },
+            "line one\nline two",
+            context_summary="Detected Mod (Hint): detected MO2 context",
+            title="Custom diagnostics bundle",
+        )
+        self.assertIn("Custom diagnostics bundle", bundle)
+        self.assertIn("App version:", bundle)
+        self.assertIn("Detected mod context:", bundle)
+        self.assertIn("Detected Mod (Hint): detected MO2 context", bundle)
+        self.assertIn('"render_profile": "enb"', bundle)
+        self.assertIn("Generation event log:", bundle)
+        self.assertIn("line one\nline two", bundle)
+
     def test_qt_preview_channel_note_formatter_includes_legends_and_viewing_state(self) -> None:
         note = _format_qt_preview_channel_note(
             "complex_material",
@@ -2872,6 +2893,19 @@ class GenerateTexturesTests(unittest.TestCase):
                     gui._export_generation_log()
                 self.assertEqual(export_path.read_text(encoding="utf-8"), expected_text + "\n")
                 self.assertIn("Exported generation log to", gui.status_var.get())
+                bundle_path = Path(temp_dir) / "bundle.txt"
+                gui.render_profile_var.set("enb")
+                gui.use_custom_output_var.set(True)
+                gui.output_var.set(str(Path(temp_dir) / "out"))
+                with mock.patch("generate_textures.filedialog.asksaveasfilename", return_value=str(bundle_path)):
+                    gui._export_diagnostics_bundle()
+                bundle_text = bundle_path.read_text(encoding="utf-8")
+                self.assertIn("Skyrim Texture Generator diagnostics bundle", bundle_text)
+                self.assertIn("App version:", bundle_text)
+                self.assertIn('"render_profile": "enb"', bundle_text)
+                self.assertIn("Generation event log:", bundle_text)
+                self.assertIn(expected_text, bundle_text)
+                self.assertIn("Exported diagnostics bundle to", gui.status_var.get())
             finally:
                 if gui is not None:
                     gui.root.destroy()
@@ -11770,6 +11804,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
                 self.assertIsNotNone(self.widget(window, "generation_log"))
                 self.assertIsNotNone(self.widget(window, "generation_log_copy"))
                 self.assertIsNotNone(self.widget(window, "generation_log_export"))
+                self.assertIsNotNone(self.widget(window, "generation_log_bundle_export"))
                 self.assertIn("dry-run first", w("nif_editor_patch").text().lower())
                 self.assertIn("read-only", w("nif_editor_compare").text().lower())
                 self.assertIn("restore", w("nif_editor_restore").text().lower())
