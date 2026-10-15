@@ -3054,6 +3054,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 "env_mask_mode": "invalid",
                 "parallax_mode": "occlusion",
                 "render_profile": "mystery",
+                "nif_render_profile": "mystery",
                 "auto_optimize_large_batches": 0,
                 "lazy_preview_mode": 0,
                 "staged_preview_mode": 0,
@@ -3075,6 +3076,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(normalized["env_mask_mode"]), "standard")
         self.assertEqual(str(normalized["parallax_mode"]), "occlusion (ENB/POM)")
         self.assertEqual(str(normalized["render_profile"]), "custom")
+        self.assertEqual(str(normalized["nif_render_profile"]), "custom")
         self.assertFalse(bool(normalized["auto_optimize_large_batches"]))
         self.assertFalse(bool(normalized["lazy_preview_mode"]))
         self.assertFalse(bool(normalized["staged_preview_mode"]))
@@ -12160,6 +12162,50 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
 
         with mock.patch.object(self.qt.QtWidgets.QMessageBox, "question", return_value=self.qt.QtWidgets.QMessageBox.StandardButton.Yes):
             self.run_window(scenario)
+
+    def test_qt_nif_scan_handoff_prefills_renderer_and_warns_on_mismatch(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        path = self.root / "mods" / "enbseries" / "stone.nif"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(_build_minimal_nif())
+        saved_states = []
+        state = {"step": 0}
+
+        def capture_state(state_data):
+            saved_states.append(json.loads(json.dumps(state_data)))
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                w("nif_scan_path").setText(str(path))
+                w("nif_scan_start").click()
+                state["step"] = 1
+                return False
+            if step == 1 and w("generate").isEnabled():
+                self.assertGreaterEqual(w("nif_scan_results").topLevelItemCount(), 1)
+                w("nif_scan_results").setCurrentItem(w("nif_scan_results").topLevelItem(0))
+                w("nif_scan_open_editor").click()
+                state["step"] = 2
+                return False
+            if step == 2 and w("generate").isEnabled():
+                self.assertEqual(w("tabs").tabText(w("tabs").currentIndex()), "NIF Editor")
+                self.assertEqual(w("nif_scan_path").text(), str(path))
+                self.assertEqual(w("nif_render_profile").currentText(), "enb")
+                self.assertIn("safe patch path", w("nif_editor_guidance").text())
+                self.assertIn("ENB POM", w("nif_editor_guidance").text())
+                self.assertTrue(saved_states)
+                self.assertEqual(saved_states[-1]["nif_render_profile"], "enb")
+                w("nif_render_profile").setCurrentText("vanilla")
+                self.app.processEvents()
+                self.assertIn("Probably incompatible", w("nif_editor_option_warning").text())
+                self.assertIn("ENB", w("nif_editor_option_warning").text())
+                self.assertEqual(saved_states[-1]["nif_render_profile"], "vanilla")
+                return True
+            return False
+
+        self.run_window(scenario, save_side_effect=capture_state)
 
     def test_actual_editor_close_cancels_folder_between_files(self) -> None:
         from tests.test_nif_patcher import _build_minimal_nif

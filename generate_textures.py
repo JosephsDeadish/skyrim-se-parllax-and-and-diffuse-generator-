@@ -258,6 +258,7 @@ _GUI_STATE_DEFAULTS: dict[str, object] = {
     "parallax_mode": "standard",
     "render_profile": "custom",
     "qt_render_profile": "custom",
+    "nif_render_profile": "custom",
     "target_game": "skyrim",
     "emboss_mode": False,
     "relief_mode": False,
@@ -1176,6 +1177,15 @@ def _normalize_gui_state(raw: Mapping[str, object] | None) -> dict[str, object]:
         qt_render_profile
         if qt_render_profile in _RENDER_PROFILE_CLI_VALUES
         else str(_GUI_STATE_DEFAULTS["qt_render_profile"])
+    )
+    nif_render_profile = str(
+        raw.get("nif_render_profile", raw.get("qt_render_profile", state["nif_render_profile"]))
+        or state["nif_render_profile"]
+    ).strip().lower()
+    state["nif_render_profile"] = (
+        nif_render_profile
+        if nif_render_profile in _RENDER_PROFILE_GUI_VALUES
+        else str(_GUI_STATE_DEFAULTS["nif_render_profile"])
     )
     state["target_game"] = _normalize_texture_target_game(str(raw.get("target_game", state["target_game"]) or state["target_game"]))
     resume_mode = str(raw.get("batch_resume_mode", state.get("batch_resume_mode", "start_fresh")) or "start_fresh").strip().lower()
@@ -19412,6 +19422,12 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     )
     nif_scan_remediation_preview_button.setEnabled(False)
     nif_scan_remediation_row.addWidget(nif_scan_remediation_preview_button)
+    nif_scan_open_editor_button = QtWidgets.QPushButton("Open selected in NIF Editor")
+    nif_scan_open_editor_button.setToolTip(
+        "Send the selected scan result to the NIF Editor, carrying over the suggested renderer family for faster guided patching."
+    )
+    nif_scan_open_editor_button.setEnabled(False)
+    nif_scan_remediation_row.addWidget(nif_scan_open_editor_button)
     nif_scan_remediation_row.addStretch(1)
     nif_scan_layout.addLayout(nif_scan_remediation_row)
     nif_scan_results = QtWidgets.QTreeWidget()
@@ -19459,6 +19475,32 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_note.setFont(font)
     nif_editor_layout.addWidget(nif_editor_note)
     nif_editor_form = QtWidgets.QFormLayout()
+    nif_render_profile = QtWidgets.QComboBox()
+    nif_render_profile.setObjectName("nif_render_profile")
+    nif_render_profile.addItems(_RENDER_PROFILE_GUI_VALUES)
+    saved_nif_render_profile = _normalize_render_profile(
+        str(
+            qt_saved_state.get("nif_render_profile", "")
+            or qt_saved_state.get("last_renderer", "")
+            or qt_saved_state.get("qt_render_profile", "")
+            or ""
+        )
+    )
+    if saved_nif_render_profile not in _RENDER_PROFILE_GUI_VALUES:
+        saved_nif_render_profile = "custom"
+    saved_nif_render_index = nif_render_profile.findText(saved_nif_render_profile)
+    if saved_nif_render_index >= 0:
+        nif_render_profile.setCurrentIndex(saved_nif_render_index)
+    nif_render_profile.setToolTip(
+        _format_short_guidance_tooltip(
+            "chooses the renderer family used to guide NIF patch defaults",
+            "pick the family that actually matches the mesh or leave Custom for fully manual control",
+            "do not mix ENB, Community Shaders, and TruePBR on the same mesh unless you are intentionally switching workflows",
+        )
+    )
+    nif_render_profile_label = QtWidgets.QLabel()
+    _configure_qt_field_label(nif_render_profile_label, "&Renderer family", nif_render_profile)
+    nif_editor_form.addRow(nif_render_profile_label, nif_render_profile)
     nif_editor_flags: dict[str, Any] = {}
     for name, label in (
         ("parallax", "Parallax"), ("pom", "Parallax occlusion (POM)"),
@@ -19535,6 +19577,119 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     )
     nif_editor_form.addRow(nif_editor_dry_run)
     nif_editor_layout.addLayout(nif_editor_form)
+    nif_editor_guidance = QtWidgets.QLabel("Renderer guidance will appear here.")
+    nif_editor_guidance.setObjectName("nif_editor_guidance")
+    nif_editor_guidance.setWordWrap(True)
+    nif_editor_guidance.setStyleSheet("font-weight: 600;")
+    nif_editor_layout.addWidget(nif_editor_guidance)
+    nif_editor_warning = QtWidgets.QLabel("")
+    nif_editor_warning.setObjectName("nif_editor_option_warning")
+    nif_editor_warning.setWordWrap(True)
+    nif_editor_warning.setStyleSheet("font-weight: 600;")
+    nif_editor_layout.addWidget(nif_editor_warning)
+
+    def _recommended_qt_nif_editor_recommendation() -> RenderProfileRecommendation | None:
+        path_text = str(nif_scan_path_edit.text() or "").strip()
+        if not path_text:
+            return None
+        try:
+            candidate = Path(path_text).expanduser()
+        except Exception:
+            return None
+        return recommend_render_profile_details(candidate, manager_context=manager_context)
+
+    def _recommended_qt_nif_editor_profile() -> str:
+        recommendation = _recommended_qt_nif_editor_recommendation()
+        if recommendation is not None:
+            return recommendation.profile
+        saved_profile = _normalize_render_profile(str(qt_saved_state.get("nif_render_profile", "") or ""))
+        if saved_profile in _RENDER_PROFILE_GUI_VALUES:
+            return saved_profile
+        saved_profile = _normalize_render_profile(str(qt_saved_state.get("last_renderer", "") or ""))
+        if saved_profile in _RENDER_PROFILE_GUI_VALUES:
+            return saved_profile
+        saved_profile = _normalize_render_profile(str(qt_saved_state.get("qt_render_profile", "") or ""))
+        if saved_profile in _RENDER_PROFILE_GUI_VALUES:
+            return saved_profile
+        return "custom"
+
+    def _update_nif_editor_context_text() -> None:
+        recommendation = _recommended_qt_nif_editor_recommendation()
+        selected_profile = _normalize_render_profile(nif_render_profile.currentText())
+        selected_for_guidance = selected_profile
+        if selected_for_guidance in {"custom", "auto"}:
+            selected_for_guidance = recommendation.profile if recommendation is not None else "custom"
+        nif_editor_note.setText(
+            _nif_editor_safety_banner_text(
+                nif_editor_profile.currentText(),
+                dry_run=nif_editor_dry_run.isChecked(),
+                backup=True,
+                experimental_fallout_write=nif_editor_experimental.isChecked(),
+            )
+        )
+        nif_editor_guidance.setText(
+            build_nif_editor_action_guidance(
+                selected_for_guidance,
+                target_game=nif_editor_profile.currentText(),
+                nif_path=nif_scan_path_edit.text(),
+            )
+        )
+        warnings = get_nif_patch_option_warnings(
+            selected_profile=selected_profile,
+            recommended_profile=recommendation.profile if recommendation is not None else None,
+            enable_parallax=nif_editor_flags["parallax"].currentText() == "Enable",
+            enable_pom=nif_editor_flags["pom"].currentText() == "Enable",
+            enable_env_mapping=nif_editor_flags["env_mapping"].currentText() == "Enable",
+            enable_pbr=nif_editor_flags["pbr"].currentText() == "Enable",
+            force_shader_type_3=nif_editor_type3.isChecked(),
+            parallax_texture_path=nif_editor_textures["parallax"][0].text(),
+            normal_texture_path=nif_editor_textures["normal"][0].text(),
+            env_mask_texture_path=nif_editor_textures["env_mask"][0].text(),
+            glow_texture_path=nif_editor_textures["glow"][0].text(),
+            cubemap_texture_path=nif_editor_textures["cubemap"][0].text(),
+            diffuse_texture_path=nif_editor_textures["diffuse"][0].text(),
+            clear_parallax_texture_path=nif_editor_textures["parallax"][1].isChecked(),
+            clear_normal_texture_path=nif_editor_textures["normal"][1].isChecked(),
+            clear_env_mask_texture_path=nif_editor_textures["env_mask"][1].isChecked(),
+            clear_glow_texture_path=nif_editor_textures["glow"][1].isChecked(),
+            clear_diffuse_texture_path=nif_editor_textures["diffuse"][1].isChecked(),
+            clear_cubemap_texture_path=nif_editor_textures["cubemap"][1].isChecked(),
+            target_game=nif_editor_profile.currentText(),
+            experimental_fallout_write=nif_editor_experimental.isChecked(),
+            dry_run=nif_editor_dry_run.isChecked(),
+            backup=True,
+        )
+        if (
+            recommendation is not None
+            and selected_profile not in {"custom", "auto"}
+            and _render_profile_family(selected_profile) != _render_profile_family(recommendation.profile)
+        ):
+            warnings.insert(0, build_render_profile_family_mismatch_warning(selected_profile, recommendation))
+        nif_editor_warning.setVisible(bool(warnings))
+        nif_editor_warning.setText("⚠ " + " | ".join(warnings[:3]) if warnings else "")
+
+    def _apply_nif_editor_renderer_defaults(*_: object) -> None:
+        recommendation = _recommended_qt_nif_editor_profile()
+        defaults = resolve_nif_patch_defaults_for_render_profile(
+            nif_render_profile.currentText(),
+            recommended_profile=recommendation,
+        )
+        for name, value in (
+            ("parallax", defaults["enable_parallax"]),
+            ("pom", defaults["enable_pom"]),
+            ("env_mapping", defaults["enable_env_mapping"]),
+            ("glow_map", False),
+            ("pbr", defaults.get("enable_pbr", False)),
+        ):
+            combo = nif_editor_flags[name]
+            combo.blockSignals(True)
+            combo.setCurrentText("Enable" if bool(value) else "Disable")
+            combo.blockSignals(False)
+        nif_editor_type3.setChecked(bool(defaults["force_shader_type_3"]))
+        _update_nif_editor_context_text()
+
+    _apply_nif_editor_renderer_defaults()
+
     def _update_nif_editor_note() -> None:
         nif_editor_note.setText(
             _nif_editor_safety_banner_text(
@@ -19543,6 +19698,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                 experimental_fallout_write=nif_editor_experimental.isChecked(),
             )
         )
+        _update_nif_editor_context_text()
 
     _update_nif_editor_note()
     nif_editor_actions = QtWidgets.QHBoxLayout()
@@ -20261,10 +20417,13 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         nif_scan_remediation_preview_button.setEnabled(
             not busy and nif_scan_results.currentItem() is not None
         )
+        nif_scan_open_editor_button.setEnabled(
+            not busy and nif_scan_results.currentItem() is not None
+        )
         for control in (
             *nif_editor_flags.values(),
             *(widget for pair in nif_editor_textures.values() for widget in pair),
-            nif_editor_type3, nif_editor_scale_enabled, nif_editor_profile,
+            nif_editor_type3, nif_editor_scale_enabled, nif_editor_profile, nif_render_profile,
             nif_editor_experimental, nif_editor_dry_run,
         ):
             control.setEnabled(not busy)
@@ -20474,6 +20633,12 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             and isinstance(row, dict)
             and bool(row.get("preview"))
         )
+        nif_scan_open_editor_button.setEnabled(
+            NIF_PATCHER_AVAILABLE
+            and nif_scan_thread is None
+            and isinstance(row, dict)
+            and bool(row.get("preview"))
+        )
 
     def _add_nif_scan_result(row: object) -> None:
         if not isinstance(row, dict):
@@ -20548,6 +20713,33 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         nif_remediation_preview_thread.finished.connect(receiver.cleanup)
         _sync_operation_controls()
         nif_remediation_preview_thread.start()
+
+    def _open_selected_nif_in_editor() -> None:
+        item = nif_scan_results.currentItem()
+        row = item.data(0, QtCore.Qt.ItemDataRole.UserRole) if item else None
+        if not isinstance(row, dict):
+            nif_scan_status_label.setText("Select a scan result before opening it in the NIF Editor.")
+            return
+        selected_path = str(row.get("preview", "") or "").strip()
+        if not selected_path:
+            nif_scan_status_label.setText("The selected scan result does not include a usable NIF path.")
+            return
+        nif_scan_path_edit.setText(selected_path)
+        file_mode_index = nif_scan_mode_combo.findData("file")
+        if file_mode_index >= 0:
+            nif_scan_mode_combo.setCurrentIndex(file_mode_index)
+        try:
+            suggested_profile = recommend_render_profile_details(Path(selected_path), manager_context=manager_context).profile
+        except Exception:
+            suggested_profile = "custom"
+        suggested_index = nif_render_profile.findText(suggested_profile)
+        if suggested_index >= 0:
+            nif_render_profile.setCurrentIndex(suggested_index)
+        tabs.setCurrentWidget(nif_editor_tab)
+        nif_editor_status.setText(
+            f"Loaded {row.get('file_name', Path(selected_path).name)} into NIF Editor. Review the renderer guidance before writing."
+        )
+        _update_nif_editor_note()
 
     def _finish_nif_scan(cancelled: bool) -> None:
         _render_nif_scan_page()
@@ -21047,6 +21239,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         if manager_context.profile_name is not None:
             state["last_mod_profile"] = manager_context.profile_name
         state["last_renderer"] = _normalize_render_profile(render_profile_combo.currentText())
+        state["nif_render_profile"] = _normalize_render_profile(nif_render_profile.currentText())
         state["last_output_target"] = (
             output_dir_edit.text().strip()
             if output_dir_edit.text().strip()
@@ -21739,9 +21932,19 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     for operation, button in nif_editor_buttons.items():
         button.clicked.connect(lambda _checked=False, name=operation: _start_nif_editor(name))
     nif_editor_cancel.clicked.connect(_cancel_nif_editor)
+    nif_render_profile.currentTextChanged.connect(_apply_nif_editor_renderer_defaults)
+    nif_render_profile.currentTextChanged.connect(lambda *_: _update_nif_editor_note())
+    nif_render_profile.currentTextChanged.connect(_persist_qt_gui_state)
+    for combo in nif_editor_flags.values():
+        combo.currentTextChanged.connect(lambda *_: _update_nif_editor_note())
+    for control, clear in nif_editor_textures.values():
+        control.textChanged.connect(lambda *_: _update_nif_editor_note())
+        clear.toggled.connect(lambda *_: _update_nif_editor_note())
+    nif_editor_type3.toggled.connect(lambda *_: _update_nif_editor_note())
     nif_editor_profile.currentTextChanged.connect(lambda *_: _update_nif_editor_note())
     nif_editor_experimental.toggled.connect(lambda *_: _update_nif_editor_note())
     nif_editor_dry_run.toggled.connect(lambda *_: _update_nif_editor_note())
+    nif_scan_path_edit.textChanged.connect(lambda *_: _update_nif_editor_note())
     detected_mod_button.clicked.connect(_pick_detected_mod_folder)
     profile_setup_restore_button.clicked.connect(_restore_qt_profile_setup)
     advanced_controls_toggle.toggled.connect(_persist_qt_gui_state)
@@ -21754,6 +21957,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_scan_start_button.clicked.connect(_start_nif_scan)
     nif_scan_cancel_button.clicked.connect(_cancel_nif_scan)
     nif_scan_remediation_preview_button.clicked.connect(_preview_selected_nif_remediation)
+    nif_scan_open_editor_button.clicked.connect(_open_selected_nif_in_editor)
     nif_scan_export_button.clicked.connect(_export_nif_scan_csv)
     nif_scan_filter_edit.textChanged.connect(_reset_nif_scan_page)
     nif_scan_status_filter.currentTextChanged.connect(_reset_nif_scan_page)
@@ -21843,7 +22047,11 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         ("generate", generate_button), ("cancel_generation", cancel_button),
         ("theme", theme_check), ("theme_mode", theme_mode_combo), ("ui_scale", ui_scale_combo), ("workflow_mode", workflow_mode_combo), ("tabs", tabs),
         ("render_profile", render_profile_combo),
+        ("nif_scan_open_editor", nif_scan_open_editor_button),
         ("nif_editor_safety_banner", nif_editor_note),
+        ("nif_render_profile", nif_render_profile),
+        ("nif_editor_guidance", nif_editor_guidance),
+        ("nif_editor_option_warning", nif_editor_warning),
         ("include_diffuse", include_diffuse_check), ("include_normal", include_normal_check),
         ("include_parallax", include_parallax_check),
         ("continue_on_error", continue_on_error_check),
