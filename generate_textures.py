@@ -4084,15 +4084,12 @@ def resolve_render_profile_mode_control_states(
 
 
 def build_render_profile_mode_controls_hint(control_states: Mapping[str, bool | str]) -> str:
-    family_note = (
-        "Family note: ENB uses _msn/_m outputs, Community Shaders uses _cm/_c outputs, and TruePBR uses "
-        "_rmaos/_ramos plus JSON sidecars."
-    )
+    family_matrix = _render_profile_family_matrix_text()
     parallax_note = "Parallax note: standard keeps the vanilla height workflow; occlusion is ENB/POM-specific."
     if bool(control_states.get("locked")):
         return (
             "Renderer preset locks mode selectors to prevent conflicting GUI combinations. "
-            f"{family_note} {parallax_note}"
+            f"{family_matrix} {parallax_note}"
         )
     disabled_controls: list[str] = []
     if str(control_states.get("complex_format")) == "disabled":
@@ -4102,17 +4099,17 @@ def build_render_profile_mode_controls_hint(control_states: Mapping[str, bool | 
     if str(control_states.get("parallax_mode")) == "disabled":
         disabled_controls.append("Parallax")
     if not disabled_controls:
-        return f"Custom mode: all mode selectors are available. {family_note} {parallax_note}"
+        return f"Custom mode: all mode selectors are available. {family_matrix} {parallax_note}"
     if len(disabled_controls) == 3:
         return (
             "Custom mode: enable ENB Complex Material, Environment mask, or Parallax outputs to unlock mode selectors. "
-            f"{family_note} {parallax_note}"
+            f"{family_matrix} {parallax_note}"
         )
     return (
         "Custom mode: enable "
         + ", ".join(disabled_controls)
         + " output(s) to unlock matching mode selectors. "
-        + family_note
+        + family_matrix
         + " "
         + parallax_note
     )
@@ -4382,6 +4379,21 @@ def _render_profile_family_quick_check_text() -> str:
     return "Quick check: " + "; ".join(quick_checks)
 
 
+def _render_profile_family_matrix_lines() -> tuple[str, ...]:
+    matrix_lines: list[str] = []
+    for profile in ("vanilla", "enb", "community_shaders", "truepbr", "custom"):
+        guidance = _render_profile_guidance(profile)
+        if guidance is None:
+            continue
+        outputs = ", ".join(guidance.canonical_outputs) if guidance.canonical_outputs else "manual-only"
+        matrix_lines.append(f"{guidance.family_name}: {outputs}")
+    return tuple(matrix_lines)
+
+
+def _render_profile_family_matrix_text() -> str:
+    return "Family matrix: " + "; ".join(_render_profile_family_matrix_lines()) + "."
+
+
 def _workflow_preset_onboarding_text() -> str:
     vanilla = _render_profile_guidance("vanilla")
     enb = _render_profile_guidance("enb")
@@ -4406,6 +4418,7 @@ def _workflow_preset_onboarding_text() -> str:
 def _workflow_quick_start_steps_text() -> str:
     return (
         f"{_workflow_preset_onboarding_text()}\n"
+        f"{_render_profile_family_matrix_text()}\n"
         "Step 1: choose one renderer family (Vanilla, ENB, Community Shaders, or TruePBR).\n"
         "Step 2: pick the input texture/folder and output target.\n"
         "Step 3: use Suggested to auto-pick a safe family from the current file or mod-manager context, then continue to Generate or Scan.\n"

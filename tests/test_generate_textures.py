@@ -79,6 +79,7 @@ from generate_textures import (
     _profile_setup_memory_key,
     _detect_renderer_version_hints,
     _format_short_guidance_tooltip,
+    _render_profile_family_matrix_text,
     _render_profile_family_quick_check_text,
     _render_profile_family_tooltip,
     _render_profile_guidance,
@@ -1932,9 +1933,19 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("Community Shaders =", quick_check)
         self.assertIn("TruePBR =", quick_check)
 
+    def test_render_profile_family_matrix_text_lists_canonical_outputs(self) -> None:
+        matrix = _render_profile_family_matrix_text()
+        self.assertIn("Family matrix:", matrix)
+        self.assertIn("Vanilla: _m.dds, _n.dds, _p.dds", matrix)
+        self.assertIn("ENB: _msn.dds, _m.dds", matrix)
+        self.assertIn("Community Shaders: _cm.dds, _c.dds", matrix)
+        self.assertIn("TruePBR: _rmaos.dds, _ramos.dds, JSON sidecars", matrix)
+        self.assertIn("Custom: manual-only", matrix)
+
     def test_workflow_quick_start_steps_text_mentions_step_flow(self) -> None:
         quick_start = _workflow_quick_start_steps_text().lower()
         self.assertIn("if you're unsure", quick_start)
+        self.assertIn("family matrix:", quick_start)
         self.assertIn("step 1:", quick_start)
         self.assertIn("step 2:", quick_start)
         self.assertIn("step 3:", quick_start)
@@ -4018,8 +4029,8 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("Custom mode: enable", hint)
         self.assertIn("ENB Complex Material", hint)
         self.assertIn("Parallax", hint)
-        self.assertIn("Family note:", hint)
-        self.assertIn("TruePBR", hint)
+        self.assertIn("Family matrix:", hint)
+        self.assertIn("TruePBR: _rmaos.dds, _ramos.dds, JSON sidecars", hint)
         self.assertIn("Parallax note:", hint)
 
     def test_build_render_profile_mode_controls_hint_reports_locked_state(self) -> None:
@@ -4032,7 +4043,8 @@ class GenerateTexturesTests(unittest.TestCase):
             }
         )
         self.assertIn("locks mode selectors", hint)
-        self.assertIn("Community Shaders", hint)
+        self.assertIn("Family matrix:", hint)
+        self.assertIn("Community Shaders: _cm.dds, _c.dds", hint)
         self.assertIn("Parallax note:", hint)
 
     def test_resolve_nif_patch_defaults_for_render_profile_returns_expected_toggles(self) -> None:

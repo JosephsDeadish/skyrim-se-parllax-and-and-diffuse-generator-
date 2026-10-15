@@ -434,11 +434,13 @@ The Qt build additionally runs `generate_textures_qt.exe --qt-acceptance-report 
 
 If you are not sure which renderer family to choose, use the shortest matching path:
 
-1. **Vanilla** — the safest default for Skyrim-only meshes that just need standard parallax.
-2. **ENB** — use when the mesh/material is intentionally built for ENB complex material or POM.
-3. **Community Shaders** — use for `_cm/_c` Extended Materials workflows.
-4. **TruePBR** — use for `_rmaos/_ramos` plus JSON sidecars.
-5. **Custom** — only when you already know the pipeline and want manual control.
+| Family | Canonical outputs | When to use | When not to use |
+| --- | --- | --- | --- |
+| Vanilla | `_m.dds`, `_n.dds`, `_p.dds` | Skyrim-safe parallax defaults | ENB, Community Shaders, or TruePBR |
+| ENB | `_msn.dds`, `_m.dds` | ENB complex material or POM | Community Shaders or TruePBR |
+| Community Shaders | `_cm.dds`, `_c.dds` | Extended Materials workflows | ENB or TruePBR |
+| TruePBR | `_rmaos.dds`, `_ramos.dds`, JSON sidecars | CS TruePBR JSON workflows | ENB or plain Community Shaders |
+| Custom | manual-only | You already know the pipeline and want full control | You want guardrails or one-click safe defaults |
 
 Do not mix ENB / Community Shaders / TruePBR families on the same mesh unless you are intentionally switching workflows.
 
