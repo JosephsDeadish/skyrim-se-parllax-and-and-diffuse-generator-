@@ -4769,6 +4769,37 @@ def build_startup_guidance_text(
     )
 
 
+@dataclass(frozen=True)
+class StartupWizardSummary:
+    safe_family_profile: str
+    safe_family_label: str
+    recommendation_text: str
+    guidance_text: str
+
+
+def build_startup_wizard_summary(
+    recommendation: RenderProfileRecommendation,
+    *,
+    selected_render_profile: str,
+    guidance_text: str,
+) -> StartupWizardSummary:
+    safe_family_profile = _render_profile_family(recommendation.profile)
+    safe_family_label = _RENDER_PROFILE_LABELS.get(
+        safe_family_profile,
+        safe_family_profile.replace("_", " ").title(),
+    )
+    return StartupWizardSummary(
+        safe_family_profile=safe_family_profile,
+        safe_family_label=safe_family_label,
+        recommendation_text=build_render_profile_brief_message(
+            recommendation.profile,
+            recommendation=recommendation,
+            selected_profile=selected_render_profile,
+        ),
+        guidance_text=guidance_text,
+    )
+
+
 def _qt_migration_status_text() -> str:
     return "\n".join(
         (
@@ -11011,6 +11042,7 @@ if GUI_AVAILABLE:
             )
             self.mode_controls_hint_var = tk.StringVar(value="")
             self.render_profile_help_window: tk.Toplevel | None = None
+            self.startup_wizard_window: tk.Toplevel | None = None
             self.auto_suggestions_var = tk.BooleanVar(value=True)
             self.auto_normal_suggestion_var = tk.BooleanVar(value=True)
             self.auto_parallax_suggestion_var = tk.BooleanVar(value=True)
@@ -11103,6 +11135,12 @@ if GUI_AVAILABLE:
                 command=self._open_render_profile_help,
             )
             _help_button.pack(side=tk.RIGHT, padx=4)
+            startup_wizard_show_button = ttk.Button(
+                top_primary_row,
+                text="Wizard…",
+                command=lambda: _show_startup_wizard(),
+            )
+            startup_wizard_show_button.pack(side=tk.RIGHT, padx=4)
             startup_onboarding_show_button = ttk.Button(
                 top_primary_row,
                 text="Show quick start",
@@ -11211,6 +11249,10 @@ if GUI_AVAILABLE:
             self._add_tooltip(
                 _help_button,
                 "Open the renderer/channel guide with ENB vs Community Shaders mappings, TruePBR workflow notes, and Skyrim wiki links.",
+            )
+            self._add_tooltip(
+                startup_wizard_show_button,
+                "Open the guided first-run wizard with recommendation rationale and safe family buttons.",
             )
 
             startup_onboarding_frame = ttk.LabelFrame(top_bar, text="Quick start", padding=6)
@@ -11341,6 +11383,163 @@ if GUI_AVAILABLE:
 
             def _apply_startup_suggested_preset() -> None:
                 _apply_startup_preset(_render_profile_family(self._recommended_render_profile_for_preview(self._current_preview_path())))
+
+            def _show_startup_wizard() -> None:
+                existing_wizard = self.startup_wizard_window
+                if existing_wizard is not None:
+                    try:
+                        if existing_wizard.winfo_exists():
+                            existing_wizard.lift()
+                            existing_wizard.focus_force()
+                            return
+                    except tk.TclError:
+                        pass
+
+                wizard_summary = build_startup_wizard_summary(
+                    self._recommended_render_profile_details_for_preview(self._current_preview_path()),
+                    selected_render_profile=self.render_profile_var.get(),
+                    guidance_text=build_startup_guidance_text(
+                        self.manager_context,
+                        profile_setup_memory=self.profile_setup_memory,
+                        selected_profile_setup_key=self._preferred_profile_setup_key(),
+                        last_mod_manager=self.last_mod_manager_memory,
+                        last_mod_profile=self.last_mod_profile_memory,
+                        input_path=self.input_var.get(),
+                        selected_render_profile=self.render_profile_var.get(),
+                        current_workflow_mode=self._workflow_mode_from_controls(),
+                        current_output_target=self.output_var.get(),
+                        current_use_custom_output=self.use_custom_output_var.get(),
+                        current_target_game=self.target_game_var.get(),
+                    ),
+                )
+                wizard = tk.Toplevel(self.root)
+                self.startup_wizard_window = wizard
+                wizard.title("First-run wizard")
+                wizard.transient(self.root)
+                wizard.resizable(True, True)
+                wizard.minsize(760, 500)
+                wizard.columnconfigure(0, weight=1)
+                wizard_body = ttk.Frame(wizard, padding=14)
+                wizard_body.pack(fill=tk.BOTH, expand=True)
+                wizard_body.columnconfigure(0, weight=1)
+
+                def _close_startup_wizard() -> None:
+                    if self.startup_wizard_window is wizard:
+                        self.startup_wizard_window = None
+                    try:
+                        wizard.grab_release()
+                    except tk.TclError:
+                        pass
+                    try:
+                        wizard.destroy()
+                    except tk.TclError:
+                        pass
+
+                def _choose_safe_family() -> None:
+                    _close_startup_wizard()
+                    _apply_startup_preset(wizard_summary.safe_family_profile)
+
+                def _choose_guided_step() -> None:
+                    _close_startup_wizard()
+                    _apply_startup_guided_step()
+
+                def _choose_family(profile_key: str) -> None:
+                    _close_startup_wizard()
+                    _apply_startup_preset(profile_key)
+
+                wizard_intro = ttk.Label(
+                    wizard_body,
+                    text=(
+                        "This wizard compares the safest family choice, explains why it was recommended, "
+                        "and gives you the next safe step without mixing renderer families."
+                    ),
+                    justify=tk.LEFT,
+                    anchor=tk.W,
+                    wraplength=720,
+                )
+                wizard_intro.pack(fill=tk.X, pady=(0, 8))
+
+                why_frame = ttk.LabelFrame(wizard_body, text="Why this was recommended", padding=10)
+                why_frame.pack(fill=tk.X, pady=(0, 8))
+                why_label = ttk.Label(
+                    why_frame,
+                    text=wizard_summary.recommendation_text,
+                    style="Muted.TLabel",
+                    justify=tk.LEFT,
+                    anchor=tk.W,
+                    wraplength=710,
+                )
+                why_label.pack(fill=tk.X)
+
+                next_frame = ttk.LabelFrame(wizard_body, text="What to do next", padding=10)
+                next_frame.pack(fill=tk.X, pady=(0, 8))
+                next_label = ttk.Label(
+                    next_frame,
+                    text=wizard_summary.guidance_text,
+                    style="Muted.TLabel",
+                    justify=tk.LEFT,
+                    anchor=tk.W,
+                    wraplength=710,
+                )
+                next_label.pack(fill=tk.X)
+
+                action_frame = ttk.LabelFrame(wizard_body, text="Choose a family or proceed", padding=10)
+                action_frame.pack(fill=tk.X)
+                action_summary = ttk.Label(
+                    action_frame,
+                    text=f"Safe family to apply now: {wizard_summary.safe_family_label}.",
+                    style="Muted.TLabel",
+                    justify=tk.LEFT,
+                    anchor=tk.W,
+                )
+                action_summary.pack(fill=tk.X, pady=(0, 6))
+                top_action_row = ttk.Frame(action_frame)
+                top_action_row.pack(fill=tk.X)
+                safe_button = ttk.Button(
+                    top_action_row,
+                    text=f"Use safe family: {wizard_summary.safe_family_label}",
+                    command=_choose_safe_family,
+                )
+                safe_button.pack(side=tk.LEFT, padx=(0, 4))
+                guided_button = ttk.Button(
+                    top_action_row,
+                    text="Next safe step",
+                    command=_choose_guided_step,
+                )
+                guided_button.pack(side=tk.LEFT, padx=4)
+                close_button = ttk.Button(top_action_row, text="Close", command=_close_startup_wizard)
+                close_button.pack(side=tk.RIGHT)
+
+                family_row = ttk.Frame(action_frame)
+                family_row.pack(fill=tk.X, pady=(6, 0))
+                for profile_key, label in (
+                    ("vanilla", "Vanilla"),
+                    ("enb", "ENB"),
+                    ("community_shaders", "Community Shaders"),
+                    ("truepbr", "TruePBR"),
+                ):
+                    family_button = ttk.Button(
+                        family_row,
+                        text=label,
+                        command=lambda value=profile_key: _choose_family(value),
+                    )
+                    family_button.pack(side=tk.LEFT, padx=(0, 4))
+                    self._add_tooltip(family_button, _render_profile_family_tooltip(profile_key))
+
+                family_note = ttk.Label(
+                    action_frame,
+                    text="Pick only one family per mesh; ENB, Community Shaders, and TruePBR are separate pipelines.",
+                    style="Muted.TLabel",
+                    justify=tk.LEFT,
+                    anchor=tk.W,
+                    wraplength=710,
+                )
+                family_note.pack(fill=tk.X, pady=(8, 0))
+
+                wizard.protocol("WM_DELETE_WINDOW", _close_startup_wizard)
+                wizard.bind("<Escape>", lambda _event: _close_startup_wizard())
+                wizard.grab_set()
+                safe_button.focus_set()
 
             _bind_tk_quick_start_shortcuts(
                 self.root,
@@ -19578,6 +19777,13 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     startup_onboarding_show_button.setToolTip("Reopen the quick start card if you hide it for later.")
     startup_onboarding_show_button.clicked.connect(lambda: _show_qt_startup_onboarding())
     appearance_row.addWidget(startup_onboarding_show_button)
+    startup_onboarding_wizard_button = QtWidgets.QPushButton("Wizard…")
+    startup_onboarding_wizard_button.setObjectName("startup_onboarding_wizard")
+    startup_onboarding_wizard_button.setToolTip(
+        "Open the guided first-run wizard with recommendation rationale and safe family buttons."
+    )
+    startup_onboarding_wizard_button.clicked.connect(lambda: _show_qt_startup_wizard())
+    appearance_row.addWidget(startup_onboarding_wizard_button)
     appearance_row.addStretch(1)
     layout.addLayout(appearance_row)
 
@@ -21928,6 +22134,161 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     def _hide_qt_startup_onboarding() -> None:
         _set_qt_startup_onboarding_visible(False)
         status_label.setText("Quick start dismissed.")
+
+    startup_wizard_dialog: QtWidgets.QDialog | None = None
+
+    def _show_qt_startup_wizard() -> None:
+        nonlocal startup_wizard_dialog
+        if startup_wizard_dialog is not None and startup_wizard_dialog.isVisible():
+            startup_wizard_dialog.raise_()
+            startup_wizard_dialog.activateWindow()
+            return
+
+        input_text = input_path_edit.text().strip()
+        preview_path: Path | None = None
+        if input_text:
+            candidate = Path(input_text).expanduser()
+            if candidate.is_file() or candidate.is_dir():
+                preview_path = candidate
+        recommendation = recommend_render_profile_details(preview_path, manager_context=manager_context)
+        wizard_summary = build_startup_wizard_summary(
+            recommendation,
+            selected_render_profile=render_profile_combo.currentText(),
+            guidance_text=build_startup_guidance_text(
+                manager_context,
+                profile_setup_memory=qt_saved_state.get("profile_setup_memory"),
+                selected_profile_setup_key=_preferred_qt_profile_setup_key(),
+                last_mod_manager=str(qt_saved_state.get("last_mod_manager", "") or ""),
+                last_mod_profile=str(qt_saved_state.get("last_mod_profile", "") or ""),
+                input_path=input_path_edit.text(),
+                selected_render_profile=render_profile_combo.currentText(),
+                current_workflow_mode=_workflow_mode_value_from_label(workflow_mode_combo.currentText()),
+                current_output_target=output_dir_edit.text(),
+                current_use_custom_output=bool(output_dir_edit.text().strip()),
+                current_target_game=target_game_combo.currentText(),
+            ),
+        )
+
+        dialog = QtWidgets.QDialog(window)
+        startup_wizard_dialog = dialog
+        dialog.setObjectName("startup_wizard")
+        dialog.setWindowTitle("First-run wizard")
+        dialog.setModal(True)
+        dialog.setMinimumWidth(760)
+        dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose, True)
+
+        def _clear_startup_wizard_dialog(*_: object) -> None:
+            nonlocal startup_wizard_dialog
+            startup_wizard_dialog = None
+
+        dialog.finished.connect(_clear_startup_wizard_dialog)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        intro_label = QtWidgets.QLabel(
+            "This wizard compares the safest family choice, explains why it was recommended, "
+            "and gives you the next safe step without mixing renderer families.",
+            dialog,
+        )
+        intro_label.setWordWrap(True)
+        layout.addWidget(intro_label)
+
+        why_group = QtWidgets.QGroupBox("Why this was recommended", dialog)
+        why_layout = QtWidgets.QVBoxLayout(why_group)
+        why_layout.setSpacing(6)
+        summary_label = QtWidgets.QLabel(
+            wizard_summary.recommendation_text,
+            dialog,
+        )
+        summary_label.setObjectName("startup_wizard_summary")
+        summary_label.setWordWrap(True)
+        why_layout.addWidget(summary_label)
+        layout.addWidget(why_group)
+
+        next_group = QtWidgets.QGroupBox("What to do next", dialog)
+        next_layout = QtWidgets.QVBoxLayout(next_group)
+        next_layout.setSpacing(6)
+        steps_label = QtWidgets.QLabel(
+            wizard_summary.guidance_text,
+            dialog,
+        )
+        steps_label.setObjectName("startup_wizard_steps")
+        steps_label.setWordWrap(True)
+        next_layout.addWidget(steps_label)
+        layout.addWidget(next_group)
+
+        family_group = QtWidgets.QGroupBox("Choose a family or proceed", dialog)
+        family_layout = QtWidgets.QVBoxLayout(family_group)
+        family_layout.setSpacing(6)
+        safe_note = QtWidgets.QLabel(f"Safe family to apply now: {wizard_summary.safe_family_label}.", dialog)
+        safe_note.setWordWrap(True)
+        family_layout.addWidget(safe_note)
+
+        def _close_startup_wizard() -> None:
+            if startup_wizard_dialog is not None:
+                startup_wizard_dialog.close()
+
+        def _choose_safe_family() -> None:
+            _close_startup_wizard()
+            _apply_qt_startup_preset(wizard_summary.safe_family_profile)
+
+        def _choose_guided_step() -> None:
+            _close_startup_wizard()
+            _apply_qt_startup_guided_step()
+
+        def _choose_family(profile_key: str) -> None:
+            _close_startup_wizard()
+            _apply_qt_startup_preset(profile_key)
+
+        top_action_row = QtWidgets.QHBoxLayout()
+        safe_button = QtWidgets.QPushButton(f"Use safe family: {wizard_summary.safe_family_label}", dialog)
+        safe_button.setObjectName("startup_wizard_use_safe_family")
+        safe_button.setDefault(True)
+        safe_button.clicked.connect(_choose_safe_family)
+        top_action_row.addWidget(safe_button)
+        guided_button = QtWidgets.QPushButton("Next safe step", dialog)
+        guided_button.setObjectName("startup_wizard_next_safe_step")
+        guided_button.clicked.connect(_choose_guided_step)
+        top_action_row.addWidget(guided_button)
+        close_button = QtWidgets.QPushButton("Close", dialog)
+        close_button.setObjectName("startup_wizard_close")
+        close_button.clicked.connect(_close_startup_wizard)
+        top_action_row.addWidget(close_button)
+        top_action_row.addStretch(1)
+        family_layout.addLayout(top_action_row)
+
+        family_grid = QtWidgets.QGridLayout()
+        family_grid.setHorizontalSpacing(8)
+        family_grid.setVerticalSpacing(6)
+        for index, (profile_key, label) in enumerate(
+            (
+                ("vanilla", "Vanilla"),
+                ("enb", "ENB"),
+                ("community_shaders", "Community Shaders"),
+                ("truepbr", "TruePBR"),
+            )
+        ):
+            family_button = QtWidgets.QPushButton(label, dialog)
+            family_button.setObjectName(f"startup_wizard_{profile_key}")
+            family_button.setToolTip(_render_profile_family_tooltip(profile_key))
+            family_button.clicked.connect(lambda _checked=False, value=profile_key: _choose_family(value))
+            family_grid.addWidget(family_button, index // 2, index % 2)
+        family_layout.addLayout(family_grid)
+        family_note = QtWidgets.QLabel(
+            "Pick only one family per mesh; ENB, Community Shaders, and TruePBR are separate pipelines.",
+            dialog,
+        )
+        family_note.setWordWrap(True)
+        family_layout.addWidget(family_note)
+        layout.addWidget(family_group)
+
+        dialog.setToolTip(
+            "Open a modal first-run guide with recommendation rationale, safe-family actions, and the safest next step."
+        )
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _apply_qt_startup_guided_step() -> None:
         action = resolve_startup_guidance_action(

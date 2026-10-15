@@ -112,6 +112,7 @@ from generate_textures import (
     _summarize_batch_source_folders,
     build_mod_manager_profile_setup_hint,
     build_startup_guidance_text,
+    build_startup_wizard_summary,
     compute_checkpoint_mismatch_flags,
     compute_checkpoint_resume_counts,
     compute_processing_queue_event_budget,
@@ -2104,6 +2105,31 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("restore from it instead of forcing a risky change", quick_start)
         self.assertIn("never mix enb / community shaders / truepbr families", quick_start)
 
+    def test_startup_wizard_summary_combines_recommendation_and_guidance(self) -> None:
+        recommendation = recommend_render_profile_details(None, manager_context=ModManagerContext())
+        guidance = build_startup_guidance_text(
+            ModManagerContext(),
+            profile_setup_memory={},
+            input_path="",
+            selected_render_profile="custom",
+            current_workflow_mode="",
+            current_output_target="",
+            current_use_custom_output=False,
+            current_target_game="skyrim",
+        )
+        wizard_summary = build_startup_wizard_summary(
+            recommendation,
+            selected_render_profile="custom",
+            guidance_text=guidance,
+        )
+        self.assertEqual(wizard_summary.safe_family_profile, "vanilla")
+        self.assertEqual(wizard_summary.safe_family_label, "Vanilla")
+        self.assertIn("Confidence:", wizard_summary.recommendation_text)
+        self.assertIn("Why not the others:", wizard_summary.recommendation_text)
+        self.assertIn("Probably incompatible", wizard_summary.recommendation_text)
+        self.assertIn("Recommended next step:", wizard_summary.guidance_text)
+        self.assertIn("choose an input file or folder", wizard_summary.guidance_text)
+
     def test_short_guidance_tooltip_uses_three_sections(self) -> None:
         tooltip = _format_short_guidance_tooltip(
             "switches a control",
@@ -2855,6 +2881,60 @@ class GenerateTexturesTests(unittest.TestCase):
                     save_state.assert_called()
                     persisted = save_state.call_args.args[0]
                     self.assertTrue(bool(persisted["show_startup_onboarding"]))
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_startup_wizard_shows_rationale_and_applies_safe_family(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        def find_button(root, title: str):
+            pending = list(root.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TButton" and str(widget.cget("text")) == title:
+                    return widget
+                pending.extend(widget.winfo_children())
+            self.fail(f"Could not find Tk button '{title}'.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            saved_states = []
+            gui = None
+
+            def capture_state(state_data):
+                saved_states.append(json.loads(json.dumps(state_data)))
+
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state), \
+                     mock.patch("generate_textures.save_gui_state", side_effect=capture_state), \
+                     mock.patch("generate_textures.detect_mod_manager_context", return_value=ModManagerContext()):
+                    gui = TextureGeneratorGUI()
+                    gui.root.update_idletasks()
+                    find_button(gui.root, "Wizard…").invoke()
+                    gui.root.update_idletasks()
+                    wizard = gui.startup_wizard_window
+                    self.assertIsNotNone(wizard)
+                    self.assertTrue(wizard.winfo_exists())
+                    label_texts = []
+                    pending = list(wizard.winfo_children())
+                    while pending:
+                        widget = pending.pop()
+                        if widget.winfo_class() in {"TLabel", "Label"}:
+                            label_texts.append(str(widget.cget("text")))
+                        pending.extend(widget.winfo_children())
+                    self.assertTrue(any("Confidence:" in text for text in label_texts))
+                    self.assertTrue(any("Why not the others:" in text for text in label_texts))
+                    self.assertTrue(any("Probably incompatible" in text for text in label_texts))
+                    self.assertTrue(any("Recommended next step:" in text for text in label_texts))
+                    find_button(wizard, "Use safe family: Vanilla").invoke()
+                    gui.root.update_idletasks()
+                    self.assertEqual(gui.render_profile_var.get(), "vanilla")
+                    self.assertFalse(gui.show_startup_onboarding_var.get())
+                    self.assertFalse(gui.startup_wizard_window)
+                    self.assertTrue(saved_states)
+                    self.assertFalse(saved_states[-1]["show_startup_onboarding"])
+                    self.assertEqual(saved_states[-1]["render_profile"], "vanilla")
             finally:
                 if gui is not None:
                     gui.root.destroy()
@@ -12351,6 +12431,45 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             load_state=saved_state,
             save_side_effect=capture_state,
             extra_patches=(mock.patch("generate_textures.detect_mod_manager_context", return_value=context),),
+        )
+
+    def test_qt_startup_wizard_shows_rationale_and_applies_safe_family(self) -> None:
+        saved_states = []
+        state = {"step": 0}
+
+        def capture_state(state_data):
+            saved_states.append(json.loads(json.dumps(state_data)))
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                w("startup_onboarding_wizard").click()
+                self.app.processEvents()
+                wizard = w("startup_wizard")
+                self.assertTrue(wizard.isVisible())
+                summary = w("startup_wizard_summary").text()
+                steps = w("startup_wizard_steps").text()
+                self.assertIn("Confidence:", summary)
+                self.assertIn("Why not the others:", summary)
+                self.assertIn("Probably incompatible", summary)
+                self.assertIn("Recommended next step:", steps)
+                w("startup_wizard_use_safe_family").click()
+                self.app.processEvents()
+                self.assertEqual(w("render_profile").currentText(), "vanilla")
+                self.assertIsNone(window.findChild(self.qt.QtCore.QObject, "startup_wizard"))
+                self.assertFalse(w("startup_onboarding").isVisible())
+                self.assertTrue(saved_states)
+                self.assertFalse(saved_states[-1]["show_startup_onboarding"])
+                self.assertEqual(saved_states[-1]["render_profile"], "vanilla")
+                state["step"] = 1
+                return True
+            return False
+
+        self.run_window(
+            scenario,
+            save_side_effect=capture_state,
+            extra_patches=(mock.patch("generate_textures.detect_mod_manager_context", return_value=ModManagerContext()),),
         )
 
     def test_actual_fallout_editor_opt_in_and_scale_gate(self) -> None:
