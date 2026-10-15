@@ -1772,6 +1772,9 @@ def build_mod_manager_context_hint(
         if context is not None
         else "Detected Mod (Hint): not detected — this is only a suggestion; your chosen input/output paths still take priority."
     )
+    truepbr_version_note = _build_truepbr_version_note(context)
+    if truepbr_version_note:
+        summary = f"{summary}\n{truepbr_version_note}"
     remembered_bits: list[str] = []
     normalized_manager = last_mod_manager.strip()
     if normalized_manager and (context is None or normalized_manager != context.manager):

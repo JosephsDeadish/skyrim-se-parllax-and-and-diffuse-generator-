@@ -1443,6 +1443,16 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("renderer Community Shaders", message)
         self.assertIn("output target next to input", message)
 
+    def test_build_mod_manager_context_hint_includes_truepbr_version_warning(self) -> None:
+        context = ModManagerContext(
+            manager="Mod Organizer 2",
+            profile_name="Main",
+            renderer_version_hints=("TruePBR 0.9.0",),
+        )
+        message = build_mod_manager_context_hint(context)
+        self.assertIn("TruePBR version hint(s) TruePBR 0.9.0", message)
+        self.assertIn("probably incompatible", message)
+
     def test_build_mod_manager_profile_setup_hint_tracks_current_profile_setup(self) -> None:
         hint = build_mod_manager_profile_setup_hint(
             {
