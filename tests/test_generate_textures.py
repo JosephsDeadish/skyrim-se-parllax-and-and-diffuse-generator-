@@ -77,6 +77,7 @@ from generate_textures import (
     _describe_qt_profile_guidance,
     _detect_renderer_version_hints,
     _format_short_guidance_tooltip,
+    _format_log_export_text,
     _format_qt_preview_channel_note,
     _format_qt_log_export_text,
     _qt_migration_status_text,
@@ -1694,6 +1695,74 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertFalse(any(_qt_profile_output_defaults("custom").values()))
         self.assertTrue(_qt_profile_output_defaults("vanilla")["include_diffuse"])
 
+    def test_generation_log_helpers_append_copy_and_export(self) -> None:
+        self.assertEqual(
+            _format_log_export_text("First line\nSecond line\n\n"),
+            "First line\nSecond line\n",
+        )
+        if not hasattr(TextureGeneratorGUI, "_append_generation_log"):
+            self.skipTest("Tk generation log helpers are unavailable in this environment.")
+
+        class FakeText:
+            def __init__(self) -> None:
+                self.content = ""
+                self.seen: list[str] = []
+                self.state_changes: list[object] = []
+
+            def configure(self, **kwargs) -> None:
+                self.state_changes.append(kwargs.get("state"))
+
+            def get(self, start: str, end: str) -> str:
+                return self.content
+
+            def insert(self, index: str, text: str) -> None:
+                self.content += text
+
+            def see(self, index: str) -> None:
+                self.seen.append(index)
+
+        class FakeVar:
+            def __init__(self) -> None:
+                self.value = ""
+
+            def set(self, value: str) -> None:
+                self.value = value
+
+            def get(self) -> str:
+                return self.value
+
+        fake_log = FakeText()
+        fake_status = FakeVar()
+        copied: list[str] = []
+        clipboard_root = SimpleNamespace(
+            clipboard_clear=lambda: copied.append("clear"),
+            clipboard_append=lambda text: copied.append(text),
+        )
+        fake_gui = SimpleNamespace(
+            generation_log_text=fake_log,
+            status_var=fake_status,
+            root=clipboard_root,
+            _default_output_browse_dir=lambda: Path(tempfile.gettempdir()),
+            _tr=lambda text: text,
+        )
+
+        TextureGeneratorGUI._append_generation_log(fake_gui, "First line")
+        TextureGeneratorGUI._append_generation_log(fake_gui, ["Second line", "Third line"])
+        self.assertEqual(fake_log.content, "First line\nSecond line\nThird line")
+        self.assertEqual(fake_log.seen, ["end", "end"])
+
+        TextureGeneratorGUI._copy_generation_log(fake_gui)
+        self.assertEqual(copied, ["clear", "First line\nSecond line\nThird line"])
+        self.assertEqual(fake_status.get(), "Copied generation log to clipboard.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_path = Path(temp_dir) / "generation.log"
+            fake_gui._default_output_browse_dir = lambda: Path(temp_dir)
+            with mock.patch("generate_textures.filedialog.asksaveasfilename", return_value=str(export_path)):
+                TextureGeneratorGUI._export_generation_log(fake_gui)
+            self.assertEqual(export_path.read_text(encoding="utf-8"), "First line\nSecond line\nThird line\n")
+            self.assertIn("Exported generation log to", fake_status.get())
+
     def test_qt_truepbr_material_overrides_are_opt_in(self) -> None:
         self.assertIsNone(
             _qt_truepbr_material_overrides(
@@ -2446,6 +2515,47 @@ class GenerateTexturesTests(unittest.TestCase):
                     persisted = save_state.call_args.args[0]
                     self.assertEqual(persisted["render_profile"], "enb")
                     self.assertFalse(bool(persisted["show_startup_onboarding"]))
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_generation_log_copy_and_export(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            export_path = Path(temp_dir) / "generation.log"
+            gui = None
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state), \
+                     mock.patch("generate_textures.save_gui_state"), \
+                     mock.patch("generate_textures.detect_mod_manager_context", return_value=ModManagerContext()):
+                    gui = TextureGeneratorGUI()
+                gui.root.update_idletasks()
+                self.assertIsNotNone(gui.generation_log_text)
+                expected_text = (
+                    "Queued 3 source texture(s).\n"
+                    "Processing 1/3: stone.dds (elapsed 0.5s, eta 1.0s)\n"
+                    "Run summary: processed 3/3."
+                )
+                gui._append_generation_log("Queued 3 source texture(s).")
+                gui._append_generation_log(
+                    [
+                        "Processing 1/3: stone.dds (elapsed 0.5s, eta 1.0s)",
+                        "Run summary: processed 3/3.",
+                    ]
+                )
+                self.assertEqual(gui.generation_log_text.get("1.0", "end-1c"), expected_text)
+                with mock.patch.object(gui.root, "clipboard_clear") as clear_clipboard, \
+                     mock.patch.object(gui.root, "clipboard_append") as append_clipboard:
+                    gui._copy_generation_log()
+                clear_clipboard.assert_called_once()
+                append_clipboard.assert_called_once_with(expected_text)
+                self.assertIn("Copied generation log to clipboard.", gui.status_var.get())
+                with mock.patch("generate_textures.filedialog.asksaveasfilename", return_value=str(export_path)):
+                    gui._export_generation_log()
+                self.assertEqual(export_path.read_text(encoding="utf-8"), expected_text + "\n")
+                self.assertIn("Exported generation log to", gui.status_var.get())
             finally:
                 if gui is not None:
                     gui.root.destroy()

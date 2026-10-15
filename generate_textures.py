@@ -4404,9 +4404,13 @@ def _nif_editor_confirmation_text(
     return "\n".join(lines)
 
 
-def _format_qt_log_export_text(text: str) -> str:
+def _format_log_export_text(text: str) -> str:
     normalized = text.rstrip()
     return normalized + "\n" if normalized else ""
+
+
+def _format_qt_log_export_text(text: str) -> str:
+    return _format_log_export_text(text)
 
 
 def recommend_render_profile_details(
@@ -10316,6 +10320,7 @@ if GUI_AVAILABLE:
             self.preview_speed_state_var = tk.StringVar(value="")
             self.checkpoint_health_var = tk.StringVar(value="Checkpoint: pending")
             self.batch_perf_hint_var = tk.StringVar(value="")
+            self.generation_log_text = None
             self.safe_preset_hint_var = tk.StringVar(
                 value="Safe defaults are recommended for most users. " + _workflow_preset_onboarding_text()
             )
@@ -11541,6 +11546,52 @@ if GUI_AVAILABLE:
             self._bind_responsive_wrap(actions, _status_label, horizontal_padding=360, min_wrap=200)
             self._bind_responsive_wrap(options_frame, self.render_profile_hint_label, horizontal_padding=350, min_wrap=220)
 
+            generation_log_frame = ttk.LabelFrame(wrapper, text="Generation event log", padding=10)
+            generation_log_frame.pack(fill=tk.X, padx=4, pady=4)
+            generation_log_header = ttk.Frame(generation_log_frame)
+            generation_log_header.pack(fill=tk.X, pady=(0, 4))
+            generation_log_label = ttk.Label(
+                generation_log_header,
+                text="Messages, warnings, and summaries from the current run.",
+                style="Muted.TLabel",
+            )
+            generation_log_label.pack(side=tk.LEFT)
+            self.generation_log_copy_button = ttk.Button(
+                generation_log_header,
+                text="Copy log",
+                command=self._copy_generation_log,
+            )
+            self.generation_log_copy_button.pack(side=tk.RIGHT, padx=(4, 0))
+            self._add_tooltip(
+                self.generation_log_copy_button,
+                "Copy the current generation log for support or bug reports.",
+            )
+            self.generation_log_export_button = ttk.Button(
+                generation_log_header,
+                text="Export log…",
+                command=self._export_generation_log,
+            )
+            self.generation_log_export_button.pack(side=tk.RIGHT, padx=(4, 0))
+            self._add_tooltip(
+                self.generation_log_export_button,
+                "Save the current generation log to a text file.",
+            )
+            generation_log_body = ttk.Frame(generation_log_frame)
+            generation_log_body.pack(fill=tk.BOTH, expand=True)
+            self.generation_log_text = tk.Text(generation_log_body, wrap=tk.WORD, height=7)
+            generation_log_text_scroll = ttk.Scrollbar(
+                generation_log_body,
+                orient=tk.VERTICAL,
+                command=self.generation_log_text.yview,
+            )
+            self.generation_log_text.configure(yscrollcommand=generation_log_text_scroll.set, state=tk.DISABLED)
+            self.generation_log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            generation_log_text_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+            self._add_tooltip(
+                generation_log_label,
+                "Shows generation progress, warnings, and summaries so you can copy or export them for support.",
+            )
+
             preview_frame = ttk.LabelFrame(wrapper, text="Preview (Source vs Generated)", padding=10)
             preview_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
 
@@ -12627,6 +12678,70 @@ if GUI_AVAILABLE:
             export_project_settings_state(self._build_gui_state(), Path(selected))
             self.status_var.set(self._tr("Exported project settings to {path}.").format(path=Path(selected)))
 
+        def _append_generation_log(self, message: str | Sequence[str]) -> None:
+            text_widget = getattr(self, "generation_log_text", None)
+            if text_widget is None:
+                return
+            if isinstance(message, str):
+                raw_lines = message.splitlines()
+            else:
+                raw_lines = [str(item) for item in message]
+            lines = [line.rstrip() for line in raw_lines if str(line).strip()]
+            if not lines:
+                return
+            text_widget.configure(state=tk.NORMAL)
+            try:
+                if text_widget.get("1.0", "end-1c").strip():
+                    text_widget.insert(tk.END, "\n")
+                for index, line in enumerate(lines):
+                    if index > 0:
+                        text_widget.insert(tk.END, "\n")
+                    text_widget.insert(tk.END, line)
+                text_widget.see(tk.END)
+            finally:
+                text_widget.configure(state=tk.DISABLED)
+
+        def _copy_generation_log(self) -> None:
+            text_widget = getattr(self, "generation_log_text", None)
+            if text_widget is None:
+                return
+            text = text_widget.get("1.0", "end-1c").strip()
+            if not text:
+                self.status_var.set("No generation log content to copy.")
+                return
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(text)
+            except Exception as exc:
+                self.status_var.set(f"Could not copy generation log: {exc}")
+                return
+            self.status_var.set("Copied generation log to clipboard.")
+
+        def _export_generation_log(self) -> None:
+            text_widget = getattr(self, "generation_log_text", None)
+            if text_widget is None:
+                return
+            text = text_widget.get("1.0", "end-1c").strip()
+            if not text:
+                self.status_var.set("No generation log content to export.")
+                return
+            selected = filedialog.asksaveasfilename(
+                title="Export generation log",
+                defaultextension=".log",
+                filetypes=[("Text files", "*.log *.txt"), ("All files", "*.*")],
+                initialdir=str(self._default_output_browse_dir()),
+                initialfile="skyrim_texture_generator.log",
+            )
+            if not selected:
+                return
+            try:
+                Path(selected).write_text(_format_log_export_text(text), encoding="utf-8")
+            except OSError as exc:
+                messagebox.showwarning("Generation log export failed", str(exc), parent=self.root)
+                self.status_var.set(f"Generation log export failed: {exc}")
+                return
+            self.status_var.set(self._tr("Exported generation log to {path}.").format(path=Path(selected)))
+
         def _default_output_dir_for_path(self, path: Path) -> Path:
             return path if path.is_dir() else path.parent
 
@@ -13355,10 +13470,12 @@ if GUI_AVAILABLE:
                         high_res_8k_count=max(0, int(getattr(self, "_active_batch_high_res_8k_count", 0) or 0)),
                     )
                     if should_update_status:
-                        self.status_var.set(
+                        progress_message = (
                             f"Processing {index}/{total}: {current_path.name} "
                             f"(elapsed {elapsed_seconds:.1f}s, eta {eta_seconds:.1f}s)"
                         )
+                        self.status_var.set(progress_message)
+                        self._append_generation_log(progress_message)
                         self._last_batch_status_update_at = now
                         self._last_batch_status_update_index = max(0, int(index))
                     if self.show_batch_preview_var.get():
@@ -13380,13 +13497,15 @@ if GUI_AVAILABLE:
                     filename, patched, failed = payload
                     self.batch_nif_patch_results.append((filename, patched, failed))
                     if patched or failed:
-                        self.status_var.set(
-                            f"Patched related NIFs for {filename}: {patched} succeeded, {failed} failed."
-                        )
+                        nif_patch_message = f"Patched related NIFs for {filename}: {patched} succeeded, {failed} failed."
+                        self.status_var.set(nif_patch_message)
+                        self._append_generation_log(nif_patch_message)
                 elif event_type == "file_error":
                     index, total, filename, error_message = payload
                     self.batch_failures.append((filename, error_message))
-                    self.status_var.set(f"Skipped failed file {index}/{total}: {filename}")
+                    error_message_text = f"Skipped failed file {index}/{total}: {filename}"
+                    self.status_var.set(error_message_text)
+                    self._append_generation_log(error_message_text)
                 elif event_type == "done":
                     telemetry: dict[str, object] = {}
                     if isinstance(payload, tuple) and len(payload) == 2 and isinstance(payload[1], dict):
@@ -13495,6 +13614,7 @@ if GUI_AVAILABLE:
                             f"checkpoint={'available' if checkpoint_health_available else 'unavailable'}."
                         ),
                     )
+                    self._append_generation_log(lines)
                     messagebox.showinfo("Generation complete", "\n".join(lines), parent=self.root)
                     self._refresh_preview()
                     keep_polling = False
@@ -13514,6 +13634,11 @@ if GUI_AVAILABLE:
                     nif_patch_summary = summarize_batch_nif_patch_activity(self.batch_nif_patch_results)
                     self.status_var.set(
                         f"Generation cancelled. Finished {total_sources}/{planned_cancelled} source texture(s) and wrote {total_outputs} file(s)."
+                    )
+                    self._append_generation_log(
+                        [
+                            f"Generation cancelled. Finished {total_sources}/{planned_cancelled} source texture(s) and wrote {total_outputs} file(s).",
+                        ]
                     )
                     checkpoint_status = "Checkpoint health: unavailable"
                     checkpoint_value = str(telemetry.get("checkpoint_path", "") or "").strip() if telemetry else ""
@@ -13542,6 +13667,7 @@ if GUI_AVAILABLE:
                             "Use Revert Process to undo files from this run if needed.",
                         ]
                     )
+                    self._append_generation_log(cancel_lines)
                     messagebox.showinfo(
                         "Generation cancelled",
                         "\n".join(cancel_lines),
@@ -13570,6 +13696,9 @@ if GUI_AVAILABLE:
                     break
                 elif event_type == "error":
                     self._set_processing_state(False)
+                    error_message = f"Generation failed: {payload}"
+                    self.status_var.set(error_message)
+                    self._append_generation_log(error_message)
                     messagebox.showerror("Generation failed", str(payload), parent=self.root)
                     keep_polling = False
                     break
@@ -14623,7 +14752,9 @@ if GUI_AVAILABLE:
                     messagebox.showwarning("Missing input", "Please choose an input DDS texture first.", parent=self.root)
                     return
                 if self.is_processing:
-                    self.status_var.set("Generation already running. Please wait for the current batch to finish.")
+                    running_message = "Generation already running. Please wait for the current batch to finish."
+                    self.status_var.set(running_message)
+                    self._append_generation_log(running_message)
                     messagebox.showwarning(
                         "Generation already running",
                         "A generation task is already in progress. Please wait for it to finish or cancel it first.",
@@ -14673,7 +14804,9 @@ if GUI_AVAILABLE:
                 input_path = Path(input_value)
                 self.selected_inputs = collect_source_textures(input_path)
                 if not self.selected_inputs:
-                    self.status_var.set("No source textures found to process.")
+                    no_sources_message = "No source textures found to process."
+                    self.status_var.set(no_sources_message)
+                    self._append_generation_log(no_sources_message)
                     messagebox.showwarning("No source textures found", "No valid source textures were found for the selected input.", parent=self.root)
                     return
                 is_huge_batch = len(self.selected_inputs) >= 1000
@@ -14734,11 +14867,11 @@ if GUI_AVAILABLE:
                     if enable_resume:
                         self.batch_resume_mode_var.set("resume")
                 if is_huge_batch:
-                    self.status_var.set(
-                        self._tr(
-                            "Huge-run mode: checkpoint safety prompts, safer resume decisions, and queue pacing are enabled for smoother long runs."
-                        )
+                    huge_run_message = self._tr(
+                        "Huge-run mode: checkpoint safety prompts, safer resume decisions, and queue pacing are enabled for smoother long runs."
                     )
+                    self.status_var.set(huge_run_message)
+                    self._append_generation_log(huge_run_message)
                 resumed_completed_count = 0
                 completed_checkpoint_files: set[str] = set()
                 if self.batch_resume_mode_var.get() == "resume":
@@ -14919,9 +15052,9 @@ if GUI_AVAILABLE:
                         str(_guardrails["effective_profile"]),
                         str(_guardrails["effective_profile"]).replace("_", " ").title(),
                     )
-                    self.status_var.set(
-                        f"Renderer guardrails applied for {_effective_label}: " + "; ".join(_guardrail_changes) + "."
-                    )
+                    guardrail_message = f"Renderer guardrails applied for {_effective_label}: " + "; ".join(_guardrail_changes) + "."
+                    self.status_var.set(guardrail_message)
+                    self._append_generation_log(guardrail_message)
                 if not self._check_and_show_generation_warnings(
                     _material_type,
                     source_role=_source_role,
@@ -15045,14 +15178,14 @@ if GUI_AVAILABLE:
                     if self.batch_resume_mode_var.get() != "resume":
                         perf_note += " Resume mode is recommended to avoid duplicate work after interruptions."
                 if self.show_batch_preview_var.get():
-                    self.status_var.set(
+                    queued_message = (
                         f"Queued {len(self.selected_inputs)} source texture(s). "
                         f"Live batch preview is ON and may slow processing.{perf_note}"
                     )
                 else:
-                    self.status_var.set(
-                        f"Queued {len(self.selected_inputs)} source texture(s) for processing...{perf_note}"
-                    )
+                    queued_message = f"Queued {len(self.selected_inputs)} source texture(s) for processing...{perf_note}"
+                self.status_var.set(queued_message)
+                self._append_generation_log(queued_message)
                 self.processing_thread = threading.Thread(
                     target=self._process_generation_batch,
                     args=(
@@ -15069,7 +15202,9 @@ if GUI_AVAILABLE:
                 self.root.after(100, self._poll_processing_queue)
             except Exception as exc:
                 self._set_processing_state(False)
-                self.status_var.set(f"Generation failed before start: {exc}")
+                failed_message = f"Generation failed before start: {exc}"
+                self.status_var.set(failed_message)
+                self._append_generation_log(failed_message)
                 messagebox.showerror("Generation failed", str(exc), parent=self.root)
 
         def _cancel_processing(self) -> None:
@@ -15077,7 +15212,9 @@ if GUI_AVAILABLE:
                 return
             self.cancel_requested = True
             self.cancel_button.configure(state=tk.DISABLED)
-            self.status_var.set("Cancellation requested. Current file will finish, then processing stops.")
+            cancel_message = "Cancellation requested. Current file will finish, then processing stops."
+            self.status_var.set(cancel_message)
+            self._append_generation_log(cancel_message)
 
         def _revert_last_generation(self) -> None:
             if self.is_processing:
@@ -20265,7 +20402,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         if not chosen_file:
             return
         try:
-            Path(chosen_file).write_text(_format_qt_log_export_text(text), encoding="utf-8")
+            Path(chosen_file).write_text(_format_log_export_text(text), encoding="utf-8")
         except OSError as exc:
             QtWidgets.QMessageBox.warning(window, "Generation log export failed", str(exc))
             return
