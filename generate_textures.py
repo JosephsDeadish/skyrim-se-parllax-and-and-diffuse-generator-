@@ -3909,6 +3909,7 @@ def get_nif_patch_option_warnings(
     target_game: str = "auto",
     experimental_fallout_write: bool = False,
     dry_run: bool = True,
+    backup: bool = True,
 ) -> list[str]:
     warnings: list[str] = []
     normalized_selected_profile = _normalize_render_profile(str(selected_profile or "auto"))
@@ -3923,6 +3924,10 @@ def get_nif_patch_option_warnings(
     if not dry_run:
         warnings.append(
             "Write mode is enabled. This will modify NIF files on disk; keep backups enabled and review the dry-run preview first."
+        )
+    if not backup:
+        warnings.append(
+            "Backup originals are disabled. No new .nif.bak rollback copy will be created."
         )
     if effective_profile == "vanilla" and enable_pom:
         warnings.append("ENB POM is usually incorrect for vanilla meshes.")
@@ -4504,6 +4509,7 @@ def _nif_editor_safety_banner_text(
     target_game: str | None = None,
     *,
     dry_run: bool = True,
+    backup: bool = True,
     experimental_fallout_write: bool = False,
 ) -> str:
     normalized_game = str(target_game or "auto").strip().lower()
@@ -4512,10 +4518,16 @@ def _nif_editor_safety_banner_text(
         fallout_note = "🧪 Fallout writes are experimental best-effort only"
     else:
         fallout_note = "Fallout writes stay off unless you opt in"
+    if backup:
+        backup_note = "Backup originals are enabled."
+        safe_default = "Safe default: keep Dry-run and Backup originals enabled."
+    else:
+        backup_note = "⚠ Backup originals are off; no new .nif.bak rollback copy will be created if you write."
+        safe_default = "Safe default: keep Dry-run on and re-enable Backup originals before writing."
     return (
-        "Safe default: keep Dry-run and Backup originals enabled. "
+        f"{safe_default} "
         f"{safety_mode}. Compare against .bak first; restore from .bak is the rollback path. "
-        f"{fallout_note}."
+        f"{fallout_note}. {backup_note}"
     )
 
 
@@ -4547,13 +4559,15 @@ def _describe_nif_backup_selection_state(nif_paths: Sequence[Path]) -> str:
     )
 
 
-def _nif_editor_confirmation_title(action: str) -> str:
+def _nif_editor_confirmation_title(action: str, *, backup: bool = True) -> str:
     normalized_action = str(action or "").strip().lower()
     if normalized_action == "restore":
         return "Confirm NIF restore"
+    if normalized_action == "remediate":
+        return "Confirm safe-fix writes" if backup else "Confirm safe-fix writes without backup"
     if normalized_action == "unpatch":
-        return "Confirm destructive unpatch"
-    return "Confirm NIF write mode"
+        return "Confirm destructive unpatch" if backup else "Confirm destructive unpatch without backup"
+    return "Confirm NIF write mode" if backup else "Confirm NIF write without backup"
 
 
 def _nif_editor_confirmation_text(
@@ -4561,6 +4575,7 @@ def _nif_editor_confirmation_text(
     file_count: int,
     *,
     nif_paths: Sequence[Path] | None = None,
+    backup: bool = True,
     experimental_fallout_write: bool = False,
 ) -> str:
     noun = "NIF file" if int(file_count) == 1 else "NIF files"
@@ -4586,6 +4601,29 @@ def _nif_editor_confirmation_text(
                 "Continue with restore mode?",
             ]
         )
+    elif normalized_action == "remediate":
+        lines = [
+            "🛠 SAFE-FIX WRITE",
+            _format_short_guidance_tooltip(
+                f"apply grouped safe fixes to {int(file_count)} {noun} and write the changes to disk with sibling .nif.bak backups for rollback",
+                "the scan already points at a supported conflict family and you want the non-destructive fix path",
+                "you still need read-only compare, or the mesh needs a manual or experimental fix instead",
+            ),
+            "",
+        ]
+        if backup_state is not None:
+            lines.extend((backup_state, ""))
+        if not backup:
+            lines.append(
+                "⚠ Backup originals are disabled. No new .nif.bak rollback copy will be created."
+            )
+        lines.extend(
+            [
+                "Rollback path: compare against the sibling .nif.bak backup first, then apply only supported fixes.",
+                "Dry-run first and backups enabled are the safe default.",
+                "Continue with safe-fix write mode?",
+            ]
+        )
     elif normalized_action == "unpatch":
         lines = [
             "🚨 DESTRUCTIVE WRITE",
@@ -4598,6 +4636,10 @@ def _nif_editor_confirmation_text(
         ]
         if backup_state is not None:
             lines.extend((backup_state, ""))
+        if not backup:
+            lines.append(
+                "⚠ Backup originals are disabled. No new .nif.bak rollback copy will be created."
+            )
         lines.append("This is a destructive write operation. Dry-run first and backups enabled are the safe default.")
         if experimental_fallout_write:
             lines.append("🧪 Fallout writes are experimental best-effort only.")
@@ -4614,6 +4656,10 @@ def _nif_editor_confirmation_text(
         ]
         if backup_state is not None:
             lines.extend((backup_state, ""))
+        if not backup:
+            lines.append(
+                "⚠ Backup originals are disabled. No new .nif.bak rollback copy will be created."
+            )
         lines.append(
             "Rollback path: write mode modifies the meshes on disk and relies on .nif.bak backups for rollback."
         )
@@ -15975,6 +16021,7 @@ if GUI_AVAILABLE:
                     text=_nif_editor_safety_banner_text(
                         target_game_var.get(),
                         dry_run=dry_run_var.get(),
+                        backup=backup_var.get(),
                         experimental_fallout_write=experimental_fallout_write_var.get(),
                     ),
                     justify=tk.LEFT,
@@ -16108,6 +16155,7 @@ if GUI_AVAILABLE:
                         target_game=target_game_var.get(),
                         experimental_fallout_write=experimental_fallout_write_var.get(),
                         dry_run=dry_run_var.get(),
+                        backup=backup_var.get(),
                     )
                     option_warning_var.set("⚠ " + " | ".join(warnings[:3]) if warnings else "")
 
@@ -16173,6 +16221,7 @@ if GUI_AVAILABLE:
                     guarded_mode_risky = (
                         selected_game == "fallout"
                         or not dry_run_var.get()
+                        or not backup_var.get()
                         or experimental_fallout_write_var.get()
                     )
                     guarded_mode_note.configure(
@@ -16180,6 +16229,7 @@ if GUI_AVAILABLE:
                         text=_nif_editor_safety_banner_text(
                             target_game=selected_game,
                             dry_run=dry_run_var.get(),
+                            backup=backup_var.get(),
                             experimental_fallout_write=experimental_fallout_write_var.get(),
                         )
                     )
@@ -16206,8 +16256,11 @@ if GUI_AVAILABLE:
                 ):
                     watch_var.trace_add("write", _update_checkbox_warnings)
                 target_game_var.trace_add("write", _update_checkbox_warnings)
+                dry_run_var.trace_add("write", _update_checkbox_warnings)
+                backup_var.trace_add("write", _update_checkbox_warnings)
                 target_game_var.trace_add("write", _sync_target_game_controls)
                 dry_run_var.trace_add("write", _sync_target_game_controls)
+                backup_var.trace_add("write", _sync_target_game_controls)
                 experimental_fallout_write_var.trace_add("write", _sync_target_game_controls)
                 _sync_target_game_controls()
                 self._add_tooltip(
@@ -17314,11 +17367,12 @@ if GUI_AVAILABLE:
                     }
                     if not remediation_options["dry_run"]:
                         proceed = messagebox.askyesno(
-                            "Confirm safe-fix writes",
+                            _nif_editor_confirmation_title("remediate", backup=backup_var.get()),
                             _nif_editor_confirmation_text(
-                                "patch",
+                                "remediate",
                                 len(nifs),
                                 nif_paths=nifs,
+                                backup=backup_var.get(),
                                 experimental_fallout_write=experimental_fallout_write_var.get(),
                             ),
                             parent=win,
@@ -17331,7 +17385,11 @@ if GUI_AVAILABLE:
                     _set_ops_active(False)
                     status_var.set(
                         f"Phase 2/4 (auto-remediation): processing {len(nifs)} NIF file(s)…"
-                        + (" DRY-RUN." if remediation_options["dry_run"] else " WRITE MODE.")
+                        + (
+                            " DRY-RUN."
+                            if remediation_options["dry_run"]
+                            else (" WRITE MODE / NO BACKUP." if not remediation_options["backup"] else " WRITE MODE.")
+                        )
                     )
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
@@ -17458,6 +17516,7 @@ if GUI_AVAILABLE:
                         target_game=target_game_var.get(),
                         experimental_fallout_write=experimental_fallout_write_var.get(),
                         dry_run=dry_run_var.get(),
+                        backup=backup_var.get(),
                         fallout_allow_parallax_scale=fallout_allow_parallax_scale_var.get(),
                         fallout_allow_fix_mesh_lighting=fallout_allow_fix_mesh_lighting_var.get(),
                         fallout_allow_spec_strength=fallout_allow_spec_strength_var.get(),
@@ -17524,11 +17583,12 @@ if GUI_AVAILABLE:
                     )
                     if not options.dry_run:
                         proceed = messagebox.askyesno(
-                            "Confirm NIF write mode",
+                            _nif_editor_confirmation_title("patch", backup=options.backup),
                             _nif_editor_confirmation_text(
                                 "patch",
                                 len(nifs),
                                 nif_paths=nifs,
+                                backup=options.backup,
                                 experimental_fallout_write=experimental_fallout_write_var.get(),
                             ),
                             parent=win,
@@ -17541,6 +17601,8 @@ if GUI_AVAILABLE:
                     _cancel_requested[0] = False
                     _set_ops_active(False)
                     mode_label = "DRY-RUN patching" if options.dry_run else "WRITE MODE patching"
+                    if not options.dry_run and not options.backup:
+                        mode_label = "WRITE MODE / NO BACKUP patching"
                     status_var.set(f"Phase 3/4 (patch): starting {mode_label} for {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
@@ -17673,11 +17735,12 @@ if GUI_AVAILABLE:
                     )
                     if not options.dry_run:
                         proceed = messagebox.askyesno(
-                            "Confirm destructive unpatch",
+                            _nif_editor_confirmation_title("unpatch", backup=options.backup),
                             _nif_editor_confirmation_text(
                                 "unpatch",
                                 len(nifs),
                                 nif_paths=nifs,
+                                backup=options.backup,
                                 experimental_fallout_write=experimental_fallout_write_var.get(),
                             ),
                             parent=win,
@@ -17690,6 +17753,8 @@ if GUI_AVAILABLE:
                     _cancel_requested[0] = False
                     _set_ops_active(False)
                     mode_label = "DRY-RUN unpatching" if options.dry_run else "WRITE MODE unpatching"
+                    if not options.dry_run and not options.backup:
+                        mode_label = "WRITE MODE / NO BACKUP unpatching"
                     status_var.set(f"Phase 4/4 (unpatch): starting {mode_label} for {len(nifs)} NIF file(s)…")
                     progress_bar.configure(maximum=max(1, len(nifs)))
                     progress_var.set(0.0)
@@ -17769,8 +17834,8 @@ if GUI_AVAILABLE:
                         _show_no_nifs("No NIF files found at the selected path.")
                         return
                     proceed = messagebox.askyesno(
-                        "Restore from backups",
-                        _nif_editor_confirmation_text("restore", len(nifs), nif_paths=nifs),
+                        _nif_editor_confirmation_title("restore"),
+                        _nif_editor_confirmation_text("restore", len(nifs), nif_paths=nifs, backup=True),
                         parent=win,
                     )
                     if not proceed:
@@ -17973,6 +18038,47 @@ if GUI_AVAILABLE:
                 self._add_tooltip(copy_all_button, "Copy all result rows for logs or bug reports.")
                 self._add_tooltip(cancel_ops_button, "Request cancellation; the current file finishes first, then the operation stops.")
                 self._add_tooltip(close_button, "Close the NIF Editor window.")
+
+                def _refresh_nif_editor_action_labels(*_: object) -> None:
+                    write_mode = not dry_run_var.get()
+                    backup_enabled = backup_var.get()
+                    fallout_mode = target_game_var.get().strip().lower() == "fallout"
+                    experimental_fallout = experimental_fallout_write_var.get()
+                    patch_label = "Apply patch (dry-run first)"
+                    safe_fix_label = "Auto-remediate conflicts"
+                    unpatch_label = "⚠ Remove features (destructive)"
+                    restore_label = "↩ Restore from .bak"
+                    if write_mode:
+                        patch_label = (
+                            "🚨 Apply patch (write mode, no backup)"
+                            if not backup_enabled
+                            else "⚠ Apply patch (write mode)"
+                        )
+                        safe_fix_label = (
+                            "🚨 Auto-remediate conflicts (write mode, no backup)"
+                            if not backup_enabled
+                            else "⚠ Auto-remediate conflicts (write mode)"
+                        )
+                        unpatch_label = (
+                            "🚨 Remove features (destructive, write mode, no backup)"
+                            if not backup_enabled
+                            else "⚠ Remove features (destructive, write mode)"
+                        )
+                        restore_label = "⚠ Restore from .bak (write mode)"
+                    if fallout_mode and experimental_fallout:
+                        patch_label = "🧪 " + patch_label
+                        safe_fix_label = "🧪 " + safe_fix_label
+                        unpatch_label = "🧪 " + unpatch_label
+                    patch_button.configure(text=patch_label)
+                    auto_fix_button.configure(text=safe_fix_label)
+                    unpatch_button.configure(text=unpatch_label)
+                    restore_button.configure(text=restore_label)
+
+                _refresh_nif_editor_action_labels()
+                dry_run_var.trace_add("write", _refresh_nif_editor_action_labels)
+                backup_var.trace_add("write", _refresh_nif_editor_action_labels)
+                target_game_var.trace_add("write", _refresh_nif_editor_action_labels)
+                experimental_fallout_write_var.trace_add("write", _refresh_nif_editor_action_labels)
 
                 _NIF_EDITOR_LAYOUT_RETRY_MAX = 6
                 _NIF_EDITOR_LAYOUT_RETRY_DELAY_MS = 80
@@ -19217,6 +19323,30 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             "you still need to inspect the diff or keep the current file unchanged",
         )
     )
+
+    def _update_qt_nif_editor_action_labels(*_: object) -> None:
+        write_mode = not nif_editor_dry_run.isChecked()
+        fallout_mode = nif_editor_profile.currentText().strip().lower() == "fallout"
+        experimental_fallout = nif_editor_experimental.isChecked()
+        patch_label = "Apply edits (dry-run first)"
+        remediate_label = "Apply safe fixes"
+        restore_label = "↩ Restore backups"
+        if write_mode:
+            patch_label = "🚨 Apply edits (write mode)"
+            remediate_label = "⚠ Apply safe fixes (write mode)"
+            restore_label = "⚠ Restore backups (write mode)"
+        if fallout_mode and experimental_fallout:
+            patch_label = "🧪 " + patch_label
+            remediate_label = "🧪 " + remediate_label
+        nif_editor_buttons["patch"].setText(patch_label)
+        nif_editor_buttons["remediate"].setText(remediate_label)
+        nif_editor_buttons["restore"].setText(restore_label)
+
+    _update_qt_nif_editor_action_labels()
+    nif_editor_dry_run.toggled.connect(_update_qt_nif_editor_action_labels)
+    nif_editor_experimental.toggled.connect(_update_qt_nif_editor_action_labels)
+    nif_editor_profile.currentTextChanged.connect(_update_qt_nif_editor_action_labels)
+
     nif_editor_cancel = QtWidgets.QPushButton("Cancel edit")
     nif_editor_cancel.setObjectName("nif_editor_cancel")
     nif_editor_cancel.setEnabled(False)
@@ -19918,16 +20048,14 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             values[f"fallout_allow_{name}"] = nif_editor_experimental.isChecked() and gate.isChecked()
         options = build_nif_patch_options_for_nif_editor(**values)
         if operation != "compare" and not options.dry_run:
-            if operation == "restore":
-                prompt = _nif_editor_confirmation_text("restore", len(paths), nif_paths=paths)
-            else:
-                prompt = _nif_editor_confirmation_text(
-                    operation,
-                    len(paths),
-                    nif_paths=paths,
-                    experimental_fallout_write=nif_editor_experimental.isChecked(),
-                )
-            title = _nif_editor_confirmation_title(operation)
+            prompt = _nif_editor_confirmation_text(
+                operation,
+                len(paths),
+                nif_paths=paths,
+                backup=options.backup,
+                experimental_fallout_write=nif_editor_experimental.isChecked(),
+            )
+            title = _nif_editor_confirmation_title(operation, backup=options.backup)
             answer = QtWidgets.QMessageBox.question(
                 window, title,
                 prompt,

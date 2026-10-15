@@ -2013,6 +2013,11 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("🚨 write mode is on", banner)
         self.assertIn("🧪 fallout writes are experimental best-effort only", banner)
 
+    def test_nif_editor_safety_banner_highlights_missing_backup(self) -> None:
+        banner = _nif_editor_safety_banner_text(dry_run=False, backup=False).lower()
+        self.assertIn("backup originals are off", banner)
+        self.assertIn("no new .nif.bak rollback copy will be created", banner)
+
     def test_qt_migration_status_text_summarizes_scope_and_remaining_parity(self) -> None:
         status = _qt_migration_status_text().lower()
         self.assertIn("qt migration preview scope", status)
@@ -2045,6 +2050,27 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertIn("best-effort", patch_message)
             self.assertIn("🚨 write mode", patch_message)
 
+            risky_patch_message = _nif_editor_confirmation_text(
+                "patch",
+                2,
+                nif_paths=[backed_up, missing_backup],
+                backup=False,
+                experimental_fallout_write=True,
+            ).lower()
+            self.assertIn("backup originals are disabled", risky_patch_message)
+            self.assertIn("no new .nif.bak rollback copy will be created", risky_patch_message)
+            self.assertIn("continue with write mode?", risky_patch_message)
+
+            safe_fix_message = _nif_editor_confirmation_text(
+                "remediate",
+                2,
+                nif_paths=[backed_up, missing_backup],
+                backup=False,
+            ).lower()
+            self.assertIn("safe-fix write", safe_fix_message)
+            self.assertIn("apply grouped safe fixes", safe_fix_message)
+            self.assertIn("continue with safe-fix write mode?", safe_fix_message)
+
             restore_message = _nif_editor_confirmation_text(
                 "restore",
                 1,
@@ -2073,7 +2099,11 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_nif_editor_confirmation_title_matches_action(self) -> None:
         self.assertEqual(_nif_editor_confirmation_title("patch"), "Confirm NIF write mode")
+        self.assertEqual(_nif_editor_confirmation_title("patch", backup=False), "Confirm NIF write without backup")
         self.assertEqual(_nif_editor_confirmation_title("unpatch"), "Confirm destructive unpatch")
+        self.assertEqual(_nif_editor_confirmation_title("unpatch", backup=False), "Confirm destructive unpatch without backup")
+        self.assertEqual(_nif_editor_confirmation_title("remediate"), "Confirm safe-fix writes")
+        self.assertEqual(_nif_editor_confirmation_title("remediate", backup=False), "Confirm safe-fix writes without backup")
         self.assertEqual(_nif_editor_confirmation_title("restore"), "Confirm NIF restore")
 
     def test_qt_preview_loader_decodes_and_bounds_image_dimensions(self) -> None:
@@ -4131,6 +4161,18 @@ class GenerateTexturesTests(unittest.TestCase):
             dry_run=False,
         )
         self.assertTrue(any("write mode is enabled" in text.lower() for text in warnings))
+
+    def test_get_nif_patch_option_warnings_highlights_missing_backup(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="vanilla",
+            enable_parallax=False,
+            enable_pom=False,
+            enable_env_mapping=False,
+            force_shader_type_3=False,
+            dry_run=False,
+            backup=False,
+        )
+        self.assertTrue(any("backup originals are disabled" in text.lower() for text in warnings))
 
     def test_get_nif_patch_option_warnings_skips_empty_env_mask_warning_for_enb(self) -> None:
         warnings = get_nif_patch_option_warnings(

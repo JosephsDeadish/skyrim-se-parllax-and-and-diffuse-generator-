@@ -6548,13 +6548,16 @@ class TestBackupOverwriteProtection(unittest.TestCase):
         self.assertIn("already exists", result.warnings[0])
 
     def test_no_warning_when_backup_disabled(self) -> None:
-        """With backup=False no warning is emitted even if a .nif.bak exists."""
+        """With backup=False the write path should warn that rollback copies are disabled."""
         nif = _write_nif(self.tmp)
         backup_path = nif.with_suffix(".nif.bak")
         backup_path.write_bytes(b"old backup")
         result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
         self.assertTrue(result.success, result.errors)
-        self.assertEqual(result.warnings, [])
+        self.assertTrue(
+            any("backup originals are disabled" in warning.lower() for warning in result.warnings),
+            result.warnings,
+        )
 
     def test_patch_still_writes_nif_when_backup_skipped(self) -> None:
         """Skipping the backup must not prevent the NIF itself from being patched."""
@@ -7193,6 +7196,29 @@ class TestCliArgumentValidation(unittest.TestCase):
         input_mock.assert_called_once_with("Type WRITE to continue with file modifications: ")
         self.assertTrue(patch_mock.call_args.args[1].dry_run is False)
         self.assertIn("WRITE MODE ENABLED", stderr.getvalue())
+        self.assertIn("files modified", stdout.getvalue())
+
+    def test_cli_no_backup_write_mode_prompts_for_explicit_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"nif")
+            write_result = NifPatchResult(nif_path=nif_path, success=True, already_up_to_date=False, message="Patched.")
+
+            with (
+                mock.patch("nif_patcher.patch_nif", return_value=write_result) as patch_mock,
+                mock.patch("sys.stdin") as stdin_mock,
+                mock.patch("builtins.input", return_value="write without backup") as input_mock,
+                mock.patch("sys.argv", ["nif_patcher.py", str(nif_path), "--write", "--no-backup", "--parallax", "textures\\stone_p.dds"]),
+            ):
+                stdin_mock.isatty.return_value = True
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    nif_patcher_main()
+
+        input_mock.assert_called_once_with("Type WRITE WITHOUT BACKUP to continue with file modifications: ")
+        self.assertFalse(patch_mock.call_args.args[1].dry_run)
+        self.assertIn("NO BACKUP MODE ENABLED", stderr.getvalue())
         self.assertIn("files modified", stdout.getvalue())
 
     def test_validate_cli_prints_explainability_summary_before_conflict_report(self) -> None:

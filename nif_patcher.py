@@ -3422,6 +3422,10 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
         )
         result.message = result.errors[0]
         return result
+    if not opts.dry_run and not opts.backup:
+        result.warnings.append(
+            "Backup originals are disabled. No new .nif.bak rollback copy will be created."
+        )
     if policy_profile == _GAME_PROFILE_FALLOUT:
         unsupported_ops: list[str] = []
         enabled_fallout_gates: list[str] = []
@@ -7305,12 +7309,20 @@ def _main() -> None:  # pragma: no cover
             "WRITE MODE ENABLED: this run may modify NIF files on disk. Review compare/backups before relying on the result.",
             file=sys.stderr,
         )
+        if args.no_backup:
+            print(
+                "NO BACKUP MODE ENABLED: writes will not create .nif.bak rollback copies.",
+                file=sys.stderr,
+            )
         if sys.stdin.isatty() and not args.yes:
             try:
-                confirmation = input("Type WRITE to continue with file modifications: ").strip()
+                expected_confirmation = "write without backup" if args.no_backup else "write"
+                confirmation = input(
+                    f"Type {expected_confirmation.upper()} to continue with file modifications: "
+                ).strip()
             except EOFError:
                 confirmation = ""
-            if confirmation.lower() != "write":
+            if confirmation.lower() != expected_confirmation:
                 print("Aborted.", file=sys.stderr)
                 sys.exit(1)
 
