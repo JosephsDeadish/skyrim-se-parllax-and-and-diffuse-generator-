@@ -2293,9 +2293,15 @@ class GenerateTexturesTests(unittest.TestCase):
                     gui.root.update_idletasks()
                     self.assertFalse(gui.show_startup_onboarding_var.get())
                     self.assertFalse(banner.winfo_ismapped())
+                    show_button = find_button(gui.root, "Show quick start")
+                    self.assertTrue(show_button.winfo_ismapped())
+                    show_button.invoke()
+                    gui.root.update_idletasks()
+                    self.assertTrue(gui.show_startup_onboarding_var.get())
+                    self.assertTrue(banner.winfo_ismapped())
                     save_state.assert_called()
                     persisted = save_state.call_args.args[0]
-                    self.assertFalse(bool(persisted["show_startup_onboarding"]))
+                    self.assertTrue(bool(persisted["show_startup_onboarding"]))
             finally:
                 if gui is not None:
                     gui.root.destroy()
@@ -11128,13 +11134,23 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
                 self.app.processEvents()
                 self.assertEqual(w("render_profile").currentText(), "vanilla")
                 self.assertFalse(w("startup_onboarding").isVisible())
+                self.assertTrue(w("startup_onboarding_show").isVisible())
                 self.assertEqual(w("tabs").tabText(w("tabs").currentIndex()), "Generation")
                 self.assertEqual(w("generation_status").text(), "Quick start applied: Vanilla.")
                 state["step"] = 1
                 return False
             if step == 1 and w("generate").isEnabled():
+                self.assertFalse(w("startup_onboarding").isVisible())
+                w("startup_onboarding_show").click()
+                self.app.processEvents()
+                self.assertTrue(w("startup_onboarding").isVisible())
+                self.assertFalse(w("startup_onboarding_show").isVisible())
+                self.assertEqual(w("generation_status").text(), "Quick start reopened.")
+                state["step"] = 2
+                return False
+            if step == 2 and w("generate").isEnabled():
                 self.assertTrue(saved_states)
-                self.assertFalse(saved_states[-1]["show_startup_onboarding"])
+                self.assertTrue(saved_states[-1]["show_startup_onboarding"])
                 self.assertEqual(saved_states[-1]["render_profile"], "vanilla")
                 return True
             return False

@@ -10300,6 +10300,12 @@ if GUI_AVAILABLE:
                 command=self._open_render_profile_help,
             )
             _help_button.pack(side=tk.RIGHT, padx=4)
+            startup_onboarding_show_button = ttk.Button(
+                top_primary_row,
+                text="Show quick start",
+                command=lambda: _show_startup_onboarding(),
+            )
+            startup_onboarding_show_button.pack(side=tk.RIGHT, padx=4)
             _theme_mode_label = ttk.Label(top_controls_row, text="Theme preset")
             _theme_mode_label.pack(side=tk.LEFT, padx=(0, 4))
             self.theme_mode_combo = ttk.Combobox(
@@ -10431,9 +10437,24 @@ if GUI_AVAILABLE:
             startup_onboarding_button_row = ttk.Frame(startup_onboarding_frame)
             startup_onboarding_button_row.pack(fill=tk.X, pady=(4, 0))
 
+            def _sync_startup_onboarding_visibility() -> None:
+                if self.show_startup_onboarding_var.get():
+                    if not startup_onboarding_frame.winfo_manager():
+                        startup_onboarding_frame.pack(fill=tk.X, pady=(6, 0))
+                    startup_onboarding_show_button.pack_forget()
+                else:
+                    startup_onboarding_frame.pack_forget()
+                    if not startup_onboarding_show_button.winfo_manager():
+                        startup_onboarding_show_button.pack(side=tk.RIGHT, padx=4)
+
+            def _show_startup_onboarding() -> None:
+                self.show_startup_onboarding_var.set(True)
+                _sync_startup_onboarding_visibility()
+                self._save_persisted_gui_state()
+
             def _dismiss_startup_onboarding() -> None:
                 self.show_startup_onboarding_var.set(False)
-                startup_onboarding_frame.pack_forget()
+                _sync_startup_onboarding_visibility()
                 self._save_persisted_gui_state()
 
             def _apply_startup_preset(profile_key: str) -> None:
@@ -10484,8 +10505,11 @@ if GUI_AVAILABLE:
                 text="Hide",
                 command=_dismiss_startup_onboarding,
             ).pack(side=tk.RIGHT)
-            if self.show_startup_onboarding_var.get():
-                startup_onboarding_frame.pack(fill=tk.X, pady=(6, 0))
+            _add_tooltip(
+                startup_onboarding_show_button,
+                "Reopen the quick start card if you hide it for later.",
+            )
+            _sync_startup_onboarding_visibility()
 
             file_frame = ttk.LabelFrame(wrapper, text="Files", padding=10)
             file_frame.pack(fill=tk.X, padx=4, pady=4)
@@ -18126,6 +18150,11 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         "Beginner keeps advanced panels hidden, Standard keeps them collapsed, and Advanced expands them."
     )
     appearance_row.addWidget(workflow_mode_combo)
+    startup_onboarding_show_button = QtWidgets.QPushButton("Show quick start")
+    startup_onboarding_show_button.setObjectName("startup_onboarding_show")
+    startup_onboarding_show_button.setToolTip("Reopen the quick start card if you hide it for later.")
+    startup_onboarding_show_button.clicked.connect(lambda: _show_qt_startup_onboarding())
+    appearance_row.addWidget(startup_onboarding_show_button)
     appearance_row.addStretch(1)
     layout.addLayout(appearance_row)
 
@@ -18233,6 +18262,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     startup_onboarding_button_row.addStretch(1)
     startup_onboarding_layout.addLayout(startup_onboarding_button_row)
     startup_onboarding_group.setVisible(startup_onboarding_visible)
+    startup_onboarding_show_button.setVisible(not startup_onboarding_visible)
     overview_layout.addWidget(startup_onboarding_group)
     button_row = QtWidgets.QHBoxLayout()
     launch_tk_button = QtWidgets.QPushButton("Open full legacy UI (Tkinter)")
@@ -19842,19 +19872,28 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         for key, control in output_controls.items():
             control.setChecked(defaults.get(key, False))
 
+    def _set_qt_startup_onboarding_visible(visible: bool) -> None:
+        nonlocal startup_onboarding_visible
+        startup_onboarding_visible = bool(visible)
+        startup_onboarding_group.setVisible(startup_onboarding_visible)
+        startup_onboarding_show_button.setVisible(not startup_onboarding_visible)
+        _persist_qt_gui_state()
+
+    def _show_qt_startup_onboarding() -> None:
+        _set_qt_startup_onboarding_visible(True)
+        status_label.setText("Quick start reopened.")
+
     def _apply_qt_startup_preset(profile_key: str) -> None:
         profile_index = render_profile_combo.findText(_normalize_render_profile(profile_key))
         if profile_index >= 0:
             render_profile_combo.setCurrentIndex(profile_index)
         _apply_profile_output_defaults()
         tabs.setCurrentWidget(generation_scroll)
-        startup_onboarding_group.hide()
-        _persist_qt_gui_state()
+        _set_qt_startup_onboarding_visible(False)
         status_label.setText(f"Quick start applied: {_RENDER_PROFILE_LABELS.get(profile_key, profile_key)}.")
 
     def _hide_qt_startup_onboarding() -> None:
-        startup_onboarding_group.hide()
-        _persist_qt_gui_state()
+        _set_qt_startup_onboarding_visible(False)
         status_label.setText("Quick start dismissed.")
 
     def _effective_checkpoint_path() -> Path:
