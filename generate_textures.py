@@ -18479,7 +18479,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     startup_onboarding_hide_button = QtWidgets.QPushButton("Hide")
     startup_onboarding_hide_button.setObjectName("startup_onboarding_hide")
     startup_onboarding_hide_button.setToolTip("Hide this quick start card and remember the dismissal for next launch.")
-    startup_onboarding_hide_button.clicked.connect(_hide_qt_startup_onboarding)
+    startup_onboarding_hide_button.clicked.connect(lambda: _hide_qt_startup_onboarding())
     startup_onboarding_button_row.addWidget(startup_onboarding_hide_button)
     startup_onboarding_button_row.addStretch(1)
     startup_onboarding_layout.addLayout(startup_onboarding_button_row)
