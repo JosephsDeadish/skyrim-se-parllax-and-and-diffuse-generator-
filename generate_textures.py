@@ -20764,6 +20764,15 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     profile_setup_restore_button.setEnabled(
         profile_setup_hint_label.text() != "No remembered setup exists for this profile yet."
     )
+
+    def _current_qt_profile_setup_key(state: Mapping[str, object] | None = None) -> str:
+        source_state = qt_saved_state if state is None else state
+        manager = (manager_context.manager or str(source_state.get("last_mod_manager", "") or "")).strip()
+        profile = (manager_context.profile_name or str(source_state.get("last_mod_profile", "") or "")).strip()
+        if not manager and not profile:
+            return ""
+        return _profile_setup_memory_key(manager, profile)
+
     profile_setup_save_copy_button.setEnabled(bool(_current_qt_profile_setup_key(qt_saved_state)))
     profile_setup_rename_button.setEnabled(False)
     profile_setup_delete_button.setEnabled(False)
@@ -21827,14 +21836,6 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
 
     def _update_resume_hint() -> None:
         resume_mode_hint.setText(_qt_resume_mode_guidance(resume_mode_combo.currentText()))
-
-    def _current_qt_profile_setup_key(state: Mapping[str, object] | None = None) -> str:
-        source_state = qt_saved_state if state is None else state
-        manager = (manager_context.manager or str(source_state.get("last_mod_manager", "") or "")).strip()
-        profile = (manager_context.profile_name or str(source_state.get("last_mod_profile", "") or "")).strip()
-        if not manager and not profile:
-            return ""
-        return _profile_setup_memory_key(manager, profile)
 
     def _current_qt_profile_setup_entry(state: Mapping[str, object] | None = None) -> dict[str, object] | None:
         source_state = qt_saved_state if state is None else state
