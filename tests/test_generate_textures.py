@@ -1896,9 +1896,12 @@ class GenerateTexturesTests(unittest.TestCase):
                 nif_paths=[backed_up, missing_backup],
                 experimental_fallout_write=True,
             ).lower()
-            self.assertIn("apply patch edits to 2 nif files", patch_message)
+            self.assertIn("what it does: apply patch edits to 2 nif files and write them to disk with sibling .nif.bak backups for rollback", patch_message)
+            self.assertIn("when to use it: the dry-run preview looks correct", patch_message)
+            self.assertIn("when not to use it: you need to keep the current mesh untouched", patch_message)
             self.assertIn("rollback path: 1/2 selected nifs have sibling .nif.bak backups", patch_message)
-            self.assertIn("dry-run first", patch_message)
+            self.assertIn("rollback path: write mode modifies the meshes on disk and relies on .nif.bak backups for rollback.", patch_message)
+            self.assertIn("dry-run first and backups enabled are the safe default.", patch_message)
             self.assertIn("best-effort", patch_message)
             self.assertIn("🚨 write mode", patch_message)
 
@@ -1907,9 +1910,11 @@ class GenerateTexturesTests(unittest.TestCase):
                 1,
                 nif_paths=[backed_up],
             ).lower()
-            self.assertIn("restore 1 nif file", restore_message)
+            self.assertIn("what it does: restore 1 nif file from sibling .nif.bak backups and overwrite the current .nif files", restore_message)
+            self.assertIn("when to use it: you are rolling back a write preview", restore_message)
+            self.assertIn("when not to use it: you need to preserve the current file contents", restore_message)
             self.assertIn("rollback path: all selected nifs have sibling .nif.bak backups", restore_message)
-            self.assertIn("overwrite the current .nif files", restore_message)
+            self.assertIn("rollback path: restore replaces the current mesh with the sibling backup.", restore_message)
             self.assertIn("⚠ restore / rollback", restore_message)
 
             unpatch_message = _nif_editor_confirmation_text(
@@ -1918,7 +1923,9 @@ class GenerateTexturesTests(unittest.TestCase):
                 nif_paths=[backed_up, missing_backup],
                 experimental_fallout_write=True,
             ).lower()
-            self.assertIn("remove the selected features from 3 nif files", unpatch_message)
+            self.assertIn("what it does: remove the selected features from 3 nif files and write the changes to disk", unpatch_message)
+            self.assertIn("when to use it: you intentionally want to strip features", unpatch_message)
+            self.assertIn("when not to use it: you want to preserve the mesh", unpatch_message)
             self.assertIn("rollback path: 1/2 selected nifs have sibling .nif.bak backups", unpatch_message)
             self.assertIn("🚨 destructive write", unpatch_message)
             self.assertIn("🧪 fallout writes are experimental best-effort only.", unpatch_message)

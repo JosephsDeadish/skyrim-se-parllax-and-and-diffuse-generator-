@@ -4350,14 +4350,18 @@ def _nif_editor_confirmation_text(
     if normalized_action == "restore":
         lines = [
             "⚠ RESTORE / ROLLBACK",
-            f"Restore {int(file_count)} {noun} from sibling .nif.bak backups?",
+            _format_short_guidance_tooltip(
+                f"restore {int(file_count)} {noun} from sibling .nif.bak backups and overwrite the current .nif files",
+                "you are rolling back a write preview and want to return to the backed-up mesh",
+                "you need to preserve the current file contents or there is no valid backup to restore",
+            ),
             "",
         ]
         if backup_state is not None:
             lines.extend((backup_state, ""))
         lines.extend(
             [
-                "This is the rollback path after a write preview and will overwrite the current .nif files.",
+                "Rollback path: restore replaces the current mesh with the sibling backup.",
                 "Dry-run first and backups enabled are the safe default.",
                 "Continue with restore mode?",
             ]
@@ -4365,7 +4369,11 @@ def _nif_editor_confirmation_text(
     elif normalized_action == "unpatch":
         lines = [
             "🚨 DESTRUCTIVE WRITE",
-            f"Remove the selected features from {int(file_count)} {noun}?",
+            _format_short_guidance_tooltip(
+                f"remove the selected features from {int(file_count)} {noun} and write the changes to disk",
+                "you intentionally want to strip features after a dry-run and backup check",
+                "you want to preserve the mesh or you are unsure whether the selected slots/flags are correct",
+            ),
             "",
         ]
         if backup_state is not None:
@@ -4377,15 +4385,19 @@ def _nif_editor_confirmation_text(
     else:
         lines = [
             "🚨 WRITE MODE",
-            f"Apply patch edits to {int(file_count)} {noun}?",
+            _format_short_guidance_tooltip(
+                f"apply patch edits to {int(file_count)} {noun} and write them to disk with sibling .nif.bak backups for rollback",
+                "the dry-run preview looks correct and you are ready to write after checking the backup path",
+                "you need to keep the current mesh untouched or have not reviewed the preview yet",
+            ),
             "",
         ]
         if backup_state is not None:
             lines.extend((backup_state, ""))
         lines.append(
-            "Dry-run first and backups enabled are the safe default. "
-            "Write mode modifies the meshes on disk and relies on .nif.bak backups for rollback."
+            "Rollback path: write mode modifies the meshes on disk and relies on .nif.bak backups for rollback."
         )
+        lines.append("Dry-run first and backups enabled are the safe default.")
         if experimental_fallout_write:
             lines.append("🧪 Fallout writes are experimental best-effort only.")
         lines.append("Continue with write mode?")
