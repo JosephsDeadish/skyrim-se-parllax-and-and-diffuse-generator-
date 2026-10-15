@@ -277,11 +277,15 @@ class TestNifPatcherLoading(unittest.TestCase):
                 encoding="utf-8",
             )
             original_sys_path = list(sys.path)
+            original_nif_patcher = sys.modules.get("nif_patcher")
             try:
                 sys.modules.pop("nif_patcher", None)
                 exports = _load_nif_patcher_exports((Path(temp_dir),))
             finally:
-                sys.modules.pop("nif_patcher", None)
+                if original_nif_patcher is None:
+                    sys.modules.pop("nif_patcher", None)
+                else:
+                    sys.modules["nif_patcher"] = original_nif_patcher
                 sys.path[:] = original_sys_path
             self.assertIn("patch_nif", exports)
             self.assertTrue(callable(exports["patch_nif"]))
@@ -2043,7 +2047,7 @@ class GenerateTexturesTests(unittest.TestCase):
     def test_qt_profile_guidance_documents_recommended_outputs_and_terrain_scope(self) -> None:
         terrain_guidance = _describe_qt_profile_guidance("terrain").lower()
         self.assertIn("<stem>_p.dds", terrain_guidance)
-        self.assertIn("does not build tiled landscape layers", terrain_guidance)
+        self.assertIn("not a tiled terrain generator", terrain_guidance)
         self.assertIn("profile selection does not change checked outputs", terrain_guidance)
         self.assertIn("never mix enb / community shaders / truepbr families", terrain_guidance)
 
