@@ -1796,7 +1796,9 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("step 1:", quick_start)
         self.assertIn("step 2:", quick_start)
         self.assertIn("step 3:", quick_start)
+        self.assertIn("step 4:", quick_start)
         self.assertIn("suggested", quick_start)
+        self.assertIn("compare against the sibling .nif.bak backup", quick_start)
         self.assertIn("never mix enb / community shaders / truepbr families", quick_start)
 
     def test_short_guidance_tooltip_uses_three_sections(self) -> None:
@@ -2289,6 +2291,7 @@ class GenerateTexturesTests(unittest.TestCase):
                         if child.winfo_class() in {"TLabel", "Label"}
                     ]
                     self.assertTrue(any("Step 1:" in text for text in label_texts))
+                    self.assertTrue(any("Step 4:" in text for text in label_texts))
                     find_button(banner, "Hide").invoke()
                     gui.root.update_idletasks()
                     self.assertFalse(gui.show_startup_onboarding_var.get())
@@ -11129,6 +11132,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             if step == 0:
                 self.assertTrue(w("startup_onboarding").isVisible())
                 self.assertIn("Step 1:", w("startup_onboarding_text").text())
+                self.assertIn("Step 4:", w("startup_onboarding_text").text())
                 self.assertEqual(w("render_profile").currentText(), "custom")
                 w("startup_onboarding_vanilla").click()
                 self.app.processEvents()
@@ -11171,6 +11175,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             if step == 0:
                 self.assertTrue(w("startup_onboarding").isVisible())
                 self.assertIn("Step 3:", w("startup_onboarding_text").text())
+                self.assertIn("Step 4:", w("startup_onboarding_text").text())
                 w("startup_onboarding_suggested").click()
                 self.app.processEvents()
                 self.assertEqual(w("render_profile").currentText(), "enb")
