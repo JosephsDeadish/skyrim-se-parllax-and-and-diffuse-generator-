@@ -96,6 +96,7 @@ from generate_textures import (
     _workflow_quick_start_steps_text,
     _bind_tk_quick_start_shortcuts,
     _build_truepbr_version_note,
+    resolve_startup_guidance_action,
     _qt_preview_channel_options,
     _inspect_qt_output_image,
     _DARK_THEME,
@@ -109,6 +110,7 @@ from generate_textures import (
     summarize_batch_nif_patch_activity,
     _summarize_batch_source_folders,
     build_mod_manager_profile_setup_hint,
+    build_startup_guidance_text,
     compute_checkpoint_mismatch_flags,
     compute_checkpoint_resume_counts,
     compute_processing_queue_event_budget,
@@ -1486,6 +1488,77 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("Remembered setup for this profile", message)
         self.assertIn(hint, message)
 
+    def test_startup_guidance_prefers_saved_setup_then_detected_folder_then_suggestion(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            detected_folder = Path(temp_dir) / "mods" / "Texture Pack"
+            detected_folder.mkdir(parents=True)
+            saved_state = {
+                "Mod Organizer 2::Main": {
+                    "render_profile": "community_shaders",
+                    "output_target": "D:/Skyrim/Output",
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                }
+            }
+            context = ModManagerContext(
+                manager="Mod Organizer 2",
+                profile_name="Main",
+                loaded_texture_dirs=(detected_folder,),
+            )
+            restore_action = resolve_startup_guidance_action(
+                context,
+                profile_setup_memory=saved_state,
+                current_render_profile="custom",
+                current_workflow_mode="beginner",
+                current_output_target="",
+                current_use_custom_output=False,
+                current_target_game="skyrim",
+            )
+            self.assertEqual(restore_action, "restore_profile_setup")
+            restore_text = build_startup_guidance_text(
+                context,
+                profile_setup_memory=saved_state,
+                selected_render_profile="custom",
+                current_workflow_mode="beginner",
+                current_output_target="",
+                current_use_custom_output=False,
+                current_target_game="skyrim",
+            )
+            self.assertIn("Recommended next step: restore the remembered setup", restore_text)
+            self.assertIn("Compare against the sibling .nif.bak", restore_text)
+            self.assertIn("Why not the others:", restore_text)
+
+            detected_action = resolve_startup_guidance_action(
+                context,
+                profile_setup_memory={},
+                input_path="",
+            )
+            self.assertEqual(detected_action, "pick_detected_mod_folder")
+            detected_text = build_startup_guidance_text(
+                context,
+                profile_setup_memory={},
+                input_path="",
+            )
+            self.assertIn("use the detected mod folder first", detected_text)
+
+            suggested_source = Path(temp_dir) / "textures" / "enb" / "stone_msn.dds"
+            suggested_action = resolve_startup_guidance_action(
+                None,
+                profile_setup_memory={},
+                input_path=str(suggested_source),
+            )
+            self.assertEqual(suggested_action, "apply_suggested_preset")
+            suggested_text = build_startup_guidance_text(
+                None,
+                profile_setup_memory={},
+                input_path=str(suggested_source),
+                selected_render_profile="community_shaders",
+            )
+            self.assertIn("apply the suggested renderer family", suggested_text)
+            self.assertIn("Why this was recommended:", suggested_text)
+            self.assertIn("Why not the others:", suggested_text)
+
     def test_profile_setup_memory_items_include_descriptive_labels(self) -> None:
         items = _profile_setup_memory_items(
             {
@@ -1953,9 +2026,10 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("step 3:", quick_start)
         self.assertIn("step 4:", quick_start)
         self.assertIn("step 5:", quick_start)
+        self.assertIn("next safe step", quick_start)
         self.assertIn("suggested", quick_start)
         self.assertIn("compare against the sibling .nif.bak backup", quick_start)
-        self.assertIn("restore from .bak", quick_start)
+        self.assertIn("restore from it instead of forcing a risky change", quick_start)
         self.assertIn("never mix enb / community shaders / truepbr families", quick_start)
 
     def test_short_guidance_tooltip_uses_three_sections(self) -> None:
@@ -2611,6 +2685,8 @@ class GenerateTexturesTests(unittest.TestCase):
                         for child in banner.winfo_children()
                         if child.winfo_class() in {"TLabel", "Label"}
                     ]
+                    self.assertTrue(any("Recommended next step:" in text for text in label_texts))
+                    self.assertTrue(any("choose an input file or folder" in text for text in label_texts))
                     self.assertTrue(any("If you're unsure" in text for text in label_texts))
                     self.assertTrue(any("Step 1:" in text for text in label_texts))
                     self.assertTrue(any("Step 4:" in text for text in label_texts))
@@ -2628,6 +2704,82 @@ class GenerateTexturesTests(unittest.TestCase):
                     save_state.assert_called()
                     persisted = save_state.call_args.args[0]
                     self.assertTrue(bool(persisted["show_startup_onboarding"]))
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_startup_onboarding_guided_step_restores_saved_setup_before_detected_folder(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        def find_label_frame(root, title: str):
+            pending = list(root.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TLabelframe" and widget.cget("text") == title:
+                    return widget
+                pending.extend(widget.winfo_children())
+            self.fail(f"Could not find Tk section '{title}'.")
+
+        def find_button(root, title: str):
+            pending = list(root.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TButton" and str(widget.cget("text")) == title:
+                    return widget
+                pending.extend(widget.winfo_children())
+            self.fail(f"Could not find Tk button '{title}'.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            manager = "Mod Organizer 2"
+            profile = "Main"
+            profile_key = _profile_setup_memory_key(manager, profile)
+            saved_state["last_mod_manager"] = manager
+            saved_state["last_mod_profile"] = profile
+            saved_state["profile_setup_memory"] = {
+                profile_key: {
+                    "render_profile": "community_shaders",
+                    "output_target": "D:/Skyrim/Output",
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                }
+            }
+            detected_folder = Path(temp_dir) / "mods" / "Texture Pack" / "textures"
+            detected_folder.mkdir(parents=True)
+            context = ModManagerContext(
+                manager=manager,
+                profile_name=profile,
+                loaded_texture_dirs=(detected_folder,),
+            )
+            gui = None
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state), \
+                     mock.patch("generate_textures.detect_mod_manager_context", return_value=context), \
+                     mock.patch("generate_textures.save_gui_state") as save_state:
+                    gui = TextureGeneratorGUI()
+                    gui.root.update_idletasks()
+                    banner = find_label_frame(gui.root, "Quick start")
+                    label_texts = [
+                        str(child.cget("text"))
+                        for child in banner.winfo_children()
+                        if child.winfo_class() in {"TLabel", "Label"}
+                    ]
+                    self.assertTrue(any("restore the remembered setup" in text for text in label_texts))
+                    find_button(banner, "Next safe step").invoke()
+                    gui.root.update_idletasks()
+                    self.assertEqual(gui.render_profile_var.get(), "community_shaders")
+                    self.assertEqual(gui.workflow_mode_var.get(), "Advanced")
+                    self.assertTrue(gui.use_custom_output_var.get())
+                    self.assertEqual(gui.output_var.get(), "D:/Skyrim/Output")
+                    self.assertEqual(gui.target_game_var.get(), "fallout4")
+                    refreshed_texts = [
+                        str(child.cget("text"))
+                        for child in banner.winfo_children()
+                        if child.winfo_class() in {"TLabel", "Label"}
+                    ]
+                    self.assertTrue(any("use the detected mod folder first" in text for text in refreshed_texts))
+                    save_state.assert_called()
             finally:
                 if gui is not None:
                     gui.root.destroy()
@@ -11833,6 +11985,8 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             if step == 0:
                 self.assertTrue(w("startup_onboarding").isVisible())
                 self.assertIn("If you're unsure", w("startup_onboarding_text").text())
+                self.assertIn("Recommended next step:", w("startup_onboarding_guidance").text())
+                self.assertIn("choose an input file or folder", w("startup_onboarding_guidance").text())
                 self.assertIn("Step 1:", w("startup_onboarding_text").text())
                 self.assertIn("Step 4:", w("startup_onboarding_text").text())
                 self.assertIn("Step 5:", w("startup_onboarding_text").text())
@@ -11897,6 +12051,67 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
 
         self.run_window(
             scenario,
+            save_side_effect=capture_state,
+            extra_patches=(mock.patch("generate_textures.detect_mod_manager_context", return_value=context),),
+        )
+
+    def test_qt_startup_quick_start_guided_button_restores_saved_setup_before_detected_folder(self) -> None:
+        saved_states = []
+        state = {"step": 0}
+        manager = "Mod Organizer 2"
+        profile = "Main"
+        profile_key = self.qt._profile_setup_memory_key(manager, profile)
+        context = ModManagerContext(
+            manager=manager,
+            profile_name=profile,
+            loaded_texture_dirs=(self.root / "mods" / "Texture Pack" / "textures",),
+        )
+        saved_state = dict(self.qt._GUI_STATE_DEFAULTS)
+        saved_state.update(
+            {
+                "last_mod_manager": manager,
+                "last_mod_profile": profile,
+                "profile_setup_memory": {
+                    profile_key: {
+                        "render_profile": "truepbr",
+                        "use_custom_output": True,
+                        "output_target": "/tmp/output",
+                        "workflow_mode": "advanced",
+                        "target_game": "fallout4",
+                    }
+                },
+            }
+        )
+
+        def capture_state(state_data):
+            saved_states.append(json.loads(json.dumps(state_data)))
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                self.assertTrue(w("startup_onboarding").isVisible())
+                self.assertIn("restore the remembered setup", w("startup_onboarding_guidance").text())
+                w("startup_onboarding_guided").click()
+                self.app.processEvents()
+                self.assertEqual(w("render_profile").currentText(), "truepbr")
+                self.assertEqual(w("target_game").currentText(), "fallout4")
+                self.assertEqual(w("workflow_mode").currentText(), self.qt._WORKFLOW_MODE_LABELS["advanced"])
+                self.assertEqual(w("output_dir").text(), "/tmp/output")
+                self.assertIn("use the detected mod folder first", w("startup_onboarding_guidance").text())
+                self.assertTrue(w("startup_onboarding").isVisible())
+                state["step"] = 1
+                return False
+            if step == 1 and w("generate").isEnabled():
+                self.assertTrue(saved_states)
+                self.assertEqual(saved_states[-1]["render_profile"], "truepbr")
+                self.assertEqual(saved_states[-1]["output_path"], "/tmp/output")
+                return True
+            return False
+
+        self.run_window(
+            scenario,
+            load_state=saved_state,
             save_side_effect=capture_state,
             extra_patches=(mock.patch("generate_textures.detect_mod_manager_context", return_value=context),),
         )

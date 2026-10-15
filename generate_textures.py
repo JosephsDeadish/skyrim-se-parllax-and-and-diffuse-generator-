@@ -4470,10 +4470,10 @@ def _workflow_quick_start_steps_text() -> str:
         f"{_workflow_preset_onboarding_text()}\n"
         f"{_render_profile_family_matrix_text()}\n"
         "Step 1: choose one renderer family (Vanilla, ENB, Community Shaders, or TruePBR).\n"
-        "Step 2: pick the input texture/folder and output target.\n"
-        "Step 3: use Suggested to auto-pick a safe family from the current file or mod-manager context, then continue to Generate or Scan.\n"
-        "Step 4: compare against the sibling .nif.bak backup before any write, and restore from it instead of forcing a risky change.\n"
-        "Step 5: if the preview or scan still looks wrong, switch families on purpose or restore from .bak before exporting the file.\n"
+        "Step 2: use Next safe step to restore a saved setup, reuse a detected mod folder, or open the input picker before falling back to Suggested.\n"
+        "Step 3: pick the input texture/folder and output target.\n"
+        "Step 4: use Suggested to auto-pick a safe family from the current file or mod-manager context, then continue to Generate or Scan.\n"
+        "Step 5: compare against the sibling .nif.bak backup before any write, and restore from it instead of forcing a risky change.\n"
         f"{_render_profile_family_quick_check_text()}\n"
         "Never mix ENB / Community Shaders / TruePBR families on the same mesh."
     )
@@ -4486,6 +4486,153 @@ def _format_short_guidance_tooltip(what_it_does: str, when_to_use_it: str, when_
             f"When to use it: {when_to_use_it.strip()}",
             f"When not to use it: {when_not_to_use_it.strip()}",
         )
+    )
+
+
+def resolve_startup_guidance_action(
+    manager_context: ModManagerContext | None,
+    *,
+    profile_setup_memory: Mapping[str, object] | None,
+    last_mod_manager: str = "",
+    last_mod_profile: str = "",
+    input_path: str = "",
+    current_render_profile: str = "",
+    current_workflow_mode: str = "",
+    current_output_target: str = "",
+    current_use_custom_output: bool = False,
+    current_target_game: str = "",
+) -> str:
+    normalized_manager = (manager_context.manager if manager_context and manager_context.manager else last_mod_manager).strip()
+    normalized_profile = (manager_context.profile_name if manager_context and manager_context.profile_name else last_mod_profile).strip()
+    if normalized_manager and normalized_profile and isinstance(profile_setup_memory, Mapping):
+        entry = profile_setup_memory.get(_profile_setup_memory_key(normalized_manager, normalized_profile))
+        if isinstance(entry, Mapping) and _profile_setup_entry_details(entry):
+            normalized_selected_render_profile = _normalize_render_profile(current_render_profile)
+            normalized_selected_workflow_mode = _normalize_workflow_mode(current_workflow_mode)
+            normalized_selected_target_game = _normalize_texture_target_game(current_target_game)
+            entry_render_profile = _normalize_render_profile(entry.get("render_profile"))
+            entry_workflow_mode = _normalize_workflow_mode(entry.get("workflow_mode"))
+            entry_target_game = _normalize_texture_target_game(str(entry.get("target_game", "") or ""))
+            entry_use_custom_output = _coerce_bool(entry.get("use_custom_output"), False)
+            entry_output_target = str(entry.get("output_target", "") or "").strip()
+            current_output_target_text = str(current_output_target or "").strip()
+            setup_matches = (
+                (not entry_render_profile or entry_render_profile == normalized_selected_render_profile)
+                and (not entry_workflow_mode or entry_workflow_mode == normalized_selected_workflow_mode)
+                and (not entry_target_game or entry_target_game == normalized_selected_target_game)
+                and (entry_use_custom_output == bool(current_use_custom_output))
+                and (not entry_use_custom_output or current_output_target_text == entry_output_target)
+            )
+            if not setup_matches:
+                return "restore_profile_setup"
+    selected_input_path_key = ""
+    if input_path.strip():
+        candidate = Path(input_path).expanduser()
+        try:
+            selected_input_path_key = str(candidate.resolve()).replace("\\", "/").casefold()
+        except Exception:
+            selected_input_path_key = str(candidate).replace("\\", "/").casefold()
+    if manager_context is not None and manager_context.loaded_texture_dirs:
+        detected_input_selected = False
+        if selected_input_path_key:
+            for detected_path in manager_context.loaded_texture_dirs:
+                try:
+                    detected_key = str(Path(detected_path).resolve()).replace("\\", "/").casefold()
+                except Exception:
+                    detected_key = str(detected_path).replace("\\", "/").casefold()
+                if detected_key == selected_input_path_key:
+                    detected_input_selected = True
+                    break
+        if not detected_input_selected:
+            return "pick_detected_mod_folder"
+    if input_path.strip():
+        return "apply_suggested_preset"
+    return "browse_input_folder"
+
+
+def build_startup_guidance_text(
+    manager_context: ModManagerContext | None,
+    *,
+    profile_setup_memory: Mapping[str, object] | None,
+    last_mod_manager: str = "",
+    last_mod_profile: str = "",
+    input_path: str = "",
+    selected_render_profile: str = "custom",
+    current_workflow_mode: str = "",
+    current_output_target: str = "",
+    current_use_custom_output: bool = False,
+    current_target_game: str = "",
+) -> str:
+    action = resolve_startup_guidance_action(
+        manager_context,
+        profile_setup_memory=profile_setup_memory,
+        last_mod_manager=last_mod_manager,
+        last_mod_profile=last_mod_profile,
+        input_path=input_path,
+        current_render_profile=selected_render_profile,
+        current_workflow_mode=current_workflow_mode,
+        current_output_target=current_output_target,
+        current_use_custom_output=current_use_custom_output,
+        current_target_game=current_target_game,
+    )
+    normalized_manager = (manager_context.manager if manager_context and manager_context.manager else last_mod_manager).strip()
+    normalized_profile = (manager_context.profile_name if manager_context and manager_context.profile_name else last_mod_profile).strip()
+    profile_label = f"{normalized_manager} / {normalized_profile}" if normalized_manager and normalized_profile else "this profile"
+    profile_setup_hint = build_mod_manager_profile_setup_hint(
+        profile_setup_memory,
+        manager=normalized_manager or None,
+        profile=normalized_profile or None,
+    )
+    if action == "restore_profile_setup":
+        heading = f"Recommended next step: restore the remembered setup for {profile_label}."
+        if profile_setup_hint:
+            return (
+                f"{heading}\n"
+                f"Why this was recommended: {profile_setup_hint} Compare against the sibling .nif.bak before any write or export.\n"
+                "Why not the others: detected-folder browsing and Suggested are fallback steps when no known-good setup exists."
+            )
+        return (
+            f"{heading}\n"
+            "Why this was recommended: the app already remembers a renderer/workflow/output target for this profile.\n"
+            "Why not the others: detected-folder browsing and Suggested are fallback steps when a saved setup does not exist."
+        )
+    if action == "pick_detected_mod_folder":
+        detected_folder = None
+        if manager_context is not None and manager_context.loaded_texture_dirs:
+            detected_folder = str(manager_context.loaded_texture_dirs[0])
+            if len(manager_context.loaded_texture_dirs) > 1:
+                detected_folder = f"{detected_folder} (+{len(manager_context.loaded_texture_dirs) - 1} more detected folder(s))"
+        detected_label = detected_folder or "the detected mod texture folders"
+        return (
+            "Recommended next step: use the detected mod folder first.\n"
+            f"Why this was recommended: the mod manager already found {detected_label}.\n"
+            "Why not the others: browse/manual input is slower when the source is already known, and Suggested is more useful after a source is chosen."
+        )
+    if action == "apply_suggested_preset":
+        recommendation = recommend_render_profile_details(
+            Path(input_path).expanduser(),
+            manager_context=manager_context,
+        )
+        selected_normalized = _normalize_render_profile(selected_render_profile)
+        selected_label = _RENDER_PROFILE_LABELS.get(
+            selected_normalized,
+            selected_normalized.replace("_", " ").title(),
+        )
+        brief_summary = _format_render_profile_brief_summary(recommendation)
+        mismatch_note = ""
+        if selected_normalized not in {"auto", "custom"} and _render_profile_family(selected_normalized) != _render_profile_family(recommendation.profile):
+            mismatch_note = (
+                f" The current selection is {selected_label}, so switching families is explicit and should be compared against the sibling .nif.bak before exporting."
+            )
+        return (
+            "Recommended next step: apply the suggested renderer family for the current file or folder.\n"
+            f"Why this was recommended: {brief_summary}{mismatch_note}\n"
+            "Why not the others: a saved setup or detected mod folder was not the best available starting point for this source."
+        )
+    return (
+        "Recommended next step: choose an input file or folder first.\n"
+        "Why this was recommended: there is no saved setup or detected mod folder to reuse yet.\n"
+        "Why not the others: restore and Suggested both become safer after a source is selected."
     )
 
 
@@ -10926,6 +11073,34 @@ if GUI_AVAILABLE:
                 horizontal_padding=24,
                 min_wrap=360,
             )
+            startup_onboarding_guidance_var = tk.StringVar(
+                value=build_startup_guidance_text(
+                    self.manager_context,
+                    profile_setup_memory=self.profile_setup_memory,
+                    last_mod_manager=self.last_mod_manager_memory,
+                    last_mod_profile=self.last_mod_profile_memory,
+                    input_path=self.input_var.get(),
+                    selected_render_profile=self.render_profile_var.get(),
+                    current_workflow_mode=self._workflow_mode_from_controls(),
+                    current_output_target=self.output_var.get(),
+                    current_use_custom_output=self.use_custom_output_var.get(),
+                    current_target_game=self.target_game_var.get(),
+                )
+            )
+            startup_onboarding_guidance_label = ttk.Label(
+                startup_onboarding_frame,
+                textvariable=startup_onboarding_guidance_var,
+                style="Muted.TLabel",
+                justify=tk.LEFT,
+                anchor=tk.W,
+            )
+            startup_onboarding_guidance_label.pack(fill=tk.X, pady=(2, 0))
+            self._bind_responsive_wrap(
+                startup_onboarding_frame,
+                startup_onboarding_guidance_label,
+                horizontal_padding=24,
+                min_wrap=360,
+            )
             startup_onboarding_button_row = ttk.Frame(startup_onboarding_frame)
             startup_onboarding_button_row.pack(fill=tk.X, pady=(4, 0))
 
@@ -10939,15 +11114,59 @@ if GUI_AVAILABLE:
                     if not startup_onboarding_show_button.winfo_manager():
                         startup_onboarding_show_button.pack(side=tk.RIGHT, padx=4)
 
+            def _refresh_startup_onboarding_guidance() -> None:
+                startup_onboarding_guidance_var.set(
+                    build_startup_guidance_text(
+                        self.manager_context,
+                        profile_setup_memory=self.profile_setup_memory,
+                        last_mod_manager=self.last_mod_manager_memory,
+                        last_mod_profile=self.last_mod_profile_memory,
+                        input_path=self.input_var.get(),
+                        selected_render_profile=self.render_profile_var.get(),
+                        current_workflow_mode=self._workflow_mode_from_controls(),
+                        current_output_target=self.output_var.get(),
+                        current_use_custom_output=self.use_custom_output_var.get(),
+                        current_target_game=self.target_game_var.get(),
+                    )
+                )
+
             def _show_startup_onboarding() -> None:
                 self.show_startup_onboarding_var.set(True)
                 _sync_startup_onboarding_visibility()
+                _refresh_startup_onboarding_guidance()
                 self._save_persisted_gui_state()
 
             def _dismiss_startup_onboarding() -> None:
                 self.show_startup_onboarding_var.set(False)
                 _sync_startup_onboarding_visibility()
                 self._save_persisted_gui_state()
+
+            def _apply_startup_guided_step() -> None:
+                action = resolve_startup_guidance_action(
+                    self.manager_context,
+                    profile_setup_memory=self.profile_setup_memory,
+                    last_mod_manager=self.last_mod_manager_memory,
+                    last_mod_profile=self.last_mod_profile_memory,
+                    input_path=self.input_var.get(),
+                    current_render_profile=self.render_profile_var.get(),
+                    current_workflow_mode=self._workflow_mode_from_controls(),
+                    current_output_target=self.output_var.get(),
+                    current_use_custom_output=self.use_custom_output_var.get(),
+                    current_target_game=self.target_game_var.get(),
+                )
+                if action == "restore_profile_setup":
+                    self._restore_profile_setup_for_current_context()
+                    _refresh_startup_onboarding_guidance()
+                    return
+                if action == "pick_detected_mod_folder":
+                    self._pick_detected_mod_folder()
+                    _refresh_startup_onboarding_guidance()
+                    return
+                if action == "apply_suggested_preset":
+                    _apply_startup_suggested_preset()
+                    return
+                self._pick_input_folder()
+                _refresh_startup_onboarding_guidance()
 
             def _apply_startup_preset(profile_key: str) -> None:
                 self._apply_safe_workflow_preset(profile_key)
@@ -10962,6 +11181,20 @@ if GUI_AVAILABLE:
                 dismiss=_dismiss_startup_onboarding,
             )
 
+            startup_guided_button = ttk.Button(
+                startup_onboarding_button_row,
+                text="Next safe step",
+                command=_apply_startup_guided_step,
+            )
+            startup_guided_button.pack(side=tk.LEFT, padx=(0, 4))
+            self._add_tooltip(
+                startup_guided_button,
+                _format_short_guidance_tooltip(
+                    "runs the safest available first-run action for this session",
+                    "you want the app to restore a saved setup, reuse a detected mod folder, or open the input picker in order of safety",
+                    "you already know the exact family and want to jump straight to a manual preset button",
+                ),
+            )
             startup_vanilla_button = ttk.Button(
                 startup_onboarding_button_row,
                 text="Vanilla",
@@ -19032,8 +19265,36 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     startup_onboarding_text.setObjectName("startup_onboarding_text")
     startup_onboarding_text.setWordWrap(True)
     startup_onboarding_layout.addWidget(startup_onboarding_text)
+    startup_onboarding_guidance_text = QtWidgets.QLabel(
+        build_startup_guidance_text(
+            manager_context,
+            profile_setup_memory=qt_saved_state.get("profile_setup_memory"),
+            last_mod_manager=str(qt_saved_state.get("last_mod_manager", "") or ""),
+            last_mod_profile=str(qt_saved_state.get("last_mod_profile", "") or ""),
+            input_path=str(qt_saved_state.get("input_path", "") or ""),
+            selected_render_profile=str(qt_saved_state.get("render_profile", "custom") or "custom"),
+            current_workflow_mode=_normalize_workflow_mode(qt_saved_state.get("workflow_mode"))
+            or _workflow_mode_value_from_label(str(qt_saved_state.get("workflow_mode", "") or "")),
+            current_output_target=str(qt_saved_state.get("output_path", "") or ""),
+            current_use_custom_output=bool(str(qt_saved_state.get("output_path", "") or "").strip()),
+            current_target_game=str(qt_saved_state.get("target_game", "skyrim") or "skyrim"),
+        )
+    )
+    startup_onboarding_guidance_text.setObjectName("startup_onboarding_guidance")
+    startup_onboarding_guidance_text.setWordWrap(True)
+    startup_onboarding_layout.addWidget(startup_onboarding_guidance_text)
     startup_onboarding_visible = bool(qt_saved_state.get("show_startup_onboarding", True))
     startup_onboarding_button_row = QtWidgets.QHBoxLayout()
+    startup_onboarding_guided_button = QtWidgets.QPushButton("Next safe step")
+    startup_onboarding_guided_button.setObjectName("startup_onboarding_guided")
+    startup_onboarding_guided_button.setToolTip(
+        _format_short_guidance_tooltip(
+            "runs the safest available first-run action for this session",
+            "you want the app to restore a saved setup, reuse a detected mod folder, or open the input picker in order of safety",
+            "you already know the exact family and want to jump straight to a manual preset button",
+        )
+    )
+    startup_onboarding_button_row.addWidget(startup_onboarding_guided_button)
     for profile_key, label in (
         ("vanilla", "Vanilla"),
         ("community_shaders", "Community Shaders"),
@@ -19069,6 +19330,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             suggested_profile = recommend_render_profile_details(None, manager_context=manager_context).profile
         _apply_qt_startup_preset(_render_profile_family(suggested_profile))
 
+    startup_onboarding_guided_button.clicked.connect(_apply_qt_startup_guided_step)
     startup_onboarding_suggested_button.clicked.connect(_apply_qt_startup_suggested_preset)
     startup_onboarding_button_row.addWidget(startup_onboarding_suggested_button)
     startup_onboarding_hide_button = QtWidgets.QPushButton("Hide")
@@ -19707,6 +19969,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         finally:
             qt_workflow_mode_syncing = False
         _persist_qt_gui_state()
+        _refresh_qt_startup_guidance()
 
     workflow_mode_combo.currentTextChanged.connect(_apply_qt_workflow_mode)
     advanced_controls_toggle.toggled.connect(_sync_qt_workflow_mode_selection)
@@ -20542,6 +20805,22 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     def _update_profile_setup_restore_controls(state: Mapping[str, object] | None = None) -> None:
         profile_setup_restore_button.setEnabled(_selected_qt_profile_setup_entry(state) is not None)
 
+    def _refresh_qt_startup_guidance() -> None:
+        startup_onboarding_guidance_text.setText(
+            build_startup_guidance_text(
+                manager_context,
+                profile_setup_memory=qt_saved_state.get("profile_setup_memory"),
+                last_mod_manager=str(qt_saved_state.get("last_mod_manager", "") or ""),
+                last_mod_profile=str(qt_saved_state.get("last_mod_profile", "") or ""),
+                input_path=input_path_edit.text(),
+                selected_render_profile=render_profile_combo.currentText(),
+                current_workflow_mode=_workflow_mode_value_from_label(workflow_mode_combo.currentText()),
+                current_output_target=output_dir_edit.text(),
+                current_use_custom_output=bool(output_dir_edit.text().strip()),
+                current_target_game=target_game_combo.currentText(),
+            )
+        )
+
     def _sync_qt_profile_setup_memory(state: dict[str, object]) -> dict[str, object]:
         key = _current_qt_profile_setup_key(state)
         if not key:
@@ -20840,6 +21119,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
 
     def _show_qt_startup_onboarding() -> None:
         _set_qt_startup_onboarding_visible(True)
+        _refresh_qt_startup_guidance()
         status_label.setText("Quick start reopened.")
 
     def _apply_qt_startup_preset(profile_key: str) -> None:
@@ -20854,6 +21134,33 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     def _hide_qt_startup_onboarding() -> None:
         _set_qt_startup_onboarding_visible(False)
         status_label.setText("Quick start dismissed.")
+
+    def _apply_qt_startup_guided_step() -> None:
+        action = resolve_startup_guidance_action(
+            manager_context,
+            profile_setup_memory=qt_saved_state.get("profile_setup_memory"),
+            last_mod_manager=str(qt_saved_state.get("last_mod_manager", "") or ""),
+            last_mod_profile=str(qt_saved_state.get("last_mod_profile", "") or ""),
+            input_path=input_path_edit.text(),
+            current_render_profile=render_profile_combo.currentText(),
+            current_workflow_mode=_workflow_mode_value_from_label(workflow_mode_combo.currentText()),
+            current_output_target=output_dir_edit.text(),
+            current_use_custom_output=bool(output_dir_edit.text().strip()),
+            current_target_game=target_game_combo.currentText(),
+        )
+        if action == "restore_profile_setup":
+            _restore_qt_profile_setup()
+            _refresh_qt_startup_guidance()
+            return
+        if action == "pick_detected_mod_folder":
+            _pick_detected_mod_folder()
+            _refresh_qt_startup_guidance()
+            return
+        if action == "apply_suggested_preset":
+            _apply_qt_startup_suggested_preset()
+            return
+        _browse_input_folder()
+        _refresh_qt_startup_guidance()
 
     def _effective_checkpoint_path() -> Path:
         text = checkpoint_path_edit.text().strip()
@@ -21472,7 +21779,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     input_path_edit.textChanged.connect(_refresh_checkpoint_health)
     input_path_edit.textChanged.connect(_update_profile_recommendation)
     input_path_edit.textChanged.connect(_update_qt_render_modes)
+    input_path_edit.textChanged.connect(lambda *_: _refresh_qt_startup_guidance())
     output_dir_edit.textChanged.connect(_refresh_checkpoint_health)
+    output_dir_edit.textChanged.connect(lambda *_: _refresh_qt_startup_guidance())
     checkpoint_path_edit.textChanged.connect(_refresh_checkpoint_health)
     input_path_edit.textChanged.connect(_persist_qt_gui_state)
     output_dir_edit.textChanged.connect(_persist_qt_gui_state)
@@ -21487,7 +21796,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     render_profile_combo.currentTextChanged.connect(_persist_qt_gui_state)
     render_profile_combo.currentTextChanged.connect(_update_profile_guidance)
     render_profile_combo.currentTextChanged.connect(_update_qt_render_modes)
+    render_profile_combo.currentTextChanged.connect(lambda *_: _refresh_qt_startup_guidance())
     target_game_combo.currentTextChanged.connect(_persist_qt_gui_state)
+    target_game_combo.currentTextChanged.connect(lambda *_: _refresh_qt_startup_guidance())
     for mode_control in (complex_format_combo, env_mask_mode_combo, parallax_mode_combo):
         mode_control.currentIndexChanged.connect(_persist_qt_gui_state)
     for strength_control in advanced_strength_controls.values():
