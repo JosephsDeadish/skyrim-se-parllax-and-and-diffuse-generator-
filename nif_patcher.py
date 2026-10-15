@@ -7491,7 +7491,7 @@ def _main() -> None:  # pragma: no cover
     changed_count = 0
     for nif in nif_files:
         res = patch_nif(nif, opts)
-        status = "OK" if res.success else "FAIL"
+        status = "PREVIEW" if args.dry_run and res.success else "OK" if res.success else "FAIL"
         print(f"[{status}] {nif.name}: {res.message}")
         for err in res.errors:
             print(f"       {err}", file=sys.stderr)

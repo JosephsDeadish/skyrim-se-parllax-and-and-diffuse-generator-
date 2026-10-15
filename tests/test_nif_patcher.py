@@ -7149,6 +7149,7 @@ class TestCliArgumentValidation(unittest.TestCase):
                     nif_patcher_main()
 
         self.assertTrue(patch_mock.call_args.args[1].dry_run)
+        self.assertIn("[PREVIEW]", stdout.getvalue())
         self.assertIn("files would change (dry-run)", stdout.getvalue())
         self.assertEqual(stderr.getvalue(), "")
 
@@ -7167,6 +7168,7 @@ class TestCliArgumentValidation(unittest.TestCase):
                     nif_patcher_main()
 
         self.assertFalse(patch_mock.call_args.args[1].dry_run)
+        self.assertIn("[OK]", stdout.getvalue())
         self.assertIn("WRITE MODE ENABLED", stderr.getvalue())
         self.assertIn("files modified", stdout.getvalue())
 
