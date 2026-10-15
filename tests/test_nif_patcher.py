@@ -7160,7 +7160,7 @@ class TestCliArgumentValidation(unittest.TestCase):
 
             with (
                 mock.patch("nif_patcher.patch_nif", return_value=write_result) as patch_mock,
-                mock.patch("sys.argv", ["nif_patcher.py", str(nif_path), "--write", "--parallax", "textures\\stone_p.dds"]),
+                mock.patch("sys.argv", ["nif_patcher.py", str(nif_path), "--write", "--yes", "--parallax", "textures\\stone_p.dds"]),
             ):
                 stdout = io.StringIO()
                 stderr = io.StringIO()
@@ -7169,6 +7169,29 @@ class TestCliArgumentValidation(unittest.TestCase):
 
         self.assertFalse(patch_mock.call_args.args[1].dry_run)
         self.assertIn("[OK]", stdout.getvalue())
+        self.assertIn("WRITE MODE ENABLED", stderr.getvalue())
+        self.assertIn("files modified", stdout.getvalue())
+
+    def test_cli_write_mode_prompts_in_interactive_shell(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"nif")
+            write_result = NifPatchResult(nif_path=nif_path, success=True, already_up_to_date=False, message="Patched.")
+
+            with (
+                mock.patch("nif_patcher.patch_nif", return_value=write_result) as patch_mock,
+                mock.patch("sys.stdin") as stdin_mock,
+                mock.patch("builtins.input", return_value="write") as input_mock,
+                mock.patch("sys.argv", ["nif_patcher.py", str(nif_path), "--write", "--parallax", "textures\\stone_p.dds"]),
+            ):
+                stdin_mock.isatty.return_value = True
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with redirect_stdout(stdout), redirect_stderr(stderr):
+                    nif_patcher_main()
+
+        input_mock.assert_called_once_with("Type WRITE to continue with file modifications: ")
+        self.assertTrue(patch_mock.call_args.args[1].dry_run is False)
         self.assertIn("WRITE MODE ENABLED", stderr.getvalue())
         self.assertIn("files modified", stdout.getvalue())
 

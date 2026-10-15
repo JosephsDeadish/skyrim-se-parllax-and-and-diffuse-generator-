@@ -7050,6 +7050,12 @@ def _main() -> None:  # pragma: no cover
     )
     parser.set_defaults(dry_run=True)
     parser.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Skip the interactive write confirmation prompt.",
+    )
+    parser.add_argument(
         "--dry-run-diff",
         action="store_true",
         help="With --dry-run, include changed-byte range summary for proposed patch bytes.",
@@ -7299,6 +7305,14 @@ def _main() -> None:  # pragma: no cover
             "WRITE MODE ENABLED: this run may modify NIF files on disk. Review compare/backups before relying on the result.",
             file=sys.stderr,
         )
+        if sys.stdin.isatty() and not args.yes:
+            try:
+                confirmation = input("Type WRITE to continue with file modifications: ").strip()
+            except EOFError:
+                confirmation = ""
+            if confirmation.lower() != "write":
+                print("Aborted.", file=sys.stderr)
+                sys.exit(1)
 
     nif_files: list[Path] = []
     for p in args.nif:
