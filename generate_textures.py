@@ -5258,7 +5258,7 @@ def build_render_profile_family_mismatch_warning(
         lines.append("Quick check: " + "; ".join(text for text in quick_checks if text is not None))
     lines.extend(
         [
-            "This is probably incompatible: ENB, Community Shaders, and TruePBR are separate families and should not be mixed on the same mesh.",
+            "Probably incompatible: ENB, Community Shaders, and TruePBR are separate families and should not be mixed on the same mesh.",
             "Use the suggested family or switch the mesh on purpose before export.",
         ]
     )
@@ -19978,6 +19978,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         app = QtWidgets.QApplication(sys.argv)
     _qt_application = app
     qt_saved_state = load_gui_state()
+    qt_profile_setup_sync_enabled = False
     manager_context = detect_mod_manager_context()
     qt_dismissed_warnings: set[str] = set()
     raw_qt_dismissed_warnings = qt_saved_state.get("dismissed_warnings", [])
@@ -20413,7 +20414,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_experimental.setObjectName("nif_experimental")
     nif_editor_experimental.setToolTip(
         _format_short_guidance_tooltip(
-            "unlocks the Fallout-only write gates for the current mesh",
+            "unlocks experimental Fallout writes by enabling the Fallout-only write gates for the current mesh",
             "you intentionally need best-effort Fallout writes and will keep dry-run and backups on",
             "you are staying on the Skyrim-safe path or still want read-only preview/compare behavior",
         )
@@ -22338,7 +22339,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             dark_mode=theme_check.isChecked(),
             theme_mode=str(theme_mode_combo.currentData() or "light"),
             ui_scale=float(ui_scale_combo.currentText()),
-            show_startup_onboarding=startup_onboarding_group.isVisible(),
+            show_startup_onboarding=not startup_onboarding_group.isHidden(),
             show_advanced_map_strengths=advanced_controls_toggle.isChecked(),
             show_truepbr_sidecar_settings=truepbr_settings_toggle.isChecked(),
             workflow_mode=_workflow_mode_value_from_label(workflow_mode_combo.currentText()),
@@ -22354,7 +22355,8 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             if output_dir_edit.text().strip()
             else "next to input"
         )
-        state = _sync_qt_profile_setup_memory(state)
+        if qt_profile_setup_sync_enabled:
+            state = _sync_qt_profile_setup_memory(state)
         state["last_profile_setup_key"] = _preferred_qt_profile_setup_key(state)
         state["dismissed_warnings"] = sorted(qt_dismissed_warnings)
         return state
@@ -23375,6 +23377,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     window.show()
     if on_ready is not None:
         QtCore.QTimer.singleShot(0, lambda: on_ready(window))
+    qt_profile_setup_sync_enabled = True
     app.exec()
 
 
