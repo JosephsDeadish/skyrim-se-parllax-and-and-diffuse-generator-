@@ -21892,6 +21892,11 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     def _refresh_profile_setup_choices(state: Mapping[str, object] | None = None) -> None:
         source_state = qt_saved_state if state is None else state
         memory = source_state.get("profile_setup_memory")
+        selected_key = (
+            _selected_qt_profile_setup_key(source_state)
+            if profile_setup_choice_combo.count() > 0
+            else ""
+        )
         profile_setup_choice_combo.blockSignals(True)
         try:
             profile_setup_choice_combo.clear()
@@ -21904,7 +21909,11 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                 profile_setup_choice_combo.setEnabled(True)
                 for key, label in items:
                     profile_setup_choice_combo.addItem(label, key)
-                preferred_key = _preferred_qt_profile_setup_key(source_state)
+                preferred_key = (
+                    selected_key
+                    if selected_key and selected_key in memory
+                    else _preferred_qt_profile_setup_key(source_state)
+                )
                 if profile_setup_choice_combo.findData(preferred_key) < 0:
                     preferred_key = items[0][0]
                 preferred_index = profile_setup_choice_combo.findData(preferred_key)
@@ -22436,6 +22445,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         _persist_qt_gui_state()
 
     def _show_qt_startup_onboarding() -> None:
+        tabs.setCurrentIndex(0)
         _set_qt_startup_onboarding_visible(True)
         _refresh_qt_startup_guidance()
         status_label.setText("Quick start reopened.")

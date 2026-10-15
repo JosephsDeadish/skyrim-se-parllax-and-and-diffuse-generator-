@@ -12513,7 +12513,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             if step == 2 and w("generate").isEnabled():
                 self.assertTrue(saved_states)
                 self.assertTrue(saved_states[-1]["show_startup_onboarding"])
-                self.assertEqual(saved_states[-1]["render_profile"], "vanilla")
+                self.assertEqual(saved_states[-1]["qt_render_profile"], "vanilla")
                 return True
             return False
 
@@ -12546,7 +12546,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             if step == 1 and w("generate").isEnabled():
                 self.assertTrue(saved_states)
                 self.assertFalse(saved_states[-1]["show_startup_onboarding"])
-                self.assertEqual(saved_states[-1]["render_profile"], "enb")
+                self.assertEqual(saved_states[-1]["qt_render_profile"], "enb")
                 return True
             return False
 
@@ -12605,7 +12605,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
                 return False
             if step == 1 and w("generate").isEnabled():
                 self.assertTrue(saved_states)
-                self.assertEqual(saved_states[-1]["render_profile"], "truepbr")
+                self.assertEqual(saved_states[-1]["qt_render_profile"], "truepbr")
                 self.assertEqual(saved_states[-1]["output_path"], "/tmp/output")
                 return True
             return False
@@ -12645,7 +12645,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
                 self.assertFalse(w("startup_onboarding").isVisible())
                 self.assertTrue(saved_states)
                 self.assertFalse(saved_states[-1]["show_startup_onboarding"])
-                self.assertEqual(saved_states[-1]["render_profile"], "vanilla")
+                self.assertEqual(saved_states[-1]["qt_render_profile"], "vanilla")
                 state["step"] = 1
                 return True
             return False
