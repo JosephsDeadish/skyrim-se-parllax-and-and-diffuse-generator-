@@ -10241,6 +10241,7 @@ if GUI_AVAILABLE:
             self.preview_source_name_var = tk.StringVar(value="No source loaded")
             self.preview_jump_var = tk.StringVar(value="")
             self.detected_context_var = tk.StringVar(value=self.manager_context.summary)
+            self.profile_setup_hint_var = tk.StringVar(value="No remembered setup exists for this profile yet.")
             self.preview_speed_state_var = tk.StringVar(value="")
             self.checkpoint_health_var = tk.StringVar(value="Checkpoint: pending")
             self.batch_perf_hint_var = tk.StringVar(value="")
@@ -10683,6 +10684,19 @@ if GUI_AVAILABLE:
             self._add_tooltip(
                 self.profile_setup_restore_button,
                 "Reapply the renderer, workflow mode, target game, and output target remembered for the detected mod-manager profile.",
+            )
+            profile_setup_hint_label = ttk.Label(
+                file_frame,
+                textvariable=self.profile_setup_hint_var,
+                style="Muted.TLabel",
+                justify=tk.LEFT,
+                anchor=tk.W,
+            )
+            profile_setup_hint_label.grid(row=5, column=0, columnspan=5, sticky=tk.EW, pady=(4, 0))
+            self._bind_responsive_wrap(file_frame, profile_setup_hint_label, horizontal_padding=24, min_wrap=360)
+            self._add_tooltip(
+                profile_setup_hint_label,
+                "Shows the renderer, workflow mode, and output target remembered for the detected mod-manager profile.",
             )
             file_frame.columnconfigure(1, weight=1, minsize=280)
             file_frame.columnconfigure(2, minsize=100)
@@ -12298,6 +12312,11 @@ if GUI_AVAILABLE:
             }
 
         def _refresh_detected_context_hint(self) -> None:
+            profile_setup_hint = build_mod_manager_profile_setup_hint(
+                self.profile_setup_memory,
+                manager=self.manager_context.manager or self.last_mod_manager_memory,
+                profile=self.manager_context.profile_name or self.last_mod_profile_memory,
+            )
             self.detected_context_var.set(
                 build_mod_manager_context_hint(
                     self.manager_context,
@@ -12305,13 +12324,10 @@ if GUI_AVAILABLE:
                     last_mod_profile=self.last_mod_profile_memory,
                     last_renderer=self.last_renderer_memory,
                     last_output_target=self.last_output_target_memory,
-                    profile_setup_hint=build_mod_manager_profile_setup_hint(
-                        self.profile_setup_memory,
-                        manager=self.manager_context.manager or self.last_mod_manager_memory,
-                        profile=self.manager_context.profile_name or self.last_mod_profile_memory,
-                    ),
+                    profile_setup_hint=profile_setup_hint,
                 )
             )
+            self.profile_setup_hint_var.set(profile_setup_hint or "No remembered setup exists for this profile yet.")
 
         def _build_gui_state(self) -> dict[str, object]:
             self._sync_current_profile_setup_memory()

@@ -2280,6 +2280,39 @@ class GenerateTexturesTests(unittest.TestCase):
                 if gui is not None:
                     gui.root.destroy()
 
+    def test_tk_profile_setup_hint_label_shows_remembered_setup(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            saved_state["last_mod_manager"] = "Mod Organizer 2"
+            saved_state["last_mod_profile"] = "Main"
+            saved_state["profile_setup_memory"] = {
+                "Mod Organizer 2::Main": {
+                    "render_profile": "community_shaders",
+                    "output_target": "D:/Skyrim/Output",
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                }
+            }
+            gui = None
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state), mock.patch(
+                    "generate_textures.detect_mod_manager_context",
+                    return_value=ModManagerContext(manager="Mod Organizer 2", profile_name="Main"),
+                ):
+                    gui = TextureGeneratorGUI()
+                gui.root.update_idletasks()
+                hint = gui.profile_setup_hint_var.get()
+                self.assertIn("Remembered setup for this profile", hint)
+                self.assertIn("renderer Community Shaders", hint)
+                self.assertIn("output D:/Skyrim/Output", hint)
+                self.assertTrue(gui.profile_setup_restore_button.instate(("!disabled",)))
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
     def test_tk_startup_onboarding_banner_can_be_dismissed(self) -> None:
         self._skip_unavailable_tk_display()
 
