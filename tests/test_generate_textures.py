@@ -1524,6 +1524,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 workflow_mode="advanced",
                 show_advanced_map_strengths=True,
                 show_truepbr_sidecar_settings=False,
+                target_game="fo4",
             )
 
         self.assertEqual(merged["input_path"], str(input_path))
@@ -1532,6 +1533,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(merged["theme_mode"]), "high_contrast")
         self.assertTrue(bool(merged["show_advanced_workflow_outputs"]))
         self.assertEqual(str(merged["workflow_mode"]), "advanced")
+        self.assertEqual(str(merged["target_game"]), "fallout4")
         self.assertTrue(bool(merged["qt_show_advanced_map_strengths"]))
         self.assertFalse(bool(merged["qt_show_truepbr_sidecar_settings"]))
         self.assertFalse(bool(merged["include_diffuse"]))
@@ -11450,7 +11452,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
                         "use_custom_output": True,
                         "output_target": str(output_dir),
                         "workflow_mode": "advanced",
-                        "target_game": "skyrim",
+                        "target_game": "fallout4",
                     }
                 },
             }
@@ -11482,14 +11484,16 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
                 state["step"] = 2
             elif step == 2 and w("generate").isEnabled():
                 self.assertEqual(w("render_profile").currentText(), "truepbr")
+                self.assertEqual(w("target_game").currentText(), "fallout4")
                 self.assertEqual(w("workflow_mode").currentText(), self.qt._WORKFLOW_MODE_LABELS["advanced"])
                 self.assertEqual(w("output_dir").text(), str(output_dir))
-                self.assertIn("Restored remembered setup", w("generation_status").text())
+                self.assertIn("target game fallout4", w("generation_status").text())
                 self.assertTrue(saved_states)
                 restored_entry = saved_states[-1]["profile_setup_memory"][profile_key]
                 self.assertEqual(restored_entry["render_profile"], "truepbr")
                 self.assertEqual(restored_entry["output_target"], str(output_dir))
                 self.assertEqual(restored_entry["workflow_mode"], "advanced")
+                self.assertEqual(restored_entry["target_game"], "fallout4")
                 return True
             return False
 

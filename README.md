@@ -67,7 +67,8 @@ This opens a desktop interface where you can:
 - tune map-pixel strengths separately from the Qt TruePBR material-sidecar overrides, which are opt-in and do not create Community Shaders `PBRTextureSets` landscape JSON
 - choose the **Env mask mode**: `standard` (greyscale, vanilla Skyrim SE) or `complex` (RGBA packed, renderer-specific)
 - choose the **Target renderer** profile (**default: `custom`**) — includes `custom`, `vanilla`, `community_shaders`, `truepbr`, and `enb`
-- when switching MO2/Vortex profiles, use the remembered setup/restore controls to reapply the last renderer + output choice for that profile instead of re-entering it manually
+- choose the **Target game** (`skyrim` or Fallout) so filename suffixes and default outputs match the intended family
+- when switching MO2/Vortex profiles, use the remembered setup/restore controls to reapply the last renderer + target game + output choice for that profile instead of re-entering it manually
 - use the Terrain profile for individual texture maps; it does not build tiled landscape layers or terrain feature sets
 - the complex material, environment mask, and parallax mode controls spell out which output family they belong to so you can spot ENB / CS / TruePBR mismatches before export
 - generation applies renderer guardrails before processing so locked/auto-detected profiles automatically realign complex format, env mask mode, and parallax mode when they conflict

@@ -1256,6 +1256,7 @@ def _merge_qt_generation_gui_state(
     truepbr_sidecar_displacement_scale: float | None = None,
     truepbr_sidecar_specular_level: float | None = None,
     truepbr_sidecar_roughness_scale: float | None = None,
+    target_game: str | None = None,
     dark_mode: bool | None = None,
     theme_mode: str | None = None,
     ui_scale: float | None = None,
@@ -1294,6 +1295,8 @@ def _merge_qt_generation_gui_state(
         merged["env_mask_mode"] = env_mask_mode
     if parallax_mode is not None:
         merged["parallax_mode"] = parallax_mode
+    if target_game is not None:
+        merged["target_game"] = _normalize_texture_target_game(target_game)
     for key, value in (
         ("normal_strength", normal_strength),
         ("parallax_strength", parallax_strength),
@@ -18985,6 +18988,20 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     )
     controls_layout.addWidget(renderer_label, 0, 0)
     controls_layout.addWidget(render_profile_combo, 0, 1)
+    target_game_label = QtWidgets.QLabel()
+    target_game_combo = QtWidgets.QComboBox()
+    target_game_combo.setObjectName("target_game")
+    target_game_combo.addItems(_TEXTURE_TARGET_GAME_VALUES)
+    _configure_qt_field_label(target_game_label, "Ta&rget game", target_game_combo)
+    target_game_combo.setToolTip(
+        _format_short_guidance_tooltip(
+            "selects Skyrim or Fallout filename and default-output rules",
+            "use Skyrim when you want Skyrim-safe output names; use Fallout only when the project should follow FO3/FO4/FO76 conventions",
+            "do not switch it just to change renderer families or to tweak a different map type",
+        )
+    )
+    controls_layout.addWidget(target_game_label, 0, 2)
+    controls_layout.addWidget(target_game_combo, 0, 3)
     controls_layout.addWidget(
         QtWidgets.QLabel("Choose one primary workflow. Map names and channels depend on the target."),
         1,
@@ -19000,19 +19017,19 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             "you still need to change the renderer family itself or keep every map choice fully manual",
         )
     )
-    controls_layout.addWidget(apply_profile_outputs_button, 1, 2)
+    controls_layout.addWidget(apply_profile_outputs_button, 1, 3)
     profile_guidance_label = QtWidgets.QLabel()
     profile_guidance_label.setWordWrap(True)
-    controls_layout.addWidget(profile_guidance_label, 3, 0, 1, 3)
+    controls_layout.addWidget(profile_guidance_label, 3, 0, 1, 4)
     profile_recommendation_label = QtWidgets.QLabel("Select a texture file to see a renderer suggestion.")
     profile_recommendation_label.setWordWrap(True)
-    controls_layout.addWidget(profile_recommendation_label, 2, 0, 1, 2)
+    controls_layout.addWidget(profile_recommendation_label, 2, 0, 1, 3)
     use_profile_recommendation_button = QtWidgets.QPushButton("Use suggestion")
     use_profile_recommendation_button.setEnabled(False)
     use_profile_recommendation_button.setToolTip(
         "Apply the suggested profile to this generation session; the suggestion never changes your selection automatically."
     )
-    controls_layout.addWidget(use_profile_recommendation_button, 2, 2)
+    controls_layout.addWidget(use_profile_recommendation_button, 2, 3)
     include_diffuse_check = QtWidgets.QCheckBox("Diffuse")
     include_diffuse_check.setChecked(True)
     include_normal_check = QtWidgets.QCheckBox("Normal")
@@ -19053,7 +19070,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         output_group_layout.setVerticalSpacing(4)
         for index, key in enumerate(output_keys):
             output_group_layout.addWidget(output_controls[key], index // 2, index % 2)
-        controls_layout.addWidget(output_group, output_group_row, 0, 1, 3)
+        controls_layout.addWidget(output_group, output_group_row, 0, 1, 4)
         output_group_row += 1
     workflow_note = QtWidgets.QLabel(
         "Vanilla/ENB _m and TruePBR _rmaos are separate Slot 5 workflows. "
@@ -19061,7 +19078,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         "_wt/_sm are shader-specific; terrain selection does not generate layered landscape sets."
     )
     workflow_note.setWordWrap(True)
-    controls_layout.addWidget(workflow_note, output_group_row, 0, 1, 3)
+    controls_layout.addWidget(workflow_note, output_group_row, 0, 1, 4)
     advanced_controls_toggle = QtWidgets.QToolButton()
     advanced_controls_toggle.setText("Advanced map strengths")
     advanced_controls_toggle.setChecked(bool(qt_saved_state["qt_show_advanced_map_strengths"]))
@@ -19401,6 +19418,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     profile_index = render_profile_combo.findText(str(qt_saved_state["qt_render_profile"]))
     if profile_index >= 0:
         render_profile_combo.setCurrentIndex(profile_index)
+    target_game_index = target_game_combo.findText(_normalize_texture_target_game(str(qt_saved_state["target_game"])))
+    if target_game_index >= 0:
+        target_game_combo.setCurrentIndex(target_game_index)
     include_diffuse_check.setChecked(bool(qt_saved_state["include_diffuse"]))
     include_normal_check.setChecked(bool(qt_saved_state["include_normal"]))
     include_parallax_check.setChecked(bool(qt_saved_state["include_parallax"]))
@@ -20046,6 +20066,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         workflow_mode = _normalize_workflow_mode(entry.get("workflow_mode"))
         use_custom_output = _coerce_bool(entry.get("use_custom_output"), False)
         output_target = str(entry.get("output_target", "") or "").strip()
+        target_game = _normalize_texture_target_game(str(entry.get("target_game", "") or ""))
         if workflow_mode:
             workflow_mode_combo.setCurrentText(_WORKFLOW_MODE_LABELS[workflow_mode])
         if use_custom_output and output_target and output_target.lower() != "next to input":
@@ -20054,6 +20075,8 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             output_dir_edit.clear()
         if render_profile:
             render_profile_combo.setCurrentText(render_profile)
+        if target_game:
+            target_game_combo.setCurrentText(target_game)
         _refresh_mod_manager_context_hint()
         _refresh_profile_setup_hint_label()
         _update_profile_setup_restore_controls()
@@ -20065,6 +20088,8 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             )
         if workflow_mode:
             summary_bits.append(f"workflow {_WORKFLOW_MODE_LABELS[workflow_mode]}")
+        if target_game and target_game != "skyrim":
+            summary_bits.append(f"target game {target_game}")
         if use_custom_output and output_target:
             summary_bits.append(f"output {output_target}")
         elif not use_custom_output:
@@ -20206,6 +20231,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             truepbr_sidecar_displacement_scale=truepbr_displacement_scale.value(),
             truepbr_sidecar_specular_level=truepbr_specular_level.value(),
             truepbr_sidecar_roughness_scale=truepbr_roughness_scale.value(),
+            target_game=target_game_combo.currentText(),
             dark_mode=theme_check.isChecked(),
             theme_mode=str(theme_mode_combo.currentData() or "light"),
             ui_scale=float(ui_scale_combo.currentText()),
@@ -20646,6 +20672,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             "truepbr_sidecar_displacement_scale": truepbr_displacement_scale.value(),
             "truepbr_sidecar_specular_level": truepbr_specular_level.value(),
             "truepbr_sidecar_roughness_scale": truepbr_roughness_scale.value(),
+            "target_game": _normalize_texture_target_game(target_game_combo.currentText()),
             "resume_mode": resume_mode_combo.currentText().strip(),
             "checkpoint_path": checkpoint_path_edit.text().strip(),
             "continue_on_error": continue_on_error_check.isChecked(),
@@ -20869,6 +20896,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     render_profile_combo.currentTextChanged.connect(_persist_qt_gui_state)
     render_profile_combo.currentTextChanged.connect(_update_profile_guidance)
     render_profile_combo.currentTextChanged.connect(_update_qt_render_modes)
+    target_game_combo.currentTextChanged.connect(_persist_qt_gui_state)
     for mode_control in (complex_format_combo, env_mask_mode_combo, parallax_mode_combo):
         mode_control.currentIndexChanged.connect(_persist_qt_gui_state)
     for strength_control in advanced_strength_controls.values():
