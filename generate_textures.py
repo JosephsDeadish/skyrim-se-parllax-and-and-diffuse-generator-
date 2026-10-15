@@ -1466,6 +1466,7 @@ def _merge_qt_generation_gui_state(
     theme_mode: str | None = None,
     ui_scale: float | None = None,
     workflow_mode: str | None = None,
+    show_startup_onboarding: bool | None = None,
     show_advanced_map_strengths: bool | None = None,
     show_truepbr_sidecar_settings: bool | None = None,
 ) -> dict[str, object]:
@@ -1530,6 +1531,8 @@ def _merge_qt_generation_gui_state(
         merged["ui_scale"] = ui_scale
     if workflow_mode is not None:
         merged["workflow_mode"] = workflow_mode
+    if show_startup_onboarding is not None:
+        merged["show_startup_onboarding"] = show_startup_onboarding
     for key, value in (
         ("qt_show_advanced_map_strengths", show_advanced_map_strengths),
         ("qt_show_truepbr_sidecar_settings", show_truepbr_sidecar_settings),

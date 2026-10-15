@@ -1710,6 +1710,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 theme_mode="high_contrast",
                 ui_scale=1.3,
                 workflow_mode="advanced",
+                show_startup_onboarding=False,
                 show_advanced_map_strengths=True,
                 show_truepbr_sidecar_settings=False,
                 target_game="fo4",
@@ -1721,6 +1722,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(merged["theme_mode"]), "high_contrast")
         self.assertTrue(bool(merged["show_advanced_workflow_outputs"]))
         self.assertEqual(str(merged["workflow_mode"]), "advanced")
+        self.assertFalse(bool(merged["show_startup_onboarding"]))
         self.assertEqual(str(merged["target_game"]), "fallout4")
         self.assertTrue(bool(merged["qt_show_advanced_map_strengths"]))
         self.assertFalse(bool(merged["qt_show_truepbr_sidecar_settings"]))
