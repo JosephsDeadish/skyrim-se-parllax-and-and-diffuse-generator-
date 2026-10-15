@@ -19978,7 +19978,12 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         app = QtWidgets.QApplication(sys.argv)
     _qt_application = app
     qt_saved_state = load_gui_state()
-    qt_profile_setup_sync_enabled = False
+    qt_profile_setup_values_touched = False
+
+    def _mark_qt_profile_setup_values_touched(*_: object) -> None:
+        nonlocal qt_profile_setup_values_touched
+        qt_profile_setup_values_touched = True
+
     manager_context = detect_mod_manager_context()
     qt_dismissed_warnings: set[str] = set()
     raw_qt_dismissed_warnings = qt_saved_state.get("dismissed_warnings", [])
@@ -20440,7 +20445,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_dry_run.setChecked(True)
     nif_editor_dry_run.setToolTip(
         _format_short_guidance_tooltip(
-            "keeps patch, remediate, and restore actions read-only",
+            "keeps patch, remediate, and restore actions read-only in dry-run mode",
             "you are previewing a mesh change or comparing against backups before any write",
             "you are ready to perform a confirmed write or restore and have already checked the rollback path",
         )
@@ -21049,6 +21054,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         _persist_qt_gui_state()
         _refresh_qt_startup_guidance()
 
+    workflow_mode_combo.currentTextChanged.connect(_mark_qt_profile_setup_values_touched)
     workflow_mode_combo.currentTextChanged.connect(_apply_qt_workflow_mode)
     advanced_controls_toggle.toggled.connect(_sync_qt_workflow_mode_selection)
     truepbr_settings_toggle.toggled.connect(_sync_qt_workflow_mode_selection)
@@ -22355,7 +22361,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             if output_dir_edit.text().strip()
             else "next to input"
         )
-        if qt_profile_setup_sync_enabled:
+        if qt_profile_setup_values_touched:
             state = _sync_qt_profile_setup_memory(state)
         state["last_profile_setup_key"] = _preferred_qt_profile_setup_key(state)
         state["dismissed_warnings"] = sorted(qt_dismissed_warnings)
@@ -23302,6 +23308,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     output_dir_edit.textChanged.connect(lambda *_: _refresh_qt_startup_guidance())
     checkpoint_path_edit.textChanged.connect(_refresh_checkpoint_health)
     input_path_edit.textChanged.connect(_persist_qt_gui_state)
+    output_dir_edit.textChanged.connect(_mark_qt_profile_setup_values_touched)
     output_dir_edit.textChanged.connect(_persist_qt_gui_state)
     checkpoint_path_edit.textChanged.connect(_persist_qt_gui_state)
     resume_mode_combo.currentTextChanged.connect(_persist_qt_gui_state)
@@ -23311,10 +23318,12 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     include_rmaos_check.toggled.connect(
         lambda checked: include_environment_mask_check.setChecked(False) if checked else None
     )
+    render_profile_combo.currentTextChanged.connect(_mark_qt_profile_setup_values_touched)
     render_profile_combo.currentTextChanged.connect(_persist_qt_gui_state)
     render_profile_combo.currentTextChanged.connect(_update_profile_guidance)
     render_profile_combo.currentTextChanged.connect(_update_qt_render_modes)
     render_profile_combo.currentTextChanged.connect(lambda *_: _refresh_qt_startup_guidance())
+    target_game_combo.currentTextChanged.connect(_mark_qt_profile_setup_values_touched)
     target_game_combo.currentTextChanged.connect(_persist_qt_gui_state)
     target_game_combo.currentTextChanged.connect(lambda *_: _refresh_qt_startup_guidance())
     for mode_control in (complex_format_combo, env_mask_mode_combo, parallax_mode_combo):
@@ -23377,7 +23386,6 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     window.show()
     if on_ready is not None:
         QtCore.QTimer.singleShot(0, lambda: on_ready(window))
-    qt_profile_setup_sync_enabled = True
     app.exec()
 
 
