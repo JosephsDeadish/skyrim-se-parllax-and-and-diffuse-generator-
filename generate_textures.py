@@ -4147,6 +4147,7 @@ def _workflow_quick_start_steps_text() -> str:
         "Step 2: pick the input texture/folder and output target.\n"
         "Step 3: use Suggested to auto-pick a safe family from the current file or mod-manager context, then continue to Generate or Scan.\n"
         "Step 4: compare against the sibling .nif.bak backup before any write, and restore from it instead of forcing a risky change.\n"
+        "Step 5: if the preview or scan still looks wrong, switch families on purpose or restore from .bak before exporting the file.\n"
         f"{_workflow_family_quick_check()}\n"
         "Never mix ENB / Community Shaders / TruePBR families on the same mesh."
     )

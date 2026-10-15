@@ -79,7 +79,7 @@ This opens a desktop interface where you can:
 - use the Qt **NIF Editor** for flag/texture-slot edits, safe conflict remediation, read-only compare against sibling `.nif.bak` files, and backup restore on the target chosen in NIF Scan; dry-run is enabled by default, writes require confirmation and backups, cancellation finishes the current file first, and the editor shows a safety banner that keeps Fallout writes obviously experimental. The Tk editor retains additional advanced presets and tuning controls.
 - use keyboard shortcuts: `Ctrl+O` opens a texture, `Ctrl+Shift+O` opens a folder, `Ctrl+Enter` starts generation, and `Esc` requests cancellation
 - switch **Workflow mode** between **Beginner**, **Standard**, and **Advanced**; Beginner keeps core controls visible, Standard shows the full layout, and Advanced also enables the extra setup/output groups
-- use the first-run **Quick start** banner: Step 1 choose a renderer family, Step 2 pick input/output, Step 3 use Suggested or Generate/Scan, Step 4 compare against the sibling `.nif.bak` before writing; keyboard: `Ctrl+1`/`2`/`3`/`4` apply safe families, `Ctrl+Shift+H` hides it once you know what you need, and the quick-start card can be reopened from the top bar later.
+- use the first-run **Quick start** banner: Step 1 choose a renderer family, Step 2 pick input/output, Step 3 use Suggested or Generate/Scan, Step 4 compare against the sibling `.nif.bak` before writing, Step 5 switch families on purpose or restore from `.bak` if the preview still looks wrong; keyboard: `Ctrl+1`/`2`/`3`/`4` apply safe families, `Ctrl+Shift+H` hides it once you know what you need, and the quick-start card can be reopened from the top bar later.
 - auto-update output folder when a different input texture is selected
 - get adaptive recommended defaults based on richer image-content analysis
 - use a clearly labeled **Automatic suggestions (analyze image and set sliders)** toggle to turn auto slider updates on/off
@@ -452,6 +452,10 @@ Do not mix ENB / Community Shaders / TruePBR families on the same mesh unless yo
 4. **Glow/emissive not visible**
    - Confirm slot 2 uses `_g.dds`-style emissive path and `SLSF2_Glow_Map` alignment.
    - Review `flag_glow_map.*` and `path_slot_glow.*` conflicts.
-5. **Large batch run is too slow or reruns unexpectedly**
+5. **Wrong preset / wrong renderer / wrong folder**
+   - Use the Suggested preset or the first-run quick start buttons to get back to the correct family.
+   - If the preview or scan still looks wrong, compare against the sibling `.nif.bak` before writing and restore instead of forcing the change.
+   - Make sure the selected input folder is the source texture set, not a generated-output folder from a previous run.
+6. **Large batch run is too slow or reruns unexpectedly**
    - Keep lazy/staged preview enabled, disable live batch preview, and use `resume` mode with checkpoint status checks.
    - Use generated failure artifacts (`batch_failure_report.json/csv`) to isolate repeat offenders before rerun.
