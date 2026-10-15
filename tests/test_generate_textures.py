@@ -79,6 +79,9 @@ from generate_textures import (
     _profile_setup_memory_key,
     _detect_renderer_version_hints,
     _format_short_guidance_tooltip,
+    _render_profile_family_quick_check_text,
+    _render_profile_family_tooltip,
+    _render_profile_guidance,
     _format_log_export_text,
     _format_qt_preview_channel_note,
     _format_qt_log_export_text,
@@ -1904,6 +1907,30 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("community shaders", onboarding)
         self.assertIn("truepbr", onboarding)
         self.assertIn("never mix enb / community shaders / truepbr families", onboarding)
+
+    def test_render_profile_guidance_data_captures_family_specific_rules(self) -> None:
+        truepbr = _render_profile_guidance("truepbr")
+        self.assertIsNotNone(truepbr)
+        self.assertIn("_rmaos", truepbr.what_it_does)
+        self.assertIn("json", truepbr.when_to_use_it.lower())
+        self.assertTrue(any("Not ENB" in text for text in truepbr.why_not_others))
+        self.assertIn("_rmaos.dds", truepbr.canonical_outputs[0])
+
+    def test_render_profile_family_tooltip_uses_structured_guidance(self) -> None:
+        tooltip = _render_profile_family_tooltip("community_shaders").lower()
+        self.assertIn("what it does:", tooltip)
+        self.assertIn("when to use it:", tooltip)
+        self.assertIn("when not to use it:", tooltip)
+        self.assertIn("_cm.dds", tooltip)
+        self.assertIn("_c.dds", tooltip)
+
+    def test_render_profile_family_quick_check_text_lists_renderer_families(self) -> None:
+        quick_check = _render_profile_family_quick_check_text()
+        self.assertIn("Quick check:", quick_check)
+        self.assertIn("Vanilla =", quick_check)
+        self.assertIn("ENB =", quick_check)
+        self.assertIn("Community Shaders =", quick_check)
+        self.assertIn("TruePBR =", quick_check)
 
     def test_workflow_quick_start_steps_text_mentions_step_flow(self) -> None:
         quick_start = _workflow_quick_start_steps_text().lower()

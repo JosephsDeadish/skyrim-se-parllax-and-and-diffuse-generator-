@@ -3204,6 +3204,85 @@ _RENDER_PROFILE_LABELS: dict[str, str] = {
     "truepbr": "Community Shaders PBR",
     "enb": "ENB",
 }
+
+
+@dataclass(frozen=True)
+class RenderProfileGuidance:
+    profile: str
+    family_name: str
+    what_it_does: str
+    when_to_use_it: str
+    when_not_to_use_it: str
+    quick_check: str
+    why_not_others: tuple[str, ...] = ()
+    canonical_outputs: tuple[str, ...] = ()
+
+
+_RENDER_PROFILE_GUIDANCE: dict[str, RenderProfileGuidance] = {
+    "custom": RenderProfileGuidance(
+        profile="custom",
+        family_name="Custom",
+        what_it_does="starts from a manual-only baseline and leaves every family choice up to you",
+        when_to_use_it="you already know the renderer family and want full manual control",
+        when_not_to_use_it="you want one-click safe defaults or family-specific guardrails",
+        quick_check="Custom = manual-only; use it only when every family choice is deliberate.",
+        why_not_others=("Custom mode is not a locked family; keep it only when you want every choice manual.",),
+    ),
+    "vanilla": RenderProfileGuidance(
+        profile="vanilla",
+        family_name="Vanilla",
+        what_it_does="keeps Skyrim-safe defaults and standard parallax naming aligned",
+        when_to_use_it="the mesh should stay on vanilla Skyrim-safe parallax defaults",
+        when_not_to_use_it="the mesh is meant for ENB, Community Shaders, or TruePBR",
+        quick_check="Vanilla = Skyrim-safe parallax with standard _m/_n/_p defaults.",
+        why_not_others=(
+            "Not ENB: ENB uses `_msn` or `_m`, not vanilla-safe defaults.",
+            "Not Community Shaders: CS uses `_cm/_c`, not vanilla-safe defaults.",
+            "Not TruePBR: TruePBR uses `_rmaos/_ramos` plus JSON sidecars, not vanilla-safe defaults.",
+        ),
+        canonical_outputs=("_m.dds", "_n.dds", "_p.dds"),
+    ),
+    "community_shaders": RenderProfileGuidance(
+        profile="community_shaders",
+        family_name="Community Shaders",
+        what_it_does="sets Extended Materials defaults for `_cm/_c` workflows",
+        when_to_use_it="the mesh should stay on Community Shaders outputs",
+        when_not_to_use_it="you need ENB `_msn/_m` or TruePBR `_rmaos/_ramos` instead",
+        quick_check="Community Shaders = `_cm/_c` Extended Materials.",
+        why_not_others=(
+            "Not ENB: ENB uses `_msn` or `_m`, not `_cm/_c`.",
+            "Not TruePBR: TruePBR uses `_rmaos/_ramos` plus JSON sidecars, not `_cm/_c`.",
+        ),
+        canonical_outputs=("_cm.dds", "_c.dds"),
+    ),
+    "truepbr": RenderProfileGuidance(
+        profile="truepbr",
+        family_name="TruePBR",
+        what_it_does="sets the JSON-driven `_rmaos/_ramos` workflow",
+        when_to_use_it="the mesh is using the Community Shaders TruePBR JSON workflow",
+        when_not_to_use_it="you need plain Community Shaders or ENB packed outputs instead",
+        quick_check="TruePBR = `_rmaos/_ramos` plus JSON sidecars.",
+        why_not_others=(
+            "Not ENB: ENB uses `_msn` or `_m`, not TruePBR packed maps.",
+            "Not Community Shaders Extended Materials: CS uses `_cm/_c`, not `_rmaos/_ramos`.",
+        ),
+        canonical_outputs=("_rmaos.dds", "_ramos.dds", "JSON sidecars"),
+    ),
+    "enb": RenderProfileGuidance(
+        profile="enb",
+        family_name="ENB",
+        what_it_does="sets ENB complex-material defaults with `_msn/_m` and optional POM",
+        when_to_use_it="the mesh is meant for ENB complex material or POM workflows",
+        when_not_to_use_it="you need Community Shaders `_cm/_c` or TruePBR `_rmaos/_ramos` instead",
+        quick_check="ENB = `_msn/_m` complex material with optional POM.",
+        why_not_others=(
+            "Not Community Shaders: CS uses `_cm/_c`, not `_msn`.",
+            "Not TruePBR: TruePBR uses `_rmaos/_ramos` plus JSON sidecars, not `_msn`.",
+        ),
+        canonical_outputs=("_msn.dds", "_m.dds"),
+    ),
+}
+
 _RENDER_PROFILE_CLI_VALUES: tuple[str, ...] = tuple(_RENDER_PROFILE_LABELS.keys())
 _RENDER_PROFILE_GUI_VALUES: tuple[str, ...] = (
     "custom",
@@ -4153,10 +4232,13 @@ def build_render_profile_recommendation_message(
         "truepbr",
         "enb",
     ):
+        guidance = _render_profile_guidance(profile)
+        quick_check = f" Quick check: {guidance.quick_check}" if guidance is not None else ""
         lines.append(
             f"- {_RENDER_PROFILE_LABELS[profile]}: "
             f"{describe_render_profile_default_outputs(profile)} "
             f"{describe_render_profile_output_recommendation(profile)}"
+            f"{quick_check}"
         )
     lines.extend(
         [
@@ -4246,6 +4328,9 @@ def _render_profile_family_reason_lines(profile: str) -> tuple[str, ...]:
     normalized = _normalize_render_profile(profile)
     family = _render_profile_family(normalized)
     label = _RENDER_PROFILE_LABELS.get(normalized, normalized.replace("_", " ").title())
+    guidance = _RENDER_PROFILE_GUIDANCE.get(normalized)
+    if guidance is not None and guidance.why_not_others:
+        return guidance.why_not_others
     if family == "community_shaders":
         return (
             "Not ENB: ENB uses `_msn` or `_m`, not `_cm/_c`.",
@@ -4266,11 +4351,55 @@ def _render_profile_family_reason_lines(profile: str) -> tuple[str, ...]:
     )
 
 
+def _render_profile_guidance(profile: str) -> RenderProfileGuidance | None:
+    return _RENDER_PROFILE_GUIDANCE.get(_normalize_render_profile(profile))
+
+
+def _render_profile_family_tooltip(profile: str) -> str:
+    guidance = _render_profile_guidance(profile)
+    if guidance is None:
+        return _format_short_guidance_tooltip(
+            "locks the current renderer family and output defaults",
+            "you want a safe preset starting point",
+            "you need to leave every family choice manual",
+        )
+    what_it_does = guidance.what_it_does
+    if guidance.canonical_outputs:
+        what_it_does = f"{what_it_does} Canonical outputs: {', '.join(guidance.canonical_outputs)}."
+    return _format_short_guidance_tooltip(
+        what_it_does,
+        guidance.when_to_use_it,
+        guidance.when_not_to_use_it,
+    )
+
+
+def _render_profile_family_quick_check_text() -> str:
+    quick_checks: list[str] = []
+    for profile in ("vanilla", "enb", "community_shaders", "truepbr"):
+        guidance = _render_profile_guidance(profile)
+        if guidance is not None:
+            quick_checks.append(guidance.quick_check)
+    return "Quick check: " + "; ".join(quick_checks)
+
+
 def _workflow_preset_onboarding_text() -> str:
+    vanilla = _render_profile_guidance("vanilla")
+    enb = _render_profile_guidance("enb")
+    community_shaders = _render_profile_guidance("community_shaders")
+    truepbr = _render_profile_guidance("truepbr")
+    custom = _render_profile_guidance("custom")
+    if None in {vanilla, enb, community_shaders, truepbr, custom}:
+        return (
+            "If you're unsure, start with the family that matches the mesh/output: Vanilla for Skyrim-safe outputs, "
+            "ENB for ENB/POM, Community Shaders for _cm/_c, and TruePBR for _rmaos/_ramos plus JSON sidecars. "
+            "Never mix ENB / Community Shaders / TruePBR families on the same mesh unless you're intentionally switching pipelines."
+        )
     return (
-        "If you're unsure, start with the family that matches the mesh/output: Vanilla for Skyrim-safe outputs, "
-        "ENB for ENB/POM, Community Shaders for _cm/_c, and TruePBR for _rmaos/_ramos plus JSON sidecars. "
-        "Never mix ENB / Community Shaders / TruePBR families on the same mesh unless you're intentionally switching pipelines."
+        f"If you're unsure, start with the family that matches the mesh/output: {vanilla.family_name} for Skyrim-safe outputs, "
+        f"{enb.family_name} for ENB/POM, {community_shaders.family_name} for _cm/_c workflows, "
+        f"and {truepbr.family_name} for _rmaos/_ramos plus JSON sidecars. "
+        f"Use {custom.family_name} only when you already know the workflow and want manual control. "
+        f"Never mix {enb.family_name} / {community_shaders.family_name} / {truepbr.family_name} families on the same mesh unless you're intentionally switching pipelines."
     )
 
 
@@ -4282,7 +4411,7 @@ def _workflow_quick_start_steps_text() -> str:
         "Step 3: use Suggested to auto-pick a safe family from the current file or mod-manager context, then continue to Generate or Scan.\n"
         "Step 4: compare against the sibling .nif.bak backup before any write, and restore from it instead of forcing a risky change.\n"
         "Step 5: if the preview or scan still looks wrong, switch families on purpose or restore from .bak before exporting the file.\n"
-        f"{_workflow_family_quick_check()}\n"
+        f"{_render_profile_family_quick_check_text()}\n"
         "Never mix ENB / Community Shaders / TruePBR families on the same mesh."
     )
 
@@ -4310,10 +4439,7 @@ def _qt_migration_status_text() -> str:
 
 
 def _workflow_family_quick_check() -> str:
-    return (
-        "Quick check: Vanilla = Skyrim-safe parallax, ENB = ENB/POM, Community Shaders = _cm/_c, "
-        "TruePBR = _rmaos/_ramos + JSON."
-    )
+    return _render_profile_family_quick_check_text()
 
 
 def _nif_editor_safety_banner_text(
@@ -4637,6 +4763,8 @@ def build_render_profile_family_mismatch_warning(
         return None
     selected_label = _RENDER_PROFILE_LABELS.get(normalized_selected, normalized_selected.replace("_", " ").title())
     recommended_label = _RENDER_PROFILE_LABELS.get(recommendation.profile, recommendation.profile.replace("_", " ").title())
+    selected_guidance = _render_profile_guidance(normalized_selected)
+    recommended_guidance = _render_profile_guidance(recommendation.profile)
     lines = [
         f"Selected renderer preset: {selected_label}.",
         f"Suggested for this file: {recommended_label} ({recommendation.confidence_label} confidence).",
@@ -4646,11 +4774,16 @@ def build_render_profile_family_mismatch_warning(
         lines.append(f"Signals: {'; '.join(recommendation.evidence[:3])}")
     if recommendation.why_not_others:
         lines.append("Why not the others: " + " ".join(recommendation.why_not_others))
+    if selected_guidance is not None or recommended_guidance is not None:
+        quick_checks = [
+            f"selected: {selected_guidance.quick_check}" if selected_guidance is not None else None,
+            f"recommended: {recommended_guidance.quick_check}" if recommended_guidance is not None else None,
+        ]
+        lines.append("Quick check: " + "; ".join(text for text in quick_checks if text is not None))
     lines.extend(
         [
             "This is probably incompatible: ENB, Community Shaders, and TruePBR are separate families and should not be mixed on the same mesh.",
             "Use the suggested family or switch the mesh on purpose before export.",
-            _workflow_family_quick_check(),
         ]
     )
     return "\n\n".join(lines)
@@ -10678,11 +10811,7 @@ if GUI_AVAILABLE:
             startup_vanilla_button.pack(side=tk.LEFT, padx=(0, 4))
             self._add_tooltip(
                 startup_vanilla_button,
-                _format_short_guidance_tooltip(
-                    "starts the quick-start flow on the safest Skyrim baseline",
-                    "you want standard parallax or a family-safe starting point",
-                    "you are intentionally using ENB, Community Shaders, or TruePBR instead",
-                ),
+                _render_profile_family_tooltip("vanilla"),
             )
             startup_enb_button = ttk.Button(
                 startup_onboarding_button_row,
@@ -10692,11 +10821,7 @@ if GUI_AVAILABLE:
             startup_enb_button.pack(side=tk.LEFT, padx=4)
             self._add_tooltip(
                 startup_enb_button,
-                _format_short_guidance_tooltip(
-                    "starts the quick-start flow on the ENB family",
-                    "the mesh is meant for ENB complex material or POM",
-                    "you need Community Shaders _cm/_c or TruePBR _rmaos/_ramos instead",
-                ),
+                _render_profile_family_tooltip("enb"),
             )
             startup_cs_button = ttk.Button(
                 startup_onboarding_button_row,
@@ -10706,11 +10831,7 @@ if GUI_AVAILABLE:
             startup_cs_button.pack(side=tk.LEFT, padx=4)
             self._add_tooltip(
                 startup_cs_button,
-                _format_short_guidance_tooltip(
-                    "starts the quick-start flow on the Community Shaders family",
-                    "the mesh should stay on _cm/_c Extended Materials outputs",
-                    "you want ENB or TruePBR outputs instead",
-                ),
+                _render_profile_family_tooltip("community_shaders"),
             )
             startup_truepbr_button = ttk.Button(
                 startup_onboarding_button_row,
@@ -10720,11 +10841,7 @@ if GUI_AVAILABLE:
             startup_truepbr_button.pack(side=tk.LEFT, padx=4)
             self._add_tooltip(
                 startup_truepbr_button,
-                _format_short_guidance_tooltip(
-                    "starts the quick-start flow on the Community Shaders TruePBR family",
-                    "the mesh is using the JSON-driven _rmaos/_ramos workflow",
-                    "you need plain Community Shaders or ENB packed outputs instead",
-                ),
+                _render_profile_family_tooltip("truepbr"),
             )
             suggested_startup_button = ttk.Button(
                 startup_onboarding_button_row,
@@ -10987,11 +11104,7 @@ if GUI_AVAILABLE:
             _preset_vanilla_button.pack(side=tk.LEFT, padx=(8, 2))
             self._add_tooltip(
                 _preset_vanilla_button,
-                _format_short_guidance_tooltip(
-                    "sets the safest vanilla Skyrim baseline and keeps output families Skyrim-safe",
-                    "the mesh should stay on standard Skyrim parallax defaults",
-                    "the mesh is intentionally ENB, Community Shaders, or TruePBR",
-                ),
+                _render_profile_family_tooltip("vanilla"),
             )
             _preset_enb_button = ttk.Button(
                 _preset_row,
@@ -11001,11 +11114,7 @@ if GUI_AVAILABLE:
             _preset_enb_button.pack(side=tk.LEFT, padx=2)
             self._add_tooltip(
                 _preset_enb_button,
-                _format_short_guidance_tooltip(
-                    "sets the conservative ENB baseline with complex-material defaults aligned",
-                    "the mesh is meant for ENB complex material or POM workflows",
-                    "you need Community Shaders _cm/_c or TruePBR _rmaos/_ramos instead",
-                ),
+                _render_profile_family_tooltip("enb"),
             )
             _preset_cs_button = ttk.Button(
                 _preset_row,
@@ -11015,11 +11124,7 @@ if GUI_AVAILABLE:
             _preset_cs_button.pack(side=tk.LEFT, padx=2)
             self._add_tooltip(
                 _preset_cs_button,
-                _format_short_guidance_tooltip(
-                    "sets the Community Shaders Extended Materials baseline for _cm/_c workflows",
-                    "the mesh should stay on Community Shaders outputs",
-                    "you need ENB _msn/_m or TruePBR _rmaos/_ramos instead",
-                ),
+                _render_profile_family_tooltip("community_shaders"),
             )
             _preset_truepbr_button = ttk.Button(
                 _preset_row,
@@ -11029,11 +11134,7 @@ if GUI_AVAILABLE:
             _preset_truepbr_button.pack(side=tk.LEFT, padx=2)
             self._add_tooltip(
                 _preset_truepbr_button,
-                _format_short_guidance_tooltip(
-                    "sets the TruePBR baseline and keeps canonical _rmaos/_ramos naming",
-                    "the mesh is using the Community Shaders TruePBR JSON workflow",
-                    "you need plain Community Shaders or ENB packed outputs instead",
-                ),
+                _render_profile_family_tooltip("truepbr"),
             )
             _preset_custom_button = ttk.Button(
                 _preset_row,
@@ -11043,11 +11144,7 @@ if GUI_AVAILABLE:
             _preset_custom_button.pack(side=tk.LEFT, padx=2)
             self._add_tooltip(
                 _preset_custom_button,
-                _format_short_guidance_tooltip(
-                    "starts from a conservative baseline but leaves workflow choices manual",
-                    "you already know the renderer family and want to tune everything yourself",
-                    "you want one-click safe defaults with family-specific guardrails",
-                ),
+                _render_profile_family_tooltip("custom"),
             )
             _preset_hint = ttk.Label(_workflow_frame, textvariable=self.safe_preset_hint_var, style="Muted.TLabel")
             _preset_hint.grid(row=3, column=0, columnspan=3, sticky=tk.W, pady=(2, 0))
@@ -18686,13 +18783,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     ):
         button = QtWidgets.QPushButton(label)
         button.setObjectName(f"startup_onboarding_{profile_key}")
-        button.setToolTip(
-            _format_short_guidance_tooltip(
-                f"starts the quick-start flow on the {label} renderer family",
-                "the mesh should stay on this renderer family",
-                "you need one of the other renderer families instead",
-            )
-        )
+        button.setToolTip(_render_profile_family_tooltip(profile_key))
         button.clicked.connect(lambda _checked=False, value=profile_key: _apply_qt_startup_preset(value))
         startup_onboarding_button_row.addWidget(button)
     startup_onboarding_suggested_button = QtWidgets.QPushButton("Suggested")
