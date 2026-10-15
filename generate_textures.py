@@ -410,23 +410,13 @@ def _normalize_profile_setup_memory(raw: object | None) -> dict[str, dict[str, o
     return normalized
 
 
-def build_mod_manager_profile_setup_hint(
-    profile_setup_memory: Mapping[str, object] | None,
-    *,
-    manager: str | None,
-    profile: str | None,
-) -> str:
-    if not profile_setup_memory:
-        return ""
-    entry = profile_setup_memory.get(_profile_setup_memory_key(manager, profile))
+def _profile_setup_entry_details(entry: Mapping[str, object] | None) -> list[str]:
     if not isinstance(entry, Mapping):
-        return ""
+        return []
     details: list[str] = []
     renderer = _normalize_render_profile(entry.get("render_profile"))
     if renderer:
-        details.append(
-            f"renderer {_RENDER_PROFILE_LABELS.get(renderer, renderer.replace('_', ' ').title())}"
-        )
+        details.append(f"renderer {_RENDER_PROFILE_LABELS.get(renderer, renderer.replace('_', ' ').title())}")
     use_custom_output = _coerce_bool(entry.get("use_custom_output"), False)
     output_target = str(entry.get("output_target", "") or "").strip()
     if use_custom_output and output_target:
@@ -439,9 +429,52 @@ def build_mod_manager_profile_setup_hint(
     target_game = _normalize_texture_target_game(str(entry.get("target_game", "") or ""))
     if target_game and target_game != "skyrim":
         details.append(f"target game {target_game}")
+    return details
+
+
+def _profile_setup_display_label(key: str, entry: Mapping[str, object] | None) -> str:
+    manager, _, profile = key.partition("::")
+    manager = manager.strip() or "unknown manager"
+    profile = profile.strip() or "default profile"
+    details = _profile_setup_entry_details(entry)
+    if details:
+        return f"{manager} / {profile} — {', '.join(details)}"
+    return f"{manager} / {profile}"
+
+
+def _profile_setup_memory_items(profile_setup_memory: Mapping[str, object] | None) -> list[tuple[str, str]]:
+    if not isinstance(profile_setup_memory, Mapping):
+        return []
+    items: list[tuple[str, str]] = []
+    for raw_key, raw_value in profile_setup_memory.items():
+        if not isinstance(raw_key, str):
+            continue
+        key = raw_key.strip()
+        if not key or not isinstance(raw_value, Mapping):
+            continue
+        items.append((key, _profile_setup_display_label(key, raw_value)))
+    items.sort(key=lambda item: item[1].casefold())
+    return items
+
+
+def build_mod_manager_profile_setup_hint(
+    profile_setup_memory: Mapping[str, object] | None,
+    *,
+    manager: str | None,
+    profile: str | None,
+) -> str:
+    if not profile_setup_memory:
+        return ""
+    entry = profile_setup_memory.get(_profile_setup_memory_key(manager, profile))
+    if not isinstance(entry, Mapping):
+        return ""
+    details = _profile_setup_entry_details(entry)
     if not details:
         return ""
-    return f"Remembered setup for this profile: {', '.join(details)}. Use the restore button to reapply it quickly."
+    return (
+        f"Remembered setup for this profile: {', '.join(details)}. "
+        "Use the restore button or switcher to reapply it quickly."
+    )
 
 
 def _infer_workflow_mode_from_state(state: Mapping[str, object]) -> str:
@@ -10312,6 +10345,7 @@ if GUI_AVAILABLE:
             self.dismissed_warnings: set[str] = set()
             self._workflow_mode_syncing = False
             self._theme_mode_syncing = False
+            self._profile_setup_choice_label_to_key: dict[str, str] = {}
 
             self.input_var = tk.StringVar()
             self.output_var = tk.StringVar()
@@ -10320,6 +10354,7 @@ if GUI_AVAILABLE:
             self.preview_jump_var = tk.StringVar(value="")
             self.detected_context_var = tk.StringVar(value=self.manager_context.summary)
             self.profile_setup_hint_var = tk.StringVar(value="No remembered setup exists for this profile yet.")
+            self.profile_setup_choice_var = tk.StringVar(value="")
             self.preview_speed_state_var = tk.StringVar(value="")
             self.checkpoint_health_var = tk.StringVar(value="Checkpoint: pending")
             self.batch_perf_hint_var = tk.StringVar(value="")
@@ -10811,8 +10846,26 @@ if GUI_AVAILABLE:
             self.profile_setup_restore_button.pack(side=tk.LEFT, padx=(8, 0))
             self._add_tooltip(
                 self.profile_setup_restore_button,
-                "Reapply the renderer, workflow mode, target game, and output target remembered for the detected mod-manager profile.",
+                "Reapply the renderer, workflow mode, target game, and output target from the selected remembered setup.",
             )
+            profile_setup_choice_label = ttk.Label(project_settings_row, text=self._tr("Saved setups:"))
+            profile_setup_choice_label.pack(side=tk.LEFT, padx=(8, 0))
+            self._add_tooltip(
+                profile_setup_choice_label,
+                "Choose from any remembered profile setup before restoring it to the current session.",
+            )
+            self.profile_setup_choice_combo = ttk.Combobox(
+                project_settings_row,
+                textvariable=self.profile_setup_choice_var,
+                state="readonly",
+                width=42,
+            )
+            self.profile_setup_choice_combo.pack(side=tk.LEFT, padx=(4, 0))
+            self._add_tooltip(
+                self.profile_setup_choice_combo,
+                "Lists remembered renderer/workflow/output setups for quick switching.",
+            )
+            self.profile_setup_choice_combo.bind("<<ComboboxSelected>>", lambda *_: self._update_profile_setup_restore_controls())
             profile_setup_hint_label = ttk.Label(
                 file_frame,
                 textvariable=self.profile_setup_hint_var,
@@ -10828,6 +10881,7 @@ if GUI_AVAILABLE:
             )
             file_frame.columnconfigure(1, weight=1, minsize=280)
             file_frame.columnconfigure(2, minsize=100)
+            self._refresh_detected_context_hint()
             file_frame.columnconfigure(3, minsize=100)
             file_frame.columnconfigure(4, minsize=100)
             self._update_output_location_controls()
@@ -12463,11 +12517,46 @@ if GUI_AVAILABLE:
             entry = self.profile_setup_memory.get(key)
             return entry if isinstance(entry, dict) else None
 
+        def _selected_profile_setup_key(self) -> str:
+            selected_label = self.profile_setup_choice_var.get().strip()
+            key = self._profile_setup_choice_label_to_key.get(selected_label, "")
+            if key:
+                return key
+            return self._current_profile_setup_key()
+
+        def _profile_setup_display_items(self) -> list[tuple[str, str]]:
+            return _profile_setup_memory_items(self.profile_setup_memory)
+
+        def _refresh_profile_setup_switcher(self) -> None:
+            combo = getattr(self, "profile_setup_choice_combo", None)
+            if combo is None:
+                return
+            items = self._profile_setup_display_items()
+            self._profile_setup_choice_label_to_key = {label: key for key, label in items}
+            if items:
+                values = tuple(label for _, label in items)
+                current_key = self._current_profile_setup_key()
+                current_label = next((label for key, label in items if key == current_key), "")
+                selected_label = self.profile_setup_choice_var.get().strip()
+                if selected_label not in self._profile_setup_choice_label_to_key:
+                    selected_label = current_label or values[0]
+                self.profile_setup_choice_var.set(selected_label)
+                combo.configure(values=values, state="readonly")
+                combo.set(selected_label)
+            else:
+                self.profile_setup_choice_var.set("")
+                self._profile_setup_choice_label_to_key = {}
+                combo.configure(values=("No remembered setups",), state="disabled")
+                combo.set("No remembered setups")
+            self._update_profile_setup_restore_controls()
+
         def _update_profile_setup_restore_controls(self) -> None:
             button = getattr(self, "profile_setup_restore_button", None)
             if button is None:
                 return
-            button.configure(state=tk.NORMAL if self._current_profile_setup_entry() else tk.DISABLED)
+            button.configure(
+                state=tk.NORMAL if self._selected_profile_setup_key() and self._selected_profile_setup_key() in self.profile_setup_memory else tk.DISABLED
+            )
 
         def _sync_current_profile_setup_memory(self) -> None:
             key = self._current_profile_setup_key()
@@ -12502,6 +12591,7 @@ if GUI_AVAILABLE:
                 )
             )
             self.profile_setup_hint_var.set(profile_setup_hint or "No remembered setup exists for this profile yet.")
+            self._refresh_profile_setup_switcher()
 
         def _build_gui_state(self) -> dict[str, object]:
             self._sync_current_profile_setup_memory()
@@ -12794,9 +12884,10 @@ if GUI_AVAILABLE:
             self.output_button.configure(state=tk.NORMAL if can_edit else tk.DISABLED)
 
         def _restore_profile_setup_for_current_context(self) -> None:
-            entry = self._current_profile_setup_entry()
-            if entry is None:
-                self.status_var.set("No remembered setup exists for the detected mod-manager profile.")
+            selected_key = self._selected_profile_setup_key()
+            entry = self.profile_setup_memory.get(selected_key)
+            if not isinstance(entry, dict):
+                self.status_var.set("No remembered setup exists for the selected profile setup.")
                 return
             render_profile = _normalize_render_profile(entry.get("render_profile"))
             workflow_mode = _normalize_workflow_mode(entry.get("workflow_mode"))
@@ -12816,7 +12907,9 @@ if GUI_AVAILABLE:
                 self._on_render_profile_changed()
             self._update_output_location_controls()
             self._save_persisted_gui_state()
+            self._refresh_profile_setup_switcher()
             profile_name = self.manager_context.profile_name or self.last_mod_profile_memory or "default profile"
+            selected_label = self.profile_setup_choice_var.get().strip() or profile_name
             summary_bits: list[str] = []
             if render_profile:
                 summary_bits.append(
@@ -12831,9 +12924,9 @@ if GUI_AVAILABLE:
             elif not use_custom_output:
                 summary_bits.append("output next to input")
             self.status_var.set(
-                f"Restored remembered setup for {profile_name}: {', '.join(summary_bits)}."
+                f"Restored remembered setup for {selected_label}: {', '.join(summary_bits)}."
                 if summary_bits
-                else f"Restored remembered setup for {profile_name}."
+                else f"Restored remembered setup for {selected_label}."
             )
 
         def _toggle_custom_output_location(self) -> None:
@@ -18945,12 +19038,27 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     profile_setup_restore_button.setObjectName("restore_profile_setup")
     profile_setup_restore_button.setToolTip(
         _format_short_guidance_tooltip(
-            "restores the renderer, workflow mode, and output target remembered for this profile",
-            "you are switching back to a known MO2/Vortex profile and want the last safe setup back",
+            "restores the renderer, workflow mode, and output target from the selected remembered setup",
+            "you are switching back to a known MO2/Vortex profile and want a saved setup back",
             "you are starting from scratch or intentionally changing families or output targets",
         )
     )
     quick_switch_row.addWidget(profile_setup_restore_button)
+    profile_setup_choice_label = QtWidgets.QLabel("Saved setups:")
+    profile_setup_choice_label.setToolTip(
+        "Choose a remembered profile setup to quickly switch the renderer, workflow, and output target."
+    )
+    quick_switch_row.addWidget(profile_setup_choice_label)
+    profile_setup_choice_combo = QtWidgets.QComboBox()
+    profile_setup_choice_combo.setObjectName("profile_setup_choice")
+    profile_setup_choice_combo.setMinimumContentsLength(38)
+    profile_setup_choice_combo.setSizeAdjustPolicy(
+        QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+    )
+    profile_setup_choice_combo.setToolTip(
+        "Lists saved renderer/workflow/output setups for quick switching."
+    )
+    quick_switch_row.addWidget(profile_setup_choice_combo, 1)
     quick_switch_row.addStretch(1)
     generation_layout.addLayout(quick_switch_row)
 
@@ -19991,6 +20099,48 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         entry = memory.get(_current_qt_profile_setup_key(source_state))
         return entry if isinstance(entry, dict) else None
 
+    def _selected_qt_profile_setup_key(state: Mapping[str, object] | None = None) -> str:
+        if profile_setup_choice_combo.count() <= 0:
+            return _current_qt_profile_setup_key(state)
+        key = profile_setup_choice_combo.currentData()
+        if isinstance(key, str) and key.strip():
+            return key.strip()
+        return _current_qt_profile_setup_key(state)
+
+    def _selected_qt_profile_setup_entry(state: Mapping[str, object] | None = None) -> dict[str, object] | None:
+        source_state = qt_saved_state if state is None else state
+        memory = source_state.get("profile_setup_memory")
+        if not isinstance(memory, Mapping):
+            return None
+        entry = memory.get(_selected_qt_profile_setup_key(source_state))
+        return entry if isinstance(entry, dict) else None
+
+    def _refresh_profile_setup_choices(state: Mapping[str, object] | None = None) -> None:
+        source_state = qt_saved_state if state is None else state
+        memory = source_state.get("profile_setup_memory")
+        profile_setup_choice_combo.blockSignals(True)
+        try:
+            profile_setup_choice_combo.clear()
+            items = _profile_setup_memory_items(memory)
+            if not items:
+                profile_setup_choice_combo.addItem("No remembered setups", "")
+                profile_setup_choice_combo.setEnabled(False)
+            else:
+                profile_setup_choice_combo.setEnabled(True)
+                for key, label in items:
+                    profile_setup_choice_combo.addItem(label, key)
+                preferred_key = _current_qt_profile_setup_key(source_state)
+                if profile_setup_choice_combo.findData(preferred_key) < 0:
+                    preferred_key = _selected_qt_profile_setup_key(source_state)
+                if profile_setup_choice_combo.findData(preferred_key) < 0:
+                    preferred_key = items[0][0]
+                preferred_index = profile_setup_choice_combo.findData(preferred_key)
+                if preferred_index >= 0:
+                    profile_setup_choice_combo.setCurrentIndex(preferred_index)
+        finally:
+            profile_setup_choice_combo.blockSignals(False)
+        _update_profile_setup_restore_controls(source_state)
+
     def _profile_setup_hint_text(state: Mapping[str, object] | None = None) -> str:
         source_state = qt_saved_state if state is None else state
         hint = build_mod_manager_profile_setup_hint(
@@ -20012,12 +20162,13 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                 profile_setup_hint=_profile_setup_hint_text(source_state),
             )
         )
+        _refresh_profile_setup_choices(source_state)
 
     def _refresh_profile_setup_hint_label(state: Mapping[str, object] | None = None) -> None:
         profile_setup_hint_label.setText(_profile_setup_hint_text(state))
 
     def _update_profile_setup_restore_controls(state: Mapping[str, object] | None = None) -> None:
-        profile_setup_restore_button.setEnabled(_current_qt_profile_setup_entry(state) is not None)
+        profile_setup_restore_button.setEnabled(_selected_qt_profile_setup_entry(state) is not None)
 
     def _sync_qt_profile_setup_memory(state: dict[str, object]) -> dict[str, object]:
         key = _current_qt_profile_setup_key(state)
@@ -20058,15 +20209,16 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         status_label.setText(f"Loaded detected mod texture folder: {selected_path}.")
 
     def _restore_qt_profile_setup() -> None:
-        entry = _current_qt_profile_setup_entry()
+        entry = _selected_qt_profile_setup_entry()
         if entry is None:
-            status_label.setText("No remembered setup exists for the detected mod-manager profile.")
+            status_label.setText("No remembered setup exists for the selected profile setup.")
             return
         render_profile = _normalize_render_profile(entry.get("render_profile"))
         workflow_mode = _normalize_workflow_mode(entry.get("workflow_mode"))
         use_custom_output = _coerce_bool(entry.get("use_custom_output"), False)
         output_target = str(entry.get("output_target", "") or "").strip()
         target_game = _normalize_texture_target_game(str(entry.get("target_game", "") or ""))
+        selected_label = profile_setup_choice_combo.currentText().strip() or "selected setup"
         if workflow_mode:
             workflow_mode_combo.setCurrentText(_WORKFLOW_MODE_LABELS[workflow_mode])
         if use_custom_output and output_target and output_target.lower() != "next to input":
@@ -20080,7 +20232,6 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         _refresh_mod_manager_context_hint()
         _refresh_profile_setup_hint_label()
         _update_profile_setup_restore_controls()
-        profile_name = manager_context.profile_name or str(qt_saved_state.get("last_mod_profile", "") or "") or "default profile"
         summary_bits: list[str] = []
         if render_profile:
             summary_bits.append(
@@ -20095,9 +20246,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         elif not use_custom_output:
             summary_bits.append("output next to input")
         status_label.setText(
-            f"Restored remembered setup for {profile_name}: {', '.join(summary_bits)}."
+            f"Restored remembered setup for {selected_label}: {', '.join(summary_bits)}."
             if summary_bits
-            else f"Restored remembered setup for {profile_name}."
+            else f"Restored remembered setup for {selected_label}."
         )
 
     def _update_profile_recommendation() -> None:

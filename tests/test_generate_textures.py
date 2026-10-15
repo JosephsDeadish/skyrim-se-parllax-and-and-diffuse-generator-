@@ -75,6 +75,8 @@ from generate_textures import (
     _apply_qt_profile_output_defaults,
     _QT_OUTPUT_GROUPS,
     _describe_qt_profile_guidance,
+    _profile_setup_memory_items,
+    _profile_setup_memory_key,
     _detect_renderer_version_hints,
     _format_short_guidance_tooltip,
     _format_log_export_text,
@@ -1478,6 +1480,33 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("Remembered setup for this profile", message)
         self.assertIn(hint, message)
 
+    def test_profile_setup_memory_items_include_descriptive_labels(self) -> None:
+        items = _profile_setup_memory_items(
+            {
+                "Mod Organizer 2::Main": {
+                    "render_profile": "truepbr",
+                    "output_target": "D:/Skyrim/Output",
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                },
+                "Mod Organizer 2::Alt": {
+                    "render_profile": "community_shaders",
+                    "output_target": "",
+                    "use_custom_output": False,
+                    "workflow_mode": "beginner",
+                    "target_game": "skyrim",
+                },
+            }
+        )
+        self.assertEqual([key for key, _ in items], ["Mod Organizer 2::Alt", "Mod Organizer 2::Main"])
+        self.assertIn("renderer Community Shaders", items[0][1])
+        self.assertIn("workflow mode Beginner", items[0][1])
+        self.assertIn("renderer Community Shaders PBR", items[1][1])
+        self.assertIn("output D:/Skyrim/Output", items[1][1])
+        self.assertIn("workflow mode Advanced", items[1][1])
+        self.assertIn("target game fallout4", items[1][1])
+
     def test_qt_generation_settings_merge_with_shared_gui_state(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             input_path = Path(temp_dir) / "source.dds"
@@ -2409,6 +2438,69 @@ class GenerateTexturesTests(unittest.TestCase):
                 self.assertIn("renderer Community Shaders", hint)
                 self.assertIn("output D:/Skyrim/Output", hint)
                 self.assertTrue(gui.profile_setup_restore_button.instate(("!disabled",)))
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_profile_setup_switcher_restores_selected_saved_setup(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "output"
+            output_dir.mkdir()
+            manager = "Mod Organizer 2"
+            profile = "Main"
+            current_key = _profile_setup_memory_key(manager, profile)
+            alternate_key = _profile_setup_memory_key(manager, "Alt")
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            saved_state["last_mod_manager"] = manager
+            saved_state["last_mod_profile"] = profile
+            saved_state["profile_setup_memory"] = {
+                current_key: {
+                    "render_profile": "truepbr",
+                    "output_target": str(output_dir),
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                },
+                alternate_key: {
+                    "render_profile": "community_shaders",
+                    "output_target": "",
+                    "use_custom_output": False,
+                    "workflow_mode": "standard",
+                    "target_game": "skyrim",
+                },
+            }
+            gui = None
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state), mock.patch(
+                    "generate_textures.detect_mod_manager_context",
+                    return_value=ModManagerContext(manager=manager, profile_name=profile),
+                ):
+                    gui = TextureGeneratorGUI()
+                gui.root.update_idletasks()
+                values = tuple(gui.profile_setup_choice_combo["values"])
+                self.assertEqual(len(values), 2)
+                self.assertTrue(any("renderer TruePBR" in value for value in values))
+                self.assertTrue(any("renderer Community Shaders" in value for value in values))
+                alt_label = next(value for value in values if "renderer Community Shaders" in value)
+                gui.profile_setup_choice_var.set(alt_label)
+                gui._update_profile_setup_restore_controls()
+                self.assertTrue(gui.profile_setup_restore_button.instate(("!disabled",)))
+                gui.profile_setup_restore_button.invoke()
+                gui.root.update_idletasks()
+                self.assertEqual(gui.render_profile_var.get(), "community_shaders")
+                self.assertEqual(gui.workflow_mode_var.get(), "Standard")
+                self.assertFalse(gui.use_custom_output_var.get())
+                self.assertEqual(gui.output_var.get(), "")
+                self.assertEqual(gui.target_game_var.get(), "skyrim")
+                restored_state = gui._build_gui_state()
+                restored_entry = restored_state["profile_setup_memory"][current_key]
+                self.assertEqual(restored_entry["render_profile"], "community_shaders")
+                self.assertEqual(restored_entry["workflow_mode"], "standard")
+                self.assertFalse(restored_entry["use_custom_output"])
+                self.assertEqual(restored_entry["output_target"], "next to input")
+                self.assertEqual(restored_entry["target_game"], "skyrim")
             finally:
                 if gui is not None:
                     gui.root.destroy()
@@ -11494,6 +11586,79 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
                 self.assertEqual(restored_entry["output_target"], str(output_dir))
                 self.assertEqual(restored_entry["workflow_mode"], "advanced")
                 self.assertEqual(restored_entry["target_game"], "fallout4")
+                return True
+            return False
+
+        self.run_window(
+            scenario,
+            load_state=saved_state,
+            save_side_effect=capture_state,
+            extra_patches=(mock.patch("generate_textures.detect_mod_manager_context", return_value=context),),
+        )
+
+    def test_qt_profile_setup_switcher_restores_selected_saved_setup(self) -> None:
+        manager = "Mod Organizer 2"
+        profile = "Main"
+        current_key = self.qt._profile_setup_memory_key(manager, profile)
+        alternate_key = self.qt._profile_setup_memory_key(manager, "Alt")
+        saved_state = dict(self.qt._GUI_STATE_DEFAULTS)
+        saved_state.update(
+            {
+                "last_mod_manager": manager,
+                "last_mod_profile": profile,
+                "profile_setup_memory": {
+                    current_key: {
+                        "render_profile": "truepbr",
+                        "use_custom_output": True,
+                        "output_target": "/tmp/output",
+                        "workflow_mode": "advanced",
+                        "target_game": "fallout4",
+                    },
+                    alternate_key: {
+                        "render_profile": "community_shaders",
+                        "use_custom_output": False,
+                        "output_target": "",
+                        "workflow_mode": "standard",
+                        "target_game": "skyrim",
+                    },
+                },
+            }
+        )
+        saved_states = []
+        context = self.qt.ModManagerContext(manager=manager, profile_name=profile, loaded_texture_dirs=())
+        state = {"step": 0}
+
+        def capture_state(state_data):
+            saved_states.append(json.loads(json.dumps(state_data)))
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            combo = w("profile_setup_choice")
+            step = state["step"]
+            if step == 0:
+                self.assertGreaterEqual(combo.count(), 2)
+                labels = [combo.itemText(i) for i in range(combo.count())]
+                self.assertTrue(any("renderer Community Shaders" in label for label in labels))
+                alternate_index = combo.findData(alternate_key)
+                self.assertGreaterEqual(alternate_index, 0)
+                combo.setCurrentIndex(alternate_index)
+                self.assertTrue(w("restore_profile_setup").isEnabled())
+                w("restore_profile_setup").click()
+                state["step"] = 1
+            elif step == 1 and w("generate").isEnabled():
+                self.assertEqual(w("render_profile").currentText(), "community_shaders")
+                self.assertEqual(w("workflow_mode").currentText(), self.qt._WORKFLOW_MODE_LABELS["standard"])
+                self.assertEqual(w("target_game").currentText(), "skyrim")
+                self.assertEqual(w("output_dir").text(), "")
+                self.assertIn("Restored remembered setup for", w("generation_status").text())
+                self.assertIn("Mod Organizer 2 / Alt", w("generation_status").text())
+                self.assertTrue(saved_states)
+                restored_entry = saved_states[-1]["profile_setup_memory"][current_key]
+                self.assertEqual(restored_entry["render_profile"], "community_shaders")
+                self.assertEqual(restored_entry["workflow_mode"], "standard")
+                self.assertFalse(restored_entry["use_custom_output"])
+                self.assertEqual(restored_entry["output_target"], "next to input")
+                self.assertEqual(restored_entry["target_game"], "skyrim")
                 return True
             return False
 
