@@ -8873,13 +8873,21 @@ def _format_qt_nif_scan_page_summary(
         status = str(row.get("status", "") or "").strip().upper()
         if status in status_counts:
             status_counts[status] += 1
+    conflict_file_count = sum(
+        bool(str(row.get("conflict_codes", "") or "").strip())
+        for row in rows
+    )
     status_summary = ", ".join(
         f"{status} {count}"
         for status, count in status_counts.items()
         if count
     )
     summary = f"Page {int(page_index) + 1} of {max(1, int(page_count))} · {len(rows)} result(s)"
-    return f"{summary} · {status_summary}" if status_summary else summary
+    summary_parts = [summary]
+    if status_summary:
+        summary_parts.append(status_summary)
+    summary_parts.append(f"conflict-coded NIFs {conflict_file_count}")
+    return " · ".join(summary_parts)
 
 
 def _qt_nif_scan_status_color(status: str, *, dark_mode: bool) -> str | None:
