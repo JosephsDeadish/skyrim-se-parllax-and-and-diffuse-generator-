@@ -8371,7 +8371,7 @@ def _write_qt_nif_scan_csv(
     path: str | os.PathLike[str],
     rows: Sequence[Mapping[str, str]],
 ) -> int:
-    fieldnames = ("status", "file_name", "preview", "details")
+    fieldnames = ("status", "file_name", "preview", "details", "conflict_codes")
     with Path(path).open("w", encoding="utf-8-sig", newline="") as csv_file:
         writer = csv.DictWriter(csv_file, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()

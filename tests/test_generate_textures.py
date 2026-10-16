@@ -943,6 +943,7 @@ class TestQtNifValidationScan(unittest.TestCase):
                 "file_name": "mesh, variant.nif",
                 "preview": "/mods/mesh, variant.nif",
                 "details": "Issue: missing slot\nConflict: shader_state.flag",
+                "conflict_codes": "shader_state.flag\nshader_state.missing_texture",
                 "extra": "ignored",
             }
         ]
@@ -961,6 +962,7 @@ class TestQtNifValidationScan(unittest.TestCase):
                     "file_name": "mesh, variant.nif",
                     "preview": "/mods/mesh, variant.nif",
                     "details": "Issue: missing slot\nConflict: shader_state.flag",
+                    "conflict_codes": "shader_state.flag\nshader_state.missing_texture",
                 }
             ],
         )
@@ -971,7 +973,10 @@ class TestQtNifValidationScan(unittest.TestCase):
             self.assertEqual(_write_qt_nif_scan_csv(csv_path, []), 0)
             with csv_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
                 reader = csv.reader(csv_file)
-                self.assertEqual(next(reader), ["status", "file_name", "preview", "details"])
+                self.assertEqual(
+                    next(reader),
+                    ["status", "file_name", "preview", "details", "conflict_codes"],
+                )
                 self.assertEqual(list(reader), [])
 
     def test_scan_rows_classify_results_and_include_diagnostic_context(self) -> None:
