@@ -8173,6 +8173,117 @@ def _normalize_nif_editor_texture_input_path(value: str) -> str | None:
     return _coerce_generated_resource_path_to_dds(normalized)
 
 
+def infer_nif_editor_texture_paths(
+    target_path: Path,
+    *,
+    prefer_msn_normal: bool = False,
+    preferred_env_mask_suffix: str = "_m.dds",
+) -> tuple[Path | None, dict[str, str]]:
+    selected_path = Path(target_path).expanduser()
+    nif_candidates = find_nif_files(selected_path) if selected_path.is_dir() else [selected_path]
+    guessed_from: Path | None = None
+    guessed_paths = {name: "" for name in ("diffuse", "parallax", "normal", "glow", "cubemap", "env_mask")}
+
+    for nif_candidate in nif_candidates:
+        if not nif_candidate.exists():
+            continue
+        try:
+            candidate_parallax = guess_parallax_path_for_nif(nif_candidate) or ""
+        except Exception:
+            candidate_parallax = ""
+        try:
+            candidate_normal = guess_normal_path_for_nif(
+                nif_candidate,
+                msn=prefer_msn_normal,
+            ) or ""
+        except Exception:
+            candidate_normal = ""
+        candidate_env = ""
+        candidate_glow = ""
+        candidate_cubemap = ""
+        try:
+            infos = scan_nif(nif_candidate)
+        except Exception:
+            infos = []
+        for info in infos:
+            texture_paths = getattr(info, "texture_paths", {})
+            if not candidate_parallax:
+                candidate_parallax = str(texture_paths.get(3, "")).strip()
+            if not candidate_normal:
+                candidate_normal = str(texture_paths.get(1, "")).strip()
+            if not candidate_env:
+                candidate_env = str(texture_paths.get(5, "")).strip()
+            candidate_glow = str(texture_paths.get(2, "")).strip()
+            candidate_cubemap = str(texture_paths.get(4, "")).strip()
+            if not guessed_paths["glow"] and candidate_glow:
+                guessed_paths["glow"] = candidate_glow
+            if not guessed_paths["cubemap"] and candidate_cubemap:
+                guessed_paths["cubemap"] = candidate_cubemap
+            diffuse_path = str(texture_paths.get(0, "")).strip()
+            if diffuse_path:
+                guessed_paths["diffuse"] = guessed_paths["diffuse"] or diffuse_path
+                diffuse_like = Path(diffuse_path.replace("\\", "/"))
+                diffuse_stem = _normalize_texture_family_stem(diffuse_like)
+                if not candidate_parallax:
+                    candidate_parallax = str(
+                        diffuse_like.parent / f"{diffuse_stem}_p.dds"
+                    ).replace("/", "\\")
+                if not candidate_normal:
+                    normal_suffix = "_msn.dds" if prefer_msn_normal else "_n.dds"
+                    candidate_normal = str(
+                        diffuse_like.parent / f"{diffuse_stem}{normal_suffix}"
+                    ).replace("/", "\\")
+                if not guessed_paths["glow"]:
+                    guessed_paths["glow"] = str(
+                        diffuse_like.parent / f"{diffuse_stem}_g.dds"
+                    ).replace("/", "\\")
+                if not candidate_env:
+                    candidate_env = str(
+                        diffuse_like.parent / f"{diffuse_stem}{preferred_env_mask_suffix}"
+                    ).replace("/", "\\")
+            if candidate_parallax and candidate_normal and candidate_env:
+                break
+        if not candidate_env:
+            try:
+                candidate_env = guess_env_mask_path_for_nif(
+                    nif_candidate,
+                    preferred_suffix=preferred_env_mask_suffix,
+                ) or ""
+            except Exception:
+                candidate_env = ""
+        if not guessed_paths["cubemap"]:
+            try:
+                guessed_paths["cubemap"] = guess_cubemap_path_for_nif(nif_candidate) or ""
+            except Exception:
+                guessed_paths["cubemap"] = ""
+        candidate_parallax = candidate_parallax.replace("/", "\\")
+        candidate_normal = candidate_normal.replace("/", "\\")
+        candidate_env = candidate_env.replace("/", "\\")
+        if (
+            candidate_parallax
+            or candidate_normal
+            or candidate_env
+            or guessed_paths["diffuse"]
+            or guessed_paths["glow"]
+            or guessed_paths["cubemap"]
+        ):
+            guessed_from = nif_candidate
+            guessed_paths["parallax"] = candidate_parallax
+            guessed_paths["normal"] = candidate_normal
+            guessed_paths["env_mask"] = candidate_env
+            break
+
+    if guessed_from is None:
+        return None, {}
+    for name, value in tuple(guessed_paths.items()):
+        guessed_paths[name] = _normalize_nif_editor_texture_input_path(value) or ""
+    if not guessed_paths["env_mask"] and guessed_paths["parallax"].lower().endswith("_p.dds"):
+        guessed_paths["env_mask"] = _normalize_nif_editor_texture_input_path(
+            guessed_paths["parallax"][:-6] + preferred_env_mask_suffix
+        ) or ""
+    return guessed_from, guessed_paths
+
+
 def resolve_nif_editor_targets(path_value: str, scan_mode: str) -> tuple[list[Path], str | None]:
     cleaned_path = str(path_value or "").strip()
     mode = str(scan_mode or "").strip().lower()
@@ -17590,114 +17701,28 @@ if GUI_AVAILABLE:
                     )
                     prefer_msn = bool(defaults.get("prefer_msn_normal"))
                     env_mask_suffix = _preferred_env_mask_suffix_for_profile()
-                    selected_path = Path(path_value)
-                    nifs = find_nif_files(selected_path) if selected_path.is_dir() else [selected_path]
-                    guessed_from: Path | None = None
-                    guessed_diffuse = ""
-                    guessed_parallax = ""
-                    guessed_normal = ""
-                    guessed_glow = ""
-                    guessed_cubemap = ""
-                    guessed_env = ""
-                    for nif_candidate in nifs:
-                        if not nif_candidate.exists():
-                            continue
-                        candidate_parallax = guess_parallax_path_for_nif(nif_candidate) or ""
-                        candidate_normal = guess_normal_path_for_nif(nif_candidate, msn=prefer_msn) or ""
-                        candidate_env = ""
-                        try:
-                            infos = scan_nif(nif_candidate)
-                        except Exception:
-                            infos = []
-                        for info in infos:
-                            texture_paths = getattr(info, "texture_paths", {})
-                            if not candidate_parallax:
-                                candidate_parallax = str(texture_paths.get(3, "")).strip()
-                            if not candidate_normal:
-                                candidate_normal = str(texture_paths.get(1, "")).strip()
-                            if not candidate_env:
-                                candidate_env = str(texture_paths.get(5, "")).strip()
-                            candidate_glow = str(texture_paths.get(2, "")).strip()
-                            candidate_cubemap = str(texture_paths.get(4, "")).strip()
-                            if not guessed_glow and candidate_glow:
-                                guessed_glow = candidate_glow
-                            if not guessed_cubemap and candidate_cubemap:
-                                guessed_cubemap = candidate_cubemap
-                            diffuse_path = str(texture_paths.get(0, "")).strip()
-                            if diffuse_path:
-                                guessed_diffuse = guessed_diffuse or diffuse_path
-                                diffuse_like = Path(diffuse_path.replace("\\", "/"))
-                                diffuse_stem = _normalize_texture_family_stem(diffuse_like)
-                                if not candidate_parallax:
-                                    candidate_parallax = str(diffuse_like.parent / f"{diffuse_stem}_p.dds").replace("/", "\\")
-                                if not candidate_normal:
-                                    normal_suffix = "_msn.dds" if prefer_msn else "_n.dds"
-                                    candidate_normal = str(diffuse_like.parent / f"{diffuse_stem}{normal_suffix}").replace("/", "\\")
-                                if not guessed_glow:
-                                    guessed_glow = str(diffuse_like.parent / f"{diffuse_stem}_g.dds").replace("/", "\\")
-                                if not candidate_env:
-                                    candidate_env = str(diffuse_like.parent / f"{diffuse_stem}{env_mask_suffix}").replace("/", "\\")
-                            if candidate_parallax and candidate_normal and candidate_env:
-                                break
-                        if not candidate_env:
-                            candidate_env = (
-                                guess_env_mask_path_for_nif(
-                                    nif_candidate,
-                                    preferred_suffix=env_mask_suffix,
-                                )
-                                or ""
-                            )
-                        if not guessed_cubemap:
-                            guessed_cubemap = guess_cubemap_path_for_nif(nif_candidate) or ""
-                        candidate_parallax = candidate_parallax.replace("/", "\\")
-                        candidate_normal = candidate_normal.replace("/", "\\")
-                        candidate_env = candidate_env.replace("/", "\\")
-                        guessed_glow = guessed_glow.replace("/", "\\")
-                        guessed_cubemap = guessed_cubemap.replace("/", "\\")
-                        guessed_diffuse = guessed_diffuse.replace("/", "\\")
-                        if candidate_parallax or candidate_normal or candidate_env or guessed_diffuse or guessed_glow or guessed_cubemap:
-                            guessed_from = nif_candidate
-                            guessed_parallax = candidate_parallax
-                            guessed_normal = candidate_normal
-                            guessed_env = candidate_env
-                            break
+                    guessed_from, guessed_paths = infer_nif_editor_texture_paths(
+                        Path(path_value),
+                        prefer_msn_normal=prefer_msn,
+                        preferred_env_mask_suffix=env_mask_suffix,
+                    )
                     if not guessed_from:
                         status_var.set("Auto-fill could not find any usable diffuse/normal texture slots in the selected NIF(s).")
                         return
-                    guessed_parallax = _normalize_nif_texture_input_path(guessed_parallax) if guessed_parallax else ""
-                    guessed_normal = _normalize_nif_texture_input_path(guessed_normal) if guessed_normal else ""
-                    guessed_env = _normalize_nif_texture_input_path(guessed_env) if guessed_env else ""
-                    guessed_glow = _normalize_nif_texture_input_path(guessed_glow) if guessed_glow else ""
-                    guessed_cubemap = _normalize_nif_texture_input_path(guessed_cubemap) if guessed_cubemap else ""
-                    guessed_diffuse = _normalize_nif_texture_input_path(guessed_diffuse) if guessed_diffuse else ""
                     changed = 0
-                    if guessed_diffuse:
-                        if diffuse_tex_var.get().strip() != guessed_diffuse:
-                            changed += 1
-                        diffuse_tex_var.set(guessed_diffuse)
-                    if guessed_parallax:
-                        if parallax_tex_var.get().strip() != guessed_parallax:
-                            changed += 1
-                        parallax_tex_var.set(guessed_parallax)
-                    if guessed_normal:
-                        if normal_tex_var.get().strip() != guessed_normal:
-                            changed += 1
-                        normal_tex_var.set(guessed_normal)
-                    if guessed_glow:
-                        if glow_tex_var.get().strip() != guessed_glow:
-                            changed += 1
-                        glow_tex_var.set(guessed_glow)
-                    if guessed_cubemap:
-                        if cubemap_tex_var.get().strip() != guessed_cubemap:
-                            changed += 1
-                        cubemap_tex_var.set(guessed_cubemap)
-                    env_mask_guess = guessed_env
-                    if not env_mask_guess and guessed_parallax.lower().endswith("_p.dds"):
-                        env_mask_guess = _normalize_nif_texture_input_path(guessed_parallax[:-6] + env_mask_suffix)
-                    if env_mask_guess:
-                        if env_mask_tex_var.get().strip() != env_mask_guess:
-                            changed += 1
-                        env_mask_tex_var.set(env_mask_guess)
+                    for name, target_var in (
+                        ("diffuse", diffuse_tex_var),
+                        ("parallax", parallax_tex_var),
+                        ("normal", normal_tex_var),
+                        ("glow", glow_tex_var),
+                        ("cubemap", cubemap_tex_var),
+                        ("env_mask", env_mask_tex_var),
+                    ):
+                        guessed_path = guessed_paths.get(name, "")
+                        if guessed_path:
+                            if target_var.get().strip() != guessed_path:
+                                changed += 1
+                            target_var.set(guessed_path)
                     if changed == 0:
                         status_var.set(f"Auto-fill checked {guessed_from.name}; current paths already match the best guess.")
                     else:
@@ -20565,6 +20590,13 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     )
     nif_editor_form.addRow("Retries per file (transient errors)", nif_editor_retry_count)
     nif_editor_layout.addLayout(nif_editor_form)
+    nif_editor_autofill_button = QtWidgets.QPushButton("Auto-fill paths from selected NIF")
+    nif_editor_autofill_button.setObjectName("nif_autofill_paths")
+    nif_editor_autofill_button.setToolTip(
+        "Suggest texture-slot paths from the selected NIF or the first usable NIF in the selected folder. "
+        "Review each guess before patching; slots marked Clear are left untouched."
+    )
+    nif_editor_layout.addWidget(nif_editor_autofill_button)
     nif_editor_guidance = QtWidgets.QLabel("Renderer guidance will appear here.")
     nif_editor_guidance.setObjectName("nif_editor_guidance")
     nif_editor_guidance.setWordWrap(True)
@@ -20655,6 +20687,64 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             warnings.insert(0, build_render_profile_family_mismatch_warning(selected_profile, recommendation))
         nif_editor_warning.setVisible(bool(warnings))
         nif_editor_warning.setText("⚠ " + " | ".join(warnings[:3]) if warnings else "")
+
+    def _autofill_qt_nif_editor_texture_paths() -> None:
+        path_text = str(nif_scan_path_edit.text() or "").strip()
+        if not path_text:
+            nif_editor_status.setText("Choose a NIF file or mesh folder in NIF Scan before auto-filling paths.")
+            return
+        recommendation = _recommended_qt_nif_editor_profile()
+        defaults = resolve_nif_patch_defaults_for_render_profile(
+            nif_render_profile.currentText(),
+            recommended_profile=recommendation,
+        )
+        effective_profile = _normalize_render_profile(nif_render_profile.currentText())
+        if effective_profile in {"auto", "custom"}:
+            effective_profile = _normalize_render_profile(recommendation)
+        env_mask_suffix = (
+            "_rmaos.dds"
+            if effective_profile == "truepbr"
+            else "_cm.dds"
+            if effective_profile == "community_shaders"
+            else "_m.dds"
+        )
+        try:
+            guessed_from, guessed_paths = infer_nif_editor_texture_paths(
+                Path(path_text),
+                prefer_msn_normal=bool(defaults.get("prefer_msn_normal")),
+                preferred_env_mask_suffix=env_mask_suffix,
+            )
+        except Exception as exc:
+            nif_editor_status.setText(f"Auto-fill failed: {exc}")
+            return
+        if guessed_from is None:
+            nif_editor_status.setText("Auto-fill could not find usable texture slots in the selected NIF(s).")
+            return
+        changed = 0
+        left_cleared = 0
+        for name, (path_edit, clear_check) in nif_editor_textures.items():
+            guessed_path = guessed_paths.get(name, "")
+            if not guessed_path:
+                continue
+            if clear_check.isChecked():
+                left_cleared += 1
+                continue
+            if path_edit.text().strip() != guessed_path:
+                changed += 1
+            path_edit.setText(guessed_path)
+        if changed:
+            nif_editor_status.setText(f"Auto-filled {changed} texture path(s) from {guessed_from.name}.")
+        elif left_cleared:
+            nif_editor_status.setText(
+                f"Auto-fill checked {guessed_from.name}; cleared slot(s) were left unchanged."
+            )
+        else:
+            nif_editor_status.setText(
+                f"Auto-fill checked {guessed_from.name}; current paths already match the best guess."
+            )
+        _update_nif_editor_context_text()
+
+    nif_editor_autofill_button.clicked.connect(_autofill_qt_nif_editor_texture_paths)
 
     def _apply_nif_editor_renderer_defaults(*_: object) -> None:
         recommendation = _recommended_qt_nif_editor_profile()

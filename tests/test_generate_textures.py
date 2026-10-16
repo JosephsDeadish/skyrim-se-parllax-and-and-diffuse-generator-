@@ -55,6 +55,7 @@ from generate_textures import (
     discover_ui_languages,
     extract_mesh_paths_from_plugin_bytes,
     extract_plugin_mesh_record_refs,
+    infer_nif_editor_texture_paths,
     load_ui_translations,
     _normalize_nif_editor_texture_input_path,
     _load_nif_patcher_exports,
@@ -7161,6 +7162,30 @@ class GenerateTexturesTests(unittest.TestCase):
     def test_normalize_nif_editor_texture_input_path_returns_none_for_blank(self) -> None:
         self.assertIsNone(_normalize_nif_editor_texture_input_path("   "))
 
+    def test_infer_nif_editor_texture_paths_uses_profile_aware_slot_guesses(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "stone.nif"
+            nif_path.write_bytes(b"fixture")
+            info = SimpleNamespace(texture_paths={0: r"textures\architecture\stone.dds"})
+            with mock.patch("generate_textures.scan_nif", return_value=[info]), \
+                 mock.patch("generate_textures.guess_parallax_path_for_nif", return_value=None), \
+                 mock.patch("generate_textures.guess_normal_path_for_nif", return_value=None), \
+                 mock.patch("generate_textures.guess_env_mask_path_for_nif", return_value=None), \
+                 mock.patch("generate_textures.guess_cubemap_path_for_nif", return_value=r"textures\cubemaps\stone_e.dds"):
+                guessed_from, paths = infer_nif_editor_texture_paths(
+                    nif_path,
+                    prefer_msn_normal=True,
+                    preferred_env_mask_suffix="_cm.dds",
+                )
+
+        self.assertEqual(guessed_from, nif_path)
+        self.assertEqual(paths["diffuse"], r"textures\architecture\stone.dds")
+        self.assertEqual(paths["parallax"], r"textures\architecture\stone_p.dds")
+        self.assertEqual(paths["normal"], r"textures\architecture\stone_msn.dds")
+        self.assertEqual(paths["glow"], r"textures\architecture\stone_g.dds")
+        self.assertEqual(paths["env_mask"], r"textures\architecture\stone_cm.dds")
+        self.assertEqual(paths["cubemap"], r"textures\cubemaps\stone_e.dds")
+
     def test_resolve_nif_editor_patch_options_for_target_autofills_missing_paths(self) -> None:
         base_options = build_nif_patch_options_for_nif_editor(
             enable_parallax=True,
@@ -12821,6 +12846,35 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
 
         with mock.patch.object(self.qt.QtWidgets.QMessageBox, "question", return_value=self.qt.QtWidgets.QMessageBox.StandardButton.Yes):
             self.run_window(scenario)
+
+    def test_qt_nif_editor_autofills_texture_paths_and_preserves_cleared_slots(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        nif_path = self.root / "stone.nif"
+        nif_path.write_bytes(
+            _build_minimal_nif(texture_paths=[r"textures\architecture\stone.dds"] + [""] * 8)
+        )
+        completed = {"value": False}
+
+        def scenario(window):
+            if completed["value"]:
+                return False
+            w = lambda name: self.widget(window, name)
+            w("nif_scan_path").setText(str(nif_path))
+            w("nif_texture_normal").setText(r"textures\manual\keep_n.dds")
+            w("nif_clear_normal").setChecked(True)
+            w("nif_autofill_paths").click()
+            self.assertEqual(w("nif_texture_diffuse").text(), r"textures\architecture\stone.dds")
+            self.assertEqual(w("nif_texture_parallax").text(), r"textures\architecture\stone_p.dds")
+            self.assertEqual(w("nif_texture_normal").text(), r"textures\manual\keep_n.dds")
+            self.assertEqual(w("nif_texture_glow").text(), r"textures\architecture\stone_g.dds")
+            self.assertEqual(w("nif_texture_env_mask").text(), r"textures\architecture\stone_m.dds")
+            self.assertEqual(w("nif_texture_cubemap").text(), r"textures\architecture\stone_e.dds")
+            self.assertIn("Auto-filled 5 texture path(s)", w("nif_editor_status").text())
+            completed["value"] = True
+            return True
+
+        self.run_window(scenario)
 
     def test_qt_conflict_only_scan_reruns_current_conflict_paths(self) -> None:
         from types import SimpleNamespace
