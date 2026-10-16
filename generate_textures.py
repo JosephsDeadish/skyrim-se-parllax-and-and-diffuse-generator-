@@ -1093,19 +1093,17 @@ def _checkpoint_source_file_fingerprints(
                 digest = hashlib.sha256()
                 with path.open("rb") as source_file:
                     opened_stat = os.fstat(source_file.fileno())
-                    if _checkpoint_stat_signature(opened_stat) != _checkpoint_stat_signature(stat_result):
-                        continue
                     for chunk in iter(lambda: source_file.read(1024 * 1024), b""):
                         digest.update(chunk)
                     finished_stat = os.fstat(source_file.fileno())
                 current_stat = path.stat()
                 if (
                     _checkpoint_stat_signature(finished_stat) != _checkpoint_stat_signature(opened_stat)
-                    or _checkpoint_stat_signature(current_stat) != _checkpoint_stat_signature(finished_stat)
+                    or _checkpoint_stat_signature(current_stat) != _checkpoint_stat_signature(stat_result)
                 ):
                     continue
-                fingerprint["size_bytes"] = int(finished_stat.st_size)
-                fingerprint["mtime_ns"] = int(finished_stat.st_mtime_ns)
+                fingerprint["size_bytes"] = int(current_stat.st_size)
+                fingerprint["mtime_ns"] = int(current_stat.st_mtime_ns)
                 fingerprint["sha256"] = digest.hexdigest()
             fingerprints[str(path.resolve())] = fingerprint
         except OSError:

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import struct
 import subprocess
 import tempfile
 import unittest
 import unittest.mock
+from types import SimpleNamespace
 from pathlib import Path
 
 from scripts.pre_release_validation import (
@@ -627,6 +629,41 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         self.assertNotEqual(mutation["changed_sha256"], original_hash)
         with self.assertRaisesRegex(ValueError, "does not match source"):
             _validate_packaged_checkpoint_fingerprints(payload)
+
+    def test_packaged_checkpoint_validation_tolerates_stat_and_fstat_identity_differences(self) -> None:
+        source = self.tmp / "sample.dds"
+        _write_packaged_smoke_dds(source, 32)
+        stat_result = source.stat()
+        source_key = str(source.resolve())
+        payload = {
+            "completed_success_files": [source_key],
+            "completed_file_fingerprints": {
+                source_key: {
+                    "size_bytes": stat_result.st_size,
+                    "mtime_ns": stat_result.st_mtime_ns,
+                    "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                }
+            },
+        }
+        original_fstat = os.fstat
+
+        def fstat_with_different_identity(file_descriptor: int) -> SimpleNamespace:
+            opened = original_fstat(file_descriptor)
+            return SimpleNamespace(
+                st_dev=opened.st_dev + 1,
+                st_ino=opened.st_ino + 1,
+                st_size=opened.st_size,
+                st_mtime_ns=opened.st_mtime_ns,
+                st_ctime_ns=opened.st_ctime_ns + 1,
+            )
+
+        with unittest.mock.patch(
+            "scripts.pre_release_validation.os.fstat",
+            side_effect=fstat_with_different_identity,
+        ):
+            validated = _validate_packaged_checkpoint_fingerprints(payload)
+
+        self.assertEqual(validated[source_key]["sha256"], payload["completed_file_fingerprints"][source_key]["sha256"])
 
     def test_packaged_smoke_scenarios_define_required_outputs(self) -> None:
         scenarios = _packaged_smoke_scenarios()

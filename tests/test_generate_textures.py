@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import json
 import io
 import os
@@ -5614,6 +5615,59 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(recorded[str(changed.resolve())]["mtime_ns"], current[str(changed.resolve())]["mtime_ns"])
         self.assertNotEqual(recorded[str(changed.resolve())]["sha256"], current[str(changed.resolve())]["sha256"])
         self.assertEqual(matching, {str(unchanged.resolve())})
+
+    def test_checkpoint_fingerprint_tolerates_stat_and_fstat_identity_differences(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.dds"
+            source.write_bytes(b"stable source")
+            original_fstat = os.fstat
+
+            def fstat_with_different_identity(file_descriptor: int) -> SimpleNamespace:
+                stat_result = original_fstat(file_descriptor)
+                return SimpleNamespace(
+                    st_dev=stat_result.st_dev + 1,
+                    st_ino=stat_result.st_ino + 1,
+                    st_size=stat_result.st_size,
+                    st_mtime_ns=stat_result.st_mtime_ns,
+                    st_ctime_ns=stat_result.st_ctime_ns + 1,
+                )
+
+            with mock.patch(
+                "generate_textures.os.fstat",
+                side_effect=fstat_with_different_identity,
+            ):
+                fingerprints = _checkpoint_source_file_fingerprints((source,))
+
+        fingerprint = fingerprints[str(source.resolve())]
+        self.assertEqual(fingerprint["size_bytes"], len(b"stable source"))
+        self.assertEqual(fingerprint["sha256"], hashlib.sha256(b"stable source").hexdigest())
+
+    def test_checkpoint_fingerprint_rejects_source_changed_during_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.dds"
+            source.write_bytes(b"stable source")
+            original_fstat = os.fstat
+            call_count = 0
+
+            def fstat_with_changed_timestamp(file_descriptor: int) -> SimpleNamespace:
+                nonlocal call_count
+                stat_result = original_fstat(file_descriptor)
+                call_count += 1
+                return SimpleNamespace(
+                    st_dev=stat_result.st_dev,
+                    st_ino=stat_result.st_ino,
+                    st_size=stat_result.st_size,
+                    st_mtime_ns=stat_result.st_mtime_ns + int(call_count > 1),
+                    st_ctime_ns=stat_result.st_ctime_ns,
+                )
+
+            with mock.patch(
+                "generate_textures.os.fstat",
+                side_effect=fstat_with_changed_timestamp,
+            ):
+                fingerprints = _checkpoint_source_file_fingerprints((source,))
+
+        self.assertNotIn(str(source.resolve()), fingerprints)
 
     def test_checkpoint_resume_reprocesses_legacy_entries_without_fingerprints(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

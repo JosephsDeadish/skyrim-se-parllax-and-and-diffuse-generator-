@@ -266,8 +266,6 @@ def _validate_packaged_checkpoint_fingerprints(
         before = source_path.stat()
         with source_path.open("rb") as source_file:
             opened = os.fstat(source_file.fileno())
-            if _checkpoint_stat_signature(opened) != _checkpoint_stat_signature(before):
-                raise ValueError(f"Source changed while validating checkpoint: {source_path}")
             digest = hashlib.sha256()
             for chunk in iter(lambda: source_file.read(1024 * 1024), b""):
                 digest.update(chunk)
@@ -275,7 +273,7 @@ def _validate_packaged_checkpoint_fingerprints(
         current = source_path.stat()
         if (
             _checkpoint_stat_signature(finished) != _checkpoint_stat_signature(opened)
-            or _checkpoint_stat_signature(current) != _checkpoint_stat_signature(finished)
+            or _checkpoint_stat_signature(current) != _checkpoint_stat_signature(before)
         ):
             raise ValueError(f"Source changed while validating checkpoint: {source_path}")
 
