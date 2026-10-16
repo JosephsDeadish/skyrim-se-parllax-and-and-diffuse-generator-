@@ -76,6 +76,7 @@ from generate_textures import (
     _qt_resume_mode_guidance,
     _checkpoint_source_file_fingerprints,
     _matching_checkpoint_completed_files,
+    _write_checkpoint_payload_atomically,
     _qt_truepbr_material_overrides,
     _apply_qt_profile_output_defaults,
     _QT_OUTPUT_GROUPS,
@@ -5565,6 +5566,31 @@ class GenerateTexturesTests(unittest.TestCase):
             )
 
         self.assertEqual(matching, set())
+
+    def test_checkpoint_payload_write_replaces_file_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            checkpoint = root / "batch.json"
+            checkpoint.write_text('{"state": "old"}', encoding="utf-8")
+
+            _write_checkpoint_payload_atomically(checkpoint, {"state": "new"})
+
+            self.assertEqual(json.loads(checkpoint.read_text(encoding="utf-8")), {"state": "new"})
+            self.assertEqual(list(root.glob(f".{checkpoint.name}.*.tmp")), [])
+
+    def test_checkpoint_payload_write_failure_preserves_previous_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            checkpoint = root / "batch.json"
+            original_contents = '{"state": "old"}'
+            checkpoint.write_text(original_contents, encoding="utf-8")
+
+            with mock.patch("generate_textures.os.replace", side_effect=OSError("replace failed")):
+                with self.assertRaisesRegex(OSError, "replace failed"):
+                    _write_checkpoint_payload_atomically(checkpoint, {"state": "new"})
+
+            self.assertEqual(checkpoint.read_text(encoding="utf-8"), original_contents)
+            self.assertEqual(list(root.glob(f".{checkpoint.name}.*.tmp")), [])
 
     def test_basic_preview_outputs_hide_advanced_workflow_tiles(self) -> None:
         self.assertEqual(

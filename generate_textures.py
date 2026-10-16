@@ -1070,6 +1070,31 @@ def _checkpoint_source_file_fingerprints(
     return fingerprints
 
 
+def _write_checkpoint_payload_atomically(
+    checkpoint_path: Path,
+    payload: Mapping[str, object],
+) -> None:
+    checkpoint_path = checkpoint_path.resolve()
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    serialized_payload = json.dumps(payload, indent=2, sort_keys=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            prefix=f".{checkpoint_path.name}.",
+            suffix=".tmp",
+            dir=checkpoint_path.parent,
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(serialized_payload)
+        os.replace(temporary_path, checkpoint_path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
 def _matching_checkpoint_completed_files(
     completed_files: set[str],
     recorded_fingerprints: object,
@@ -10805,7 +10830,6 @@ def run_batch_with_options(
     def _write_checkpoint_state() -> None:
         if checkpoint_file is None:
             return
-        checkpoint_file.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "tool": "generate_textures",
             "version": APP_VERSION,
@@ -10821,7 +10845,7 @@ def run_batch_with_options(
                 if path_key in source_file_fingerprints
             },
         }
-        checkpoint_file.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        _write_checkpoint_payload_atomically(checkpoint_file, payload)
 
     if checkpoint_file is not None and resume_from_checkpoint and checkpoint_file.exists():
         try:
@@ -14750,7 +14774,6 @@ if GUI_AVAILABLE:
             resumed_completed_count: int,
             source_file_fingerprints: Mapping[str, Mapping[str, int]] | None = None,
         ) -> None:
-            checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
             payload = {
                 "tool": "generate_textures",
                 "version": APP_VERSION,
@@ -14764,7 +14787,7 @@ if GUI_AVAILABLE:
                     if source_file_fingerprints is not None and path_key in source_file_fingerprints
                 },
             }
-            checkpoint_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+            _write_checkpoint_payload_atomically(checkpoint_path, payload)
 
         def _clear_batch_checkpoint(self) -> None:
             value = self.batch_checkpoint_path_var.get().strip()
@@ -19906,7 +19929,6 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             generation_options: Mapping[str, object],
             source_file_fingerprints: Mapping[str, Mapping[str, int]],
         ) -> None:
-            checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
             payload = {
                 "tool": "generate_textures",
                 "version": APP_VERSION,
@@ -19923,7 +19945,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                 },
                 "generation_options": dict(generation_options),
             }
-            checkpoint_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+            _write_checkpoint_payload_atomically(checkpoint_path, payload)
 
         @QtCore.Slot()
         def run(self) -> None:
