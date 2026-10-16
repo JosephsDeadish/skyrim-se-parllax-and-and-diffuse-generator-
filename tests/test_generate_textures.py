@@ -3271,8 +3271,10 @@ class GenerateTexturesTests(unittest.TestCase):
                 return_value=load_gui_state(Path("/missing/gui-state.json")),
             ):
                 gui = TextureGeneratorGUI()
-            gui._open_nif_editor()
-            gui.root.update()
+            with mock.patch("generate_textures.messagebox.showerror") as show_error:
+                gui._open_nif_editor()
+                gui.root.update()
+                show_error.assert_not_called()
             editors = [
                 widget for widget in gui.root.winfo_children()
                 if widget.winfo_class() == "Toplevel"

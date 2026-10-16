@@ -16768,7 +16768,9 @@ if GUI_AVAILABLE:
                 win.minsize(min_width, min_height)
                 win.resizable(True, True)
                 win.grab_set()
-                colors = _theme_palette_for_mode(self._theme_mode_value())
+                theme_mode = self._theme_mode_value()
+                colors = _theme_palette_for_mode(theme_mode)
+                dark = theme_mode != "light"
                 bg = colors["bg"]
                 fg = colors["fg"]
                 entry_bg = colors["field_bg"]
@@ -17124,9 +17126,6 @@ if GUI_AVAILABLE:
                 def _refresh_profile_guidance(*_: object) -> None:
                     profile_guidance_var.set(_nif_editor_profile_guidance_text())
 
-                _refresh_profile_guidance()
-                renderer_combo.bind("<<ComboboxSelected>>", _refresh_profile_guidance, add="+")
-                target_game_var.trace_add("write", _refresh_profile_guidance)
                 guarded_mode_note = ttk.Label(
                     opt_frame,
                     text=_nif_editor_safety_banner_text(
@@ -17221,6 +17220,10 @@ if GUI_AVAILABLE:
                         target_game=target_game_var.get(),
                         nif_path=nif_path_var.get(),
                     )
+
+                _refresh_profile_guidance()
+                renderer_combo.bind("<<ComboboxSelected>>", _refresh_profile_guidance, add="+")
+                target_game_var.trace_add("write", _refresh_profile_guidance)
 
                 def _apply_renderer_defaults(*_: object) -> None:
                     recommended_profile = _recommended_nif_editor_profile()
