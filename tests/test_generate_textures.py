@@ -2780,7 +2780,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 gui.root.update_idletasks()
                 values = tuple(gui.profile_setup_choice_combo["values"])
                 self.assertEqual(len(values), 2)
-                self.assertTrue(any("renderer TruePBR" in value for value in values))
+                self.assertTrue(any("renderer Community Shaders PBR" in value for value in values))
                 self.assertTrue(any("renderer Community Shaders" in value for value in values))
                 alt_label = next(value for value in values if "renderer Community Shaders" in value)
                 gui.profile_setup_choice_var.set(alt_label)

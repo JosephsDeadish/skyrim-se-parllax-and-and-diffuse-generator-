@@ -13558,10 +13558,10 @@ if GUI_AVAILABLE:
             self.theme_mode_label_var.set(self._tr(_THEME_MODE_LABELS[self._theme_mode_value()]))
 
         def _workflow_mode_from_controls(self) -> str:
-            if bool(self.show_advanced_generation_var.get()) or bool(self.show_advanced_workflow_outputs_var.get()):
-                return "advanced"
             if bool(self.simplified_main_layout_var.get()):
                 return "beginner"
+            if bool(self.show_advanced_generation_var.get()) or bool(self.show_advanced_workflow_outputs_var.get()):
+                return "advanced"
             return "standard"
 
         def _sync_workflow_mode_selection(self, *_: object) -> None:
@@ -15482,7 +15482,7 @@ if GUI_AVAILABLE:
             preview_path: Path | None,
         ) -> RenderProfileRecommendation:
             if preview_path is None:
-                return recommend_render_profile_details(None)
+                return recommend_render_profile_details(None, manager_context=self.manager_context)
             role_info = identify_skyrim_texture_role(preview_path)
             workflow_profile = detect_workflow_profile(preview_path)
             material_type = classify_material_type(preview_path)
