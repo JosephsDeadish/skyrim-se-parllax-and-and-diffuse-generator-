@@ -6872,6 +6872,30 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(options.env_mask_texture_path, "textures\\sign01_m.dds")
         self.assertEqual(options.parallax_scale, 4.0)
 
+    def test_build_nif_patch_options_maps_texture_games_to_guarded_nif_profiles(self) -> None:
+        for texture_game, nif_profile in (
+            ("auto", "auto"),
+            ("skyrim", "skyrim"),
+            ("fallout3", "fallout"),
+            ("falloutnv", "fallout"),
+            ("fallout4", "fallout"),
+            ("fallout76", "fallout"),
+        ):
+            with self.subTest(texture_game=texture_game):
+                options = build_nif_patch_options_for_generated_outputs(
+                    None,
+                    {},
+                    complex_format="msn",
+                    env_mask_mode="standard",
+                    parallax_mode="standard",
+                    parallax_scale=2.0,
+                    target_game=texture_game,
+                )
+
+                self.assertEqual(options.target_game, nif_profile)
+                if nif_profile == "fallout":
+                    self.assertFalse(options.experimental_fallout_write)
+
     def test_build_nif_patch_options_for_generated_outputs_accepts_gui_occlusion_label(self) -> None:
         outputs = {"parallax": Path("/tmp/textures/sign01_p.dds")}
 
@@ -7309,6 +7333,7 @@ class GenerateTexturesTests(unittest.TestCase):
                     parallax_scale=2.0,
                     include_parallax=True,
                     include_environment_mask=False,
+                    target_game="falloutnv",
                 )
 
             self.assertEqual(len(results), 1)
@@ -7316,6 +7341,8 @@ class GenerateTexturesTests(unittest.TestCase):
             passed_options = patch_nif_mock.call_args.args[1]
             self.assertFalse(bool(passed_options.disable_parallax))
             self.assertTrue(bool(passed_options.disable_env_mapping))
+            self.assertEqual(passed_options.target_game, "fallout")
+            self.assertFalse(passed_options.experimental_fallout_write)
 
     def test_run_with_options_requires_at_least_one_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

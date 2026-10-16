@@ -369,6 +369,19 @@ def _normalize_texture_target_game(value: str | None) -> str:
     return normalized
 
 
+def _nif_profile_for_texture_target_game(value: str | None) -> str:
+    normalized = str(value or "auto").strip().lower()
+    if normalized == "auto":
+        return "auto"
+    if normalized == "fallout":
+        return "fallout"
+    return (
+        "fallout"
+        if _normalize_texture_target_game(normalized) in _FALLOUT_TEXTURE_TARGET_GAMES
+        else "skyrim"
+    )
+
+
 def _normalize_workflow_mode(value: object | None) -> str | None:
     normalized = str(value or "").strip().lower()
     return normalized if normalized in _WORKFLOW_MODE_VALUES else None
@@ -8071,6 +8084,7 @@ def build_nif_patch_options_for_generated_outputs(
     include_parallax: bool | None = None,
     include_environment_mask: bool | None = None,
     include_glow: bool | None = None,
+    target_game: str = "auto",
 ) -> NifPatchOptions:
     normalized_complex_format = _normalize_complex_format(complex_format)
     normalized_env_mask_mode = _normalize_env_mask_mode(env_mask_mode)
@@ -8151,6 +8165,7 @@ def build_nif_patch_options_for_generated_outputs(
         clear_env_mask_texture_path=env_mask_disabled_by_options,
         disable_glow_map=glow_disabled_by_options,
         clear_glow_texture_path=glow_disabled_by_options,
+        target_game=_nif_profile_for_texture_target_game(target_game),
         backup=True,
         dry_run=False,
     )
@@ -9092,6 +9107,7 @@ def auto_patch_related_nifs_for_texture(
     include_parallax: bool | None = None,
     include_environment_mask: bool | None = None,
     include_glow: bool | None = None,
+    target_game: str = "auto",
 ) -> tuple[object, ...]:
     related_nifs = find_related_nif_files_for_texture(
         source_texture,
@@ -9111,6 +9127,7 @@ def auto_patch_related_nifs_for_texture(
         include_parallax=include_parallax,
         include_environment_mask=include_environment_mask,
         include_glow=include_glow,
+        target_game=target_game,
     )
     results: list[object] = []
     for nif_path in related_nifs:
@@ -14966,6 +14983,7 @@ if GUI_AVAILABLE:
                                     generation_call_kwargs.get("include_environment_mask", False)
                                     or generation_call_kwargs.get("include_rmaos", False)
                                 ),
+                                target_game=str(generation_call_kwargs.get("target_game", "skyrim")),
                             )
                             patched = sum(1 for result in nif_patch_results if getattr(result, "success", False))
                             failed = sum(1 for result in nif_patch_results if not getattr(result, "success", False))
