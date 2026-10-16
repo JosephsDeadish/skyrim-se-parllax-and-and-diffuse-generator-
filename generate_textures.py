@@ -8201,6 +8201,7 @@ def _scan_nif_validation_rows(
     on_progress: Callable[[int, int, str], None] | None = None,
     on_row: Callable[[dict[str, str]], None] | None = None,
     include_conflict_report: bool = True,
+    include_conflict_examples: bool = True,
 ) -> tuple[list[dict[str, str]], bool]:
     rows: list[dict[str, str]] = []
     total = len(nif_paths)
@@ -8215,6 +8216,7 @@ def _scan_nif_validation_rows(
             details = _build_qt_nif_validation_detail_lines(
                 validation,
                 include_conflict_report=include_conflict_report,
+                include_conflict_examples=include_conflict_examples,
             )
             details.append(backup_state)
             shader_count = int(getattr(validation, "shader_count", 0) or 0)
@@ -8375,6 +8377,7 @@ def _build_qt_nif_validation_detail_lines(
     validation: object,
     *,
     include_conflict_report: bool = True,
+    include_conflict_examples: bool = True,
     max_conflicts: int = 4,
 ) -> list[str]:
     shader_count = max(0, int(getattr(validation, "shader_count", 0) or 0))
@@ -8438,7 +8441,7 @@ def _build_qt_nif_validation_detail_lines(
             lines.append(f"Conflict {code}: {count}")
             lines.append(f"- {code}: {count} (profile={profile}, layout={layout})")
             examples = _collect_qt_nif_detail_texts(getattr(group, "examples", ()))
-            if examples:
+            if include_conflict_examples and examples:
                 lines.append(f"  examples: {examples[0]}" + (f" | {examples[1]}" if len(examples) > 1 else ""))
             actions = _collect_qt_nif_detail_texts(getattr(group, "suggested_actions", ()))
             if actions:
@@ -18290,6 +18293,7 @@ if GUI_AVAILABLE:
                     self._save_persisted_gui_state()
                     retries_per_file = max(0, min(3, int(retry_count_var.get())))
                     include_conflict_report = conflict_report_var.get()
+                    include_conflict_examples = conflict_examples_var.get()
                     _is_running[0] = True
                     _cancel_requested[0] = False
                     _set_ops_active(False)
@@ -18331,6 +18335,7 @@ if GUI_AVAILABLE:
                                 combined_detail_lines = _build_qt_nif_validation_detail_lines(
                                     validation,
                                     include_conflict_report=include_conflict_report,
+                                    include_conflict_examples=include_conflict_examples,
                                 )
                                 if validation.renderer_notes:
                                     combined_detail_lines.append("Renderer compatibility details:")
@@ -18394,7 +18399,10 @@ if GUI_AVAILABLE:
                             if grouped_conflicts:
                                 summary_lines = []
                                 for group in grouped_conflicts[:8]:
-                                    examples = ", ".join(tuple(group.example_files[:3]))
+                                    examples = (
+                                        ", ".join(tuple(group.example_files[:3]))
+                                        if include_conflict_examples else ""
+                                    )
                                     summary_lines.append(
                                         f"{group.count}× {group.code} in {group.file_count} file(s)"
                                         + (f" [{examples}]" if examples else "")
@@ -18412,7 +18420,10 @@ if GUI_AVAILABLE:
                                 if plugin_summary:
                                     plugin_lines = []
                                     for group in plugin_summary[:6]:
-                                        plugins = ", ".join(tuple(group.example_plugins[:2]))
+                                        plugins = (
+                                            ", ".join(tuple(group.example_plugins[:2]))
+                                            if include_conflict_examples else ""
+                                        )
                                         plugin_lines.append(
                                             f"{group.count}× {group.code} in {group.file_count} file(s), "
                                             f"{group.plugin_count} plugin(s)"
@@ -19974,10 +19985,12 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             nif_paths: Sequence[Path],
             *,
             include_conflict_report: bool = True,
+            include_conflict_examples: bool = True,
         ) -> None:
             super().__init__()
             self._nif_paths = list(nif_paths)
             self._include_conflict_report = bool(include_conflict_report)
+            self._include_conflict_examples = bool(include_conflict_examples)
             self._cancel_requested = False
 
         @QtCore.Slot()
@@ -19993,6 +20006,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                     on_progress=lambda index, total, path: self.progress.emit(index, total, path),
                     on_row=self.result.emit,
                     include_conflict_report=self._include_conflict_report,
+                    include_conflict_examples=self._include_conflict_examples,
                 )
                 self.finished.emit(cancelled)
             except Exception as exc:
@@ -20316,6 +20330,13 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         "When enabled, scan results include the longer grouped conflict-code section; other diagnostic and safe-fix details remain available."
     )
     nif_scan_options_row.addWidget(nif_scan_conflict_report)
+    nif_scan_conflict_examples = QtWidgets.QCheckBox("Include conflict examples")
+    nif_scan_conflict_examples.setObjectName("nif_scan_include_conflict_examples")
+    nif_scan_conflict_examples.setChecked(True)
+    nif_scan_conflict_examples.setToolTip(
+        "Show example affected shader details beneath grouped conflict codes."
+    )
+    nif_scan_options_row.addWidget(nif_scan_conflict_examples)
     nif_scan_options_row.addStretch(1)
     nif_scan_layout.addLayout(nif_scan_options_row)
     nif_scan_action_row = QtWidgets.QHBoxLayout()
@@ -22907,6 +22928,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         nif_scan_worker = _QtNifScanWorker(
             nif_paths,
             include_conflict_report=nif_scan_conflict_report.isChecked(),
+            include_conflict_examples=nif_scan_conflict_examples.isChecked(),
         )
         nif_scan_thread = QtCore.QThread(window)
         nif_scan_worker.moveToThread(nif_scan_thread)

@@ -76,7 +76,7 @@ This opens a desktop interface where you can:
 - toggle **Emboss depth** for edge-ridge normal generation on flat printed assets (books/cards/scrolls/posters)
 - choose **Parallax mode**: `standard` (vanilla / Community Shaders Extended Materials) or `occlusion (ENB/POM)` for smoother ENBSeries POM heightmaps
 - scroll through all controls in smaller windows
-- inspect individual NIF files or mesh folders in the Qt **NIF Scan** tab using read-only diagnostics, status/text filters, paged results, and an option to hide grouped conflict-code details
+- inspect individual NIF files or mesh folders in the Qt **NIF Scan** tab using read-only diagnostics, status/text filters, paged results, and options to hide grouped conflict-code details or their examples
 - copy or export the generation event log, or export a diagnostics bundle with the current GUI state, for diagnostics and support
 - use the Qt **NIF Editor** for flag/texture-slot edits, safe conflict remediation, read-only compare against sibling `.nif.bak` files, and backup restore on the target chosen in NIF Scan; dry-run is enabled by default, with an optional byte-range diff summary, writes require confirmation and always create backups, transient per-file exceptions can be retried 0–3 times (default 1, persisted), cancellation finishes the current file first, and the editor shows a safety banner that keeps Fallout writes obviously experimental. The Tk editor retains additional advanced presets and tuning controls.
 - use keyboard shortcuts: `Ctrl+O` opens a texture, `Ctrl+Shift+O` opens a folder, `Ctrl+Enter` starts generation, and `Esc` requests cancellation

@@ -889,6 +889,20 @@ class TestQtNifValidationScan(unittest.TestCase):
         self.assertNotIn("Grouped conflict codes:", rows[0]["details"])
         self.assertIn("What this file needs:", rows[0]["details"])
 
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"fixture")
+            with mock.patch("generate_textures.validate_nif_for_parallax", return_value=validation):
+                rows, cancelled = _scan_nif_validation_rows(
+                    [nif_path],
+                    include_conflict_examples=False,
+                )
+
+        self.assertFalse(cancelled)
+        self.assertIn("Grouped conflict codes:", rows[0]["details"])
+        self.assertIn("fix actions:", rows[0]["details"])
+        self.assertNotIn("examples:", rows[0]["details"])
+
     def test_scan_validation_rows_mark_fully_ready_uncertain_results_as_probably_incompatible(self) -> None:
         validation = SimpleNamespace(
             shader_count=1,
@@ -3281,6 +3295,7 @@ class GenerateTexturesTests(unittest.TestCase):
             path_label = None
             scan_button = None
             results_tree = None
+            conflict_examples_check = None
             pending = list(editor.winfo_children())
             while pending:
                 widget = pending.pop()
@@ -3290,10 +3305,20 @@ class GenerateTexturesTests(unittest.TestCase):
                     scan_button = widget
                 elif widget.winfo_class() == "Treeview":
                     results_tree = widget
+                elif (
+                    widget.winfo_class() == "TCheckbutton"
+                    and widget.cget("text") == "Include conflict examples"
+                ):
+                    conflict_examples_check = widget
                 pending.extend(widget.winfo_children())
             self.assertIsNotNone(path_label)
             self.assertIsNotNone(scan_button)
             self.assertIsNotNone(results_tree)
+            self.assertIsNotNone(conflict_examples_check)
+            examples_var = str(conflict_examples_check.cget("variable"))
+            self.assertEqual(int(gui.root.getvar(examples_var)), 0)
+            conflict_examples_check.invoke()
+            self.assertEqual(int(gui.root.getvar(examples_var)), 1)
             path_entries = [
                 widget for widget in path_label.master.winfo_children()
                 if widget.winfo_class() == "TEntry"
@@ -12256,6 +12281,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
                 self.assertTrue(w("nif_dry_run").isChecked())
                 self.assertFalse(w("nif_dry_run_diff").isChecked())
                 self.assertTrue(w("nif_scan_include_conflict_report").isChecked())
+                self.assertTrue(w("nif_scan_include_conflict_examples").isChecked())
                 banner = w("nif_editor_safety_banner").text().lower()
                 self.assertIn("dry-run is on", banner)
                 self.assertIn("compare against .bak first", banner)

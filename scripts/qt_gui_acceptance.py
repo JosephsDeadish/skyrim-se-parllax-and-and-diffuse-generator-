@@ -241,7 +241,10 @@ def run_acceptance(generator, report_path: str | Path, *, timeout_seconds: float
                         "nif_texture_diffuse", "nif_dry_run", "nif_dry_run_diff",
                         "nif_retry_count", "nif_editor_patch",
                     ),
-                    "NIF Scan": ("nif_scan_include_conflict_report", "nif_scan_start"),
+                    "NIF Scan": (
+                        "nif_scan_include_conflict_report", "nif_scan_include_conflict_examples",
+                        "nif_scan_start",
+                    ),
                     "Batch/Resume": ("checkpoint_path", "resume_mode"),
                 }.get(title, ())
                 reachability = []
