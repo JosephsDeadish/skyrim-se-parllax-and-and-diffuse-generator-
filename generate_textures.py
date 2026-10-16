@@ -10844,7 +10844,11 @@ def run_batch_with_options(
 ) -> dict[Path, dict[str, Path]]:
     batch_start_time = time.perf_counter()
     input_files = collect_source_textures(input_path)
-    source_file_fingerprints = _checkpoint_source_file_fingerprints(input_files)
+    source_file_fingerprints = (
+        _checkpoint_source_file_fingerprints(input_files)
+        if checkpoint_file is not None
+        else {}
+    )
     completed_success_files: set[str] = set()
     resumed_completed_count = 0
     per_file_durations: list[float] = []

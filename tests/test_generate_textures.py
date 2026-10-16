@@ -1882,6 +1882,7 @@ class GenerateTexturesTests(unittest.TestCase):
                     str((input_root / "done.dds").resolve()): {
                         "size_bytes": 42,
                         "mtime_ns": 1234,
+                        "sha256": "a" * 64,
                     }
                 },
             }
@@ -1889,6 +1890,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 str((input_root / "done.dds").resolve()): {
                     "size_bytes": 42,
                     "mtime_ns": 1234,
+                    "sha256": "a" * 64,
                 }
             }
             self.assertEqual(
@@ -1911,6 +1913,23 @@ class GenerateTexturesTests(unittest.TestCase):
                         str((input_root / "done.dds").resolve()): {
                             "size_bytes": 42,
                             "mtime_ns": 9999,
+                            "sha256": "a" * 64,
+                        }
+                    },
+                ),
+                set(),
+            )
+            self.assertEqual(
+                _qt_resume_completed_files(
+                    payload,
+                    input_root=input_root,
+                    output_dir=output_root,
+                    generation_options=options,
+                    source_file_fingerprints={
+                        str((input_root / "done.dds").resolve()): {
+                            "size_bytes": 42,
+                            "mtime_ns": 1234,
+                            "sha256": "b" * 64,
                         }
                     },
                 ),
@@ -5575,11 +5594,12 @@ class GenerateTexturesTests(unittest.TestCase):
             for path in (unchanged, changed, removed):
                 path.write_bytes(b"same-size")
             recorded = _checkpoint_source_file_fingerprints((unchanged, changed, removed))
+            changed_recorded_stat = changed.stat()
             changed.write_bytes(b"new-bytes")
             changed_stat = changed.stat()
             os.utime(
                 changed,
-                ns=(changed_stat.st_atime_ns, changed_stat.st_mtime_ns + 1_000_000_000),
+                ns=(changed_stat.st_atime_ns, changed_recorded_stat.st_mtime_ns),
             )
             removed.unlink()
             current = _checkpoint_source_file_fingerprints((unchanged, changed))
@@ -5590,6 +5610,9 @@ class GenerateTexturesTests(unittest.TestCase):
                 current,
             )
 
+        self.assertEqual(recorded[str(changed.resolve())]["size_bytes"], current[str(changed.resolve())]["size_bytes"])
+        self.assertEqual(recorded[str(changed.resolve())]["mtime_ns"], current[str(changed.resolve())]["mtime_ns"])
+        self.assertNotEqual(recorded[str(changed.resolve())]["sha256"], current[str(changed.resolve())]["sha256"])
         self.assertEqual(matching, {str(unchanged.resolve())})
 
     def test_checkpoint_resume_reprocesses_legacy_entries_without_fingerprints(self) -> None:
@@ -8029,8 +8052,10 @@ class GenerateTexturesTests(unittest.TestCase):
             changed_stat = changed_path.stat()
             os.utime(
                 changed_path,
-                ns=(changed_stat.st_atime_ns, original_changed_fingerprint["mtime_ns"] + 1_000_000_000),
+                ns=(changed_stat.st_atime_ns, original_changed_fingerprint["mtime_ns"]),
             )
+            self.assertEqual(changed_stat.st_size, original_changed_fingerprint["size_bytes"])
+            self.assertEqual(changed_path.stat().st_mtime_ns, original_changed_fingerprint["mtime_ns"])
             outputs = run_batch_with_options(
                 input_path=input_dir,
                 output_dir=output_dir,
@@ -8046,6 +8071,30 @@ class GenerateTexturesTests(unittest.TestCase):
             resumed_payload["completed_file_fingerprints"][str(changed_path.resolve())],
             original_changed_fingerprint,
         )
+
+    def test_run_batch_without_checkpoint_does_not_hash_source_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            input_dir.mkdir()
+            _sample_image().save(input_dir / "source.dds", format="DDS", pixel_format="DXT5")
+
+            with mock.patch(
+                "generate_textures._checkpoint_source_file_fingerprints",
+                side_effect=AssertionError("Uncheckpointed batches should not hash source files"),
+            ):
+                outputs = run_batch_with_options(
+                    input_path=input_dir,
+                    output_dir=temp_path / "out",
+                    include_diffuse=True,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                )
+
+        self.assertEqual([path.name for path in outputs], ["source.dds"])
 
     def test_run_batch_with_options_recovers_interrupted_multiresolution_batch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
