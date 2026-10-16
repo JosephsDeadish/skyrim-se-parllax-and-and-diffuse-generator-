@@ -243,7 +243,8 @@ def run_acceptance(generator, report_path: str | Path, *, timeout_seconds: float
                     ),
                     "NIF Scan": (
                         "nif_scan_include_conflict_report", "nif_scan_include_conflict_examples",
-                        "nif_scan_start", "nif_scan_conflicts",
+                        "nif_scan_start", "nif_scan_conflicts", "nif_scan_patch_conflicts",
+                        "nif_scan_remediate_conflicts",
                     ),
                     "Batch/Resume": ("checkpoint_path", "resume_mode"),
                 }.get(title, ())
@@ -252,7 +253,11 @@ def run_acceptance(generator, report_path: str | Path, *, timeout_seconds: float
                 for name in controls:
                     control = self.widget(name)
                     self.require(control.isVisible(), f"Unavailable {name}")
-                    if name != "nif_scan_conflicts":
+                    if name not in {
+                        "nif_scan_conflicts",
+                        "nif_scan_patch_conflicts",
+                        "nif_scan_remediate_conflicts",
+                    }:
                         self.require(control.isEnabled(), f"Unavailable {name}")
                     if isinstance(page, widgets.QScrollArea):
                         page.ensureWidgetVisible(control)

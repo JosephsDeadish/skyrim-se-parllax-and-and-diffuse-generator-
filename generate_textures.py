@@ -20391,11 +20391,28 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_scan_action_row.addWidget(nif_scan_start_button)
     nif_scan_action_row.addWidget(nif_scan_cancel_button)
     nif_scan_action_row.addWidget(nif_scan_conflicts_button)
+    nif_scan_patch_conflicts_button = QtWidgets.QPushButton("Patch conflicts only")
+    nif_scan_patch_conflicts_button.setObjectName("nif_scan_patch_conflicts")
+    nif_scan_patch_conflicts_button.setEnabled(False)
+    nif_scan_patch_conflicts_button.setToolTip(
+        "Run the NIF Editor's current patch settings only on files with conflict codes in the latest scan."
+    )
+    nif_scan_remediate_conflicts_button = QtWidgets.QPushButton("Remediate conflicts only")
+    nif_scan_remediate_conflicts_button.setObjectName("nif_scan_remediate_conflicts")
+    nif_scan_remediate_conflicts_button.setEnabled(False)
+    nif_scan_remediate_conflicts_button.setToolTip(
+        "Run safe, non-destructive auto-remediation only on files with conflict codes in the latest scan."
+    )
     nif_scan_progress = QtWidgets.QProgressBar()
     nif_scan_progress.setRange(0, 100)
     nif_scan_progress.setValue(0)
     nif_scan_action_row.addWidget(nif_scan_progress, 1)
     nif_scan_layout.addLayout(nif_scan_action_row)
+    nif_scan_editor_action_row = QtWidgets.QHBoxLayout()
+    nif_scan_editor_action_row.addWidget(nif_scan_patch_conflicts_button)
+    nif_scan_editor_action_row.addWidget(nif_scan_remediate_conflicts_button)
+    nif_scan_editor_action_row.addStretch(1)
+    nif_scan_layout.addLayout(nif_scan_editor_action_row)
     nif_scan_status_label = QtWidgets.QLabel("Ready.")
     nif_scan_status_label.setWordWrap(True)
     nif_scan_layout.addWidget(nif_scan_status_label)
@@ -21539,6 +21556,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     ui_receivers: list[_QtUiReceiver] = []
     nif_scan_rows: list[dict[str, str]] = []
     nif_scan_conflict_paths: list[Path] = []
+    nif_scan_patch_conflict_paths: list[Path] = []
     nif_scan_page_index = 0
     preview_manual_paused = False
     preview_auto_speed_off = False
@@ -21554,6 +21572,12 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         launch_tk_button.setEnabled(not busy)
         nif_scan_start_button.setEnabled(not busy)
         nif_scan_conflicts_button.setEnabled(not busy and bool(nif_scan_conflict_paths))
+        nif_scan_patch_conflicts_button.setEnabled(
+            not busy and bool(nif_scan_patch_conflict_paths)
+        )
+        nif_scan_remediate_conflicts_button.setEnabled(
+            not busy and bool(nif_scan_patch_conflict_paths)
+        )
         nif_scan_path_edit.setEnabled(not busy)
         nif_scan_mode_combo.setEnabled(not busy)
         nif_scan_browse_button.setEnabled(not busy)
@@ -21586,13 +21610,21 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         ui_receivers.append(receiver)
         return receiver
 
-    def _start_nif_editor(operation: str) -> None:
+    def _start_nif_editor(
+        operation: str,
+        *,
+        nif_paths: Sequence[Path] | None = None,
+    ) -> None:
         nonlocal nif_editor_thread, nif_editor_worker
         if _operation_active():
             return
-        paths, error = resolve_nif_editor_targets(
-            nif_scan_path_edit.text(), str(nif_scan_mode_combo.currentData() or ""),
-        )
+        if nif_paths is None:
+            paths, error = resolve_nif_editor_targets(
+                nif_scan_path_edit.text(), str(nif_scan_mode_combo.currentData() or ""),
+            )
+        else:
+            paths = [Path(path) for path in nif_paths if Path(path).is_file()]
+            error = None
         if error or not paths:
             nif_editor_status.setText(error or "No NIF files found.")
             return
@@ -21705,6 +21737,17 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         _sync_operation_controls()
         nif_editor_thread.start()
 
+    def _start_qt_nif_editor_conflicts(operation: str) -> None:
+        paths = [path for path in nif_scan_patch_conflict_paths if path.is_file()]
+        if not paths:
+            _invalidate_nif_scan_conflicts()
+            nif_scan_status_label.setText("No remaining NIF conflict results to process.")
+            return
+        nif_scan_status_label.setText(
+            f"Starting {operation} on {len(paths)} NIF file(s) with scan conflicts…"
+        )
+        _start_nif_editor(operation, nif_paths=paths)
+
     def _cancel_nif_editor() -> None:
         if nif_editor_worker is not None:
             nif_editor_worker.request_cancel()
@@ -21791,19 +21834,27 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             return
         normalized_row = {str(key): str(value) for key, value in row.items()}
         nif_scan_rows.append(normalized_row)
-        if normalized_row.get("conflict_codes") or normalized_row.get("status", "").upper() == "FAIL":
-            raw_path = normalized_row.get("preview", "").strip()
-            if raw_path:
-                candidate = Path(raw_path)
-                if candidate not in nif_scan_conflict_paths:
-                    nif_scan_conflict_paths.append(candidate)
+        raw_path = normalized_row.get("preview", "").strip()
+        if raw_path:
+            candidate = Path(raw_path)
+            if (
+                normalized_row.get("conflict_codes")
+                and candidate not in nif_scan_conflict_paths
+            ):
+                nif_scan_conflict_paths.append(candidate)
+                if candidate not in nif_scan_patch_conflict_paths:
+                    nif_scan_patch_conflict_paths.append(candidate)
+            elif normalized_row.get("status", "").upper() == "FAIL" and candidate not in nif_scan_conflict_paths:
+                nif_scan_conflict_paths.append(candidate)
         if _should_refresh_qt_nif_scan_page(len(nif_scan_rows)):
             _render_nif_scan_page()
 
     def _invalidate_nif_scan_conflicts(*_: object) -> None:
-        if nif_scan_conflict_paths:
-            nif_scan_conflict_paths.clear()
-            nif_scan_conflicts_button.setEnabled(False)
+        nif_scan_conflict_paths.clear()
+        nif_scan_patch_conflict_paths.clear()
+        nif_scan_conflicts_button.setEnabled(False)
+        nif_scan_patch_conflicts_button.setEnabled(False)
+        nif_scan_remediate_conflicts_button.setEnabled(False)
 
     def _reset_nif_scan_page(*_: object) -> None:
         nonlocal nif_scan_page_index
@@ -23048,6 +23099,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             return
         nif_scan_rows.clear()
         nif_scan_conflict_paths.clear()
+        nif_scan_patch_conflict_paths.clear()
         nif_scan_page_index = 0
         nif_scan_results.clear()
         nif_scan_detail_view.setPlainText(_format_qt_nif_scan_detail(None))
@@ -23522,6 +23574,12 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_scan_start_button.clicked.connect(_start_nif_scan)
     nif_scan_conflicts_button.clicked.connect(
         lambda _checked=False: _start_nif_scan(conflicts_only=True)
+    )
+    nif_scan_patch_conflicts_button.clicked.connect(
+        lambda _checked=False: _start_qt_nif_editor_conflicts("patch")
+    )
+    nif_scan_remediate_conflicts_button.clicked.connect(
+        lambda _checked=False: _start_qt_nif_editor_conflicts("remediate")
     )
     nif_scan_cancel_button.clicked.connect(_cancel_nif_scan)
     nif_scan_remediation_preview_button.clicked.connect(_preview_selected_nif_remediation)

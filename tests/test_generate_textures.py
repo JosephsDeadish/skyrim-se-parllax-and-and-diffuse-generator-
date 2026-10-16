@@ -12957,6 +12957,121 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
         with mock.patch("generate_textures.validate_nif_for_parallax", side_effect=validate):
             self.run_window(scenario)
 
+    def test_qt_conflict_patch_and_remediation_exclude_scan_failures(self) -> None:
+        from types import SimpleNamespace
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        folder = self.root / "meshes"
+        folder.mkdir()
+        conflict_path = folder / "conflict.nif"
+        failure_path = folder / "failure.nif"
+        clear_path = folder / "clear.nif"
+        for path in (conflict_path, failure_path, clear_path):
+            path.write_bytes(_build_minimal_nif())
+
+        conflict_group = SimpleNamespace(
+            code="shader_state.envmap_missing_slot5",
+            count=1,
+            game_profile="skyrim",
+            shader_layout="real",
+            examples=("Slot 5 is unresolved.",),
+            suggested_actions=("Add a matching environment mask.",),
+        )
+        conflicted = SimpleNamespace(
+            shader_count=1,
+            ready_count=0,
+            skip_count=0,
+            detected_game_profile="skyrim",
+            has_havok=False,
+            skip_reasons=[],
+            issues=[],
+            suggestions=[],
+            renderer_notes={},
+            renderer_verdicts={},
+            conflict_report=[conflict_group],
+        )
+        ready = SimpleNamespace(
+            shader_count=1,
+            ready_count=1,
+            skip_count=0,
+            detected_game_profile="skyrim",
+            has_havok=False,
+            skip_reasons=[],
+            issues=[],
+            suggestions=[],
+            renderer_notes={},
+            renderer_verdicts={},
+            conflict_report=[],
+        )
+
+        def validate(path):
+            path = Path(path)
+            if path == failure_path:
+                raise RuntimeError("simulated scan failure")
+            return conflicted if path == conflict_path else ready
+
+        patch_result = SimpleNamespace(
+            success=True,
+            message="Would patch.",
+            warnings=[],
+            errors=[],
+        )
+        remediation_result = SimpleNamespace(
+            success=True,
+            message="Would safely remediate.",
+            warnings=[],
+            errors=[],
+        )
+        state = {"step": 0}
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            if state["step"] == 0:
+                self.assertFalse(w("nif_scan_patch_conflicts").isEnabled())
+                w("nif_scan_mode").setCurrentIndex(1)
+                w("nif_scan_path").setText(str(folder))
+                w("nif_scan_start").click()
+                state["step"] = 1
+            elif state["step"] == 1 and w("generate").isEnabled():
+                self.assertTrue(w("nif_scan_conflicts").isEnabled())
+                self.assertTrue(w("nif_scan_patch_conflicts").isEnabled())
+                self.assertTrue(w("nif_scan_remediate_conflicts").isEnabled())
+                w("nif_scan_patch_conflicts").click()
+                state["step"] = 2
+            elif state["step"] == 2 and w("generate").isEnabled():
+                summary = window.property("nif_editor_summary")
+                self.assertEqual(summary["total"], 1)
+                self.assertEqual(summary["results"][0]["path"], str(conflict_path))
+                w("nif_scan_remediate_conflicts").click()
+                state["step"] = 3
+            elif state["step"] == 3 and w("generate").isEnabled():
+                summary = window.property("nif_editor_summary")
+                self.assertEqual(summary["total"], 1)
+                self.assertEqual(summary["results"][0]["path"], str(conflict_path))
+                return True
+            return False
+
+        with mock.patch(
+            "generate_textures.validate_nif_for_parallax",
+            side_effect=validate,
+        ), mock.patch(
+            "generate_textures.resolve_nif_editor_patch_options_for_target",
+            side_effect=lambda _path, options: (options, ()),
+        ), mock.patch(
+            "generate_textures.patch_nif",
+            return_value=patch_result,
+        ) as patch_nif_mock, mock.patch(
+            "generate_textures.auto_remediate_nif_conflicts",
+            return_value=(remediation_result, ("safe_fix",)),
+        ) as remediate_mock:
+            self.run_window(scenario)
+
+        self.assertEqual([call.args[0] for call in patch_nif_mock.call_args_list], [conflict_path])
+        self.assertEqual(
+            [call.args[0] for call in remediate_mock.call_args_list],
+            [conflict_path],
+        )
+
     def test_qt_nif_scan_handoff_prefills_renderer_and_warns_on_mismatch(self) -> None:
         from tests.test_nif_patcher import _build_minimal_nif
 
