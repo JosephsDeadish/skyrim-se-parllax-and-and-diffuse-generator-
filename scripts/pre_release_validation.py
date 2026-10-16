@@ -234,6 +234,65 @@ def _write_packaged_smoke_dds(path: Path, size: int | tuple[int, int]) -> None:
     )
 
 
+def _checkpoint_stat_signature(stat_result: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        int(stat_result.st_dev),
+        int(stat_result.st_ino),
+        int(stat_result.st_size),
+        int(stat_result.st_mtime_ns),
+        int(stat_result.st_ctime_ns),
+    )
+
+
+def _validate_packaged_checkpoint_fingerprints(
+    checkpoint_payload: object,
+) -> dict[str, dict[str, object]]:
+    if not isinstance(checkpoint_payload, Mapping):
+        raise ValueError("Checkpoint payload is not an object.")
+    completed_files = checkpoint_payload.get("completed_success_files")
+    fingerprints = checkpoint_payload.get("completed_file_fingerprints")
+    if (
+        not isinstance(completed_files, list)
+        or any(not isinstance(path_key, str) for path_key in completed_files)
+        or not isinstance(fingerprints, Mapping)
+    ):
+        raise ValueError("Checkpoint is missing completed files or source fingerprints.")
+    if set(fingerprints) != set(completed_files):
+        raise ValueError("Checkpoint fingerprint membership does not match completed files.")
+
+    validated: dict[str, dict[str, object]] = {}
+    for path_key in completed_files:
+        source_path = Path(path_key)
+        before = source_path.stat()
+        with source_path.open("rb") as source_file:
+            opened = os.fstat(source_file.fileno())
+            if _checkpoint_stat_signature(opened) != _checkpoint_stat_signature(before):
+                raise ValueError(f"Source changed while validating checkpoint: {source_path}")
+            digest = hashlib.sha256()
+            for chunk in iter(lambda: source_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+            finished = os.fstat(source_file.fileno())
+        current = source_path.stat()
+        if (
+            _checkpoint_stat_signature(finished) != _checkpoint_stat_signature(opened)
+            or _checkpoint_stat_signature(current) != _checkpoint_stat_signature(finished)
+        ):
+            raise ValueError(f"Source changed while validating checkpoint: {source_path}")
+
+        fingerprint = fingerprints.get(path_key)
+        if not isinstance(fingerprint, Mapping):
+            raise ValueError(f"Checkpoint fingerprint is invalid for {source_path}")
+        expected_digest = digest.hexdigest()
+        if (
+            fingerprint.get("size_bytes") != current.st_size
+            or fingerprint.get("mtime_ns") != current.st_mtime_ns
+            or fingerprint.get("sha256") != expected_digest
+        ):
+            raise ValueError(f"Checkpoint fingerprint does not match source: {source_path}")
+        validated[path_key] = dict(fingerprint)
+    return validated
+
+
 def _read_packaged_smoke_dds_dimensions(path: Path) -> tuple[int, int]:
     with path.open("rb") as dds_file:
         header = dds_file.read(20)
@@ -284,6 +343,8 @@ def _write_batch_acceptance_dds(
 def _mutate_batch_acceptance_dds_preserving_metadata(
     path: Path,
     size: tuple[int, int],
+    *,
+    pixel_format: str | None = None,
 ) -> dict[str, object]:
     from PIL import Image, ImageOps
 
@@ -292,7 +353,8 @@ def _mutate_batch_acceptance_dds_preserving_metadata(
     with Image.open(path) as image:
         image.load()
         changed = ImageOps.invert(image.convert("RGB"))
-    changed.save(path, format="DDS")
+    save_options = {"pixel_format": pixel_format} if pixel_format else {}
+    changed.save(path, format="DDS", **save_options)
     changed.close()
     if path.stat().st_size != original_stat.st_size:
         raise ValueError(f"Rewritten acceptance source changed size: {path}")
@@ -1049,6 +1111,7 @@ def _packaged_smoke_scenarios() -> list[dict[str, object]]:
             "input_format": "dds",
             "checkpoint_resume": True,
             "interruption_resume": True,
+            "verify_content_change_resume": True,
             "min_outputs": 4,
             "required_suffixes": ("_d.dds", "_n.dds"),
             "required_exact_suffix_counts": {"_d.dds": 2, "_n.dds": 2},
@@ -1324,6 +1387,13 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                         f"Packaged executable smoke interruption for '{scenario_name}' checkpointed "
                         f"{completed_files!r}; expected every valid input except the failed one."
                     )
+                try:
+                    _validate_packaged_checkpoint_fingerprints(interrupted_checkpoint)
+                except (OSError, ValueError) as exc:
+                    raise SystemExit(
+                        f"Packaged executable smoke interruption for '{scenario_name}' has invalid "
+                        f"source fingerprints: {exc}"
+                    ) from exc
                 resumed_count = expected_completed_count
                 for interruption_index in interruption_indices:
                     repaired_input = smoke_input / f"sample_{interruption_index:02d}{input_suffix}"
@@ -1368,7 +1438,138 @@ def _run_packaged_executable_smoke(artifact_dir: Path, *, loops: int = 1) -> Non
                             f"state {resumed_checkpoint!r}; expected {resumed_count} resumed and "
                             f"{expected_success_count} completed inputs."
                         )
+                    try:
+                        _validate_packaged_checkpoint_fingerprints(resumed_checkpoint)
+                    except (OSError, ValueError) as exc:
+                        raise SystemExit(
+                            f"Packaged executable smoke resume for '{scenario_name}' has invalid "
+                            f"source fingerprints: {exc}"
+                        ) from exc
                     resumed_count = expected_success_count
+                if bool(scenario.get("verify_content_change_resume", False)):
+                    if checkpoint_path is None or input_format != "dds":
+                        raise SystemExit(
+                            f"Packaged executable smoke for '{scenario_name}' requires a DDS checkpoint scenario."
+                        )
+                    source_path = smoke_input / f"sample_01{input_suffix}"
+                    source_key = str(source_path.resolve())
+                    try:
+                        checkpoint_before = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+                        fingerprints_before = _validate_packaged_checkpoint_fingerprints(checkpoint_before)
+                        source_fingerprint_before = fingerprints_before[source_key]
+                        source_change = _mutate_batch_acceptance_dds_preserving_metadata(
+                            source_path,
+                            input_dimensions,
+                            pixel_format="DXT5",
+                        )
+                    except (KeyError, OSError, ValueError, json.JSONDecodeError) as exc:
+                        raise SystemExit(
+                            f"Packaged executable smoke could not prepare a same-metadata source mutation "
+                            f"for '{scenario_name}': {exc}"
+                        ) from exc
+                    if (
+                        source_change["size_bytes"] != source_fingerprint_before.get("size_bytes")
+                        or source_change["mtime_ns"] != source_fingerprint_before.get("mtime_ns")
+                        or source_change["original_sha256"] != source_fingerprint_before.get("sha256")
+                        or source_change["changed_sha256"] == source_fingerprint_before.get("sha256")
+                    ):
+                        raise SystemExit(
+                            f"Packaged executable smoke mutation for '{scenario_name}' did not preserve "
+                            "source size/mtime while changing content."
+                        )
+                    outputs_before = {
+                        path.name: path.read_bytes()
+                        for path in sorted(smoke_out.glob("*.dds"))
+                    }
+                    changed_resume = subprocess.run(
+                        [*run_args, "--resume-checkpoint"],
+                        cwd=REPO_ROOT,
+                        capture_output=True,
+                        text=True,
+                    )
+                    if changed_resume.returncode != 0:
+                        print(changed_resume.stdout)
+                        print(changed_resume.stderr)
+                        raise SystemExit(changed_resume.returncode)
+                    try:
+                        checkpoint_after = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+                        fingerprints_after = _validate_packaged_checkpoint_fingerprints(checkpoint_after)
+                    except (OSError, ValueError, json.JSONDecodeError) as exc:
+                        raise SystemExit(
+                            f"Packaged executable smoke resume after content mutation for '{scenario_name}' "
+                            f"left invalid checkpoint fingerprints: {exc}"
+                        ) from exc
+                    expected_completed_files = {
+                        str((smoke_input / f"sample_{index:02d}{input_suffix}").resolve())
+                        for index in range(1, input_count + 1)
+                    }
+                    if (
+                        int(checkpoint_after.get("resumed_completed_count", -1)) != input_count - 1
+                        or int(checkpoint_after.get("completed_success_count", -1)) != input_count
+                        or set(checkpoint_after.get("completed_success_files", [])) != expected_completed_files
+                    ):
+                        raise SystemExit(
+                            f"Packaged executable smoke resume after content mutation for '{scenario_name}' "
+                            "did not regenerate only the changed input."
+                        )
+                    source_fingerprint_after = fingerprints_after.get(source_key, {})
+                    if (
+                        source_fingerprint_after.get("sha256") != source_change["changed_sha256"]
+                        or source_fingerprint_after.get("size_bytes") != source_change["size_bytes"]
+                        or source_fingerprint_after.get("mtime_ns") != source_change["mtime_ns"]
+                    ):
+                        raise SystemExit(
+                            f"Packaged executable smoke resume for '{scenario_name}' did not refresh the changed "
+                            "source digest."
+                        )
+                    outputs_after = {
+                        path.name: path.read_bytes()
+                        for path in sorted(smoke_out.glob("*.dds"))
+                    }
+                    changed_output_names = {
+                        name
+                        for name in outputs_before
+                        if Path(name).stem.lower().startswith(source_path.stem.lower())
+                    }
+                    if not changed_output_names or set(outputs_after) != set(outputs_before):
+                        raise SystemExit(
+                            f"Packaged executable smoke resume for '{scenario_name}' changed output membership."
+                        )
+                    if any(
+                        outputs_after[name] != outputs_before[name]
+                        for name in outputs_before
+                        if name not in changed_output_names
+                    ):
+                        raise SystemExit(
+                            f"Packaged executable smoke resume for '{scenario_name}' modified outputs unrelated "
+                            "to the changed source."
+                        )
+                    changed_output_differences = sorted(
+                        name
+                        for name in changed_output_names
+                        if outputs_after[name] != outputs_before[name]
+                    )
+                    if not changed_output_differences:
+                        raise SystemExit(
+                            f"Packaged executable smoke resume for '{scenario_name}' did not regenerate changed outputs."
+                        )
+                    content_change_evidence = {
+                        "scenario": scenario_name,
+                        "source": source_key,
+                        "source_size_bytes": source_change["size_bytes"],
+                        "source_mtime_ns": source_change["mtime_ns"],
+                        "original_sha256": source_change["original_sha256"],
+                        "changed_sha256": source_change["changed_sha256"],
+                        "resumed_completed_count": checkpoint_after.get("resumed_completed_count"),
+                        "changed_outputs": changed_output_differences,
+                        "unchanged_output_count": len(outputs_before) - len(changed_output_names),
+                    }
+                    evidence_path = smoke_io / f"content_change_resume_loop{loop_index}_{scenario_name}.json"
+                    evidence_path.write_text(json.dumps(content_change_evidence, indent=2), encoding="utf-8")
+                    print(
+                        f"Packaged checkpoint content-change resume passed for '{scenario_name}': "
+                        f"{len(changed_output_differences)} outputs regenerated."
+                    )
             elif run_completed.returncode != 0:
                 print(run_completed.stdout)
                 print(run_completed.stderr)

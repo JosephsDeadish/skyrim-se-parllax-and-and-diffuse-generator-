@@ -27,11 +27,14 @@ from scripts.pre_release_validation import (
     _packaged_smoke_dimensions,
     _packaged_smoke_resume_args,
     _packaged_smoke_scenarios,
+    _mutate_batch_acceptance_dds_preserving_metadata,
     _read_packaged_smoke_dds_dimensions,
     _resolve_seed_realmod_delta_files,
     _run_repository_hygiene_scan,
     _resolve_packaged_smoke_binary,
+    _validate_packaged_checkpoint_fingerprints,
     _write_packaged_smoke_png,
+    _write_packaged_smoke_dds,
 )
 
 
@@ -593,6 +596,38 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         self.assertEqual(struct.unpack(">II", png_path.read_bytes()[16:24]), (48, 32))
         self.assertEqual(_packaged_smoke_dimensions(24), (24, 24))
 
+    def test_packaged_checkpoint_validation_and_content_mutation(self) -> None:
+        source = self.tmp / "sample.dds"
+        _write_packaged_smoke_dds(source, 32)
+        stat_result = source.stat()
+        original_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+        source_key = str(source.resolve())
+        payload = {
+            "completed_success_files": [source_key],
+            "completed_file_fingerprints": {
+                source_key: {
+                    "size_bytes": stat_result.st_size,
+                    "mtime_ns": stat_result.st_mtime_ns,
+                    "sha256": original_hash,
+                }
+            },
+        }
+
+        validated = _validate_packaged_checkpoint_fingerprints(payload)
+        self.assertEqual(validated[source_key]["sha256"], original_hash)
+
+        mutation = _mutate_batch_acceptance_dds_preserving_metadata(
+            source,
+            (32, 32),
+            pixel_format="DXT5",
+        )
+        self.assertEqual(mutation["size_bytes"], stat_result.st_size)
+        self.assertEqual(mutation["mtime_ns"], stat_result.st_mtime_ns)
+        self.assertEqual(mutation["original_sha256"], original_hash)
+        self.assertNotEqual(mutation["changed_sha256"], original_hash)
+        with self.assertRaisesRegex(ValueError, "does not match source"):
+            _validate_packaged_checkpoint_fingerprints(payload)
+
     def test_packaged_smoke_scenarios_define_required_outputs(self) -> None:
         scenarios = _packaged_smoke_scenarios()
         scenario_by_name = {
@@ -653,6 +688,7 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
         self.assertEqual(resume_scenario.get("input_format"), "dds")
         self.assertTrue(resume_scenario.get("checkpoint_resume"))
         self.assertTrue(resume_scenario.get("interruption_resume"))
+        self.assertTrue(resume_scenario.get("verify_content_change_resume"))
         self.assertEqual(
             resume_scenario.get("required_exact_output_family_counts"),
             {"diffuse": 2, "normal": 2},
