@@ -20489,6 +20489,13 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         )
     )
     nif_editor_form.addRow(nif_editor_dry_run)
+    nif_editor_dry_run_diff = QtWidgets.QCheckBox("Include byte-range diff in dry-run patch summary")
+    nif_editor_dry_run_diff.setObjectName("nif_dry_run_diff")
+    nif_editor_dry_run_diff.setToolTip(
+        "When enabled, dry-run patch results include the number and byte ranges of changes. "
+        "This affects reporting only and never enables writes."
+    )
+    nif_editor_form.addRow(nif_editor_dry_run_diff)
     nif_editor_retry_count = QtWidgets.QSpinBox()
     nif_editor_retry_count.setObjectName("nif_retry_count")
     nif_editor_retry_count.setRange(0, 3)
@@ -21409,7 +21416,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             *nif_editor_flags.values(),
             *(widget for pair in nif_editor_textures.values() for widget in pair),
             nif_editor_type3, nif_editor_scale_enabled, nif_editor_profile, nif_render_profile,
-            nif_editor_experimental, nif_editor_dry_run, nif_editor_retry_count,
+            nif_editor_experimental, nif_editor_dry_run, nif_editor_dry_run_diff, nif_editor_retry_count,
         ):
             control.setEnabled(not busy)
         nif_editor_scale.setEnabled(not busy and nif_editor_scale_enabled.isChecked())
@@ -21439,7 +21446,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             return
         values: dict[str, Any] = {
             "backup": True, "dry_run": nif_editor_dry_run.isChecked(),
-            "dry_run_diff": nif_editor_dry_run.isChecked(),
+            "dry_run_diff": nif_editor_dry_run_diff.isChecked(),
             "target_game": nif_editor_profile.currentText(),
             "experimental_fallout_write": nif_editor_experimental.isChecked(),
             "force_shader_type_3": nif_editor_type3.isChecked(),
