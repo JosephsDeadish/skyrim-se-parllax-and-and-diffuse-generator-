@@ -1052,6 +1052,45 @@ def compute_checkpoint_resume_counts(
     return completed, max(0, len(selected_files) - completed)
 
 
+def _checkpoint_source_file_fingerprints(
+    paths: Sequence[Path],
+) -> dict[str, dict[str, int]]:
+    fingerprints: dict[str, dict[str, int]] = {}
+    for path in paths:
+        try:
+            stat_result = path.stat()
+            if not path.is_file():
+                continue
+            fingerprints[str(path.resolve())] = {
+                "size_bytes": int(stat_result.st_size),
+                "mtime_ns": int(stat_result.st_mtime_ns),
+            }
+        except OSError:
+            continue
+    return fingerprints
+
+
+def _matching_checkpoint_completed_files(
+    completed_files: set[str],
+    recorded_fingerprints: object,
+    current_fingerprints: Mapping[str, Mapping[str, object]],
+) -> set[str]:
+    if not isinstance(recorded_fingerprints, dict):
+        return set()
+    matching: set[str] = set()
+    for path_key in completed_files:
+        recorded = recorded_fingerprints.get(path_key)
+        current = current_fingerprints.get(path_key)
+        if not isinstance(recorded, dict) or current is None:
+            continue
+        if (
+            recorded.get("size_bytes") == current.get("size_bytes")
+            and recorded.get("mtime_ns") == current.get("mtime_ns")
+        ):
+            matching.add(path_key)
+    return matching
+
+
 def compute_preview_refresh_delay_ms(
     *,
     is_processing: bool,
@@ -10707,6 +10746,7 @@ def run_batch_with_options(
 ) -> dict[Path, dict[str, Path]]:
     batch_start_time = time.perf_counter()
     input_files = collect_source_textures(input_path)
+    source_file_fingerprints = _checkpoint_source_file_fingerprints(input_files)
     completed_success_files: set[str] = set()
     resumed_completed_count = 0
     per_file_durations: list[float] = []
@@ -10775,6 +10815,11 @@ def run_batch_with_options(
             "completed_success_count": len(completed_success_files),
             "resumed_completed_count": resumed_completed_count,
             "completed_success_files": sorted(completed_success_files),
+            "completed_file_fingerprints": {
+                path_key: source_file_fingerprints[path_key]
+                for path_key in sorted(completed_success_files)
+                if path_key in source_file_fingerprints
+            },
         }
         checkpoint_file.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -10802,7 +10847,11 @@ def run_batch_with_options(
         raw_completed = payload.get("completed_success_files", [])
         if not isinstance(raw_completed, list) or any(not isinstance(entry, str) for entry in raw_completed):
             raise ValueError("Checkpoint completed-file list is invalid; start fresh or repair the checkpoint.")
-        completed_success_files = set(raw_completed)
+        completed_success_files = _matching_checkpoint_completed_files(
+            set(raw_completed),
+            payload.get("completed_file_fingerprints"),
+            source_file_fingerprints,
+        )
         resumed_completed_count = len(completed_success_files)
         input_files = [path for path in input_files if _checkpoint_key(path) not in completed_success_files]
 
@@ -11391,6 +11440,7 @@ if GUI_AVAILABLE:
             self.preview_before: ImageTk.PhotoImage | None = None
             self.preview_output_images: dict[str, ImageTk.PhotoImage] = {}
             self.selected_inputs: list[Path] = []
+            self.checkpoint_source_files: list[Path] = []
             self.current_preview_index = 0
             self.batch_failures: list[tuple[str, str]] = []
             self.batch_nif_patch_results: list[tuple[str, int, int]] = []
@@ -14570,7 +14620,7 @@ if GUI_AVAILABLE:
             if mode == "resume":
                 self.batch_resume_hint_var.set(
                     self._tr(
-                        "Checkpoint mode: Resume (recommended for long/1000+ runs) — continue from checkpoint and skip completed files."
+                        "Checkpoint mode: Resume (recommended for long/1000+ runs) — skip unchanged completed files and regenerate changed sources."
                     )
                 )
             else:
@@ -14593,6 +14643,17 @@ if GUI_AVAILABLE:
             if not isinstance(raw, list):
                 return set()
             return {str(item) for item in raw if isinstance(item, str)}
+
+        def _load_batch_checkpoint_file_fingerprints(self, checkpoint_path: Path) -> object:
+            if not checkpoint_path.exists():
+                return {}
+            try:
+                payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            except Exception:
+                return {}
+            if not isinstance(payload, dict):
+                return {}
+            return payload.get("completed_file_fingerprints", {})
 
         def _refresh_checkpoint_health_status(
             self,
@@ -14619,7 +14680,15 @@ if GUI_AVAILABLE:
                 age_label = f"{int(age_seconds // 3600)}h ago"
             else:
                 age_label = f"{int(age_seconds // 86400)}d ago"
-            completed = len(self._load_batch_checkpoint_completed_files(checkpoint_path))
+            completed_files = self._load_batch_checkpoint_completed_files(checkpoint_path)
+            checkpoint_source_files = self.checkpoint_source_files or self.selected_inputs
+            if checkpoint_source_files:
+                completed_files = _matching_checkpoint_completed_files(
+                    completed_files,
+                    self._load_batch_checkpoint_file_fingerprints(checkpoint_path),
+                    _checkpoint_source_file_fingerprints(checkpoint_source_files),
+                )
+            completed = len(completed_files)
             payload: dict[str, object] = {}
             try:
                 payload_raw = json.loads(checkpoint_path.read_text(encoding="utf-8"))
@@ -14679,6 +14748,7 @@ if GUI_AVAILABLE:
             input_root: Path,
             completed_success_files: set[str],
             resumed_completed_count: int,
+            source_file_fingerprints: Mapping[str, Mapping[str, int]] | None = None,
         ) -> None:
             checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
             payload = {
@@ -14688,6 +14758,11 @@ if GUI_AVAILABLE:
                 "completed_success_count": len(completed_success_files),
                 "resumed_completed_count": int(resumed_completed_count),
                 "completed_success_files": sorted(completed_success_files),
+                "completed_file_fingerprints": {
+                    path_key: dict(source_file_fingerprints[path_key])
+                    for path_key in sorted(completed_success_files)
+                    if source_file_fingerprints is not None and path_key in source_file_fingerprints
+                },
             }
             checkpoint_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -14717,6 +14792,7 @@ if GUI_AVAILABLE:
             try:
                 input_files = collect_source_textures(path)
                 self.selected_inputs = input_files
+                self.checkpoint_source_files = input_files.copy()
                 self.last_input_browse_dir = path if path.is_dir() else path.parent
                 self.current_preview_index = 0
                 self.emboss_mode_manual_override = False
@@ -14766,6 +14842,7 @@ if GUI_AVAILABLE:
             except Exception as exc:
                 self.source_image = None
                 self.selected_inputs = []
+                self.checkpoint_source_files = []
                 self.current_preview_index = 0
                 self.preview_source_name_var.set("No source loaded")
                 self.preview_jump_var.set("")
@@ -14945,8 +15022,11 @@ if GUI_AVAILABLE:
             checkpoint_path: Path,
             completed_checkpoint_files: set[str],
             resumed_completed_count: int,
+            source_file_fingerprints: Mapping[str, Mapping[str, int]] | None = None,
         ) -> None:
             try:
+                if source_file_fingerprints is None:
+                    source_file_fingerprints = _checkpoint_source_file_fingerprints(input_files)
                 total = len(input_files)
                 results: dict[Path, dict[str, Path]] = {}
                 started_at = time.perf_counter()
@@ -15026,6 +15106,7 @@ if GUI_AVAILABLE:
                             input_root=input_root,
                             completed_success_files=completed_checkpoint_files,
                             resumed_completed_count=resumed_completed_count,
+                            source_file_fingerprints=source_file_fingerprints,
                         )
                     except Exception as exc:
                         self.processing_queue.put((
@@ -16475,6 +16556,7 @@ if GUI_AVAILABLE:
 
                 input_path = Path(input_value)
                 self.selected_inputs = collect_source_textures(input_path)
+                self.checkpoint_source_files = self.selected_inputs.copy()
                 if not self.selected_inputs:
                     no_sources_message = "No source textures found to process."
                     self.status_var.set(no_sources_message)
@@ -16544,7 +16626,9 @@ if GUI_AVAILABLE:
                     )
                     self.status_var.set(huge_run_message)
                     self._append_generation_log(huge_run_message)
+                source_file_fingerprints = _checkpoint_source_file_fingerprints(self.selected_inputs)
                 resumed_completed_count = 0
+                unmatched_checkpoint_count = 0
                 completed_checkpoint_files: set[str] = set()
                 if self.batch_resume_mode_var.get() == "resume":
                     if not checkpoint_path.exists():
@@ -16617,19 +16701,37 @@ if GUI_AVAILABLE:
                                     "Resume canceled due to checkpoint mismatch. Switch to Start fresh or load the matching input/output set."
                                 )
                                 return
-                    completed_checkpoint_files = self._load_batch_checkpoint_completed_files(checkpoint_path)
+                    raw_completed_checkpoint_files = self._load_batch_checkpoint_completed_files(checkpoint_path)
+                    completed_checkpoint_files = _matching_checkpoint_completed_files(
+                        raw_completed_checkpoint_files,
+                        self._load_batch_checkpoint_file_fingerprints(checkpoint_path),
+                        source_file_fingerprints,
+                    )
+                    unmatched_checkpoint_count = len(raw_completed_checkpoint_files - completed_checkpoint_files)
                     if checkpoint_path.exists() and not completed_checkpoint_files:
-                        proceed_empty_resume = messagebox.askyesno(
-                            "Resume checkpoint has no completed entries",
-                            self._tr(
+                        empty_resume_message = (
+                            "No completed checkpoint entry matches the current source files. Changed, removed, "
+                            "or legacy entries cannot be verified and will be regenerated.\n\nContinue?"
+                            if unmatched_checkpoint_count > 0
+                            else (
                                 "Resume mode is enabled, but this checkpoint has no completed files yet.\n\n"
-                                "Continuing will process all selected files (same as start fresh) while creating checkpoint history.\n"
-                                "Continue?"
-                            ),
+                                "Continuing will process all selected files (same as start fresh) while creating "
+                                "checkpoint history.\n\nContinue?"
+                            )
+                        )
+                        proceed_empty_resume = messagebox.askyesno(
+                            "Resume checkpoint entries need verification"
+                            if unmatched_checkpoint_count > 0
+                            else "Resume checkpoint has no completed entries",
+                            self._tr(empty_resume_message),
                             parent=self.root,
                         )
                         if not proceed_empty_resume:
-                            self.status_var.set("Resume canceled because checkpoint had no completed entries.")
+                            self.status_var.set(
+                                "Resume canceled because checkpoint entries did not match current sources."
+                                if unmatched_checkpoint_count > 0
+                                else "Resume canceled because checkpoint had no completed entries."
+                            )
                             return
                     if completed_checkpoint_files:
                         resumed_completed_count, remaining_file_count = compute_checkpoint_resume_counts(
@@ -16850,6 +16952,11 @@ if GUI_AVAILABLE:
                     self.reenable_batch_preview_button.configure(state=tk.DISABLED)
                 if resumed_completed_count > 0:
                     perf_note += f" Resume mode skipped {resumed_completed_count} file(s) from checkpoint."
+                if unmatched_checkpoint_count > 0:
+                    perf_note += (
+                        f" {unmatched_checkpoint_count} checkpoint entry/entries did not match current source files "
+                        "and will be regenerated."
+                    )
                 if checkpoint_path.exists():
                     perf_note += f" Checkpoint file: {checkpoint_path.name}."
                 perf_note += f" Checkpoint mode: {self.batch_resume_mode_var.get()}."
@@ -16875,6 +16982,7 @@ if GUI_AVAILABLE:
                         checkpoint_path,
                         completed_checkpoint_files,
                         resumed_completed_count,
+                        source_file_fingerprints,
                     ),
                     daemon=True,
                 )
@@ -19531,6 +19639,7 @@ def _qt_resume_completed_files(
     input_root: Path,
     output_dir: Path | None,
     generation_options: Mapping[str, object],
+    source_file_fingerprints: Mapping[str, Mapping[str, int]],
 ) -> set[str]:
     if not isinstance(payload, dict):
         raise ValueError("Checkpoint is invalid; start fresh or choose a valid Qt checkpoint.")
@@ -19552,14 +19661,19 @@ def _qt_resume_completed_files(
     raw_completed = payload.get("completed_success_files", [])
     if not isinstance(raw_completed, list):
         raise ValueError("Checkpoint completed-file list is invalid; start fresh.")
-    return {entry for entry in raw_completed if isinstance(entry, str)}
+    completed_files = {entry for entry in raw_completed if isinstance(entry, str)}
+    return _matching_checkpoint_completed_files(
+        completed_files,
+        payload.get("completed_file_fingerprints"),
+        source_file_fingerprints,
+    )
 
 
 def _qt_resume_mode_guidance(mode: str) -> str:
     if str(mode or "").strip().lower() == "resume":
         return (
-            "Resume skips checkpointed files only when the input, output folder, and generation settings match. "
-            "For a mismatch or older checkpoint, choose Start fresh."
+            "Resume skips checkpointed files only when the source fingerprint, input, output folder, and generation settings match. "
+            "Changed sources are regenerated; legacy entries without fingerprints are also regenerated."
         )
     return "Start fresh ignores prior checkpoint entries."
 
@@ -19764,6 +19878,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             input_root: Path,
             output_dir: Path | None,
             generation_options: Mapping[str, object],
+            source_file_fingerprints: Mapping[str, Mapping[str, int]],
         ) -> set[str]:
             if not checkpoint_path.exists():
                 return set()
@@ -19776,6 +19891,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                 input_root=input_root,
                 output_dir=output_dir,
                 generation_options=generation_options,
+                source_file_fingerprints=source_file_fingerprints,
             )
 
         def _write_checkpoint_state(
@@ -19788,6 +19904,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             output_dir: Path | None,
             total_files_considered: int,
             generation_options: Mapping[str, object],
+            source_file_fingerprints: Mapping[str, Mapping[str, int]],
         ) -> None:
             checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
             payload = {
@@ -19799,6 +19916,11 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                 "completed_success_count": len(completed_success_files),
                 "resumed_completed_count": int(resumed_completed_count),
                 "completed_success_files": sorted(completed_success_files),
+                "completed_file_fingerprints": {
+                    path_key: dict(source_file_fingerprints[path_key])
+                    for path_key in sorted(completed_success_files)
+                    if path_key in source_file_fingerprints
+                },
                 "generation_options": dict(generation_options),
             }
             checkpoint_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -19860,6 +19982,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
 
                 if input_path.is_dir():
                     all_files = collect_source_textures(input_path)
+                    source_file_fingerprints = _checkpoint_source_file_fingerprints(all_files)
                     completed_success_files: set[str] = set()
                     if resume_mode == "resume":
                         completed_success_files = self._load_completed_set(
@@ -19867,6 +19990,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                             input_root=input_path,
                             output_dir=output_dir,
                             generation_options=checkpoint_generation_options,
+                            source_file_fingerprints=source_file_fingerprints,
                         )
                     resumed_completed_count = len(completed_success_files)
                     pending_files = [
@@ -19988,6 +20112,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                                 output_dir=output_dir,
                                 total_files_considered=len(all_files),
                                 generation_options=checkpoint_generation_options,
+                                source_file_fingerprints=source_file_fingerprints,
                             )
                             self.event.emit("file_done", {"source": display_label, "outputs": output_payload})
                         except Exception as exc:

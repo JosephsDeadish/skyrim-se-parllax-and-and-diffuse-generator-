@@ -74,6 +74,8 @@ from generate_textures import (
     _qt_checkpoint_generation_options,
     _qt_resume_completed_files,
     _qt_resume_mode_guidance,
+    _checkpoint_source_file_fingerprints,
+    _matching_checkpoint_completed_files,
     _qt_truepbr_material_overrides,
     _apply_qt_profile_output_defaults,
     _QT_OUTPUT_GROUPS,
@@ -1853,10 +1855,11 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_qt_resume_mode_guidance_explains_checkpoint_matching(self) -> None:
         resume_guidance = _qt_resume_mode_guidance("resume").lower()
+        self.assertIn("source fingerprint", resume_guidance)
         self.assertIn("input", resume_guidance)
         self.assertIn("output folder", resume_guidance)
         self.assertIn("generation settings", resume_guidance)
-        self.assertIn("start fresh", resume_guidance)
+        self.assertIn("regenerated", resume_guidance)
         self.assertEqual(
             _qt_resume_mode_guidance("start_fresh"),
             "Start fresh ignores prior checkpoint entries.",
@@ -1873,6 +1876,18 @@ class GenerateTexturesTests(unittest.TestCase):
                 "output_root": str(output_root.resolve()),
                 "generation_options": options,
                 "completed_success_files": [str((input_root / "done.dds").resolve()), 3],
+                "completed_file_fingerprints": {
+                    str((input_root / "done.dds").resolve()): {
+                        "size_bytes": 42,
+                        "mtime_ns": 1234,
+                    }
+                },
+            }
+            source_fingerprints = {
+                str((input_root / "done.dds").resolve()): {
+                    "size_bytes": 42,
+                    "mtime_ns": 1234,
+                }
             }
             self.assertEqual(
                 _qt_resume_completed_files(
@@ -1880,8 +1895,34 @@ class GenerateTexturesTests(unittest.TestCase):
                     input_root=input_root,
                     output_dir=output_root,
                     generation_options=options,
+                    source_file_fingerprints=source_fingerprints,
                 ),
                 {str((input_root / "done.dds").resolve())},
+            )
+            self.assertEqual(
+                _qt_resume_completed_files(
+                    payload,
+                    input_root=input_root,
+                    output_dir=output_root,
+                    generation_options=options,
+                    source_file_fingerprints={
+                        str((input_root / "done.dds").resolve()): {
+                            "size_bytes": 42,
+                            "mtime_ns": 9999,
+                        }
+                    },
+                ),
+                set(),
+            )
+            self.assertEqual(
+                _qt_resume_completed_files(
+                    {key: value for key, value in payload.items() if key != "completed_file_fingerprints"},
+                    input_root=input_root,
+                    output_dir=output_root,
+                    generation_options=options,
+                    source_file_fingerprints=source_fingerprints,
+                ),
+                set(),
             )
 
             invalid_cases = (
@@ -1913,6 +1954,7 @@ class GenerateTexturesTests(unittest.TestCase):
                         input_root=input_root,
                         output_dir=output_root,
                         generation_options=options,
+                        source_file_fingerprints=source_fingerprints,
                     )
 
     def test_qt_profile_recommendation_uses_existing_filename_and_path_hints(self) -> None:
@@ -5483,6 +5525,47 @@ class GenerateTexturesTests(unittest.TestCase):
             (2, 1),
         )
 
+    def test_checkpoint_resume_fingerprints_skip_only_unchanged_existing_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            unchanged = root / "unchanged.dds"
+            changed = root / "changed.dds"
+            removed = root / "removed.dds"
+            for path in (unchanged, changed, removed):
+                path.write_bytes(b"same-size")
+            recorded = _checkpoint_source_file_fingerprints((unchanged, changed, removed))
+            changed.write_bytes(b"new-bytes")
+            changed_stat = changed.stat()
+            os.utime(
+                changed,
+                ns=(changed_stat.st_atime_ns, changed_stat.st_mtime_ns + 1_000_000_000),
+            )
+            removed.unlink()
+            current = _checkpoint_source_file_fingerprints((unchanged, changed))
+
+            matching = _matching_checkpoint_completed_files(
+                set(recorded),
+                recorded,
+                current,
+            )
+
+        self.assertEqual(matching, {str(unchanged.resolve())})
+
+    def test_checkpoint_resume_reprocesses_legacy_entries_without_fingerprints(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "legacy.dds"
+            source.write_bytes(b"source")
+            source_key = str(source.resolve())
+
+            matching = _matching_checkpoint_completed_files(
+                {source_key},
+                None,
+                _checkpoint_source_file_fingerprints((source,)),
+            )
+
+        self.assertEqual(matching, set())
+
     def test_basic_preview_outputs_hide_advanced_workflow_tiles(self) -> None:
         self.assertEqual(
             _visible_preview_output_keys(show_advanced_workflow_outputs=False),
@@ -7824,6 +7907,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 json.dumps(
                     {
                         "completed_success_files": [str(a_path.resolve())],
+                        "completed_file_fingerprints": _checkpoint_source_file_fingerprints((a_path,)),
                     }
                 ),
                 encoding="utf-8",
@@ -7847,6 +7931,55 @@ class GenerateTexturesTests(unittest.TestCase):
             payload = json.loads(checkpoint.read_text(encoding="utf-8"))
             self.assertEqual(payload["resumed_completed_count"], 1)
             self.assertEqual(payload["completed_success_count"], 2)
+
+    def test_run_batch_with_options_resume_reprocesses_sources_changed_since_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            checkpoint = temp_path / "batch_checkpoint.json"
+            input_dir.mkdir()
+            changed_path = input_dir / "changed.dds"
+            unchanged_path = input_dir / "unchanged.dds"
+            _sample_image().save(changed_path, format="DDS", pixel_format="DXT5")
+            _sample_image().save(unchanged_path, format="DDS", pixel_format="DXT5")
+            options = {
+                "include_diffuse": True,
+                "include_normal": False,
+                "include_parallax": False,
+                "include_glow": False,
+                "include_environment_mask": False,
+                "include_complex": False,
+                "batch_workers": 1,
+                "checkpoint_file": checkpoint,
+            }
+            run_batch_with_options(input_path=input_dir, output_dir=output_dir, **options)
+            original_payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            original_changed_fingerprint = original_payload["completed_file_fingerprints"][
+                str(changed_path.resolve())
+            ]
+
+            _sample_image().rotate(20).save(changed_path, format="DDS", pixel_format="DXT5")
+            changed_stat = changed_path.stat()
+            os.utime(
+                changed_path,
+                ns=(changed_stat.st_atime_ns, original_changed_fingerprint["mtime_ns"] + 1_000_000_000),
+            )
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                **options,
+                resume_from_checkpoint=True,
+            )
+
+            resumed_payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+
+        self.assertEqual([path.name for path in outputs], ["changed.dds"])
+        self.assertEqual(resumed_payload["resumed_completed_count"], 1)
+        self.assertNotEqual(
+            resumed_payload["completed_file_fingerprints"][str(changed_path.resolve())],
+            original_changed_fingerprint,
+        )
 
     def test_run_batch_with_options_recovers_interrupted_multiresolution_batch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -8032,6 +8165,7 @@ class GenerateTexturesTests(unittest.TestCase):
             worker = _BatchWorker()
             interrupted_after = 11
             first_attempts: list[str] = []
+            source_fingerprints = _checkpoint_source_file_fingerprints(input_files)
 
             def cancel_after_completed_files(**kwargs: object) -> dict[str, Path]:
                 input_file = kwargs["input_file"]
@@ -8056,6 +8190,7 @@ class GenerateTexturesTests(unittest.TestCase):
                     checkpoint,
                     set(),
                     0,
+                    source_fingerprints,
                 )
 
             interrupted_events = []
@@ -8077,6 +8212,10 @@ class GenerateTexturesTests(unittest.TestCase):
                 for index in range(interrupted_after)
             ]
             self.assertEqual(interrupted_state["completed_success_files"], completed_before_resume)
+            self.assertEqual(
+                set(interrupted_state["completed_file_fingerprints"]),
+                set(completed_before_resume),
+            )
 
             remaining_files = [
                 input_file
@@ -8107,6 +8246,7 @@ class GenerateTexturesTests(unittest.TestCase):
                     checkpoint,
                     set(interrupted_state["completed_success_files"]),
                     interrupted_after,
+                    source_fingerprints,
                 )
 
             resumed_events = []
@@ -8128,6 +8268,10 @@ class GenerateTexturesTests(unittest.TestCase):
             completed_state = json.loads(checkpoint.read_text(encoding="utf-8"))
             self.assertEqual(completed_state["completed_success_count"], len(dimensions))
             self.assertEqual(completed_state["resumed_completed_count"], interrupted_after)
+            self.assertEqual(
+                set(completed_state["completed_file_fingerprints"]),
+                set(completed_state["completed_success_files"]),
+            )
 
     def test_run_batch_with_options_recovers_failed_file_under_parallel_queue_pressure(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
