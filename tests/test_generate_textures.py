@@ -875,6 +875,7 @@ class TestQtNifValidationScan(unittest.TestCase):
         self.assertIn("examples:", details)
         self.assertIn("fix actions:", details)
         self.assertIn("Rollback path: sibling backup found", details)
+        self.assertEqual(rows[0]["conflict_codes"], "shader_state.envmap_missing_slot5")
 
         with tempfile.TemporaryDirectory() as temp_dir:
             nif_path = Path(temp_dir) / "mesh.nif"
@@ -12819,6 +12820,87 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             return False
 
         with mock.patch.object(self.qt.QtWidgets.QMessageBox, "question", return_value=self.qt.QtWidgets.QMessageBox.StandardButton.Yes):
+            self.run_window(scenario)
+
+    def test_qt_conflict_only_scan_reruns_current_conflict_paths(self) -> None:
+        from types import SimpleNamespace
+
+        folder = self.root / "meshes"
+        folder.mkdir()
+        conflict_path = folder / "conflict.nif"
+        clear_path = folder / "clear.nif"
+        conflict_path.write_bytes(b"conflict fixture")
+        clear_path.write_bytes(b"clear fixture")
+        conflict_group = SimpleNamespace(
+            code="shader_state.envmap_missing_slot5",
+            count=1,
+            game_profile="skyrim",
+            shader_layout="real",
+            examples=("Slot 5 is unresolved.",),
+            suggested_actions=("Add a matching environment mask.",),
+        )
+        conflicted = SimpleNamespace(
+            shader_count=1,
+            ready_count=0,
+            skip_count=0,
+            detected_game_profile="skyrim",
+            has_havok=False,
+            skip_reasons=[],
+            issues=[],
+            suggestions=[],
+            renderer_verdicts={},
+            conflict_report=[conflict_group],
+        )
+        ready = SimpleNamespace(
+            shader_count=1,
+            ready_count=1,
+            skip_count=0,
+            detected_game_profile="skyrim",
+            has_havok=False,
+            skip_reasons=[],
+            issues=[],
+            suggestions=[],
+            renderer_verdicts={},
+            conflict_report=[],
+        )
+        validation_calls = []
+
+        def validate(path):
+            path = Path(path)
+            validation_calls.append(path.name)
+            if path == conflict_path and validation_calls.count(path.name) == 1:
+                return conflicted
+            return ready
+
+        state = {"step": 0}
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            if state["step"] == 0:
+                self.assertFalse(w("nif_scan_conflicts").isEnabled())
+                w("nif_scan_mode").setCurrentIndex(1)
+                w("nif_scan_path").setText(str(folder))
+                w("nif_scan_start").click()
+                state["step"] = 1
+            elif state["step"] == 1 and w("generate").isEnabled():
+                self.assertEqual(w("nif_scan_results").topLevelItemCount(), 2)
+                self.assertTrue(w("nif_scan_conflicts").isEnabled())
+                w("nif_scan_conflicts").click()
+                self.assertFalse(w("nif_scan_conflicts").isEnabled())
+                state["step"] = 2
+            elif state["step"] == 2 and w("generate").isEnabled():
+                self.assertEqual(w("nif_scan_results").topLevelItemCount(), 1)
+                result = w("nif_scan_results").topLevelItem(0).data(
+                    0, self.qt.QtCore.Qt.ItemDataRole.UserRole
+                )
+                self.assertEqual(result["preview"], str(conflict_path))
+                self.assertEqual(validation_calls.count("conflict.nif"), 2)
+                self.assertEqual(validation_calls.count("clear.nif"), 1)
+                self.assertFalse(w("nif_scan_conflicts").isEnabled())
+                return True
+            return False
+
+        with mock.patch("generate_textures.validate_nif_for_parallax", side_effect=validate):
             self.run_window(scenario)
 
     def test_qt_nif_scan_handoff_prefills_renderer_and_warns_on_mismatch(self) -> None:

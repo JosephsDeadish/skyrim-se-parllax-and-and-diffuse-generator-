@@ -243,7 +243,7 @@ def run_acceptance(generator, report_path: str | Path, *, timeout_seconds: float
                     ),
                     "NIF Scan": (
                         "nif_scan_include_conflict_report", "nif_scan_include_conflict_examples",
-                        "nif_scan_start",
+                        "nif_scan_start", "nif_scan_conflicts",
                     ),
                     "Batch/Resume": ("checkpoint_path", "resume_mode"),
                 }.get(title, ())

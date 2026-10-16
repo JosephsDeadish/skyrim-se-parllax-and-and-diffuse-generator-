@@ -8211,8 +8211,14 @@ def _scan_nif_validation_rows(
             cancelled = True
             break
         backup_state = _describe_nif_backup_state(nif_path)
+        conflict_codes = ""
         try:
             validation = validate_nif_for_parallax(nif_path)
+            conflict_codes = "\n".join(sorted({
+                str(getattr(group, "code", "") or "").strip()
+                for group in (getattr(validation, "conflict_report", ()) or ())
+                if str(getattr(group, "code", "") or "").strip()
+            }))
             details = _build_qt_nif_validation_detail_lines(
                 validation,
                 include_conflict_report=include_conflict_report,
@@ -8240,6 +8246,7 @@ def _scan_nif_validation_rows(
             "file_name": nif_path.name,
             "details": detail_text,
             "preview": str(nif_path),
+            "conflict_codes": conflict_codes,
         }
         rows.append(row)
         if on_row is not None:
@@ -20350,8 +20357,15 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     )
     nif_scan_cancel_button = QtWidgets.QPushButton("Cancel scan")
     nif_scan_cancel_button.setEnabled(False)
+    nif_scan_conflicts_button = QtWidgets.QPushButton("Rescan conflicts")
+    nif_scan_conflicts_button.setObjectName("nif_scan_conflicts")
+    nif_scan_conflicts_button.setEnabled(False)
+    nif_scan_conflicts_button.setToolTip(
+        "Rerun the latest scan only for NIFs with grouped conflict codes or scan failures."
+    )
     nif_scan_action_row.addWidget(nif_scan_start_button)
     nif_scan_action_row.addWidget(nif_scan_cancel_button)
+    nif_scan_action_row.addWidget(nif_scan_conflicts_button)
     nif_scan_progress = QtWidgets.QProgressBar()
     nif_scan_progress.setRange(0, 100)
     nif_scan_progress.setValue(0)
@@ -21434,6 +21448,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_worker: _QtNifEditorWorker | None = None
     ui_receivers: list[_QtUiReceiver] = []
     nif_scan_rows: list[dict[str, str]] = []
+    nif_scan_conflict_paths: list[Path] = []
     nif_scan_page_index = 0
     preview_manual_paused = False
     preview_auto_speed_off = False
@@ -21448,6 +21463,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         generate_button.setEnabled(not busy)
         launch_tk_button.setEnabled(not busy)
         nif_scan_start_button.setEnabled(not busy)
+        nif_scan_conflicts_button.setEnabled(not busy and bool(nif_scan_conflict_paths))
         nif_scan_path_edit.setEnabled(not busy)
         nif_scan_mode_combo.setEnabled(not busy)
         nif_scan_browse_button.setEnabled(not busy)
@@ -21683,9 +21699,21 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     def _add_nif_scan_result(row: object) -> None:
         if not isinstance(row, dict):
             return
-        nif_scan_rows.append({str(key): str(value) for key, value in row.items()})
+        normalized_row = {str(key): str(value) for key, value in row.items()}
+        nif_scan_rows.append(normalized_row)
+        if normalized_row.get("conflict_codes") or normalized_row.get("status", "").upper() == "FAIL":
+            raw_path = normalized_row.get("preview", "").strip()
+            if raw_path:
+                candidate = Path(raw_path)
+                if candidate not in nif_scan_conflict_paths:
+                    nif_scan_conflict_paths.append(candidate)
         if _should_refresh_qt_nif_scan_page(len(nif_scan_rows)):
             _render_nif_scan_page()
+
+    def _invalidate_nif_scan_conflicts(*_: object) -> None:
+        if nif_scan_conflict_paths:
+            nif_scan_conflict_paths.clear()
+            nif_scan_conflicts_button.setEnabled(False)
 
     def _reset_nif_scan_page(*_: object) -> None:
         nonlocal nif_scan_page_index
@@ -22905,28 +22933,37 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         nif_scan_progress.setValue(min(100, int(index * 100 / max(1, total))))
         nif_scan_status_label.setText(f"Scanning {index}/{total}: {Path(path).name}")
 
-    def _start_nif_scan() -> None:
+    def _start_nif_scan(conflicts_only: bool = False) -> None:
         nonlocal nif_scan_thread, nif_scan_worker, nif_scan_page_index
         if _operation_active():
             return
-        nif_paths, error = resolve_nif_editor_targets(
-            nif_scan_path_edit.text(),
-            str(nif_scan_mode_combo.currentData() or ""),
-        )
-        if error:
-            nif_scan_status_label.setText(error)
-            return
+        if conflicts_only:
+            nif_paths = [path for path in nif_scan_conflict_paths if path.is_file()]
+            if not nif_paths:
+                _invalidate_nif_scan_conflicts()
+                nif_scan_status_label.setText("No remaining NIF conflict results to rescan.")
+                return
+        else:
+            nif_paths, error = resolve_nif_editor_targets(
+                nif_scan_path_edit.text(),
+                str(nif_scan_mode_combo.currentData() or ""),
+            )
+            if error:
+                nif_scan_status_label.setText(error)
+                return
         if not nif_paths:
             nif_scan_status_label.setText("No NIF files found in the selected location.")
             return
         if nif_scan_thread is not None:
             return
         nif_scan_rows.clear()
+        nif_scan_conflict_paths.clear()
         nif_scan_page_index = 0
         nif_scan_results.clear()
         nif_scan_detail_view.setPlainText(_format_qt_nif_scan_detail(None))
         nif_scan_progress.setValue(0)
-        nif_scan_status_label.setText(f"Starting read-only scan of {len(nif_paths)} NIF file(s)…")
+        scan_scope = "conflict NIF file(s)" if conflicts_only else "NIF file(s)"
+        nif_scan_status_label.setText(f"Starting read-only scan of {len(nif_paths)} {scan_scope}…")
         _set_nif_scan_running(True)
         nif_scan_worker = _QtNifScanWorker(
             nif_paths,
@@ -23375,6 +23412,8 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_dry_run.toggled.connect(lambda *_: _update_nif_editor_note())
     nif_editor_retry_count.valueChanged.connect(_persist_qt_gui_state)
     nif_scan_path_edit.textChanged.connect(lambda *_: _update_nif_editor_note())
+    nif_scan_path_edit.textChanged.connect(_invalidate_nif_scan_conflicts)
+    nif_scan_mode_combo.currentIndexChanged.connect(_invalidate_nif_scan_conflicts)
     detected_mod_button.clicked.connect(_pick_detected_mod_folder)
     profile_setup_restore_button.clicked.connect(_restore_qt_profile_setup)
     profile_setup_save_copy_button.clicked.connect(_save_qt_profile_setup_as_new_preset)
@@ -23391,6 +23430,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     browse_checkpoint_button.clicked.connect(_browse_checkpoint)
     nif_scan_browse_button.clicked.connect(_browse_nif_scan_target)
     nif_scan_start_button.clicked.connect(_start_nif_scan)
+    nif_scan_conflicts_button.clicked.connect(
+        lambda _checked=False: _start_nif_scan(conflicts_only=True)
+    )
     nif_scan_cancel_button.clicked.connect(_cancel_nif_scan)
     nif_scan_remediation_preview_button.clicked.connect(_preview_selected_nif_remediation)
     nif_scan_open_editor_button.clicked.connect(_open_selected_nif_in_editor)
