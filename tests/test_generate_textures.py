@@ -13202,7 +13202,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
         )
         self.assertEqual(
             [call.args[0] for call in restore_mock.call_args_list],
-            [path],
+            [[path]],
         )
 
     def test_qt_nif_scan_handoff_prefills_renderer_and_warns_on_mismatch(self) -> None:
