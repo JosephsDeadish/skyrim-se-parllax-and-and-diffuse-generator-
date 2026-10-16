@@ -8867,7 +8867,17 @@ def _format_qt_nif_scan_page_summary(
     rows: Sequence[Mapping[str, str]],
     page_index: int,
     page_count: int,
+    *,
+    page_size: int = _NIF_EDITOR_RESULT_PAGE_SIZE,
 ) -> str:
+    normalized_page_size = max(1, int(page_size))
+    normalized_page_index = max(0, int(page_index))
+    total_count = len(rows)
+    first_visible = normalized_page_index * normalized_page_size + 1
+    last_visible = min(first_visible + normalized_page_size - 1, total_count)
+    visible_range = (
+        f"{first_visible}–{last_visible}" if first_visible <= last_visible else "0"
+    )
     status_counts = {status: 0 for status in ("OK", "WARN", "PROBABLY INCOMPATIBLE", "SKIP", "FAIL")}
     for row in rows:
         status = str(row.get("status", "") or "").strip().upper()
@@ -8884,12 +8894,12 @@ def _format_qt_nif_scan_page_summary(
     )
     summary = (
         f"Page {int(page_index) + 1} of {max(1, int(page_count))} · "
-        f"{len(rows)} filtered result(s)"
+        f"showing {visible_range} of {total_count} filtered"
     )
     summary_parts = [summary]
     if status_summary:
-        summary_parts.append(status_summary)
-    summary_parts.append(f"conflict-coded NIFs {conflict_file_count}")
+        summary_parts.append(f"filtered status: {status_summary}")
+    summary_parts.append(f"conflict-coded NIFs {conflict_file_count} filtered")
     return " · ".join(summary_parts)
 
 
