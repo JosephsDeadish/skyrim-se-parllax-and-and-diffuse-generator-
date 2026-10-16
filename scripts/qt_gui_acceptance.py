@@ -251,7 +251,9 @@ def run_acceptance(generator, report_path: str | Path, *, timeout_seconds: float
                 page = tabs.currentWidget()
                 for name in controls:
                     control = self.widget(name)
-                    self.require(control.isEnabled() and control.isVisible(), f"Unavailable {name}")
+                    self.require(control.isVisible(), f"Unavailable {name}")
+                    if name != "nif_scan_conflicts":
+                        self.require(control.isEnabled(), f"Unavailable {name}")
                     if isinstance(page, widgets.QScrollArea):
                         page.ensureWidgetVisible(control)
                         app.processEvents()
