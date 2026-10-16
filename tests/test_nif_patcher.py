@@ -1037,6 +1037,47 @@ class TestValidateNifForParallax(unittest.TestCase):
         self.assertEqual(conflict.game_profile, "skyrim")
         self.assertEqual(conflict.shader_layout, "legacy")
 
+    def test_reports_explicit_target_profile_mismatch(self) -> None:
+        skyrim_dir = self.tmp / "skyrim"
+        fallout_dir = self.tmp / "fallout"
+        skyrim_dir.mkdir()
+        fallout_dir.mkdir()
+        skyrim_nif = _write_nif(skyrim_dir, user_ver2=130)
+        fallout_target_validation = validate_nif_for_parallax(
+            skyrim_nif,
+            target_game="fallout",
+        )
+        self.assertEqual(fallout_target_validation.detected_game_profile, "skyrim")
+        self.assertTrue(
+            any(
+                "requested target profile 'fallout'" in suggestion.lower()
+                and "detected header profile 'skyrim'" in suggestion.lower()
+                for suggestion in fallout_target_validation.suggestions
+            ),
+            fallout_target_validation.suggestions,
+        )
+
+        fallout_nif = _write_nif(fallout_dir, user_ver2=130)
+        _rewrite_user_version(fallout_nif, 11)
+        skyrim_target_validation = validate_nif_for_parallax(
+            fallout_nif,
+            target_game="skyrim",
+        )
+        self.assertEqual(skyrim_target_validation.detected_game_profile, "fallout")
+        self.assertTrue(
+            any(
+                "requested target profile 'skyrim'" in suggestion.lower()
+                and "detected header profile 'fallout'" in suggestion.lower()
+                for suggestion in skyrim_target_validation.suggestions
+            ),
+            skyrim_target_validation.suggestions,
+        )
+
+    def test_rejects_unsupported_target_game(self) -> None:
+        nif = _write_nif(self.tmp)
+        with self.assertRaisesRegex(ValueError, "Expected one of: auto, skyrim, fallout"):
+            validate_nif_for_parallax(nif, target_game="oblivion")
+
     def test_reports_single_pass_skip_reason(self) -> None:
         nif = _write_nif(self.tmp, flags1=SLSF1_SINGLE_PASS)
         v = validate_nif_for_parallax(nif)
@@ -7237,6 +7278,19 @@ class TestCliArgumentValidation(unittest.TestCase):
         self.assertIn("Experimental fix path:", text)
         self.assertIn("Conflict report:", text)
         self.assertLess(text.index("What this file needs:"), text.index("Conflict report:"))
+
+    def test_validate_cli_reports_explicit_target_profile_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            nif_path = _write_nif(Path(td))
+            out = io.StringIO()
+            with mock.patch(
+                "sys.argv",
+                ["nif_patcher.py", str(nif_path), "--validate", "--target-game", "fallout"],
+            ):
+                with redirect_stdout(out):
+                    nif_patcher_main()
+        self.assertIn("Requested target profile 'fallout'", out.getvalue())
+        self.assertIn("detected header profile 'skyrim'", out.getvalue())
 
 
 if __name__ == "__main__":

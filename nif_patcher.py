@@ -5744,8 +5744,12 @@ def validate_nif_for_parallax(
     *,
     skip_single_pass: bool = True,
     unknown_shader_type_map: dict[int, int] | None = None,
+    target_game: str = "auto",
 ) -> NifValidationResult:
     """Check whether a NIF is ready for parallax, and suggest fixes.
+
+    *target_game* is compared with the detected header profile for explicit
+    targets, but never overrides the profile detected from the NIF itself.
 
     The result now carries per-block :attr:`~NifValidationResult.skip_reasons`
     (explaining exactly why each shader will be skipped by the patcher),
@@ -5756,6 +5760,11 @@ def validate_nif_for_parallax(
     Shaders, and TruePBR.
     """
     result = NifValidationResult(nif_path=nif_path, valid=False)
+    target_profile = (target_game or "auto").strip().lower()
+    if target_profile not in {"auto", _GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT}:
+        raise ValueError(
+            f"Unsupported target_game {target_game!r}. Expected one of: auto, skyrim, fallout."
+        )
 
     # ------------------------------------------------------------------
     # Fast binary check for BSBehaviorGraphExtraData (Havok-animated mesh).
@@ -5781,6 +5790,16 @@ def validate_nif_for_parallax(
     def _append_unique(items: list[str], message: str) -> None:
         if message not in items:
             items.append(message)
+
+    if target_profile != "auto" and result.detected_game_profile != target_profile:
+        _append_unique(
+            result.suggestions,
+            (
+                f"Requested target profile '{target_profile}' differs from detected header profile "
+                f"'{result.detected_game_profile}'; validation continues using the detected profile. "
+                "Review this mismatch before attempting any patch or auto-remediation."
+            ),
+        )
 
     if diagnostics:
         result.issues.extend(diagnostics[:6])
@@ -7120,7 +7139,8 @@ def _main() -> None:  # pragma: no cover
         choices=("auto", "skyrim", "fallout"),
         default="auto",
         help="Header profile target. 'auto' detects from NIF, 'skyrim' enforces Skyrim profile, "
-             "'fallout' enables Fallout profile selection (requires --experimental-fallout-write to patch).",
+             "'fallout' enables Fallout profile selection (requires --experimental-fallout-write to patch); "
+             "validation reports explicit target/header mismatches without overriding detection.",
     )
     parser.add_argument(
         "--experimental-fallout-write",
@@ -7368,7 +7388,11 @@ def _main() -> None:  # pragma: no cover
                         r for r in parsed_refs if r.plugin_name
                     ]
         for nif in nif_files:
-            v = validate_nif_for_parallax(nif, unknown_shader_type_map=parsed_shader_map)
+            v = validate_nif_for_parallax(
+                nif,
+                unknown_shader_type_map=parsed_shader_map,
+                target_game=args.target_game,
+            )
             validation_results.append(v)
             status = "READY" if v.ready_count == v.shader_count else "NEEDS PATCH"
             print(f"[{status}] {nif.name}: "
@@ -7427,6 +7451,7 @@ def _main() -> None:  # pragma: no cover
                         validation_results[-1] = validate_nif_for_parallax(
                             nif,
                             unknown_shader_type_map=parsed_shader_map,
+                            target_game=args.target_game,
                         )
         summary: list[NifBatchConflictSummary] = []
         if args.conflict_report_summary or args.parity_delta_report:
