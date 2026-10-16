@@ -19450,6 +19450,7 @@ def run_nif_editor_operation(
     options: NifPatchOptions,
     *,
     operation: str = "patch",
+    retries_per_file: int = 0,
     is_cancelled: Callable[[], bool] = lambda: False,
     on_progress: Callable[[int, int, str], None] | None = None,
     on_result: Callable[[object], None] | None = None,
@@ -19457,6 +19458,7 @@ def run_nif_editor_operation(
     """Run the Qt editor's bounded, backup-protected per-file operations."""
     if operation not in {"patch", "remediate", "restore", "compare"}:
         raise ValueError(f"Unknown NIF editor operation: {operation}")
+    retries_per_file = max(0, min(3, int(retries_per_file)))
     options = replace(options, backup=True, strict_pre_write_validation=True)
     rows: list[dict[str, str]] = []
     cancelled = False
@@ -19469,35 +19471,46 @@ def run_nif_editor_operation(
             on_progress(index, len(nif_paths), str(path))
         try:
             notes: tuple[str, ...] = ()
-            if operation == "compare":
-                status, _, message = compare_nif_backups([path])[0]
-            elif operation == "restore":
-                if options.dry_run:
-                    status = "OK" if path.with_suffix(".nif.bak").is_file() else "SKIP"
-                    message = "Would restore sibling .nif.bak; no file written." if status == "OK" else "No .nif.bak backup found."
-                else:
-                    status, _, message = restore_nif_backups([path])[0]
-            else:
-                if operation == "patch":
-                    resolved, notes = resolve_nif_editor_patch_options_for_target(path, options)
-                    result = patch_nif(path, resolved)
-                else:
-                    validation = validate_nif_for_parallax(path)
-                    codes = sorted({group.code for group in validation.conflict_report})
-                    result, notes = auto_remediate_nif_conflicts(
-                        path, codes, allow_destructive=False, backup=True,
-                        dry_run=options.dry_run, target_game=options.target_game,
-                        experimental_fallout_write=options.experimental_fallout_write,
-                        **{name: getattr(options, name) for name in (
-                            "fallout_allow_parallax_scale", "fallout_allow_fix_mesh_lighting",
-                            "fallout_allow_spec_strength", "fallout_allow_spec_color",
-                            "fallout_allow_env_map_scale",
-                        )},
-                    )
-                status = "SKIP" if result is None else ("OK" if result.success else "FAIL")
-                message = "No safe automatic fix available." if result is None else "\n".join(
-                    [str(result.message), *result.warnings, *result.errors]
-                )
+            for attempt in range(retries_per_file + 1):
+                try:
+                    if operation == "compare":
+                        status, _, message = compare_nif_backups([path])[0]
+                    elif operation == "restore":
+                        if options.dry_run:
+                            status = "OK" if path.with_suffix(".nif.bak").is_file() else "SKIP"
+                            message = (
+                                "Would restore sibling .nif.bak; no file written."
+                                if status == "OK" else "No .nif.bak backup found."
+                            )
+                        else:
+                            status, _, message = restore_nif_backups([path])[0]
+                    else:
+                        if operation == "patch":
+                            resolved, notes = resolve_nif_editor_patch_options_for_target(path, options)
+                            result = patch_nif(path, resolved)
+                        else:
+                            validation = validate_nif_for_parallax(path)
+                            codes = sorted({group.code for group in validation.conflict_report})
+                            result, notes = auto_remediate_nif_conflicts(
+                                path, codes, allow_destructive=False, backup=True,
+                                dry_run=options.dry_run, target_game=options.target_game,
+                                experimental_fallout_write=options.experimental_fallout_write,
+                                **{name: getattr(options, name) for name in (
+                                    "fallout_allow_parallax_scale", "fallout_allow_fix_mesh_lighting",
+                                    "fallout_allow_spec_strength", "fallout_allow_spec_color",
+                                    "fallout_allow_env_map_scale",
+                                )},
+                            )
+                        status = "SKIP" if result is None else ("OK" if result.success else "FAIL")
+                        message = "No safe automatic fix available." if result is None else "\n".join(
+                            [str(result.message), *result.warnings, *result.errors]
+                        )
+                    if attempt:
+                        notes = (*notes, f"{operation.title()} succeeded after retry {attempt}/{retries_per_file}.")
+                    break
+                except Exception:
+                    if attempt >= retries_per_file:
+                        raise
             row = {"status": status, "path": str(path), "message": "\n".join([message, *notes])}
         except Exception as exc:
             row = {"status": "FAIL", "path": str(path), "message": str(exc)}
@@ -19574,9 +19587,16 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         finished = QtCore.Signal(object)
         failed = QtCore.Signal(str)
 
-        def __init__(self, paths: Sequence[Path], options: NifPatchOptions, operation: str) -> None:
+        def __init__(
+            self,
+            paths: Sequence[Path],
+            options: NifPatchOptions,
+            operation: str,
+            retries_per_file: int = 0,
+        ) -> None:
             super().__init__()
             self.paths, self.options, self.operation = paths, options, operation
+            self.retries_per_file = retries_per_file
             self.cancelled = False
 
         def request_cancel(self) -> None:
@@ -19587,6 +19607,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             try:
                 self.finished.emit(run_nif_editor_operation(
                     self.paths, self.options, operation=self.operation,
+                    retries_per_file=self.retries_per_file,
                     is_cancelled=lambda: self.cancelled,
                     on_progress=self.progress.emit, on_result=self.result.emit,
                 ))
@@ -20468,6 +20489,14 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         )
     )
     nif_editor_form.addRow(nif_editor_dry_run)
+    nif_editor_retry_count = QtWidgets.QSpinBox()
+    nif_editor_retry_count.setObjectName("nif_retry_count")
+    nif_editor_retry_count.setRange(0, 3)
+    nif_editor_retry_count.setValue(max(0, min(3, int(qt_saved_state.get("nif_retry_count", 1)))))
+    nif_editor_retry_count.setToolTip(
+        "Retry transient per-file exceptions before recording a failure. Retries do not repeat operations that return a normal failure result."
+    )
+    nif_editor_form.addRow("Retries per file (transient errors)", nif_editor_retry_count)
     nif_editor_layout.addLayout(nif_editor_form)
     nif_editor_guidance = QtWidgets.QLabel("Renderer guidance will appear here.")
     nif_editor_guidance.setObjectName("nif_editor_guidance")
@@ -21380,7 +21409,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             *nif_editor_flags.values(),
             *(widget for pair in nif_editor_textures.values() for widget in pair),
             nif_editor_type3, nif_editor_scale_enabled, nif_editor_profile, nif_render_profile,
-            nif_editor_experimental, nif_editor_dry_run,
+            nif_editor_experimental, nif_editor_dry_run, nif_editor_retry_count,
         ):
             control.setEnabled(not busy)
         nif_editor_scale.setEnabled(not busy and nif_editor_scale_enabled.isChecked())
@@ -21456,7 +21485,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         nif_editor_status.setText(
             f"Starting {mode_label} on {len(paths)} NIF file(s)… {status_note}"
         )
-        nif_editor_worker = _QtNifEditorWorker(paths, options, operation)
+        nif_editor_worker = _QtNifEditorWorker(
+            paths, options, operation, retries_per_file=nif_editor_retry_count.value(),
+        )
         nif_editor_thread = QtCore.QThread(window)
         nif_editor_worker.moveToThread(nif_editor_thread)
 
@@ -22382,6 +22413,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             state["last_mod_profile"] = manager_context.profile_name
         state["last_renderer"] = _normalize_render_profile(render_profile_combo.currentText())
         state["nif_render_profile"] = _normalize_render_profile(nif_render_profile.currentText())
+        state["nif_retry_count"] = nif_editor_retry_count.value()
         state["last_output_target"] = (
             output_dir_edit.text().strip()
             if output_dir_edit.text().strip()
@@ -23284,6 +23316,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_editor_profile.currentTextChanged.connect(lambda *_: _update_nif_editor_note())
     nif_editor_experimental.toggled.connect(lambda *_: _update_nif_editor_note())
     nif_editor_dry_run.toggled.connect(lambda *_: _update_nif_editor_note())
+    nif_editor_retry_count.valueChanged.connect(_persist_qt_gui_state)
     nif_scan_path_edit.textChanged.connect(lambda *_: _update_nif_editor_note())
     detected_mod_button.clicked.connect(_pick_detected_mod_folder)
     profile_setup_restore_button.clicked.connect(_restore_qt_profile_setup)

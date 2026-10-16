@@ -11922,6 +11922,25 @@ class TestQtNifEditorRunner(unittest.TestCase):
         from generate_textures import run_nif_editor_operation
         return run_nif_editor_operation(paths, options, **kwargs)
 
+    def test_qt_editor_retries_transient_patch_exception(self) -> None:
+        path = self.make_nif()
+        options = self.options()
+        patch_result = SimpleNamespace(
+            success=True, message="Patched.", warnings=(), errors=(), already_up_to_date=False,
+        )
+        with mock.patch(
+            "generate_textures.resolve_nif_editor_patch_options_for_target",
+            side_effect=[OSError("temporary file lock"), (options, ())],
+        ) as resolve_options, mock.patch(
+            "generate_textures.patch_nif",
+            return_value=patch_result,
+        ):
+            summary = self.run_operation([path], options, retries_per_file=1)
+
+        self.assertEqual(summary["success"], 1, summary)
+        self.assertEqual(resolve_options.call_count, 2)
+        self.assertIn("succeeded after retry 1/1", summary["results"][0]["message"])
+
     def test_skyrim_dry_run_write_type3_slots_and_restore(self) -> None:
         from nif_patcher import scan_nif
         path = self.make_nif(texture_paths=["textures\\stone.dds", "textures\\stone_n.dds"] + [""] * 7)
@@ -12264,6 +12283,26 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
 
         with mock.patch.object(self.qt.QtWidgets.QMessageBox, "question", side_effect=confirm):
             self.run_window(scenario)
+
+    def test_qt_nif_retry_count_uses_and_persists_shared_setting(self) -> None:
+        saved_states = []
+        saved_state = dict(self.qt._GUI_STATE_DEFAULTS)
+        saved_state["nif_retry_count"] = 2
+
+        def scenario(window):
+            retry_count = self.widget(window, "nif_retry_count")
+            self.assertEqual((retry_count.minimum(), retry_count.maximum()), (0, 3))
+            self.assertEqual(retry_count.value(), 2)
+            retry_count.setValue(3)
+            self.assertTrue(saved_states)
+            self.assertEqual(saved_states[-1]["nif_retry_count"], 3)
+            return True
+
+        self.run_window(
+            scenario,
+            load_state=saved_state,
+            save_side_effect=lambda state: saved_states.append(dict(state)),
+        )
 
     def test_qt_detected_mod_hint_and_profile_restore(self) -> None:
         detected_mod_dir = self.root / "mods" / "Detected Mod" / "textures"
