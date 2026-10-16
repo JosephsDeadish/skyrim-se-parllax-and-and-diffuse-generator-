@@ -52,6 +52,7 @@ from nif_patcher import (
     auto_remediate_nif_conflicts,
     scan_nif_diagnostics,
     validate_nif_for_parallax,
+    validate_nif_bytes_for_restore,
     NifPluginConflictRef,
     _main as nif_patcher_main,
     _Buf,
@@ -6562,6 +6563,21 @@ class TestBackupOverwriteProtection(unittest.TestCase):
 
     def tearDown(self) -> None:
         self._td.cleanup()
+
+    def test_restore_validator_accepts_structurally_valid_skyrim_and_fallout_nifs(self) -> None:
+        skyrim_data = _build_minimal_nif(user_ver2=130, shader_layout="real")
+        fallout_path = self.tmp / "fallout.nif"
+        fallout_path.write_bytes(_build_minimal_nif(user_ver2=130, shader_layout="real"))
+        _rewrite_user_version(fallout_path, 11)
+
+        self.assertEqual(validate_nif_bytes_for_restore(skyrim_data), [])
+        self.assertEqual(validate_nif_bytes_for_restore(fallout_path.read_bytes()), [])
+
+    def test_restore_validator_rejects_truncated_and_unsupported_nif_data(self) -> None:
+        valid_data = _build_minimal_nif()
+
+        self.assertTrue(validate_nif_bytes_for_restore(valid_data[:90]))
+        self.assertTrue(validate_nif_bytes_for_restore(b"not a NIF"))
 
     def test_backup_created_when_none_exists(self) -> None:
         """A .nif.bak file is created on the first patch when no backup exists."""

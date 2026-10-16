@@ -3290,6 +3290,15 @@ def _validate_patched_bytes_before_write(
     return errors
 
 
+def validate_nif_bytes_for_restore(data: bytes) -> list[str]:
+    """Return structural validation errors for a Skyrim or Fallout NIF backup."""
+    return _validate_patched_bytes_before_write(
+        data,
+        allowed_profiles=(_GAME_PROFILE_SKYRIM, _GAME_PROFILE_FALLOUT),
+        unknown_shader_type_map=None,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------

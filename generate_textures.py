@@ -99,6 +99,7 @@ try:
             "summarize_plugin_aware_validation_conflicts",
             "summarize_validation_conflicts",
             "validate_nif_for_parallax",
+            "validate_nif_bytes_for_restore",
         )
         last_error: ImportError | None = None
         resolved_search_dirs = search_dirs or _candidate_nif_patcher_search_dirs()
@@ -753,14 +754,43 @@ def restore_nif_backups(
         if should_cancel is not None and should_cancel():
             break
         backup_path = nif_path.with_suffix(".nif.bak")
+        if backup_path.is_symlink():
+            results.append(("FAIL", nif_path.name, "Restore failed: backup must not be a symbolic link."))
+            continue
         if not backup_path.exists():
             results.append(("SKIP", nif_path.name, "No .nif.bak backup found."))
             continue
+        temporary_path: Path | None = None
         try:
-            shutil.copy2(backup_path, nif_path)
+            if not backup_path.is_file():
+                raise OSError("Backup must be a regular file.")
+            if nif_path.is_symlink():
+                raise OSError("Restore target must not be a symbolic link.")
+            if nif_path.exists() and not nif_path.is_file():
+                raise OSError("Restore target must be a regular file.")
+            if nif_path.exists() and backup_path.samefile(nif_path):
+                raise OSError("Backup refers to the restore target itself.")
+            backup_data = backup_path.read_bytes()
+            validation_errors = validate_nif_bytes_for_restore(backup_data)
+            if validation_errors:
+                raise ValueError("Backup is not a usable NIF: " + validation_errors[0])
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                prefix=f".{nif_path.name}.restore-",
+                suffix=".tmp",
+                dir=nif_path.parent,
+                delete=False,
+            ) as temporary_file:
+                temporary_path = Path(temporary_file.name)
+                temporary_file.write(backup_data)
+            shutil.copystat(backup_path, temporary_path)
+            os.replace(temporary_path, nif_path)
         except Exception as exc:
             results.append(("FAIL", nif_path.name, f"Restore failed: {exc}"))
             continue
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
         results.append(("OK", nif_path.name, f"Restored from {backup_path.name}."))
     return results
 

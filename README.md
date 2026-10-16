@@ -346,7 +346,7 @@ When both Community Shaders and ENB markers are detected in mod-manager context,
 
 The **NIF Editor** (accessible from the toolbar button) patches Skyrim-format BSLightingShaderProperty flags and texture slots for supported Skyrim LE/SE/AE/VR/CK variants. Fallout-era headers are now detected with an experimental profile path and should be treated as best-effort.
 Skyrim NIF editing is a supported workflow; review scan results and keep backups before patching. Fallout-era writes remain experimental and best-effort.
-When backups are requested, patching refuses to write if backup creation fails or the existing backup is not a readable, structurally valid regular NIF file; existing valid backups are never overwritten.
+When backups are requested, patching refuses to write if backup creation fails or the existing backup is not a readable, structurally valid regular NIF file; existing valid backups are never overwritten. Restore also validates the backup and refuses symlink or non-regular paths before atomically replacing the mesh.
 
 Qt editor regressions exercise synthetic Skyrim and Fallout meshes, including dry-run, guarded writes, remediation, and backup restoration. These fixtures are not redistributed real Fallout mod meshes. Real-mod validation remains blocked until samples with explicit permission for use and redistribution are available; synthetic diagnostics and successful writes do not establish in-game compatibility.
 The **Auto-patch NIFs after generation** checkbox (off by default) triggers NIF patching automatically after each generation run and carries the selected texture game profile through to related-mesh checks. Fallout profiles remain guarded: auto-patching does not enable experimental Fallout writes.

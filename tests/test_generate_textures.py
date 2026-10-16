@@ -273,6 +273,7 @@ class TestNifPatcherLoading(unittest.TestCase):
                         "def summarize_plugin_aware_validation_conflicts(*args, **kwargs): return []",
                         "def summarize_validation_conflicts(*args, **kwargs): return []",
                         "def validate_nif_for_parallax(*args, **kwargs): return None",
+                        "def validate_nif_bytes_for_restore(*args, **kwargs): return []",
                     ]
                 ),
                 encoding="utf-8",
@@ -5070,16 +5071,20 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(compute_wrapped_preview_index(1, 3), 1)
 
     def test_restore_nif_backups_restores_from_nif_bak(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
         with tempfile.TemporaryDirectory() as tmpdir:
             mesh_path = Path(tmpdir) / "test_mesh.nif"
             backup_path = mesh_path.with_suffix(".nif.bak")
-            mesh_path.write_bytes(b"new-data")
-            backup_path.write_bytes(b"old-data")
+            current_data = _build_minimal_nif(texture_paths=[r"textures\current.dds"] + [""] * 8)
+            backup_data = _build_minimal_nif(texture_paths=[r"textures\backup.dds"] + [""] * 8)
+            mesh_path.write_bytes(current_data)
+            backup_path.write_bytes(backup_data)
 
             rows = restore_nif_backups([mesh_path])
 
             self.assertEqual(rows[0][0], "OK")
-            self.assertEqual(mesh_path.read_bytes(), b"old-data")
+            self.assertEqual(mesh_path.read_bytes(), backup_data)
 
     def test_restore_nif_backups_skips_when_backup_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -5092,13 +5097,19 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(mesh_path.read_bytes(), b"current-data")
 
     def test_restore_nif_backups_stops_before_next_file_when_cancelled(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
         with tempfile.TemporaryDirectory() as tmpdir:
             first_mesh = Path(tmpdir) / "first.nif"
             second_mesh = Path(tmpdir) / "second.nif"
-            first_mesh.write_bytes(b"new-first")
-            first_mesh.with_suffix(".nif.bak").write_bytes(b"old-first")
-            second_mesh.write_bytes(b"new-second")
-            second_mesh.with_suffix(".nif.bak").write_bytes(b"old-second")
+            first_current = _build_minimal_nif(texture_paths=[r"textures\new_first.dds"] + [""] * 8)
+            first_backup = _build_minimal_nif(texture_paths=[r"textures\old_first.dds"] + [""] * 8)
+            second_current = _build_minimal_nif(texture_paths=[r"textures\new_second.dds"] + [""] * 8)
+            second_backup = _build_minimal_nif(texture_paths=[r"textures\old_second.dds"] + [""] * 8)
+            first_mesh.write_bytes(first_current)
+            first_mesh.with_suffix(".nif.bak").write_bytes(first_backup)
+            second_mesh.write_bytes(second_current)
+            second_mesh.with_suffix(".nif.bak").write_bytes(second_backup)
             cancel_checks = 0
 
             def cancel_after_first_restore() -> bool:
@@ -5112,8 +5123,122 @@ class GenerateTexturesTests(unittest.TestCase):
             )
 
             self.assertEqual([row[1] for row in rows], ["first.nif"])
-            self.assertEqual(first_mesh.read_bytes(), b"old-first")
-            self.assertEqual(second_mesh.read_bytes(), b"new-second")
+            self.assertEqual(first_mesh.read_bytes(), first_backup)
+            self.assertEqual(second_mesh.read_bytes(), second_current)
+
+    def test_restore_nif_backups_rejects_malformed_backup_without_overwriting_mesh(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mesh_path = Path(tmpdir) / "test_mesh.nif"
+            original_data = _build_minimal_nif()
+            mesh_path.write_bytes(original_data)
+            mesh_path.with_suffix(".nif.bak").write_bytes(b"not a valid NIF")
+
+            rows = restore_nif_backups([mesh_path])
+
+            self.assertEqual(rows[0][0], "FAIL")
+            self.assertIn("not a usable NIF", rows[0][2])
+            self.assertEqual(mesh_path.read_bytes(), original_data)
+
+    def test_restore_nif_backups_rejects_symbolic_link_backup(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            mesh_path = root / "test_mesh.nif"
+            original_data = _build_minimal_nif()
+            mesh_path.write_bytes(original_data)
+            backup_path = mesh_path.with_suffix(".nif.bak")
+            valid_target = root / "valid-backup.nif"
+            valid_target.write_bytes(_build_minimal_nif(texture_paths=[r"textures\backup.dds"] + [""] * 8))
+            try:
+                backup_path.symlink_to(valid_target)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            rows = restore_nif_backups([mesh_path])
+
+            self.assertEqual(rows[0][0], "FAIL")
+            self.assertIn("symbolic link", rows[0][2])
+            self.assertEqual(mesh_path.read_bytes(), original_data)
+            self.assertTrue(backup_path.is_symlink())
+
+    def test_restore_nif_backups_rejects_symbolic_link_target(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            mesh_path = root / "test_mesh.nif"
+            backup_data = _build_minimal_nif()
+            mesh_path.with_suffix(".nif.bak").write_bytes(backup_data)
+            actual_target = root / "outside.nif"
+            original_data = _build_minimal_nif(texture_paths=[r"textures\outside.dds"] + [""] * 8)
+            actual_target.write_bytes(original_data)
+            try:
+                mesh_path.symlink_to(actual_target)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            rows = restore_nif_backups([mesh_path])
+
+            self.assertEqual(rows[0][0], "FAIL")
+            self.assertIn("symbolic link", rows[0][2])
+            self.assertTrue(mesh_path.is_symlink())
+            self.assertEqual(actual_target.read_bytes(), original_data)
+
+    def test_restore_nif_backups_rejects_directory_backup_without_overwriting_mesh(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mesh_path = Path(tmpdir) / "test_mesh.nif"
+            original_data = _build_minimal_nif()
+            mesh_path.write_bytes(original_data)
+            mesh_path.with_suffix(".nif.bak").mkdir()
+
+            rows = restore_nif_backups([mesh_path])
+
+            self.assertEqual(rows[0][0], "FAIL")
+            self.assertIn("regular file", rows[0][2])
+            self.assertEqual(mesh_path.read_bytes(), original_data)
+
+    def test_restore_nif_backups_rejects_hardlink_to_target(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mesh_path = Path(tmpdir) / "test_mesh.nif"
+            original_data = _build_minimal_nif()
+            mesh_path.write_bytes(original_data)
+            backup_path = mesh_path.with_suffix(".nif.bak")
+            try:
+                backup_path.hardlink_to(mesh_path)
+            except OSError as exc:
+                self.skipTest(f"Hard links are unavailable: {exc}")
+
+            rows = restore_nif_backups([mesh_path])
+
+            self.assertEqual(rows[0][0], "FAIL")
+            self.assertIn("refers to the restore target itself", rows[0][2])
+            self.assertEqual(mesh_path.read_bytes(), original_data)
+
+    def test_restore_nif_backups_replace_failure_preserves_current_mesh(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mesh_path = Path(tmpdir) / "test_mesh.nif"
+            current_data = _build_minimal_nif(texture_paths=[r"textures\current.dds"] + [""] * 8)
+            backup_data = _build_minimal_nif(texture_paths=[r"textures\backup.dds"] + [""] * 8)
+            mesh_path.write_bytes(current_data)
+            mesh_path.with_suffix(".nif.bak").write_bytes(backup_data)
+
+            with mock.patch("generate_textures.os.replace", side_effect=OSError("replace failed")):
+                rows = restore_nif_backups([mesh_path])
+
+            self.assertEqual(rows[0][0], "FAIL")
+            self.assertIn("replace failed", rows[0][2])
+            self.assertEqual(mesh_path.read_bytes(), current_data)
+            self.assertEqual(mesh_path.with_suffix(".nif.bak").read_bytes(), backup_data)
+            self.assertEqual(list(Path(tmpdir).glob(".*.restore-*.tmp")), [])
 
     def test_compare_nif_backups_reports_match_diff_and_missing_backup_states(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
