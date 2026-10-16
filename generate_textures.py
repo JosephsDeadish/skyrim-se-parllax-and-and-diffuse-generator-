@@ -4,6 +4,7 @@ import argparse
 import concurrent.futures
 import csv
 import gc
+import hashlib
 import importlib
 import io
 import json
@@ -1075,20 +1076,51 @@ def compute_checkpoint_resume_counts(
 
 def _checkpoint_source_file_fingerprints(
     paths: Sequence[Path],
-) -> dict[str, dict[str, int]]:
-    fingerprints: dict[str, dict[str, int]] = {}
+    *,
+    include_content_hash: bool = True,
+) -> dict[str, dict[str, int | str]]:
+    fingerprints: dict[str, dict[str, int | str]] = {}
     for path in paths:
         try:
             stat_result = path.stat()
             if not path.is_file():
                 continue
-            fingerprints[str(path.resolve())] = {
+            fingerprint: dict[str, int | str] = {
                 "size_bytes": int(stat_result.st_size),
                 "mtime_ns": int(stat_result.st_mtime_ns),
             }
+            if include_content_hash:
+                digest = hashlib.sha256()
+                with path.open("rb") as source_file:
+                    opened_stat = os.fstat(source_file.fileno())
+                    if _checkpoint_stat_signature(opened_stat) != _checkpoint_stat_signature(stat_result):
+                        continue
+                    for chunk in iter(lambda: source_file.read(1024 * 1024), b""):
+                        digest.update(chunk)
+                    finished_stat = os.fstat(source_file.fileno())
+                current_stat = path.stat()
+                if (
+                    _checkpoint_stat_signature(finished_stat) != _checkpoint_stat_signature(opened_stat)
+                    or _checkpoint_stat_signature(current_stat) != _checkpoint_stat_signature(finished_stat)
+                ):
+                    continue
+                fingerprint["size_bytes"] = int(finished_stat.st_size)
+                fingerprint["mtime_ns"] = int(finished_stat.st_mtime_ns)
+                fingerprint["sha256"] = digest.hexdigest()
+            fingerprints[str(path.resolve())] = fingerprint
         except OSError:
             continue
     return fingerprints
+
+
+def _checkpoint_stat_signature(stat_result: os.stat_result) -> tuple[int, int, int, int, int]:
+    return (
+        int(stat_result.st_dev),
+        int(stat_result.st_ino),
+        int(stat_result.st_size),
+        int(stat_result.st_mtime_ns),
+        int(stat_result.st_ctime_ns),
+    )
 
 
 def _write_checkpoint_payload_atomically(
@@ -1129,6 +1161,8 @@ def _matching_checkpoint_completed_files(
     completed_files: set[str],
     recorded_fingerprints: object,
     current_fingerprints: Mapping[str, Mapping[str, object]],
+    *,
+    verify_content: bool = True,
 ) -> set[str]:
     if not isinstance(recorded_fingerprints, dict):
         return set()
@@ -1138,11 +1172,20 @@ def _matching_checkpoint_completed_files(
         current = current_fingerprints.get(path_key)
         if not isinstance(recorded, dict) or current is None:
             continue
-        if (
-            recorded.get("size_bytes") == current.get("size_bytes")
-            and recorded.get("mtime_ns") == current.get("mtime_ns")
-        ):
-            matching.add(path_key)
+        if recorded.get("size_bytes") != current.get("size_bytes"):
+            continue
+        if recorded.get("mtime_ns") != current.get("mtime_ns"):
+            continue
+        if verify_content:
+            recorded_digest = recorded.get("sha256")
+            current_digest = current.get("sha256")
+            if (
+                not isinstance(recorded_digest, str)
+                or not isinstance(current_digest, str)
+                or recorded_digest != current_digest
+            ):
+                continue
+        matching.add(path_key)
     return matching
 
 
@@ -14740,7 +14783,11 @@ if GUI_AVAILABLE:
                 completed_files = _matching_checkpoint_completed_files(
                     completed_files,
                     self._load_batch_checkpoint_file_fingerprints(checkpoint_path),
-                    _checkpoint_source_file_fingerprints(checkpoint_source_files),
+                    _checkpoint_source_file_fingerprints(
+                        checkpoint_source_files,
+                        include_content_hash=False,
+                    ),
+                    verify_content=False,
                 )
             completed = len(completed_files)
             payload: dict[str, object] = {}
@@ -14804,7 +14851,7 @@ if GUI_AVAILABLE:
             input_root: Path,
             completed_success_files: set[str],
             resumed_completed_count: int,
-            source_file_fingerprints: Mapping[str, Mapping[str, int]] | None = None,
+            source_file_fingerprints: Mapping[str, Mapping[str, int | str]] | None = None,
             output_root: str = "",
             total_files_considered: int = 0,
             generation_options: Mapping[str, object] | None = None,
@@ -15083,7 +15130,7 @@ if GUI_AVAILABLE:
             checkpoint_path: Path,
             completed_checkpoint_files: set[str],
             resumed_completed_count: int,
-            source_file_fingerprints: Mapping[str, Mapping[str, int]] | None = None,
+            source_file_fingerprints: Mapping[str, Mapping[str, int | str]] | None = None,
             total_files_considered: int | None = None,
         ) -> None:
             try:
@@ -19754,7 +19801,7 @@ def _qt_resume_completed_files(
     input_root: Path,
     output_dir: Path | None,
     generation_options: Mapping[str, object],
-    source_file_fingerprints: Mapping[str, Mapping[str, int]],
+    source_file_fingerprints: Mapping[str, Mapping[str, int | str]],
 ) -> set[str]:
     if not isinstance(payload, dict):
         raise ValueError("Checkpoint is invalid; start fresh or choose a valid Qt checkpoint.")
@@ -19993,7 +20040,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             input_root: Path,
             output_dir: Path | None,
             generation_options: Mapping[str, object],
-            source_file_fingerprints: Mapping[str, Mapping[str, int]],
+            source_file_fingerprints: Mapping[str, Mapping[str, int | str]],
         ) -> set[str]:
             if not checkpoint_path.exists():
                 return set()
@@ -20019,7 +20066,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             output_dir: Path | None,
             total_files_considered: int,
             generation_options: Mapping[str, object],
-            source_file_fingerprints: Mapping[str, Mapping[str, int]],
+            source_file_fingerprints: Mapping[str, Mapping[str, int | str]],
         ) -> None:
             payload = {
                 "tool": "generate_textures",
