@@ -876,6 +876,19 @@ class TestQtNifValidationScan(unittest.TestCase):
         self.assertIn("fix actions:", details)
         self.assertIn("Rollback path: sibling backup found", details)
 
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"fixture")
+            with mock.patch("generate_textures.validate_nif_for_parallax", return_value=validation):
+                rows, cancelled = _scan_nif_validation_rows(
+                    [nif_path],
+                    include_conflict_report=False,
+                )
+
+        self.assertFalse(cancelled)
+        self.assertNotIn("Grouped conflict codes:", rows[0]["details"])
+        self.assertIn("What this file needs:", rows[0]["details"])
+
     def test_scan_validation_rows_mark_fully_ready_uncertain_results_as_probably_incompatible(self) -> None:
         validation = SimpleNamespace(
             shader_count=1,
@@ -2884,6 +2897,7 @@ class GenerateTexturesTests(unittest.TestCase):
                     self.assertFalse(banner.winfo_ismapped())
                     show_button = find_button(gui.root, "Show quick start")
                     self.assertTrue(show_button.winfo_ismapped())
+                    self.assertTrue(show_button.bind("<Enter>"))
                     show_button.invoke()
                     gui.root.update_idletasks()
                     self.assertTrue(gui.show_startup_onboarding_var.get())
@@ -2891,6 +2905,34 @@ class GenerateTexturesTests(unittest.TestCase):
                     save_state.assert_called()
                     persisted = save_state.call_args.args[0]
                     self.assertTrue(bool(persisted["show_startup_onboarding"]))
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_startup_show_quick_start_tooltip_is_bound(self) -> None:
+        self._skip_unavailable_tk_display()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_file = Path(temp_dir) / "gui-state.json"
+            saved_state = load_gui_state(state_file)
+            gui = None
+            try:
+                with mock.patch("generate_textures.GUI_STATE_FILE", state_file), \
+                     mock.patch("generate_textures.load_gui_state", return_value=saved_state), \
+                     mock.patch("generate_textures.save_gui_state"):
+                    gui = TextureGeneratorGUI()
+                    pending = [gui.root]
+                    show_button = None
+                    while pending:
+                        widget = pending.pop()
+                        if (
+                            widget.winfo_class() == "TButton"
+                            and str(widget.cget("text")) == "Show quick start"
+                        ):
+                            show_button = widget
+                            break
+                        pending.extend(widget.winfo_children())
+                    self.assertIsNotNone(show_button)
+                    self.assertTrue(show_button.bind("<Enter>"))
             finally:
                 if gui is not None:
                     gui.root.destroy()
@@ -12213,6 +12255,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             if step == 0:
                 self.assertTrue(w("nif_dry_run").isChecked())
                 self.assertFalse(w("nif_dry_run_diff").isChecked())
+                self.assertTrue(w("nif_scan_include_conflict_report").isChecked())
                 banner = w("nif_editor_safety_banner").text().lower()
                 self.assertIn("dry-run is on", banner)
                 self.assertIn("compare against .bak first", banner)

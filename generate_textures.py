@@ -8200,6 +8200,7 @@ def _scan_nif_validation_rows(
     is_cancelled: Callable[[], bool] | None = None,
     on_progress: Callable[[int, int, str], None] | None = None,
     on_row: Callable[[dict[str, str]], None] | None = None,
+    include_conflict_report: bool = True,
 ) -> tuple[list[dict[str, str]], bool]:
     rows: list[dict[str, str]] = []
     total = len(nif_paths)
@@ -8211,7 +8212,10 @@ def _scan_nif_validation_rows(
         backup_state = _describe_nif_backup_state(nif_path)
         try:
             validation = validate_nif_for_parallax(nif_path)
-            details = _build_qt_nif_validation_detail_lines(validation)
+            details = _build_qt_nif_validation_detail_lines(
+                validation,
+                include_conflict_report=include_conflict_report,
+            )
             details.append(backup_state)
             shader_count = int(getattr(validation, "shader_count", 0) or 0)
             ready_count = int(getattr(validation, "ready_count", 0) or 0)
@@ -11894,7 +11898,7 @@ if GUI_AVAILABLE:
                     "you still need the quick-start decision tree visible while choosing a renderer family",
                 ),
             )
-            _add_tooltip(
+            self._add_tooltip(
                 startup_onboarding_show_button,
                 "Reopen the quick start card if you hide it for later.",
             )
@@ -19965,9 +19969,15 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         finished = QtCore.Signal(bool)
         failed = QtCore.Signal(str)
 
-        def __init__(self, nif_paths: Sequence[Path]) -> None:
+        def __init__(
+            self,
+            nif_paths: Sequence[Path],
+            *,
+            include_conflict_report: bool = True,
+        ) -> None:
             super().__init__()
             self._nif_paths = list(nif_paths)
+            self._include_conflict_report = bool(include_conflict_report)
             self._cancel_requested = False
 
         @QtCore.Slot()
@@ -19982,6 +19992,7 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                     is_cancelled=lambda: self._cancel_requested,
                     on_progress=lambda index, total, path: self.progress.emit(index, total, path),
                     on_row=self.result.emit,
+                    include_conflict_report=self._include_conflict_report,
                 )
                 self.finished.emit(cancelled)
             except Exception as exc:
@@ -20297,8 +20308,19 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_scan_browse_button = QtWidgets.QPushButton("Browse…")
     nif_scan_path_row.addWidget(nif_scan_browse_button)
     nif_scan_layout.addLayout(nif_scan_path_row)
+    nif_scan_options_row = QtWidgets.QHBoxLayout()
+    nif_scan_conflict_report = QtWidgets.QCheckBox("Show grouped conflict codes in scan details")
+    nif_scan_conflict_report.setObjectName("nif_scan_include_conflict_report")
+    nif_scan_conflict_report.setChecked(True)
+    nif_scan_conflict_report.setToolTip(
+        "When enabled, scan results include the longer grouped conflict-code section; other diagnostic and safe-fix details remain available."
+    )
+    nif_scan_options_row.addWidget(nif_scan_conflict_report)
+    nif_scan_options_row.addStretch(1)
+    nif_scan_layout.addLayout(nif_scan_options_row)
     nif_scan_action_row = QtWidgets.QHBoxLayout()
     nif_scan_start_button = QtWidgets.QPushButton("Scan NIFs")
+    nif_scan_start_button.setObjectName("nif_scan_start")
     nif_scan_start_button.setToolTip(
         "Inspect mesh flags, slot states, conflict groups, and renderer verdicts without writing."
     )
@@ -22882,7 +22904,10 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         nif_scan_progress.setValue(0)
         nif_scan_status_label.setText(f"Starting read-only scan of {len(nif_paths)} NIF file(s)…")
         _set_nif_scan_running(True)
-        nif_scan_worker = _QtNifScanWorker(nif_paths)
+        nif_scan_worker = _QtNifScanWorker(
+            nif_paths,
+            include_conflict_report=nif_scan_conflict_report.isChecked(),
+        )
         nif_scan_thread = QtCore.QThread(window)
         nif_scan_worker.moveToThread(nif_scan_thread)
         nif_scan_thread.started.connect(nif_scan_worker.run)
