@@ -13042,6 +13042,8 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
                 summary = window.property("nif_editor_summary")
                 self.assertEqual(summary["total"], 1)
                 self.assertEqual(summary["results"][0]["path"], str(conflict_path))
+                self.assertTrue(w("nif_scan_patch_conflicts").isEnabled())
+                self.assertTrue(w("nif_scan_remediate_conflicts").isEnabled())
                 w("nif_scan_remediate_conflicts").click()
                 state["step"] = 3
             elif state["step"] == 3 and w("generate").isEnabled():
@@ -13141,6 +13143,31 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
                 self.assertFalse(w("nif_scan_patch_conflicts").isEnabled())
                 self.assertFalse(w("nif_scan_remediate_conflicts").isEnabled())
                 self.assertIn("stale", w("nif_scan_status").text().lower())
+                w("nif_scan_start").click()
+                state["step"] = 5
+            elif state["step"] == 5 and w("generate").isEnabled():
+                self.assertTrue(w("nif_scan_patch_conflicts").isEnabled())
+                w("nif_editor_remediate").click()
+                state["step"] = 6
+            elif state["step"] == 6 and w("generate").isEnabled():
+                summary = window.property("nif_editor_summary")
+                self.assertEqual(summary["operation"], "remediate")
+                self.assertFalse(w("nif_scan_conflicts").isEnabled())
+                self.assertFalse(w("nif_scan_patch_conflicts").isEnabled())
+                self.assertIn("stale", w("nif_scan_status").text().lower())
+                w("nif_scan_start").click()
+                state["step"] = 7
+            elif state["step"] == 7 and w("generate").isEnabled():
+                self.assertTrue(w("nif_scan_patch_conflicts").isEnabled())
+                w("nif_editor_restore").click()
+                state["step"] = 8
+            elif state["step"] == 8 and w("generate").isEnabled():
+                summary = window.property("nif_editor_summary")
+                self.assertEqual(summary["operation"], "restore")
+                self.assertFalse(w("nif_scan_conflicts").isEnabled())
+                self.assertFalse(w("nif_scan_patch_conflicts").isEnabled())
+                self.assertFalse(w("nif_scan_remediate_conflicts").isEnabled())
+                self.assertIn("stale", w("nif_scan_status").text().lower())
                 return True
             return False
 
@@ -13157,11 +13184,25 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             self.qt.QtWidgets.QMessageBox,
             "question",
             return_value=self.qt.QtWidgets.QMessageBox.StandardButton.Yes,
-        ):
+        ), mock.patch(
+            "generate_textures.auto_remediate_nif_conflicts",
+            return_value=(patch_result, ()),
+        ) as remediate_mock, mock.patch(
+            "generate_textures.restore_nif_backups",
+            return_value=[("OK", path.with_suffix(".nif.bak"), "Restored backup.")],
+        ) as restore_mock:
             self.run_window(scenario)
         self.assertEqual(
             [call.args[0] for call in patch_nif_mock.call_args_list],
             [path, path],
+        )
+        self.assertEqual(
+            [call.args[0] for call in remediate_mock.call_args_list],
+            [path],
+        )
+        self.assertEqual(
+            [call.args[0] for call in restore_mock.call_args_list],
+            [path],
         )
 
     def test_qt_nif_scan_handoff_prefills_renderer_and_warns_on_mismatch(self) -> None:
