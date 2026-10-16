@@ -8882,7 +8882,10 @@ def _format_qt_nif_scan_page_summary(
         for status, count in status_counts.items()
         if count
     )
-    summary = f"Page {int(page_index) + 1} of {max(1, int(page_count))} · {len(rows)} result(s)"
+    summary = (
+        f"Page {int(page_index) + 1} of {max(1, int(page_count))} · "
+        f"{len(rows)} filtered result(s)"
+    )
     summary_parts = [summary]
     if status_summary:
         summary_parts.append(status_summary)

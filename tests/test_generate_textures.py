@@ -731,13 +731,13 @@ class TestQtNifValidationScan(unittest.TestCase):
         )
         self.assertEqual(
             summary,
-            "Page 2 of 3 · 7 result(s) · OK 1, WARN 2, PROBABLY INCOMPATIBLE 1, SKIP 1, FAIL 1 · conflict-coded NIFs 1",
+            "Page 2 of 3 · 7 filtered result(s) · OK 1, WARN 2, PROBABLY INCOMPATIBLE 1, SKIP 1, FAIL 1 · conflict-coded NIFs 1",
         )
 
     def test_scan_page_summary_handles_empty_filtered_results(self) -> None:
         self.assertEqual(
             _format_qt_nif_scan_page_summary([], 0, 0),
-            "Page 1 of 1 · 0 result(s) · conflict-coded NIFs 0",
+            "Page 1 of 1 · 0 filtered result(s) · conflict-coded NIFs 0",
         )
 
     def test_scan_page_refresh_cadence_matches_page_size(self) -> None:
