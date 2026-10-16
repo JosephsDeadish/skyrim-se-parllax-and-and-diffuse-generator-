@@ -12212,6 +12212,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             step = state["step"]
             if step == 0:
                 self.assertTrue(w("nif_dry_run").isChecked())
+                self.assertFalse(w("nif_dry_run_diff").isChecked())
                 banner = w("nif_editor_safety_banner").text().lower()
                 self.assertIn("dry-run is on", banner)
                 self.assertIn("compare against .bak first", banner)
@@ -12247,6 +12248,8 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
                 self.assertEqual(window.property("nif_editor_summary")["operation"], "compare")
                 self.assertEqual(window.property("nif_editor_summary")["results"][0]["status"], "OK")
                 self.assertIn("restore would be a no-op", w("nif_editor_results").toPlainText())
+                w("nif_dry_run_diff").setChecked(True)
+                self.assertTrue(w("nif_dry_run").isChecked())
                 w("nif_editor_patch").click()
                 self.assertFalse(w("generate").isEnabled())
                 self.assertFalse(w("nif_scan_start").isEnabled())
@@ -12254,6 +12257,7 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             elif step == 1 and w("generate").isEnabled():
                 self.assertEqual(path.read_bytes(), original)
                 self.assertEqual(window.property("nif_editor_summary")["success"], 1)
+                self.assertIn("Diff:", w("nif_editor_results").toPlainText())
                 w("nif_dry_run").setChecked(False)
                 w("nif_editor_patch").click()
                 self.assertEqual(path.read_bytes(), original)

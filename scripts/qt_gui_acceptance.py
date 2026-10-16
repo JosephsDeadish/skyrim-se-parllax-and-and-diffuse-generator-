@@ -238,7 +238,8 @@ def run_acceptance(generator, report_path: str | Path, *, timeout_seconds: float
                         "render_profile", "include_diffuse", "include_normal", "include_parallax",
                     ),
                     "NIF Editor": (
-                        "nif_texture_diffuse", "nif_dry_run", "nif_retry_count", "nif_editor_patch",
+                        "nif_texture_diffuse", "nif_dry_run", "nif_dry_run_diff",
+                        "nif_retry_count", "nif_editor_patch",
                     ),
                     "Batch/Resume": ("checkpoint_path", "resume_mode"),
                 }.get(title, ())
