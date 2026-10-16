@@ -568,6 +568,31 @@ class TestNifEditorUiUpdateQueue(unittest.TestCase):
                 status_filter="WARN",
             )
         )
+        self.assertTrue(
+            _nif_editor_result_matches_filters(
+                {
+                    "status": "WARN",
+                    "file_name": "stone01.nif",
+                    "details": "Renderer information only",
+                    "preview": "/mods/stone01.nif",
+                    "conflict_codes": "shader_state.parallax_missing_slot3",
+                },
+                keyword="parallax_missing_slot3",
+                status_filter="ALL",
+            )
+        )
+        self.assertFalse(
+            _nif_editor_result_matches_filters(
+                {
+                    "status": "WARN",
+                    "file_name": "stone01.nif",
+                    "details": "Renderer information only",
+                    "preview": "/mods/stone01.nif",
+                },
+                keyword="parallax_missing_slot3",
+                status_filter="ALL",
+            )
+        )
         self.assertFalse(
             _nif_editor_result_matches_filters(
                 row,

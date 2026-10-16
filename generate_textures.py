@@ -8832,8 +8832,8 @@ def _nif_editor_result_matches_filters(
     if not keyword:
         return True
     return any(
-        keyword in row[key].lower()
-        for key in ("status", "file_name", "details", "preview")
+        keyword in str(row.get(key, "") or "").lower()
+        for key in ("status", "file_name", "details", "preview", "conflict_codes")
     )
 
 
@@ -20418,7 +20418,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
     nif_scan_layout.addWidget(nif_scan_status_label)
     nif_scan_filter_row = QtWidgets.QHBoxLayout()
     nif_scan_filter_edit = QtWidgets.QLineEdit()
-    nif_scan_filter_edit.setPlaceholderText("Filter by file path, status, or diagnostic text")
+    nif_scan_filter_edit.setPlaceholderText(
+        "Filter by file path, status, diagnostic text, or conflict code"
+    )
     nif_scan_filter_row.addWidget(nif_scan_filter_edit, 1)
     nif_scan_status_filter = QtWidgets.QComboBox()
     nif_scan_status_filter.addItems(["ALL", "OK", "WARN", "PROBABLY INCOMPATIBLE", "SKIP", "FAIL"])
