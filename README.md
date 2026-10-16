@@ -382,6 +382,7 @@ Release validation also emits `nif_realmod_fallback_drift_report.json` / `.md` a
 The regression suite also includes a locked fixture corpus baseline at `tests/fixtures/nif_fixture_corpus*.json` for cross-profile/layout conflict-matrix stability checks, including truncated-header and shifted texture-set layout edge signatures.
 CLI folder batch runs now emit `batch_failure_report.json` and `batch_failure_report.csv` when any source files fail, with per-file action/conflict/error fields for triage.
 For long-running folder batches, use `--checkpoint-file <path>` to persist successful-file progress and `--resume-checkpoint` to skip already completed files after interruption/restart. Checkpoints record source size/mtime fingerprints as well as output folder and generation settings; changed sources are processed again, removed sources no longer count as completed, and resuming with different output/settings is rejected. Legacy checkpoints without source fingerprints remain readable, but completed entries are reprocessed because their inputs cannot be verified.
+The Tk GUI also records output location, full source count, and generation settings in its batch checkpoint; Resume mode prompts before continuing when these differ or cannot be verified.
 Batch completion summaries also include a top-level folder breakdown so large folder-mode runs are easier to triage at a glance.
 
 ### Large real-sample batch verification checklist (release readiness)

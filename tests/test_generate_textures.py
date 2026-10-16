@@ -76,6 +76,7 @@ from generate_textures import (
     _qt_resume_mode_guidance,
     _checkpoint_source_file_fingerprints,
     _matching_checkpoint_completed_files,
+    _tk_checkpoint_generation_options,
     _write_checkpoint_payload_atomically,
     _qt_truepbr_material_overrides,
     _apply_qt_profile_output_defaults,
@@ -5515,6 +5516,45 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("checkpoint output path differs", mismatch)
         self.assertIn("checkpoint file count differs", mismatch)
 
+    def test_compute_checkpoint_mismatch_flags_detects_settings_and_missing_metadata(self) -> None:
+        mismatch = compute_checkpoint_mismatch_flags(
+            checkpoint_payload={
+                "input_root": "/input",
+                "output_root": "",
+                "total_files_considered": 3,
+                "generation_options": {"normal_strength": 1.0},
+            },
+            current_input_root="/input",
+            current_output_root="",
+            planned_total=3,
+            current_generation_options={"normal_strength": 2.0},
+        )
+        self.assertEqual(mismatch, ["checkpoint generation settings differ"])
+
+        missing_metadata = compute_checkpoint_mismatch_flags(
+            checkpoint_payload={"input_root": "/input"},
+            current_input_root="/input",
+            current_output_root="",
+            planned_total=3,
+            current_generation_options={},
+        )
+        self.assertIn("checkpoint output path cannot be verified", missing_metadata)
+        self.assertIn("checkpoint file count cannot be verified", missing_metadata)
+        self.assertIn("checkpoint generation settings cannot be verified", missing_metadata)
+
+    def test_tk_checkpoint_generation_options_excludes_runtime_only_fields(self) -> None:
+        self.assertEqual(
+            _tk_checkpoint_generation_options(
+                {
+                    "output_dir": Path("/tmp/output"),
+                    "manager_context": object(),
+                    "include_diffuse": True,
+                    "normal_strength": 1.75,
+                }
+            ),
+            {"include_diffuse": True, "normal_strength": 1.75},
+        )
+
     def test_compute_checkpoint_resume_counts_reports_matching_completed_and_remaining(self) -> None:
         selected = [Path("/input/a.dds"), Path("/input/b.dds"), Path("/input/c.dds")]
         completed = {str(selected[0].resolve()), str(selected[2].resolve()), "/stale/old.dds"}
@@ -8211,7 +8251,11 @@ class GenerateTexturesTests(unittest.TestCase):
                 TextureGeneratorGUI._process_generation_batch(
                     worker,
                     input_files,
-                    {"output_dir": output_dir},
+                    {
+                        "output_dir": output_dir,
+                        "normal_strength": 1.75,
+                        "include_diffuse": True,
+                    },
                     input_dir,
                     checkpoint,
                     set(),
@@ -8242,6 +8286,12 @@ class GenerateTexturesTests(unittest.TestCase):
                 set(interrupted_state["completed_file_fingerprints"]),
                 set(completed_before_resume),
             )
+            self.assertEqual(interrupted_state["output_root"], str(output_dir.resolve()))
+            self.assertEqual(interrupted_state["total_files_considered"], len(input_files))
+            self.assertEqual(
+                interrupted_state["generation_options"],
+                {"normal_strength": 1.75, "include_diffuse": True},
+            )
 
             remaining_files = [
                 input_file
@@ -8267,7 +8317,11 @@ class GenerateTexturesTests(unittest.TestCase):
                 TextureGeneratorGUI._process_generation_batch(
                     worker,
                     remaining_files,
-                    {"output_dir": output_dir},
+                    {
+                        "output_dir": output_dir,
+                        "normal_strength": 1.75,
+                        "include_diffuse": True,
+                    },
                     input_dir,
                     checkpoint,
                     set(interrupted_state["completed_success_files"]),

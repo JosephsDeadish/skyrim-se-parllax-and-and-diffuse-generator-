@@ -1029,17 +1029,38 @@ def compute_checkpoint_mismatch_flags(
     current_input_root: str | None,
     current_output_root: str | None,
     planned_total: int,
+    current_generation_options: Mapping[str, object] | None = None,
 ) -> list[str]:
     mismatch_flags: list[str] = []
-    checkpoint_input_root = str(checkpoint_payload.get("input_root", "") or "").strip()
-    if checkpoint_input_root and current_input_root and checkpoint_input_root != current_input_root:
-        mismatch_flags.append("checkpoint input path differs")
-    checkpoint_output_root = str(checkpoint_payload.get("output_root", "") or "").strip()
-    if checkpoint_output_root and current_output_root and checkpoint_output_root != current_output_root:
-        mismatch_flags.append("checkpoint output path differs")
-    checkpoint_total = int(checkpoint_payload.get("total_files_considered", 0) or 0)
-    if planned_total > 0 and checkpoint_total > 0 and checkpoint_total != planned_total:
-        mismatch_flags.append("checkpoint file count differs")
+    checkpoint_input_root = checkpoint_payload.get("input_root")
+    if current_input_root is not None:
+        if not isinstance(checkpoint_input_root, str) or not checkpoint_input_root.strip():
+            mismatch_flags.append("checkpoint input path cannot be verified")
+        elif checkpoint_input_root.strip() != current_input_root:
+            mismatch_flags.append("checkpoint input path differs")
+    checkpoint_output_root = checkpoint_payload.get("output_root")
+    if current_output_root is not None:
+        if not isinstance(checkpoint_output_root, str):
+            mismatch_flags.append("checkpoint output path cannot be verified")
+        elif checkpoint_output_root.strip() != current_output_root:
+            mismatch_flags.append("checkpoint output path differs")
+    raw_checkpoint_total = checkpoint_payload.get("total_files_considered")
+    checkpoint_total = (
+        raw_checkpoint_total
+        if isinstance(raw_checkpoint_total, int) and not isinstance(raw_checkpoint_total, bool)
+        else 0
+    )
+    if planned_total > 0:
+        if checkpoint_total <= 0:
+            mismatch_flags.append("checkpoint file count cannot be verified")
+        elif checkpoint_total != planned_total:
+            mismatch_flags.append("checkpoint file count differs")
+    if current_generation_options is not None:
+        checkpoint_options = checkpoint_payload.get("generation_options")
+        if not isinstance(checkpoint_options, dict):
+            mismatch_flags.append("checkpoint generation settings cannot be verified")
+        elif checkpoint_options != dict(current_generation_options):
+            mismatch_flags.append("checkpoint generation settings differ")
     return mismatch_flags
 
 
@@ -1093,6 +1114,15 @@ def _write_checkpoint_payload_atomically(
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
+
+
+def _tk_checkpoint_generation_options(generation_kwargs: Mapping[str, object]) -> dict[str, object]:
+    non_generation_keys = {"manager_context", "output_dir"}
+    return {
+        key: value
+        for key, value in generation_kwargs.items()
+        if key not in non_generation_keys
+    }
 
 
 def _matching_checkpoint_completed_files(
@@ -14730,7 +14760,9 @@ if GUI_AVAILABLE:
                     current_input_root = None
             current_output_root: str | None = None
             current_output_raw = self.output_var.get().strip()
-            if current_output_raw:
+            if not self.use_custom_output_var.get():
+                current_output_root = ""
+            elif current_output_raw:
                 try:
                     current_output_root = str(Path(current_output_raw).resolve())
                 except Exception:
@@ -14773,11 +14805,16 @@ if GUI_AVAILABLE:
             completed_success_files: set[str],
             resumed_completed_count: int,
             source_file_fingerprints: Mapping[str, Mapping[str, int]] | None = None,
+            output_root: str = "",
+            total_files_considered: int = 0,
+            generation_options: Mapping[str, object] | None = None,
         ) -> None:
             payload = {
                 "tool": "generate_textures",
                 "version": APP_VERSION,
                 "input_root": str(input_root.resolve()),
+                "output_root": output_root,
+                "total_files_considered": int(total_files_considered),
                 "completed_success_count": len(completed_success_files),
                 "resumed_completed_count": int(resumed_completed_count),
                 "completed_success_files": sorted(completed_success_files),
@@ -14786,6 +14823,7 @@ if GUI_AVAILABLE:
                     for path_key in sorted(completed_success_files)
                     if source_file_fingerprints is not None and path_key in source_file_fingerprints
                 },
+                "generation_options": dict(generation_options or {}),
             }
             _write_checkpoint_payload_atomically(checkpoint_path, payload)
 
@@ -15046,10 +15084,13 @@ if GUI_AVAILABLE:
             completed_checkpoint_files: set[str],
             resumed_completed_count: int,
             source_file_fingerprints: Mapping[str, Mapping[str, int]] | None = None,
+            total_files_considered: int | None = None,
         ) -> None:
             try:
                 if source_file_fingerprints is None:
                     source_file_fingerprints = _checkpoint_source_file_fingerprints(input_files)
+                if total_files_considered is None:
+                    total_files_considered = len(source_file_fingerprints) or len(input_files)
                 total = len(input_files)
                 results: dict[Path, dict[str, Path]] = {}
                 started_at = time.perf_counter()
@@ -15078,6 +15119,7 @@ if GUI_AVAILABLE:
                             "max_source_dimension": max_source_dim,
                             "max_source_megapixels": max_source_megapixels,
                             "resumed_completed_count": resumed_completed_count,
+                            "total_files_considered": total_files_considered,
                             "checkpoint_path": str(checkpoint_path),
                             "folder_summary_lines": folder_summary_lines,
                         })))
@@ -15124,12 +15166,16 @@ if GUI_AVAILABLE:
                         results[input_file] = outputs
                         self._record_created_outputs(list(outputs.values()))
                         completed_checkpoint_files.add(str(input_file.resolve()))
+                        output_dir = generation_kwargs.get("output_dir")
                         self._write_batch_checkpoint_state(
                             checkpoint_path,
                             input_root=input_root,
                             completed_success_files=completed_checkpoint_files,
                             resumed_completed_count=resumed_completed_count,
                             source_file_fingerprints=source_file_fingerprints,
+                            output_root=str(Path(output_dir).resolve()) if output_dir is not None else "",
+                            total_files_considered=total_files_considered,
+                            generation_options=_tk_checkpoint_generation_options(generation_kwargs),
                         )
                     except Exception as exc:
                         self.processing_queue.put((
@@ -15150,6 +15196,7 @@ if GUI_AVAILABLE:
                     "max_source_dimension": max_source_dim,
                     "max_source_megapixels": max_source_megapixels,
                     "resumed_completed_count": resumed_completed_count,
+                    "total_files_considered": total_files_considered,
                     "checkpoint_path": str(checkpoint_path),
                     "folder_summary_lines": folder_summary_lines,
                 })))
@@ -15361,7 +15408,10 @@ if GUI_AVAILABLE:
                             checkpoint_health_available = True
                             self._refresh_checkpoint_health_status(
                                 checkpoint_path=Path(checkpoint_value),
-                                planned_total=max(0, total_sources + resumed),
+                                planned_total=max(
+                                    0,
+                                    int(telemetry.get("total_files_considered", total_sources + resumed) or 0),
+                                ),
                             )
                             lines.append(
                                 f"Checkpoint health: {self.checkpoint_health_var.get() or 'unavailable'}"
@@ -15394,7 +15444,10 @@ if GUI_AVAILABLE:
                     total_sources = len(results)
                     total_outputs = sum(len(output_set) for output_set in results.values())
                     resumed_cancelled = int(telemetry.get("resumed_completed_count", 0) or 0)
-                    planned_cancelled = max(0, total_sources + resumed_cancelled)
+                    planned_cancelled = max(
+                        0,
+                        int(telemetry.get("total_files_considered", total_sources + resumed_cancelled) or 0),
+                    )
                     nif_patch_summary = summarize_batch_nif_patch_activity(self.batch_nif_patch_results)
                     self.status_var.set(
                         f"Generation cancelled. Finished {total_sources}/{planned_cancelled} source texture(s) and wrote {total_outputs} file(s)."
@@ -15410,7 +15463,10 @@ if GUI_AVAILABLE:
                         resumed = int(telemetry.get("resumed_completed_count", 0) or 0)
                         self._refresh_checkpoint_health_status(
                             checkpoint_path=Path(checkpoint_value),
-                            planned_total=max(0, total_sources + resumed),
+                            planned_total=max(
+                                0,
+                                int(telemetry.get("total_files_considered", total_sources + resumed) or 0),
+                            ),
                         )
                         checkpoint_status = f"Checkpoint health: {self.checkpoint_health_var.get() or 'unavailable'}"
                     peak_backlog = int(getattr(self, "_max_observed_queue_backlog", 0) or 0)
@@ -15462,7 +15518,10 @@ if GUI_AVAILABLE:
                             resumed = int(telemetry.get("resumed_completed_count", 0) or 0)
                             self._refresh_checkpoint_health_status(
                                 checkpoint_path=Path(checkpoint_value),
-                                planned_total=max(0, total_sources + resumed),
+                                planned_total=max(
+                                    0,
+                                    int(telemetry.get("total_files_considered", total_sources + resumed) or 0),
+                                ),
                             )
                     keep_polling = False
                     break
@@ -16580,6 +16639,7 @@ if GUI_AVAILABLE:
                 input_path = Path(input_value)
                 self.selected_inputs = collect_source_textures(input_path)
                 self.checkpoint_source_files = self.selected_inputs.copy()
+                total_files_considered = len(self.checkpoint_source_files)
                 if not self.selected_inputs:
                     no_sources_message = "No source textures found to process."
                     self.status_var.set(no_sources_message)
@@ -16620,10 +16680,11 @@ if GUI_AVAILABLE:
                     input_path=input_path,
                     output_dir=output_dir,
                 )
+                source_file_fingerprints = _checkpoint_source_file_fingerprints(self.selected_inputs)
                 self.batch_checkpoint_path_var.set(str(checkpoint_path))
                 self._refresh_checkpoint_health_status(
                     checkpoint_path=checkpoint_path,
-                    planned_total=len(self.selected_inputs),
+                    planned_total=total_files_considered,
                 )
                 if (
                     is_huge_batch
@@ -16649,10 +16710,11 @@ if GUI_AVAILABLE:
                     )
                     self.status_var.set(huge_run_message)
                     self._append_generation_log(huge_run_message)
-                source_file_fingerprints = _checkpoint_source_file_fingerprints(self.selected_inputs)
                 resumed_completed_count = 0
                 unmatched_checkpoint_count = 0
                 completed_checkpoint_files: set[str] = set()
+                checkpoint_payload: dict[str, object] = {}
+                checkpoint_payload_valid = False
                 if self.batch_resume_mode_var.get() == "resume":
                     if not checkpoint_path.exists():
                         if is_huge_batch:
@@ -16676,8 +16738,6 @@ if GUI_AVAILABLE:
                             self.status_var.set("Batch start canceled before creating a new checkpoint.")
                             return
                     if checkpoint_path.exists():
-                        checkpoint_payload: dict[str, object] = {}
-                        checkpoint_payload_valid = False
                         try:
                             payload_raw = json.loads(checkpoint_path.read_text(encoding="utf-8"))
                             if isinstance(payload_raw, dict):
@@ -16820,7 +16880,7 @@ if GUI_AVAILABLE:
                     checkpoint_path.unlink(missing_ok=True)
                 self._refresh_checkpoint_health_status(
                     checkpoint_path=checkpoint_path,
-                    planned_total=len(self.selected_inputs),
+                    planned_total=total_files_considered,
                 )
 
                 _context_source = select_generation_context_source(Path(input_value), self.selected_inputs)
@@ -16898,8 +16958,8 @@ if GUI_AVAILABLE:
                         if not self._show_dismissible_warning_dialog("Output Folder Warning", warning_id, message):
                             return
 
-                _pm_raw = self.parallax_mode_var.get()
-                _parallax_mode_key = "occlusion" if "occlusion" in _pm_raw else "standard"
+                parallax_mode_raw = self.parallax_mode_var.get()
+                parallax_mode_key = "occlusion" if "occlusion" in parallax_mode_raw else "standard"
                 generation_kwargs = {
                     "output_dir": output_dir,
                     "normal_strength": self._resolve_generation_value(
@@ -16933,7 +16993,7 @@ if GUI_AVAILABLE:
                     "env_mask_mode": self.env_mask_mode_var.get(),
                     "emboss_mode": self.emboss_mode_var.get(),
                     "relief_mode": self.relief_mode_var.get(),
-                    "parallax_mode": _parallax_mode_key,
+                    "parallax_mode": parallax_mode_key,
                     "auto_patch_nifs": self.auto_patch_nifs_var.get(),
                     "manager_context": self.manager_context,
                     "render_profile": self.render_profile_var.get(),
@@ -16953,6 +17013,37 @@ if GUI_AVAILABLE:
                     "include_roughness": include_roughness,
                     "include_complex": include_complex,
                 }
+                if (
+                    self.batch_resume_mode_var.get() == "resume"
+                    and checkpoint_path.exists()
+                    and checkpoint_payload_valid
+                ):
+                    current_options = _tk_checkpoint_generation_options(generation_kwargs)
+                    settings_mismatch_flags = compute_checkpoint_mismatch_flags(
+                        checkpoint_payload=checkpoint_payload,
+                        current_input_root=None,
+                        current_output_root=None,
+                        planned_total=0,
+                        current_generation_options=current_options,
+                    )
+                    if settings_mismatch_flags:
+                        proceed_settings_mismatch = messagebox.askyesno(
+                            "Resume checkpoint settings warning",
+                            self._tr(
+                                "Checkpoint generation settings differ or cannot be verified ({mismatch_flags}).\n\n"
+                                "Action: use Start fresh for safest behavior, or continue Resume only if this mismatch is intentional.\n"
+                                "Continue with Resume anyway?"
+                            ).format(mismatch_flags=", ".join(settings_mismatch_flags)),
+                            parent=self.root,
+                        )
+                        if not proceed_settings_mismatch:
+                            self.selected_inputs = self.checkpoint_source_files.copy()
+                            self._update_preview_navigation_state()
+                            self.status_var.set(
+                                "Resume canceled due to generation-settings mismatch. Switch to Start fresh or restore the original settings."
+                            )
+                            return
+
                 self.batch_failures = []
                 self.batch_nif_patch_results = []
                 self.cancel_requested = False
@@ -17006,6 +17097,7 @@ if GUI_AVAILABLE:
                         completed_checkpoint_files,
                         resumed_completed_count,
                         source_file_fingerprints,
+                        total_files_considered,
                     ),
                     daemon=True,
                 )
