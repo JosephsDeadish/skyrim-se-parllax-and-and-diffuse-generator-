@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import struct
 import subprocess
@@ -39,7 +40,10 @@ class TestRealisticBatchAcceptance(unittest.TestCase):
         self._td = tempfile.TemporaryDirectory()
         self.root = Path(self._td.name)
         self.calls: list[list[str]] = []
-        self.inventory = {name: (16, 16) for name in _realistic_batch_inventory(12)}
+        self.inventory = {
+            name: (1024, 1024) if name == "striped_05.dds" else (16, 16)
+            for name in _realistic_batch_inventory(12)
+        }
         self.mutation = ""
 
     def tearDown(self) -> None:
@@ -55,21 +59,44 @@ class TestRealisticBatchAcceptance(unittest.TestCase):
         names = list(self.inventory)
         if phase:
             names.append("corrupt.dds")
-        generated = names if phase == 0 else ["corrupt.dds"] if phase == 1 else []
+        changed_source_name = next(name for name, size in self.inventory.items() if size == (1024, 1024))
+        generated = (
+            names if phase == 0 else
+            ["corrupt.dds"] if phase == 1 else
+            [changed_source_name] if phase == 3 else
+            []
+        )
         for name in generated:
             for suffix in ("", "_n", "_p"):
-                size = (1024, 1024) if name == "corrupt.dds" else (16, 16)
-                _write_batch_acceptance_dds(output_dir / f"{Path(name).stem}{suffix}.dds", size)
-        state = {"completed_success_count": len(names), "resumed_completed_count": (0, 12, 13)[phase],
-                 "completed_success_files": sorted(str(input_dir / name) for name in names)}
+                size = (1024, 1024) if name == "corrupt.dds" else self.inventory[name]
+                _write_batch_acceptance_dds(
+                    output_dir / f"{Path(name).stem}{suffix}.dds",
+                    size,
+                    variant=1 if phase == 3 else 0,
+                )
+        completed_file_fingerprints = {}
+        for name in names:
+            source_path = input_dir / name
+            stat_result = source_path.stat()
+            completed_file_fingerprints[str(source_path.resolve())] = {
+                "size_bytes": stat_result.st_size,
+                "mtime_ns": stat_result.st_mtime_ns,
+                "sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
+            }
+        state = {
+            "completed_success_count": len(names),
+            "resumed_completed_count": (0, 12, 13, 12)[phase],
+            "completed_success_files": sorted(str((input_dir / name).resolve()) for name in names),
+            "completed_file_fingerprints": completed_file_fingerprints,
+        }
         if self.mutation == "checkpoint":
             state["completed_success_files"][0] = str(input_dir / "unknown.dds")
-        if phase < 2:
+        if phase < 2 or phase == 3:
             checkpoint.write_text(json.dumps(state), encoding="utf-8")
         summary = {
             "workers": 2 if phase == 0 else 1, "total_files_considered": 13,
-            "processed_files": (13, 1, 0)[phase], "successful_files": (12, 1, 0)[phase],
-            "failed_files": (1, 0, 0)[phase], "resumed_completed_count": (0, 12, 13)[phase],
+            "processed_files": (13, 1, 0, 1)[phase], "successful_files": (12, 1, 0, 1)[phase],
+            "failed_files": (1, 0, 0, 0)[phase], "resumed_completed_count": (0, 12, 13, 12)[phase],
             "checkpoint_enabled": True, "resumed_from_checkpoint": phase > 0,
             "source_files_4k_or_above": 2, "max_source_dimension": 4096,
         }
@@ -96,8 +123,20 @@ class TestRealisticBatchAcceptance(unittest.TestCase):
     def test_source_orchestration_recovers_then_noops_and_preserves_outputs(self) -> None:
         report = self.run_mocked()
         self.assertEqual(report["status"], "pass", report.get("error"))
-        self.assertEqual([row["output_count"] for row in report["phases"]], [36, 39, 39])
-        self.assertEqual([row["unchanged_output_count"] for row in report["phases"]], [0, 36, 39])
+        self.assertEqual([row["output_count"] for row in report["phases"]], [36, 39, 39, 39])
+        self.assertEqual([row["unchanged_output_count"] for row in report["phases"]], [0, 36, 39, 36])
+        self.assertEqual(report["phases"][-1]["changed_source"], "striped_05.dds")
+        self.assertEqual(report["phases"][-1]["source_mutation"]["size_bytes"], 1024 * 1024 * 3 + 128)
+        self.assertNotEqual(
+            report["phases"][-1]["source_mutation"]["original_sha256"],
+            report["phases"][-1]["source_mutation"]["changed_sha256"],
+        )
+        self.assertEqual(
+            report["phases"][-1]["source_mutation"]["changed_sha256"],
+            report["phases"][-1]["checkpoint"]["completed_file_fingerprints"][
+                str((Path(report["artifact_dir"]) / "input" / "striped_05.dds").resolve())
+            ]["sha256"],
+        )
         self.assertEqual(report["cli_cooperative_cancellation"], "unsupported")
         self.assertIn("not_mod_scale", report["scope"])
         self.assertTrue(self.calls[0][1].endswith("generate_textures.py"))

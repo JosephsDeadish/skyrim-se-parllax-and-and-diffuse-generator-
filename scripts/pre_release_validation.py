@@ -261,16 +261,53 @@ def _realistic_batch_inventory(count: int = 64) -> dict[str, tuple[int, int]]:
     return {f"striped_{index:02d}.dds": size for index, size in enumerate(sizes)}
 
 
-def _write_batch_acceptance_dds(path: Path, size: tuple[int, int]) -> None:
+def _write_batch_acceptance_dds(
+    path: Path,
+    size: tuple[int, int],
+    *,
+    variant: int = 0,
+) -> None:
     from PIL import Image, ImageDraw
 
-    with Image.new("RGB", size, (48, 76, 100)) as image:
+    background = (48, 76, 100) if variant == 0 else (207, 179, 155)
+    stripe_color = (184, 146, 92) if variant == 0 else (71, 109, 163)
+    band_color = (92, 118, 152) if variant == 0 else (163, 137, 103)
+    with Image.new("RGB", size, background) as image:
         draw = ImageDraw.Draw(image)
         for x in range(0, size[0], 64):
-            draw.rectangle((x, 0, x + 31, size[1] - 1), fill=(184, 146, 92))
+            draw.rectangle((x, 0, x + 31, size[1] - 1), fill=stripe_color)
         for y in range(0, size[1], 128):
-            draw.rectangle((0, y, size[0] - 1, y + 15), fill=(92, 118, 152))
+            draw.rectangle((0, y, size[0] - 1, y + 15), fill=band_color)
         image.save(path, format="DDS")
+
+
+def _mutate_batch_acceptance_dds_preserving_metadata(
+    path: Path,
+    size: tuple[int, int],
+) -> dict[str, object]:
+    from PIL import Image, ImageOps
+
+    original_stat = path.stat()
+    original_fingerprint = _validate_batch_acceptance_dds(path, size)
+    with Image.open(path) as image:
+        image.load()
+        changed = ImageOps.invert(image.convert("RGB"))
+    changed.save(path, format="DDS")
+    changed.close()
+    if path.stat().st_size != original_stat.st_size:
+        raise ValueError(f"Rewritten acceptance source changed size: {path}")
+    os.utime(path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+    current_fingerprint = _validate_batch_acceptance_dds(path, size)
+    if current_fingerprint["mtime_ns"] != original_fingerprint["mtime_ns"]:
+        raise ValueError(f"Rewritten acceptance source did not preserve its mtime: {path}")
+    if current_fingerprint["sha256"] == original_fingerprint["sha256"]:
+        raise ValueError(f"Rewritten acceptance source content did not change: {path}")
+    return {
+        "size_bytes": original_stat.st_size,
+        "mtime_ns": original_fingerprint["mtime_ns"],
+        "original_sha256": original_fingerprint["sha256"],
+        "changed_sha256": current_fingerprint["sha256"],
+    }
 
 
 def _validate_batch_acceptance_dds(path: Path, size: tuple[int, int]) -> dict[str, object]:
@@ -342,7 +379,12 @@ def run_realistic_batch_acceptance(
         "phases": [], "outputs": {},
     }
     started = time.perf_counter()
-    for phase_name in ("initial_corrupt_recovery", "repaired_resume", "noop_resume"):
+    for phase_name in (
+        "initial_corrupt_recovery",
+        "repaired_resume",
+        "noop_resume",
+        "same_metadata_source_change_resume",
+    ):
         (root / f"{phase_name}.log").write_text("", encoding="utf-8")
         (root / f"{phase_name}_telemetry.json").write_text(
             json.dumps({"status": "not_run"}), encoding="utf-8",
@@ -377,10 +419,34 @@ def run_realistic_batch_acceptance(
             ("initial_corrupt_recovery", 1, count, 1, count + 1, 0),
             ("repaired_resume", 0, 1, 0, 1, count),
             ("noop_resume", 0, 0, 0, 0, count + 1),
+            ("same_metadata_source_change_resume", 0, 1, 0, 1, count),
         ):
             if phase == "repaired_resume":
                 _write_batch_acceptance_dds(bad, (1024, 1024))
                 inventory[bad.name] = (1024, 1024)
+            source_change: dict[str, object] | None = None
+            changed_source_name: str | None = None
+            if phase == "same_metadata_source_change_resume":
+                changed_source_name = next(
+                    name for name, size in inventory.items() if size == (1024, 1024)
+                )
+                changed_source_path = input_dir / changed_source_name
+                prior_checkpoint = json.loads(checkpoint.read_text(encoding="utf-8"))
+                source_key = str(changed_source_path.resolve())
+                prior_fingerprint = prior_checkpoint.get("completed_file_fingerprints", {}).get(source_key)
+                if not isinstance(prior_fingerprint, dict):
+                    raise ValueError("Checkpoint omitted the source fingerprint before same-metadata mutation.")
+                source_change = _mutate_batch_acceptance_dds_preserving_metadata(
+                    changed_source_path,
+                    inventory[changed_source_name],
+                )
+                require(
+                    source_change["size_bytes"] == prior_fingerprint.get("size_bytes")
+                    and source_change["mtime_ns"] == prior_fingerprint.get("mtime_ns")
+                    and source_change["original_sha256"] == prior_fingerprint.get("sha256")
+                    and source_change["changed_sha256"] != prior_fingerprint.get("sha256"),
+                    "Acceptance mutation must change content while preserving checkpoint size/mtime.",
+                )
             telemetry_path = root / f"{phase}_telemetry.json"
             log_path = root / f"{phase}.log"
             command = [*base_command, "--batch-telemetry-file", str(telemetry_path)]
@@ -427,6 +493,23 @@ def run_realistic_batch_acceptance(
             expected_members = sorted(str((input_dir / name).resolve()) for name in inventory)
             require(state["completed_success_files"] == expected_members, f"{phase}: incorrect checkpoint membership")
             require(state["completed_success_count"] == len(inventory), f"{phase}: incorrect checkpoint count")
+            recorded_fingerprints = state.get("completed_file_fingerprints")
+            require(isinstance(recorded_fingerprints, dict), f"{phase}: missing source fingerprints")
+            for source_key in expected_members:
+                fingerprint = recorded_fingerprints.get(source_key)
+                require(
+                    isinstance(fingerprint, dict)
+                    and isinstance(fingerprint.get("sha256"), str)
+                    and len(fingerprint["sha256"]) == 64,
+                    f"{phase}: missing source content digest for {source_key}",
+                )
+            if source_change is not None and changed_source_name is not None:
+                refreshed = recorded_fingerprints.get(str((input_dir / changed_source_name).resolve()))
+                require(
+                    isinstance(refreshed, dict)
+                    and refreshed.get("sha256") == source_change["changed_sha256"],
+                    f"{phase}: source content digest was not refreshed after regeneration",
+                )
             # A no-op CLI resume does not rewrite the last successful checkpoint.
             checkpoint_skipped = count if phase == "noop_resume" else skipped
             require(state["resumed_completed_count"] == checkpoint_skipped,
@@ -440,9 +523,25 @@ def run_realistic_batch_acceptance(
                     f"{phase}: incorrect output membership")
             current = {name: _validate_batch_acceptance_dds(output_dir / name, size)
                        for name, size in expected_paths.items()}
+            changed_output_names = (
+                {
+                    f"{Path(changed_source_name).stem}{suffix}.dds"
+                    for suffix in ("", "_n", "_p")
+                }
+                if changed_source_name is not None
+                else set()
+            )
             for name, fingerprint in prior_outputs.items():
-                require(current[name] == fingerprint, f"{phase}: resumed output changed: {name}")
-            row["unchanged_output_count"] = len(prior_outputs)
+                if name not in changed_output_names:
+                    require(current[name] == fingerprint, f"{phase}: resumed output changed: {name}")
+            if changed_output_names:
+                require(
+                    any(current[name] != prior_outputs[name] for name in changed_output_names),
+                    f"{phase}: changed source did not regenerate any changed output",
+                )
+                row["changed_source"] = changed_source_name
+                row["source_mutation"] = source_change
+            row["unchanged_output_count"] = len(prior_outputs) - len(changed_output_names)
             row["output_count"] = len(current)
             row["status"] = "pass"
             prior_outputs = current
