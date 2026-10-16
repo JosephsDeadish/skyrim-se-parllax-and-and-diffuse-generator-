@@ -13072,6 +13072,80 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
             [conflict_path],
         )
 
+    def test_qt_conflict_write_invalidates_scan_actions(self) -> None:
+        from types import SimpleNamespace
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        path = self.root / "conflict.nif"
+        path.write_bytes(_build_minimal_nif())
+        conflict_group = SimpleNamespace(
+            code="shader_state.envmap_missing_slot5",
+            count=1,
+            game_profile="skyrim",
+            shader_layout="real",
+            examples=("Slot 5 is unresolved.",),
+            suggested_actions=("Add a matching environment mask.",),
+        )
+        conflicted = SimpleNamespace(
+            shader_count=1,
+            ready_count=0,
+            skip_count=0,
+            detected_game_profile="skyrim",
+            has_havok=False,
+            skip_reasons=[],
+            issues=[],
+            suggestions=[],
+            renderer_notes={},
+            renderer_verdicts={},
+            conflict_report=[conflict_group],
+        )
+        patch_result = SimpleNamespace(
+            success=True,
+            message="Patched.",
+            warnings=[],
+            errors=[],
+        )
+        state = {"step": 0}
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            if state["step"] == 0:
+                w("nif_scan_path").setText(str(path))
+                w("nif_scan_start").click()
+                state["step"] = 1
+            elif state["step"] == 1 and w("generate").isEnabled():
+                self.assertTrue(w("nif_scan_conflicts").isEnabled())
+                self.assertTrue(w("nif_scan_patch_conflicts").isEnabled())
+                w("nif_dry_run").setChecked(False)
+                w("nif_scan_patch_conflicts").click()
+                state["step"] = 2
+            elif state["step"] == 2 and w("generate").isEnabled():
+                summary = window.property("nif_editor_summary")
+                self.assertEqual(summary["total"], 1)
+                self.assertFalse(w("nif_scan_conflicts").isEnabled())
+                self.assertFalse(w("nif_scan_patch_conflicts").isEnabled())
+                self.assertFalse(w("nif_scan_remediate_conflicts").isEnabled())
+                self.assertIn("stale", w("nif_scan_status").text().lower())
+                self.assertIn("new nif scan", w("nif_scan_status").text().lower())
+                return True
+            return False
+
+        with mock.patch(
+            "generate_textures.validate_nif_for_parallax",
+            return_value=conflicted,
+        ), mock.patch(
+            "generate_textures.resolve_nif_editor_patch_options_for_target",
+            side_effect=lambda _path, options: (options, ()),
+        ), mock.patch(
+            "generate_textures.patch_nif",
+            return_value=patch_result,
+        ), mock.patch.object(
+            self.qt.QtWidgets.QMessageBox,
+            "question",
+            return_value=self.qt.QtWidgets.QMessageBox.StandardButton.Yes,
+        ):
+            self.run_window(scenario)
+
     def test_qt_nif_scan_handoff_prefills_renderer_and_warns_on_mismatch(self) -> None:
         from tests.test_nif_patcher import _build_minimal_nif
 

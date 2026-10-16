@@ -21736,6 +21736,15 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         nif_editor_thread.started.connect(nif_editor_worker.run)
         _sync_operation_controls()
         nif_editor_thread.start()
+        if (
+            nif_paths is not None
+            and operation in {"patch", "remediate"}
+            and not options.dry_run
+        ):
+            _invalidate_nif_scan_conflicts()
+            nif_scan_status_label.setText(
+                "Conflict scan results are stale after write-mode editing. Run a new NIF scan before using conflict-only actions."
+            )
 
     def _start_qt_nif_editor_conflicts(operation: str) -> None:
         paths = [path for path in nif_scan_patch_conflict_paths if path.is_file()]
