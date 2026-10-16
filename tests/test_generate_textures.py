@@ -13127,6 +13127,20 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
                 self.assertFalse(w("nif_scan_remediate_conflicts").isEnabled())
                 self.assertIn("stale", w("nif_scan_status").text().lower())
                 self.assertIn("new nif scan", w("nif_scan_status").text().lower())
+                w("nif_scan_start").click()
+                state["step"] = 3
+            elif state["step"] == 3 and w("generate").isEnabled():
+                self.assertTrue(w("nif_scan_conflicts").isEnabled())
+                self.assertTrue(w("nif_scan_patch_conflicts").isEnabled())
+                w("nif_editor_patch").click()
+                state["step"] = 4
+            elif state["step"] == 4 and w("generate").isEnabled():
+                summary = window.property("nif_editor_summary")
+                self.assertEqual(summary["total"], 1)
+                self.assertFalse(w("nif_scan_conflicts").isEnabled())
+                self.assertFalse(w("nif_scan_patch_conflicts").isEnabled())
+                self.assertFalse(w("nif_scan_remediate_conflicts").isEnabled())
+                self.assertIn("stale", w("nif_scan_status").text().lower())
                 return True
             return False
 
@@ -13139,12 +13153,16 @@ class TestQtNifEditorEventLoop(unittest.TestCase):
         ), mock.patch(
             "generate_textures.patch_nif",
             return_value=patch_result,
-        ), mock.patch.object(
+        ) as patch_nif_mock, mock.patch.object(
             self.qt.QtWidgets.QMessageBox,
             "question",
             return_value=self.qt.QtWidgets.QMessageBox.StandardButton.Yes,
         ):
             self.run_window(scenario)
+        self.assertEqual(
+            [call.args[0] for call in patch_nif_mock.call_args_list],
+            [path, path],
+        )
 
     def test_qt_nif_scan_handoff_prefills_renderer_and_warns_on_mismatch(self) -> None:
         from tests.test_nif_patcher import _build_minimal_nif

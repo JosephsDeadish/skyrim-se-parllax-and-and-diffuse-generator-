@@ -21737,9 +21737,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
         _sync_operation_controls()
         nif_editor_thread.start()
         if (
-            nif_paths is not None
-            and operation in {"patch", "remediate"}
+            operation in {"patch", "remediate", "restore"}
             and not options.dry_run
+            and set(paths).intersection(nif_scan_conflict_paths)
         ):
             _invalidate_nif_scan_conflicts()
             nif_scan_status_label.setText(
