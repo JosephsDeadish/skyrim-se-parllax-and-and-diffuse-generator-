@@ -1174,6 +1174,118 @@ def _checkpoint_completed_files_with_existing_outputs(
     return set(_checkpoint_completed_output_records(completed_files, recorded_output_paths))
 
 
+def _reconcile_checkpoint_batch_inputs(
+    all_input_files: Sequence[Path],
+    completed_files: set[str],
+    recorded_output_paths: object,
+) -> tuple[list[Path], set[str]]:
+    valid_completed_files = _checkpoint_completed_files_with_existing_outputs(
+        completed_files,
+        recorded_output_paths,
+    )
+    pending_files = [
+        path for path in all_input_files
+        if str(path.resolve()) not in valid_completed_files
+    ]
+    return pending_files, valid_completed_files
+
+
+def _generation_output_paths_for_input(
+    input_path: Path,
+    generation_kwargs: Mapping[str, object],
+) -> list[Path]:
+    output_dir = generation_kwargs.get("output_dir")
+    target_game = str(generation_kwargs.get("target_game", "skyrim"))
+    expected_paths: list[Path] = []
+    if bool(generation_kwargs.get("include_diffuse", False)):
+        diffuse_path, _ = build_output_paths(
+            input_path=input_path,
+            output_dir=output_dir,
+            diffuse_name=generation_kwargs.get("diffuse_name"),
+            parallax_name=generation_kwargs.get("parallax_name"),
+            target_game=target_game,
+        )
+        expected_paths.append(diffuse_path)
+    if bool(generation_kwargs.get("include_normal", False)):
+        expected_paths.append(
+            build_normal_output_path(
+                input_path=input_path,
+                output_dir=output_dir,
+                target_game=target_game,
+            )
+        )
+    if bool(generation_kwargs.get("include_parallax", False)):
+        _, parallax_path = build_output_paths(
+            input_path=input_path,
+            output_dir=output_dir,
+            diffuse_name=generation_kwargs.get("diffuse_name"),
+            parallax_name=generation_kwargs.get("parallax_name"),
+            target_game=target_game,
+        )
+        expected_paths.append(parallax_path)
+    if bool(generation_kwargs.get("include_glow", False)):
+        expected_paths.append(
+            build_glow_output_path(
+                input_path=input_path,
+                output_dir=output_dir,
+                target_game=target_game,
+            )
+        )
+    if bool(generation_kwargs.get("include_environment_mask", False)):
+        expected_paths.append(
+            build_environment_mask_output_path(
+                input_path=input_path,
+                output_dir=output_dir,
+                env_mask_mode=str(generation_kwargs.get("env_mask_mode", "standard")),
+                complex_format=str(generation_kwargs.get("complex_format", "msn")),
+                render_profile=str(generation_kwargs.get("render_profile", "auto")),
+                include_complex=bool(generation_kwargs.get("include_complex", False)),
+                target_game=target_game,
+            )
+        )
+    if bool(generation_kwargs.get("include_complex", False)):
+        expected_paths.append(
+            build_complex_output_path(
+                input_path=input_path,
+                output_dir=output_dir,
+                complex_format=str(generation_kwargs.get("complex_format", "msn")),
+                target_game=target_game,
+            )
+        )
+    if bool(generation_kwargs.get("include_rmaos", False)):
+        expected_paths.append(
+            build_rmaos_output_path(
+                input_path=input_path,
+                output_dir=output_dir,
+                target_game=target_game,
+            )
+        )
+    if bool(generation_kwargs.get("include_pbr_texture_sets", False)):
+        expected_paths.append(build_pbr_texture_sets_output_path(input_path, output_dir))
+    if bool(generation_kwargs.get("include_ao", False)):
+        expected_paths.append(build_ao_output_path(input_path=input_path, output_dir=output_dir))
+    if bool(generation_kwargs.get("include_roughness", False)):
+        expected_paths.append(
+            build_roughness_output_path(input_path=input_path, output_dir=output_dir)
+        )
+    return expected_paths
+
+
+def _backup_existing_generation_outputs(
+    expected_paths: Sequence[Path],
+    backup_dir: Path,
+    backups: dict[Path, Path],
+) -> None:
+    for candidate in expected_paths:
+        for possible in (candidate, candidate.with_suffix(".png"), candidate.with_suffix(".json")):
+            if not possible.exists() or possible in backups:
+                continue
+            backup_target = backup_dir / f"{len(backups):05d}{possible.suffix}"
+            backup_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(possible, backup_target)
+            backups[possible] = backup_target
+
+
 def _load_checkpoint_completed_output_paths(checkpoint_path: Path) -> object:
     try:
         payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
@@ -15333,112 +15445,12 @@ if GUI_AVAILABLE:
             self._discard_last_generation_snapshot()
             backup_dir = Path(tempfile.mkdtemp(prefix="skyrim-texture-revert-"))
             backups: dict[Path, Path] = {}
-            includes = {
-                "diffuse": bool(generation_kwargs["include_diffuse"]),
-                "normal": bool(generation_kwargs["include_normal"]),
-                "parallax": bool(generation_kwargs["include_parallax"]),
-                "glow": bool(generation_kwargs["include_glow"]),
-                "environment_mask": bool(generation_kwargs["include_environment_mask"]),
-                "rmaos": bool(generation_kwargs["include_rmaos"]),
-                "pbr_texture_sets": bool(generation_kwargs.get("include_pbr_texture_sets", False)),
-                "ao": bool(generation_kwargs.get("include_ao", False)),
-                "roughness": bool(generation_kwargs.get("include_roughness", False)),
-                "complex_material": bool(generation_kwargs["include_complex"]),
-            }
             for input_file in input_files:
-                expected_paths: list[Path] = []
-                if includes["diffuse"]:
-                    diffuse_path, _ = build_output_paths(
-                        input_path=input_file,
-                        output_dir=generation_kwargs["output_dir"],
-                        diffuse_name=generation_kwargs.get("diffuse_name"),
-                        parallax_name=generation_kwargs.get("parallax_name"),
-                        target_game=str(generation_kwargs.get("target_game", "skyrim")),
-                    )
-                    expected_paths.append(diffuse_path)
-                if includes["normal"]:
-                    expected_paths.append(
-                        build_normal_output_path(
-                            input_path=input_file,
-                            output_dir=generation_kwargs["output_dir"],
-                            target_game=str(generation_kwargs.get("target_game", "skyrim")),
-                        )
-                    )
-                if includes["parallax"]:
-                    _, parallax_path = build_output_paths(
-                        input_path=input_file,
-                        output_dir=generation_kwargs["output_dir"],
-                        diffuse_name=generation_kwargs.get("diffuse_name"),
-                        parallax_name=generation_kwargs.get("parallax_name"),
-                        target_game=str(generation_kwargs.get("target_game", "skyrim")),
-                    )
-                    expected_paths.append(parallax_path)
-                if includes["glow"]:
-                    expected_paths.append(
-                        build_glow_output_path(
-                            input_path=input_file,
-                            output_dir=generation_kwargs["output_dir"],
-                            target_game=str(generation_kwargs.get("target_game", "skyrim")),
-                        )
-                    )
-                if includes["environment_mask"]:
-                    expected_paths.append(
-                        build_environment_mask_output_path(
-                            input_path=input_file,
-                            output_dir=generation_kwargs["output_dir"],
-                            env_mask_mode=str(generation_kwargs.get("env_mask_mode", "standard")),
-                            complex_format=str(generation_kwargs.get("complex_format", "msn")),
-                            render_profile=str(generation_kwargs.get("render_profile", "auto")),
-                            include_complex=bool(generation_kwargs.get("include_complex", False)),
-                            target_game=str(generation_kwargs.get("target_game", "skyrim")),
-                        )
-                    )
-                if includes["complex_material"]:
-                    expected_paths.append(
-                        build_complex_output_path(
-                            input_path=input_file,
-                            output_dir=generation_kwargs["output_dir"],
-                            complex_format=str(generation_kwargs["complex_format"]),
-                            target_game=str(generation_kwargs.get("target_game", "skyrim")),
-                        )
-                    )
-                if includes["rmaos"]:
-                    expected_paths.append(
-                        build_rmaos_output_path(
-                            input_path=input_file,
-                            output_dir=generation_kwargs["output_dir"],
-                            target_game=str(generation_kwargs.get("target_game", "skyrim")),
-                        )
-                    )
-                if includes["pbr_texture_sets"]:
-                    expected_paths.append(
-                        build_pbr_texture_sets_output_path(
-                            input_file,
-                            generation_kwargs["output_dir"],
-                        )
-                    )
-                if includes["ao"]:
-                    expected_paths.append(
-                        build_ao_output_path(
-                            input_path=input_file,
-                            output_dir=generation_kwargs["output_dir"],
-                        )
-                    )
-                if includes["roughness"]:
-                    expected_paths.append(
-                        build_roughness_output_path(
-                            input_path=input_file,
-                            output_dir=generation_kwargs["output_dir"],
-                        )
-                    )
-                for candidate in expected_paths:
-                    for possible in (candidate, candidate.with_suffix(".png"), candidate.with_suffix(".json")):
-                        if not possible.exists() or possible in backups:
-                            continue
-                        backup_target = backup_dir / f"{len(backups):05d}{possible.suffix}"
-                        backup_target.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.copy2(possible, backup_target)
-                        backups[possible] = backup_target
+                _backup_existing_generation_outputs(
+                    _generation_output_paths_for_input(input_file, generation_kwargs),
+                    backup_dir,
+                    backups,
+                )
             self.last_generation_backup_dir = backup_dir
             self.last_generation_backups = backups
             self.last_generation_created_files = set()
@@ -15466,7 +15478,6 @@ if GUI_AVAILABLE:
                     source_file_fingerprints = dict(source_file_fingerprints)
                 if total_files_considered is None:
                     total_files_considered = len(source_file_fingerprints) or len(input_files)
-                total = len(input_files)
                 results: dict[Path, dict[str, Path]] = {}
                 started_at = time.perf_counter()
                 per_file_durations: list[float] = []
@@ -15477,12 +15488,38 @@ if GUI_AVAILABLE:
                 generation_call_kwargs = dict(generation_kwargs)
                 auto_patch_nifs = bool(generation_call_kwargs.pop("auto_patch_nifs", False))
                 manager_context = generation_call_kwargs.pop("manager_context", None)
+                all_input_files = getattr(self, "checkpoint_source_files", None) or input_files
+                selected_source_keys = {str(path.resolve()) for path in all_input_files}
+                candidate_completed_files = completed_checkpoint_files & selected_source_keys
+                recorded_output_paths = _load_checkpoint_completed_output_paths(checkpoint_path)
+                input_files, valid_completed_files = _reconcile_checkpoint_batch_inputs(
+                    all_input_files,
+                    candidate_completed_files,
+                    recorded_output_paths,
+                )
+                requeued_checkpoint_files = candidate_completed_files - valid_completed_files
                 completed_file_outputs = _checkpoint_completed_output_records(
                     completed_checkpoint_files,
-                    _load_checkpoint_completed_output_paths(checkpoint_path),
+                    recorded_output_paths,
                 )
-                completed_checkpoint_files.intersection_update(completed_file_outputs)
-                all_input_files = getattr(self, "checkpoint_source_files", None) or input_files
+                completed_checkpoint_files.intersection_update(valid_completed_files)
+                if requeued_checkpoint_files:
+                    backup_dir = getattr(self, "last_generation_backup_dir", None)
+                    backups = getattr(self, "last_generation_backups", None)
+                    if not isinstance(backup_dir, Path) or not isinstance(backups, dict):
+                        raise RuntimeError(
+                            "Could not protect existing outputs before regenerating a checkpointed source."
+                        )
+                    for input_file in all_input_files:
+                        if str(input_file.resolve()) not in requeued_checkpoint_files:
+                            continue
+                        _backup_existing_generation_outputs(
+                            _generation_output_paths_for_input(input_file, generation_call_kwargs),
+                            backup_dir,
+                            backups,
+                        )
+                resumed_completed_count = len(completed_checkpoint_files)
+                total = len(input_files)
                 _validate_batch_output_path_conflicts(
                     all_input_files,
                     output_dir=generation_call_kwargs.get("output_dir"),

@@ -5757,6 +5757,61 @@ class GenerateTexturesTests(unittest.TestCase):
             set(),
         )
 
+    def test_checkpoint_reconciliation_requeues_sources_with_missing_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            input_dir.mkdir()
+            output_dir.mkdir()
+            complete_source = input_dir / "complete.dds"
+            missing_source = input_dir / "missing.dds"
+            pending_source = input_dir / "pending.dds"
+            complete_output = output_dir / "complete.dds"
+            partial_output = output_dir / "missing.dds"
+            for source in (complete_source, missing_source, pending_source):
+                source.write_bytes(b"source")
+            complete_output.write_bytes(b"complete output")
+            partial_output.write_bytes(b"partial output")
+
+            completed_files = {
+                str(complete_source.resolve()),
+                str(missing_source.resolve()),
+            }
+            output_records = {
+                str(complete_source.resolve()): {"diffuse": str(complete_output.resolve())},
+                str(missing_source.resolve()): {
+                    "diffuse": str(partial_output.resolve()),
+                    "normal": str((output_dir / "missing_n.dds").resolve()),
+                },
+            }
+            (output_dir / "missing_n.dds").unlink(missing_ok=True)
+
+            pending, valid_completed = gt._reconcile_checkpoint_batch_inputs(
+                (complete_source, missing_source, pending_source),
+                completed_files,
+                output_records,
+            )
+            generation_options = {
+                "output_dir": output_dir,
+                "include_diffuse": True,
+                "include_normal": True,
+                "include_parallax": False,
+            }
+            expected_outputs = gt._generation_output_paths_for_input(
+                missing_source,
+                generation_options,
+            )
+            backup_dir = root / "backup"
+            backup_dir.mkdir()
+            backups: dict[Path, Path] = {}
+            gt._backup_existing_generation_outputs(expected_outputs, backup_dir, backups)
+
+        self.assertEqual(pending, [missing_source, pending_source])
+        self.assertEqual(valid_completed, {str(complete_source.resolve())})
+        self.assertIn(partial_output, backups)
+        self.assertEqual(backups[partial_output].read_bytes(), b"partial output")
+
     def test_checkpoint_fingerprint_tolerates_stat_and_fstat_identity_differences(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             source = Path(temp_dir) / "source.dds"
@@ -8837,6 +8892,120 @@ class GenerateTexturesTests(unittest.TestCase):
 
         self.assertEqual([event_type for event_type, _payload in events], ["error"])
         self.assertIn("Conflicting batch output paths", events[0][1])
+
+    def test_tk_batch_worker_requeues_checkpoint_source_if_output_disappears(self) -> None:
+        if not all(
+            hasattr(TextureGeneratorGUI, name)
+            for name in (
+                "_process_generation_batch",
+                "_prepare_generation_snapshot",
+                "_discard_last_generation_snapshot",
+                "_record_created_outputs",
+                "_write_batch_checkpoint_state",
+            )
+        ):
+            self.skipTest("Tk batch worker is unavailable in this environment.")
+
+        class _BatchWorker:
+            _process_generation_batch = TextureGeneratorGUI._process_generation_batch
+            _prepare_generation_snapshot = TextureGeneratorGUI._prepare_generation_snapshot
+            _discard_last_generation_snapshot = TextureGeneratorGUI._discard_last_generation_snapshot
+            _record_created_outputs = TextureGeneratorGUI._record_created_outputs
+            _write_batch_checkpoint_state = TextureGeneratorGUI._write_batch_checkpoint_state
+
+            def __init__(self, all_sources: list[Path]) -> None:
+                self.cancel_requested = False
+                self.processing_queue = queue.Queue()
+                self.checkpoint_source_files = all_sources
+                self.last_generation_backup_dir: Path | None = None
+                self.last_generation_backups: dict[Path, Path] = {}
+                self.last_generation_created_files: set[Path] = set()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            input_dir.mkdir()
+            output_dir.mkdir()
+            completed_source = input_dir / "completed.dds"
+            pending_source = input_dir / "pending.dds"
+            for source in (completed_source, pending_source):
+                _sample_image().save(source, format="DDS", pixel_format="DXT5")
+            completed_output = output_dir / "completed.dds"
+            missing_output = output_dir / "completed_n.dds"
+            completed_output.write_bytes(b"prior diffuse")
+            completed_key = str(completed_source.resolve())
+            pending_key = str(pending_source.resolve())
+            fingerprints = _checkpoint_source_file_fingerprints(
+                (completed_source, pending_source)
+            )
+            checkpoint = root / "checkpoint.json"
+            checkpoint.write_text(
+                json.dumps(
+                    {
+                        "completed_file_outputs": {
+                            completed_key: {
+                                "diffuse": str(completed_output.resolve()),
+                                "normal": str(missing_output.resolve()),
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            generation_options = {
+                "output_dir": output_dir,
+                "include_diffuse": True,
+                "include_normal": True,
+                "include_parallax": False,
+                "include_glow": False,
+                "include_environment_mask": False,
+                "include_complex": False,
+                "include_rmaos": False,
+            }
+            worker = _BatchWorker([completed_source, pending_source])
+            worker._prepare_generation_snapshot([pending_source], generation_options)
+            generated_sources: list[str] = []
+
+            def generate(**kwargs: object) -> dict[str, Path]:
+                source = kwargs["input_file"]
+                assert isinstance(source, Path)
+                generated_sources.append(source.name)
+                outputs = {
+                    "diffuse": output_dir / f"{source.stem}.dds",
+                    "normal": output_dir / f"{source.stem}_n.dds",
+                }
+                for output in outputs.values():
+                    output.write_bytes(f"{source.name}:{output.name}".encode())
+                return outputs
+
+            with mock.patch("generate_textures.run_with_options", side_effect=generate):
+                worker._process_generation_batch(
+                    [pending_source],
+                    generation_options,
+                    input_dir,
+                    checkpoint,
+                    {completed_key},
+                    1,
+                    fingerprints,
+                    total_files_considered=2,
+                )
+
+            events = []
+            while not worker.processing_queue.empty():
+                events.append(worker.processing_queue.get_nowait())
+            checkpoint_payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            backed_up_completed_output = worker.last_generation_backups.get(completed_output)
+
+        self.assertEqual(generated_sources, ["completed.dds", "pending.dds"])
+        self.assertEqual(backed_up_completed_output.read_bytes(), b"prior diffuse")
+        done_payload = next(payload for kind, payload in events if kind == "done")[1]
+        self.assertEqual(done_payload["resumed_completed_count"], 0)
+        self.assertEqual(done_payload["total_files_considered"], 2)
+        self.assertEqual(checkpoint_payload["completed_success_count"], 2)
+        self.assertEqual(checkpoint_payload["resumed_completed_count"], 0)
+        self.assertIn(completed_key, checkpoint_payload["completed_success_files"])
+        self.assertIn(pending_key, checkpoint_payload["completed_success_files"])
 
     def test_gui_batch_worker_cancellation_checkpoint_resumes_long_run(self) -> None:
         if not all(
