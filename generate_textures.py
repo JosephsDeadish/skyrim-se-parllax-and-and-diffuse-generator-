@@ -13886,10 +13886,13 @@ if GUI_AVAILABLE:
                     screen_height,
                 )
                 self.root.minsize(min_width, min_height)
-                self.root.geometry(f"{safe_width}x{safe_height}")
-                self.root.update_idletasks()
                 width = max(0, int(self.root.winfo_width() or 0))
                 height = max(0, int(self.root.winfo_height() or 0))
+                if width < max(320, min_width * 0.8) or height < max(240, min_height * 0.8):
+                    self.root.geometry(f"{safe_width}x{safe_height}")
+                    self.root.update_idletasks()
+                    width = max(0, int(self.root.winfo_width() or 0))
+                    height = max(0, int(self.root.winfo_height() or 0))
                 # On Windows high-DPI / saved-state startup the window can briefly be
                 # restored to a tiny pre-layout size before the app settles. Reapply the
                 # safe geometry until the size is back in a sane screen-sized envelope.

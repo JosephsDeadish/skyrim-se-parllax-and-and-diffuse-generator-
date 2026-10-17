@@ -3316,14 +3316,23 @@ class GenerateTexturesTests(unittest.TestCase):
                         self.assertGreater(gui.root.winfo_width(), 0)
                         self.assertGreater(gui.root.winfo_height(), 0)
 
-                    gui.ui_scale_var.set(2.0)
-                    gui._set_theme_mode("dark")
-                    gui._apply_ui_scaling()
-                    gui._apply_theme()
-                    gui._restore_default_startup_geometry()
+                    gui.root.geometry("800x600")
                     gui.root.update_idletasks()
-                    self.assertEqual(gui.root.winfo_width(), 960)
-                    self.assertEqual(gui.root.winfo_height(), 700)
+                    selected_size = (gui.root.winfo_width(), gui.root.winfo_height())
+                    gui.ui_scale_combo.set("2.0")
+                    with mock.patch("generate_textures.save_gui_state"):
+                        gui._on_ui_scale_changed()
+                    gui.root.update_idletasks()
+                    self.assertEqual(
+                        (gui.root.winfo_width(), gui.root.winfo_height()),
+                        selected_size,
+                    )
+                    gui._set_theme_mode("dark", persist=False)
+                    gui.root.update_idletasks()
+                    self.assertEqual(
+                        (gui.root.winfo_width(), gui.root.winfo_height()),
+                        selected_size,
+                    )
 
                     style = gui.root.tk.call
                     with mock.patch("generate_textures.save_gui_state"):
