@@ -3388,6 +3388,7 @@ class GenerateTexturesTests(unittest.TestCase):
         try:
             with mock.patch("generate_textures.tk.Tk", side_effect=track_root_mapping):
                 gui = TextureGeneratorGUI()
+            self.assertEqual(gui.root.state(), "withdrawn")
             gui.root.update_idletasks()
             self.assertTrue(mapped_child_counts)
             self.assertGreater(mapped_child_counts[0], 0)
@@ -3400,6 +3401,31 @@ class GenerateTexturesTests(unittest.TestCase):
         finally:
             if gui is not None:
                 gui.root.destroy()
+
+    def test_tk_startup_window_is_shown_after_deferred_geometry_restore(self) -> None:
+        scheduled: list[object] = []
+        events: list[str] = []
+
+        class StartupRoot:
+            def update_idletasks(self) -> None:
+                return None
+
+            def geometry(self, _geometry: str) -> None:
+                return None
+
+            def after_idle(self, callback) -> None:
+                scheduled.append(callback)
+
+        gt._prepare_tk_startup_geometry(
+            StartupRoot(),
+            lambda: events.append("restore"),
+            show_window=lambda: events.append("show"),
+        )
+
+        self.assertEqual(events, ["restore"])
+        self.assertEqual(len(scheduled), 1)
+        scheduled[0]()
+        self.assertEqual(events, ["restore", "restore", "show"])
 
     def test_tk_startup_geometry_clamps_small_screen_and_preserves_resized_window(self) -> None:
         safe_width, safe_height, min_width, min_height = _compute_safe_startup_geometry(800, 600)

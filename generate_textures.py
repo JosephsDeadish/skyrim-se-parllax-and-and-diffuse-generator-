@@ -2293,7 +2293,12 @@ def _should_apply_safe_startup_geometry(
     return too_small or (force_safe_geometry and exceeds_safe_size)
 
 
-def _prepare_tk_startup_geometry(root: object, restore_geometry: Callable[[], None]) -> None:
+def _prepare_tk_startup_geometry(
+    root: object,
+    restore_geometry: Callable[[], None],
+    *,
+    show_window: Callable[[], None] | None = None,
+) -> None:
     try:
         root.update_idletasks()
         root.geometry("960x700")
@@ -2301,9 +2306,20 @@ def _prepare_tk_startup_geometry(root: object, restore_geometry: Callable[[], No
     except Exception:
         pass
     try:
-        root.after_idle(restore_geometry)
+        def restore_after_idle() -> None:
+            try:
+                restore_geometry()
+            finally:
+                if show_window is not None:
+                    show_window()
+
+        root.after_idle(restore_after_idle)
     except Exception:
-        pass
+        if show_window is not None:
+            try:
+                show_window()
+            except Exception:
+                pass
 
 
 def _compute_qt_initial_window_size(
@@ -13945,17 +13961,19 @@ if GUI_AVAILABLE:
             self._apply_theme()
             self._on_render_profile_changed()
             self._restore_startup_selection()
-            # Reassert the default startup geometry after all persisted theme/scale
-            # state has been applied; Tk can otherwise collapse the window during
-            # high-DPI startup on Windows. Do this both immediately and again after
-            # idle tasks settle to cover the frozen packaged startup race.
+            # Reassert startup geometry after persisted theme/scale state is applied.
+            # Keep the root withdrawn until the deferred correction completes so a
+            # collapsed pre-layout window is never exposed during Windows startup.
             restore_geometry = lambda: self._restore_default_startup_geometry(
                 restore_visibility=False,
                 force_safe_geometry=True,
             )
-            _prepare_tk_startup_geometry(self.root, restore_geometry)
+            _prepare_tk_startup_geometry(
+                self.root,
+                restore_geometry,
+                show_window=self.root.deiconify,
+            )
             self._apply_runtime_localization()
-            self.root.deiconify()
 
         def _set_app_icon(self) -> None:
             try:
