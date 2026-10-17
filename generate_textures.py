@@ -2051,6 +2051,19 @@ def _compute_safe_startup_geometry(
     return desired_width, desired_height, min_width, min_height
 
 
+def _prepare_tk_startup_geometry(root: object, restore_geometry: Callable[[], None]) -> None:
+    try:
+        root.update_idletasks()
+        root.geometry("960x700")
+        restore_geometry()
+    except Exception:
+        pass
+    try:
+        root.after_idle(restore_geometry)
+    except Exception:
+        pass
+
+
 def _compute_qt_initial_window_size(
     available_width: int,
     available_height: int,
@@ -13546,15 +13559,8 @@ if GUI_AVAILABLE:
             # state has been applied; Tk can otherwise collapse the window during
             # high-DPI startup on Windows. Do this both immediately and again after
             # idle tasks settle to cover the frozen packaged startup race.
-            try:
-                self.root.update_idletasks()
-                self.root.geometry("960x700")
-                self._restore_default_startup_geometry(restore_visibility=False)
-                self.root.after_idle(
-                    lambda: self._restore_default_startup_geometry(restore_visibility=False)
-                )
-            except Exception:
-                pass
+            restore_geometry = lambda: self._restore_default_startup_geometry(restore_visibility=False)
+            _prepare_tk_startup_geometry(self.root, restore_geometry)
             self._apply_runtime_localization()
             self.root.deiconify()
 

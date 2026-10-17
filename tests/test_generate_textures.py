@@ -3382,6 +3382,30 @@ class GenerateTexturesTests(unittest.TestCase):
             if gui is not None:
                 gui.root.destroy()
 
+    def test_tk_startup_geometry_schedules_deferred_restore_after_initial_failure(self) -> None:
+        scheduled: list[object] = []
+        restore_calls: list[bool] = []
+
+        class StartupRoot:
+            def update_idletasks(self) -> None:
+                return None
+
+            def geometry(self, _geometry: str) -> None:
+                raise RuntimeError("temporary geometry failure")
+
+            def after_idle(self, callback) -> None:
+                scheduled.append(callback)
+
+        gt._prepare_tk_startup_geometry(
+            StartupRoot(),
+            lambda: restore_calls.append(True),
+        )
+
+        self.assertEqual(restore_calls, [])
+        self.assertEqual(len(scheduled), 1)
+        scheduled[0]()
+        self.assertEqual(restore_calls, [True])
+
     def test_build_nif_editor_action_guidance_is_profile_aware(self) -> None:
         vanilla_guidance = build_nif_editor_action_guidance("vanilla")
         self.assertIn("Patch recipe", vanilla_guidance)
