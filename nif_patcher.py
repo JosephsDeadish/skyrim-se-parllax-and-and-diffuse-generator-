@@ -5037,7 +5037,15 @@ def _build_conflict_report(
     result: NifValidationResult,
     infos: list[NifShaderInfo] | None = None,
 ) -> list[NifConflictSummary]:
-    info_by_block = {info.block_index: info for info in (infos or [])}
+    shader_infos = infos or []
+    info_by_block = {info.block_index: info for info in shader_infos}
+    real_layout_texture_set_refs = {
+        info.texture_set_ref
+        for info in shader_infos
+        if info.layout_name == "real"
+        and info.texture_set_ref is not None
+        and info.texture_set_ref >= 0
+    }
     grouped: dict[tuple[str, str, str], list[str]] = {}
     block_code_sets: dict[tuple[str, str, int], set[str]] = {}
     semantic_slot3_real_layout_combo_counts: dict[tuple[str, str], int] = {}
@@ -5060,11 +5068,16 @@ def _build_conflict_report(
             block_code_sets.setdefault(bucket_key, set()).add(base_code)
 
     for (profile, layout, block_idx), block_codes in block_code_sets.items():
-        if layout != "real":
-            continue
         has_missing_slot3_empty = any(code.startswith("missing_parallax_slot3.empty") for code in block_codes)
+        block_info = info_by_block.get(block_idx)
+        has_real_layout_context = layout == "real" or (
+            block_info is not None
+            and block_info.texture_set_ref is not None
+            and block_info.texture_set_ref in real_layout_texture_set_refs
+        )
         if (
-            has_missing_slot3_empty
+            has_real_layout_context
+            and has_missing_slot3_empty
             and "unknown_shader_type.default_fallback_unresolved" in block_codes
         ):
             default_fallback_slot3_real_layout_combo_counts[(profile, layout)] = (
@@ -5076,6 +5089,8 @@ def _build_conflict_report(
             ).append(
                 f"Block {block_idx}: real-layout drift combo detected — default fallback shader resolution is unresolved while slot 3 remains unresolved."
             )
+        if layout != "real":
+            continue
         if (
             has_missing_slot3_empty
             and any(code.startswith("unknown_shader_type.semantic_resolved") for code in block_codes)
