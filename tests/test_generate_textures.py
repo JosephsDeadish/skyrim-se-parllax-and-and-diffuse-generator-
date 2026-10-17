@@ -9096,6 +9096,7 @@ class GenerateTexturesTests(unittest.TestCase):
 
             output_dir.mkdir()
             worker = _BatchWorker()
+            worker.checkpoint_source_files = input_files.copy()
             interrupted_after = 11
             first_attempts: list[str] = []
             source_fingerprints = _checkpoint_source_file_fingerprints(input_files)
