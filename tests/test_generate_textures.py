@@ -1864,6 +1864,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("source fingerprint", resume_guidance)
         self.assertIn("input", resume_guidance)
         self.assertIn("output folder", resume_guidance)
+        self.assertIn("outputs still exist", resume_guidance)
         self.assertIn("generation settings", resume_guidance)
         self.assertIn("regenerated", resume_guidance)
         self.assertEqual(
@@ -1877,21 +1878,28 @@ class GenerateTexturesTests(unittest.TestCase):
             input_root = root / "input"
             output_root = root / "output"
             options = {"include_normal": True, "normal_strength": 2.0}
+            source_key = str((input_root / "done.dds").resolve())
+            recorded_output = output_root / "done_n.dds"
+            recorded_output.parent.mkdir(parents=True)
+            recorded_output.write_bytes(b"generated")
             payload = {
                 "input_root": str(input_root.resolve()),
                 "output_root": str(output_root.resolve()),
                 "generation_options": options,
                 "completed_success_files": [str((input_root / "done.dds").resolve()), 3],
                 "completed_file_fingerprints": {
-                    str((input_root / "done.dds").resolve()): {
+                    source_key: {
                         "size_bytes": 42,
                         "mtime_ns": 1234,
                         "sha256": "a" * 64,
                     }
                 },
+                "completed_file_outputs": {
+                    source_key: {"normal": str(recorded_output.resolve())},
+                },
             }
             source_fingerprints = {
-                str((input_root / "done.dds").resolve()): {
+                source_key: {
                     "size_bytes": 42,
                     "mtime_ns": 1234,
                     "sha256": "a" * 64,
@@ -5726,6 +5734,29 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertNotEqual(recorded[str(changed.resolve())]["sha256"], current[str(changed.resolve())]["sha256"])
         self.assertEqual(matching, {str(unchanged.resolve())})
 
+    def test_checkpoint_completed_sources_require_all_recorded_outputs_to_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            present_output = root / "present.dds"
+            missing_output = root / "missing.dds"
+            present_output.write_bytes(b"generated")
+            completed = {"present-source", "missing-source"}
+            output_records = {
+                "present-source": {"diffuse": str(present_output.resolve())},
+                "missing-source": {"diffuse": str(missing_output.resolve())},
+            }
+
+            matching = gt._checkpoint_completed_files_with_existing_outputs(
+                completed,
+                output_records,
+            )
+
+        self.assertEqual(matching, {"present-source"})
+        self.assertEqual(
+            gt._checkpoint_completed_files_with_existing_outputs(completed, None),
+            set(),
+        )
+
     def test_checkpoint_fingerprint_tolerates_stat_and_fstat_identity_differences(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             source = Path(temp_dir) / "source.dds"
@@ -8370,10 +8401,16 @@ class GenerateTexturesTests(unittest.TestCase):
             b_path = input_dir / "b.dds"
             _sample_image().save(a_path, format="DDS", pixel_format="DXT5")
             _sample_image().save(b_path, format="DDS", pixel_format="DXT5")
+            completed_output = output_dir / "a.dds"
+            completed_output.parent.mkdir(parents=True)
+            completed_output.write_bytes(b"already generated")
             checkpoint.write_text(
                 json.dumps(
                     {
                         "completed_success_files": [str(a_path.resolve())],
+                        "completed_file_outputs": {
+                            str(a_path.resolve()): {"diffuse": str(completed_output.resolve())},
+                        },
                         "completed_file_fingerprints": _checkpoint_source_file_fingerprints((a_path,)),
                     }
                 ),
@@ -8398,6 +8435,41 @@ class GenerateTexturesTests(unittest.TestCase):
             payload = json.loads(checkpoint.read_text(encoding="utf-8"))
             self.assertEqual(payload["resumed_completed_count"], 1)
             self.assertEqual(payload["completed_success_count"], 2)
+
+    def test_run_batch_resume_regenerates_source_when_output_was_deleted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "out"
+            checkpoint = root / "checkpoint.json"
+            input_dir.mkdir()
+            source = input_dir / "source.dds"
+            _sample_image().save(source, format="DDS", pixel_format="DXT5")
+            options = {
+                "input_path": input_dir,
+                "output_dir": output_dir,
+                "include_diffuse": True,
+                "include_normal": False,
+                "include_parallax": False,
+                "include_glow": False,
+                "include_environment_mask": False,
+                "include_complex": False,
+                "batch_workers": 1,
+                "checkpoint_file": checkpoint,
+            }
+
+            run_batch_with_options(**options)
+            generated_output = output_dir / "source.dds"
+            self.assertTrue(generated_output.is_file())
+            generated_output.unlink()
+
+            resumed_outputs = run_batch_with_options(**options, resume_from_checkpoint=True)
+
+            self.assertIn(source, resumed_outputs)
+            self.assertTrue(generated_output.is_file())
+            payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(payload["resumed_completed_count"], 0)
+            self.assertEqual(payload["completed_file_outputs"][str(source.resolve())]["diffuse"], str(generated_output.resolve()))
 
     def test_run_batch_with_options_resume_reprocesses_sources_changed_since_checkpoint(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
