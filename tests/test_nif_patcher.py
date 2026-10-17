@@ -5703,6 +5703,26 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertTrue(info.has_glow_map_flag)
         self.assertEqual(info.texture_paths[TEXTURE_SLOT_GLOW], "textures\\effects\\aura_g.dds")
 
+    def test_auto_remediation_prefers_disabling_glow_when_conflicting_and_unresolved(self) -> None:
+        nif = _write_nif(self.tmp, texture_paths=[""] * 9)
+
+        with mock.patch("nif_patcher.guess_glow_path_for_nif", return_value=None):
+            opts, steps = build_auto_remediation_patch_options(
+                nif,
+                [
+                    "flag_glow_map.slot2_filled_without_flag.skyrim.legacy",
+                    "flag_glow_map.flag_set_without_slot2.skyrim.legacy",
+                ],
+                backup=False,
+            )
+
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertFalse(opts.enable_glow_map)
+        self.assertTrue(opts.disable_glow_map)
+        self.assertFalse(any(step.startswith("enable_glow_map") for step in steps))
+        self.assertIn("disable_glow_map_for_missing_slot2", steps)
+
     def test_auto_remediation_skips_enable_parallax_when_disabling_non_heightmap_pom(self) -> None:
         nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT)
         opts, steps = build_auto_remediation_patch_options(
