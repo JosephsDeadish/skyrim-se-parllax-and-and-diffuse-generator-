@@ -2051,6 +2051,21 @@ def _compute_safe_startup_geometry(
     return desired_width, desired_height, min_width, min_height
 
 
+def _should_apply_safe_startup_geometry(
+    width: int,
+    height: int,
+    safe_width: int,
+    safe_height: int,
+    min_width: int,
+    min_height: int,
+    *,
+    force_safe_geometry: bool = False,
+) -> bool:
+    too_small = width < max(320, min_width * 0.8) or height < max(240, min_height * 0.8)
+    exceeds_safe_size = width > safe_width or height > safe_height
+    return too_small or (force_safe_geometry and exceeds_safe_size)
+
+
 def _prepare_tk_startup_geometry(root: object, restore_geometry: Callable[[], None]) -> None:
     try:
         root.update_idletasks()
@@ -13563,7 +13578,10 @@ if GUI_AVAILABLE:
             # state has been applied; Tk can otherwise collapse the window during
             # high-DPI startup on Windows. Do this both immediately and again after
             # idle tasks settle to cover the frozen packaged startup race.
-            restore_geometry = lambda: self._restore_default_startup_geometry(restore_visibility=False)
+            restore_geometry = lambda: self._restore_default_startup_geometry(
+                restore_visibility=False,
+                force_safe_geometry=True,
+            )
             _prepare_tk_startup_geometry(self.root, restore_geometry)
             self._apply_runtime_localization()
             self.root.deiconify()
@@ -13870,6 +13888,7 @@ if GUI_AVAILABLE:
             *,
             retries: int = 8,
             restore_visibility: bool = True,
+            force_safe_geometry: bool = False,
         ) -> None:
             try:
                 self.root.update_idletasks()
@@ -13888,7 +13907,15 @@ if GUI_AVAILABLE:
                 self.root.minsize(min_width, min_height)
                 width = max(0, int(self.root.winfo_width() or 0))
                 height = max(0, int(self.root.winfo_height() or 0))
-                if width < max(320, min_width * 0.8) or height < max(240, min_height * 0.8):
+                if _should_apply_safe_startup_geometry(
+                    width,
+                    height,
+                    safe_width,
+                    safe_height,
+                    min_width,
+                    min_height,
+                    force_safe_geometry=force_safe_geometry,
+                ):
                     self.root.geometry(f"{safe_width}x{safe_height}")
                     self.root.update_idletasks()
                     width = max(0, int(self.root.winfo_width() or 0))
@@ -13902,6 +13929,7 @@ if GUI_AVAILABLE:
                         lambda: self._restore_default_startup_geometry(
                             retries=retries - 1,
                             restore_visibility=restore_visibility,
+                            force_safe_geometry=force_safe_geometry,
                         ),
                     )
             except Exception:
@@ -13912,6 +13940,7 @@ if GUI_AVAILABLE:
                             lambda: self._restore_default_startup_geometry(
                                 retries=retries - 1,
                                 restore_visibility=restore_visibility,
+                                force_safe_geometry=force_safe_geometry,
                             ),
                         )
                     except Exception:

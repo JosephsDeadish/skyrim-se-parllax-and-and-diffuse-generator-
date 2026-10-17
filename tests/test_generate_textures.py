@@ -3392,6 +3392,45 @@ class GenerateTexturesTests(unittest.TestCase):
             if gui is not None:
                 gui.root.destroy()
 
+    def test_tk_startup_geometry_clamps_small_screen_and_preserves_resized_window(self) -> None:
+        safe_width, safe_height, min_width, min_height = _compute_safe_startup_geometry(800, 600)
+        self.assertTrue(
+            gt._should_apply_safe_startup_geometry(
+                960,
+                700,
+                safe_width,
+                safe_height,
+                min_width,
+                min_height,
+                force_safe_geometry=True,
+            )
+        )
+        self.assertFalse(
+            gt._should_apply_safe_startup_geometry(
+                safe_width,
+                safe_height,
+                safe_width,
+                safe_height,
+                min_width,
+                min_height,
+                force_safe_geometry=True,
+            )
+        )
+
+        large_safe_width, large_safe_height, large_min_width, large_min_height = (
+            _compute_safe_startup_geometry(1920, 1080)
+        )
+        self.assertFalse(
+            gt._should_apply_safe_startup_geometry(
+                800,
+                600,
+                large_safe_width,
+                large_safe_height,
+                large_min_width,
+                large_min_height,
+            )
+        )
+
     def test_tk_startup_geometry_schedules_deferred_restore_after_initial_failure(self) -> None:
         scheduled: list[object] = []
         restore_calls: list[bool] = []
