@@ -5664,6 +5664,45 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertTrue(opts.disable_glow_map)
         self.assertIn("disable_glow_map_for_missing_slot2", steps)
 
+    def test_auto_remediation_restores_glow_when_combined_conflicts_are_recoverable(self) -> None:
+        meshes = self.tmp / "meshes"
+        textures = self.tmp / "textures"
+        meshes.mkdir()
+        (textures / "effects").mkdir(parents=True)
+        (textures / "cubemaps").mkdir()
+        for texture in (
+            textures / "effects" / "aura.dds",
+            textures / "effects" / "aura_m.dds",
+            textures / "effects" / "aura_g.dds",
+            textures / "cubemaps" / "aura_e.dds",
+        ):
+            texture.write_bytes(b"texture fixture")
+
+        paths = ["textures\\effects\\aura.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_CUBEMAP] = "textures\\cubemaps\\aura_e.dds"
+        paths[TEXTURE_SLOT_ENV_MASK] = "textures\\effects\\aura_m.dds"
+        nif = _write_nif(
+            meshes,
+            shader_type=SHADER_TYPE_ENVMAP,
+            flags1=SLSF1_ENVIRONMENT_MAPPING,
+            flags2=SLSF2_GLOW_MAP,
+            texture_paths=paths,
+        )
+        codes = [
+            "flag_glow_map.flag_set_without_slot2.skyrim.legacy",
+            "shader_state.envmap_glow_missing_slot2.slot2_empty.skyrim.legacy",
+        ]
+
+        result, steps = auto_remediate_nif_conflicts(nif, codes, backup=False)
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertTrue(result.success, result.errors)
+        self.assertNotIn("disable_glow_map_for_missing_slot2", steps)
+        info = scan_nif(nif)[0]
+        self.assertTrue(info.has_glow_map_flag)
+        self.assertEqual(info.texture_paths[TEXTURE_SLOT_GLOW], "textures\\effects\\aura_g.dds")
+
     def test_auto_remediation_skips_enable_parallax_when_disabling_non_heightmap_pom(self) -> None:
         nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT)
         opts, steps = build_auto_remediation_patch_options(
