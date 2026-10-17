@@ -34,6 +34,7 @@ from scripts.pre_release_validation import (
     _resolve_seed_realmod_delta_files,
     _run_repository_hygiene_scan,
     _resolve_packaged_smoke_binary,
+    _run_packaging_smoke,
     _validate_packaged_checkpoint_fingerprints,
     _write_packaged_smoke_png,
     _write_packaged_smoke_dds,
@@ -569,6 +570,24 @@ class TestPreReleaseValidationPackagingSmoke(unittest.TestCase):
     def test_resolve_packaged_smoke_binary_raises_when_missing(self) -> None:
         with self.assertRaises(SystemExit):
             _resolve_packaged_smoke_binary(self.tmp)
+
+    def test_packaging_smoke_uses_platform_data_separator(self) -> None:
+        with unittest.mock.patch("scripts.pre_release_validation._run_step") as run_step:
+            _run_packaging_smoke(self.tmp)
+
+        command = run_step.call_args.args[1]
+        data_arguments = [
+            command[index + 1]
+            for index, argument in enumerate(command[:-1])
+            if argument == "--add-data"
+        ]
+        self.assertEqual(
+            data_arguments,
+            [
+                f"{REPO_ROOT / 'nif_patcher.py'}{os.pathsep}.",
+                f"{REPO_ROOT / 'assets'}{os.pathsep}assets",
+            ],
+        )
 
     def test_packaged_smoke_resume_uses_checkpoint_output_directory(self) -> None:
         command = _packaged_smoke_resume_args(

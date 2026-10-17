@@ -1,5 +1,6 @@
 import csv
 import hashlib
+import inspect
 import json
 import io
 import os
@@ -8902,7 +8903,7 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["failed_files"], 1)
             self.assertEqual(Path(payload["failures"][0]["file"]).name, "bad.dds")
 
-    def test_main_passes_checkpoint_options_to_batch_run(self) -> None:
+    def test_main_passes_batch_options_to_batch_run(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             input_dir = root / "textures"
@@ -8947,7 +8948,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 roughness_strength=None,
                 complex_material=False,
                 pbr_material=False,
-                pbr_texture_sets=False,
+                pbr_texture_sets=True,
                 render_profile="auto",
                 batch_workers=2,
                 checkpoint_file=checkpoint,
@@ -8959,6 +8960,24 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             self.assertEqual(batch_mock.call_args.kwargs["checkpoint_file"], checkpoint)
             self.assertTrue(batch_mock.call_args.kwargs["resume_from_checkpoint"])
+            self.assertTrue(batch_mock.call_args.kwargs["include_pbr_texture_sets"])
+
+    def test_generation_api_preserves_legacy_positional_parameter_order(self) -> None:
+        run_parameters = tuple(inspect.signature(run_with_options).parameters)
+        batch_parameters = tuple(inspect.signature(run_batch_with_options).parameters)
+
+        self.assertEqual(
+            run_parameters[run_parameters.index("render_profile") + 1],
+            "include_wetness_mask",
+        )
+        self.assertEqual(
+            batch_parameters[batch_parameters.index("render_profile") + 1],
+            "include_wetness_mask",
+        )
+        self.assertEqual(
+            batch_parameters[batch_parameters.index("roughness_name") + 1],
+            "progress_callback",
+        )
 
     def test_create_panda_icon_image_returns_rgba_square(self) -> None:
         for size in (16, 32, 64, 128, 256):

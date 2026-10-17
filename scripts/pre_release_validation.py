@@ -152,7 +152,7 @@ def _run_packaging_smoke(artifact_dir: Path) -> None:
             "--collect-all",
             "numpy",
             "--add-data",
-            f"{REPO_ROOT / 'nif_patcher.py'}:.",
+            f"{REPO_ROOT / 'nif_patcher.py'}{os.pathsep}.",
             "--add-data",
             f"{REPO_ROOT / 'assets'}{os.pathsep}assets",
             "--name",
