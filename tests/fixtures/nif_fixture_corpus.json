@@ -1,0 +1,1731 @@
+{
+  "cases": [
+    {
+      "id": "skyrim_legacy_missing_parallax",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83
+    },
+    {
+      "id": "skyrim_real_missing_parallax",
+      "profile": "skyrim",
+      "shader_layout": "real",
+      "user_ver2": 130
+    },
+    {
+      "id": "skyrim_le_legacy_missing_parallax",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 34
+    },
+    {
+      "id": "skyrim_crlf_u16_export_like",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true
+    },
+    {
+      "id": "skyrim_diffuse_wrong_suffix",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\arch\\stone_n.dds",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_normal_wrong_suffix",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "textures\\arch\\stone_p.dds",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_cubemap_wrong_suffix",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "",
+        "textures\\arch\\stone_n.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_parallax_matches_diffuse",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_parallax_matches_normal",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "textures\\arch\\stone_n.dds",
+        "",
+        "textures\\arch\\stone_n.dds",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_envmask_generic_alias",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\arch\\stone_orm.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_env_slot4_without_flag",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\stone_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_env_slot5_without_flag",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\arch\\stone_m.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_envmap_missing_slots4_5",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1
+    },
+    {
+      "id": "skyrim_envmap_missing_slot4_only",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\arch\\stone_m.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_envmap_missing_slot5_only",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\stone_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_parallax_envmap_missing_slot3_only",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 2176,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\stone_e.dds",
+        "textures\\arch\\stone_m.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_mixed_multiconflict_envmap_parallax_glow",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 268435584,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "textures\\arch\\stone_n.dds",
+        "textures\\arch\\stone_n.dds",
+        "textures\\arch\\stone.dds",
+        "textures\\arch\\stone_n.dds",
+        "textures\\arch\\stone_orm.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_mixed_multiconflict_envmap_slot5_missing_glow_flag",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "textures\\arch\\stone_n.dds",
+        "",
+        "textures\\arch\\stone_n.dds",
+        "textures\\cubemaps\\stone_e.dds",
+        "textures\\arch\\missing_m.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_mixed_envmap_pom_unresolved",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 268435584,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "textures\\arch\\stone_p.dds",
+        "textures\\cubemaps\\missing_env_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_multiconflict_env_flag_mismatch_with_aliases",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "textures\\arch\\stone_n.dds",
+        "",
+        "textures\\arch\\stone_n.dds",
+        "textures\\arch\\stone_n.dds",
+        "textures\\arch\\stone_orm.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_envmap_glow_mixed_unresolved",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64
+    },
+    {
+      "id": "skyrim_parallax_envmap_mixed_unresolved",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 2176
+    },
+    {
+      "id": "skyrim_parallax_envmap_slot5_missing_with_slot3_4_present",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 2176,
+      "texture_paths": [
+        "textures\\effects\\aura.dds",
+        "",
+        "",
+        "textures\\effects\\aura_p.dds",
+        "textures\\cubemaps\\aura_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_parallax_envmap_glow_mixed_unresolved",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 2176,
+      "flags2": 64
+    },
+    {
+      "id": "skyrim_real_shifted_multiconflict_envmap",
+      "profile": "skyrim",
+      "shader_layout": "real",
+      "user_ver2": 130,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "texture_set_layout_shift": 4,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "textures\\arch\\stone_n.dds",
+        "textures\\arch\\stone_n.dds",
+        "textures\\arch\\stone.dds",
+        "textures\\cubemaps\\missing_e.dds",
+        "textures\\arch\\stone_orm.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_real_semantic_slot3_drift_combo",
+      "profile": "skyrim",
+      "shader_layout": "real",
+      "user_ver2": 130,
+      "shader_type": 305419896,
+      "flags1": 2176,
+      "texture_set_layout_shift": 4,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_real_semantic_slot3_drift_combo_core_family",
+      "profile": "skyrim",
+      "family": "core_drift_semantic_slot3",
+      "shader_layout": "real",
+      "user_ver2": 130,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_set_layout_shift": 4,
+      "texture_paths": [
+        "textures\\architecture\\dwemer\\metal.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\architecture\\dwemer\\metal_m.dds",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\dwemer\\metal.dds",
+            "",
+            "",
+            "textures\\architecture\\dwemer\\metal.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "skyrim_real_semantic_slot3_drift_combo_repeated_core_family",
+      "profile": "fallout",
+      "family": "core_drift_semantic_slot3_repeated",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_set_layout_shift": 4,
+      "block_type_index_overrides": [
+        {
+          "ordinal": 0,
+          "value": 65535
+        }
+      ],
+      "extra_shader_texture_set_refs": [
+        0
+      ],
+      "texture_paths": [
+        "textures\\architecture\\dwemer\\metal.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\architecture\\dwemer\\metal_m.dds",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\dwemer\\metal.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "skyrim_real_crossblock_parallax_envmap_glow_no_source",
+      "profile": "skyrim",
+      "shader_layout": "real",
+      "user_ver2": 130,
+      "shader_type": 1,
+      "flags1": 268437632,
+      "flags2": 64,
+      "texture_set_layout_shift": 4,
+      "texture_paths": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\bridge\\stonebridge.dds",
+            "textures\\architecture\\bridge\\stonebridge_n.dds",
+            "",
+            "textures\\architecture\\bridge\\stonebridge_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "skyrim_family_architecture_multishader",
+      "profile": "skyrim",
+      "family": "architecture",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\architecture\\stonewall.dds",
+        "",
+        "",
+        "textures\\architecture\\stonewall.dds",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 1,
+          "flags1": 128
+        }
+      ]
+    },
+    {
+      "id": "skyrim_family_clutter_envmap_slot4_missing",
+      "profile": "skyrim",
+      "family": "clutter",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\clutter\\barrel\\barrel01.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\clutter\\barrel\\barrel01_m.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_family_armor_envmap_slot5_missing",
+      "profile": "skyrim",
+      "family": "armor",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\armor\\iron\\ironarmor.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\armor_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_family_landscape_envmask_alias",
+      "profile": "skyrim",
+      "family": "landscape",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\landscape\\rocks\\rock01.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\landscape\\rocks\\rock01_orm.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_family_foliage_cubemap_suffix",
+      "profile": "skyrim",
+      "family": "foliage",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\plants\\tree\\treepine.dds",
+        "",
+        "",
+        "",
+        "textures\\plants\\tree\\treepine_n.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_family_effects_glow_suffix",
+      "profile": "skyrim",
+      "family": "effects",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\effects\\fxmist.dds",
+        "",
+        "textures\\effects\\fxmist_n.dds",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "skyrim_family_architecture_truepbr_canonical",
+      "profile": "skyrim",
+      "family": "architecture",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\pbr\\architecture\\stone.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\stone_e.dds",
+        "textures\\pbr\\architecture\\stone_rmaos.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_legacy_11_130",
+      "profile": "fallout",
+      "shader_layout": "legacy",
+      "user_version": 11,
+      "user_ver2": 130
+    },
+    {
+      "id": "fallout_real_11_131",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131
+    },
+    {
+      "id": "fallout_real_11_132",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 132
+    },
+    {
+      "id": "fallout_legacy_single_pass_11_139",
+      "profile": "fallout",
+      "shader_layout": "legacy",
+      "user_version": 11,
+      "user_ver2": 139,
+      "flags1": 32
+    },
+    {
+      "id": "fallout_real_11_133",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 133
+    },
+    {
+      "id": "fallout_real_12_131",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 12,
+      "user_ver2": 131
+    },
+    {
+      "id": "fallout_legacy_12_133",
+      "profile": "fallout",
+      "shader_layout": "legacy",
+      "user_version": 12,
+      "user_ver2": 133
+    },
+    {
+      "id": "fallout_envmap_missing_slots4_5",
+      "profile": "fallout",
+      "shader_layout": "legacy",
+      "user_version": 11,
+      "user_ver2": 130,
+      "shader_type": 1,
+      "flags1": 128
+    },
+    {
+      "id": "fallout_env_slot5_without_flag",
+      "profile": "fallout",
+      "shader_layout": "legacy",
+      "user_version": 11,
+      "user_ver2": 130,
+      "texture_paths": [
+        "textures\\arch\\stone.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\arch\\stone_m.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_parallax_envmap_glow_mixed_unresolved",
+      "profile": "fallout",
+      "shader_layout": "legacy",
+      "user_version": 11,
+      "user_ver2": 130,
+      "shader_type": 1,
+      "flags1": 2176,
+      "flags2": 64
+    },
+    {
+      "id": "fallout_real_crlf_u16_shifted_envmap_slot5_missing",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\architecture\\vault\\vaulttrim.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\vaulttrim_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_real_crlf_u16_shifted_env_slot5_alias_without_flag",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 132,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "texture_paths": [
+        "textures\\architecture\\factory\\factorywall.dds",
+        "",
+        "",
+        "",
+        "textures\\architecture\\factory\\factorywall_n.dds",
+        "textures\\architecture\\factory\\factorywall_orm.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_real_shifted_multiblock_envmap_glow_parallax_reuse",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\clutter\\factory\\console.dds",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\clutter\\factory\\console.dds",
+            "textures\\clutter\\factory\\console_n.dds",
+            "textures\\clutter\\factory\\console_n.dds",
+            "textures\\clutter\\factory\\console.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fallout_real_crlf_u16_shifted_envmap_glow_slot5_missing",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 132,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\architecture\\vault\\vaultpanel.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\vaultpanel_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_real_crlf_u16_shifted_multiblock_envmap_parallax_mixed",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\clutter\\factory\\panel.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\clutter\\factory\\panel_m.dds",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\clutter\\factory\\panel.dds",
+            "textures\\clutter\\factory\\panel_n.dds",
+            "",
+            "textures\\clutter\\factory\\panel_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fallout_real_shifted_multiblock_env_slot4_missing_parallax_normal_reuse",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\architecture\\factory\\wallpanel.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\architecture\\factory\\wallpanel_m.dds",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\factory\\wallpanel.dds",
+            "textures\\architecture\\factory\\wallpanel_n.dds",
+            "",
+            "textures\\architecture\\factory\\wallpanel_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fallout_real_crossblock_parallax_envmap_glow_no_source",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "shader_type": 1,
+      "flags1": 268437632,
+      "flags2": 64,
+      "texture_set_layout_shift": 4,
+      "texture_paths": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\clutter\\factory\\console.dds",
+            "textures\\clutter\\factory\\console_n.dds",
+            "",
+            "textures\\clutter\\factory\\console_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fallout_real_crlf_u16_shifted_crossblock_env_slot5_missing_parallax_reuse",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\architecture\\factory\\bulkhead.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\bulkhead_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\factory\\bulkhead.dds",
+            "textures\\architecture\\factory\\bulkhead_n.dds",
+            "",
+            "textures\\architecture\\factory\\bulkhead_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fallout_real_crlf_u16_shifted_crossblock_env_glow_slot2_missing_plus_single_pass",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\effects\\reactor\\reactorfx.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\reactorfx_e.dds",
+        "textures\\effects\\reactor\\reactorfx_m.dds",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "flags1": 32,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\effects\\reactor\\reactorfx.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fallout_real_num_blocks_corrupt_envmap",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "shader_type": 1,
+      "flags1": 128,
+      "num_blocks_delta": 2
+    },
+    {
+      "id": "fallout_real_crossblock_texture_ref_mismatch",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\architecture\\factory\\bulkhead.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\bulkhead_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "texture_paths": [
+            "textures\\architecture\\factory\\bulkhead.dds",
+            "textures\\architecture\\factory\\bulkhead_n.dds",
+            "",
+            "textures\\architecture\\factory\\bulkhead_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "extra_shader_texture_set_refs": [
+        0
+      ]
+    },
+    {
+      "id": "fallout_real_crossblock_invalid_texture_ref_with_size_corruption",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "shader_size_delta": 8,
+      "texture_paths": [
+        "textures\\effects\\reactor\\reactorfx.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\reactorfx_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "flags1": 32,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\effects\\reactor\\reactorfx.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "extra_shader_texture_set_refs": [
+        99
+      ],
+      "extra_shader_size_deltas": [
+        4
+      ]
+    },
+    {
+      "id": "fallout_real_num_block_types_drift_corrupt",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "shader_type": 1,
+      "flags1": 128,
+      "num_block_types_delta": -1
+    },
+    {
+      "id": "fallout_real_block_type_index_table_drift",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "texture_set_layout_shift": 4,
+      "texture_set_count_u16": true,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "block_type_index_overrides": [
+        {
+          "ordinal": 0,
+          "value": 65535
+        }
+      ]
+    },
+    {
+      "id": "fallout_real_block_size_table_skew_primary",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_layout_shift": 4,
+      "texture_set_count_u16": true,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\architecture\\vault\\vaultdoor.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\vaultdoor_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "block_size_deltas": [
+        0,
+        8
+      ]
+    },
+    {
+      "id": "fallout_real_multiblock_block_size_table_drift_combo",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_layout_shift": 4,
+      "texture_set_count_u16": true,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\effects\\facility\\reactorpanel.dds",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "flags1": 32,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\effects\\facility\\reactorpanel.dds",
+            "textures\\effects\\facility\\reactorpanel_n.dds",
+            "",
+            "textures\\effects\\facility\\reactorpanel_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "extra_shader_texture_set_refs": [
+        99
+      ],
+      "block_size_delta_overrides": [
+        {
+          "ordinal": 1,
+          "delta": 12
+        },
+        {
+          "ordinal": 3,
+          "delta": -6
+        }
+      ]
+    },
+    {
+      "id": "fallout_real_crossblock_texture_ref_drift_plus_size_skew",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_layout_shift": 4,
+      "texture_set_count_u16": true,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\architecture\\vault\\vaultpanel.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\vaultpanel_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "flags1": 2176,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\vault\\vaultpanel.dds",
+            "textures\\architecture\\vault\\vaultpanel_n.dds",
+            "",
+            "textures\\architecture\\vault\\vaultpanel_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "extra_shader_texture_set_refs": [
+        99
+      ],
+      "block_size_delta_overrides": [
+        {
+          "ordinal": 1,
+          "delta": 10
+        },
+        {
+          "ordinal": 3,
+          "delta": -4
+        }
+      ]
+    },
+    {
+      "id": "fallout_real_crlf_u16_shifted_multiblock_glow_env_drift",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\effects\\facility\\warninglight.dds",
+        "",
+        "",
+        "",
+        "",
+        "textures\\effects\\facility\\warninglight_mrao.dds",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "flags1": 32,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\effects\\facility\\warninglight.dds",
+            "textures\\effects\\facility\\warninglight_n.dds",
+            "",
+            "textures\\effects\\facility\\warninglight_n.dds",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        },
+        {
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\effects\\facility\\warninglight.dds",
+            "",
+            "",
+            "",
+            "textures\\cubemaps\\warninglight_e.dds",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "extra_shader_texture_set_refs": [
+        77,
+        99
+      ]
+    },
+    {
+      "id": "fallout_mixed_signature_drift_user11_u83",
+      "profile": "unknown",
+      "shader_layout": "legacy",
+      "user_version": 11,
+      "user_ver2": 83,
+      "texture_paths": [
+        "textures\\architecture\\factory\\bulkhead.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\bulkhead_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_real_crlf_u16_numblocks_drift_unknown_tail",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "num_blocks_delta": 2,
+      "texture_paths": [
+        "textures\\architecture\\factory\\controlpanel.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\controlpanel_e.dds",
+        "textures\\architecture\\factory\\controlpanel_orm.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_real_shifted_block_type_table_drift",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "num_block_types_delta": -1,
+      "block_type_index_overrides": [
+        {
+          "ordinal": 0,
+          "value": 65535
+        }
+      ],
+      "texture_paths": [
+        "textures\\effects\\vault\\vaultspark.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\vaultspark_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_legacy_u16_blocksize_drift_multiblock",
+      "profile": "fallout",
+      "shader_layout": "legacy",
+      "user_version": 11,
+      "user_ver2": 130,
+      "texture_set_count_u16": true,
+      "shader_type": 1,
+      "flags1": 128,
+      "texture_paths": [
+        "textures\\clutter\\pipes\\reactorpipes.dds",
+        "textures\\clutter\\pipes\\reactorpipes_n.dds",
+        "",
+        "textures\\clutter\\pipes\\reactorpipes_n.dds",
+        "",
+        "textures\\clutter\\pipes\\reactorpipes_orm.dds",
+        "",
+        "",
+        ""
+      ],
+      "extra_shader_blocks": [
+        {
+          "shader_type": 0,
+          "flags1": 32,
+          "texture_paths": [
+            "textures\\clutter\\pipes\\reactorpipes.dds",
+            "textures\\clutter\\pipes\\reactorpipes_n.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ]
+        }
+      ],
+      "block_size_delta_overrides": [
+        {
+          "ordinal": 1,
+          "delta": 14
+        },
+        {
+          "ordinal": 3,
+          "delta": -6
+        }
+      ]
+    },
+    {
+      "id": "fallout_architecture_real_crlf_u16_multidrift_envmap_glow_tail",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 128,
+      "flags2": 64,
+      "num_blocks_delta": 1,
+      "block_size_delta_overrides": [
+        {
+          "ordinal": 1,
+          "delta": 10
+        },
+        {
+          "ordinal": 3,
+          "delta": -6
+        }
+      ],
+      "texture_paths": [
+        "textures\\architecture\\industrial\\catwalk.dds",
+        "",
+        "",
+        "",
+        "textures\\cubemaps\\catwalk_e.dds",
+        "",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_effects_real_crlf_u16_envmap_pom_glow_alias_multidrift_tail",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 268435584,
+      "flags2": 64,
+      "num_blocks_delta": 2,
+      "block_size_delta_overrides": [
+        {
+          "ordinal": 1,
+          "delta": 14
+        },
+        {
+          "ordinal": 2,
+          "delta": -8
+        }
+      ],
+      "texture_paths": [
+        "textures\\effects\\reactor\\haze.dds",
+        "",
+        "textures\\effects\\reactor\\haze_n.dds",
+        "",
+        "",
+        "textures\\effects\\reactor\\haze_orm.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_clutter_real_crlf_u16_single_pass_envmap_multidrift_tail",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 0,
+      "flags1": 160,
+      "num_blocks_delta": 1,
+      "block_type_index_overrides": [
+        {
+          "ordinal": 0,
+          "value": 65535
+        }
+      ],
+      "texture_paths": [
+        "textures\\clutter\\industrial\\console.dds",
+        "",
+        "",
+        "textures\\clutter\\industrial\\console_n.dds",
+        "",
+        "textures\\clutter\\industrial\\console_m.dds",
+        "",
+        "",
+        ""
+      ]
+    },
+    {
+      "id": "fallout_architecture_real_crlf_u16_envmap_glow_singlepass_refskew_tail",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 160,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\architecture\\vault\\bulkhead.dds",
+        "textures\\architecture\\vault\\bulkhead_n.dds",
+        "",
+        "",
+        "textures\\cubemaps\\bulkhead_e.dds",
+        "textures\\architecture\\vault\\bulkhead_m.dds",
+        "",
+        "",
+        ""
+      ],
+      "num_blocks_delta": 1,
+      "extra_shader_texture_set_refs": [
+        91
+      ],
+      "block_size_delta_overrides": [
+        {
+          "ordinal": 1,
+          "delta": 12
+        },
+        {
+          "ordinal": 3,
+          "delta": -7
+        }
+      ]
+    },
+    {
+      "id": "fallout_effects_real_crlf_u16_envmap_parallax_glow_multidrift_refskew_tail",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 1,
+      "flags1": 268435584,
+      "flags2": 64,
+      "texture_paths": [
+        "textures\\effects\\reactor\\coolantmist.dds",
+        "textures\\effects\\reactor\\coolantmist_n.dds",
+        "",
+        "textures\\effects\\reactor\\coolantmist_n.dds",
+        "",
+        "textures\\effects\\reactor\\coolantmist_orm.dds",
+        "",
+        "",
+        ""
+      ],
+      "num_blocks_delta": 2,
+      "extra_shader_texture_set_refs": [
+        77
+      ],
+      "block_type_index_overrides": [
+        {
+          "ordinal": 0,
+          "value": 65535
+        }
+      ],
+      "block_size_delta_overrides": [
+        {
+          "ordinal": 1,
+          "delta": 16
+        },
+        {
+          "ordinal": 2,
+          "delta": -9
+        }
+      ]
+    },
+    {
+      "id": "fallout_clutter_real_crlf_u16_env_alias_singlepass_multidrift_refskew_tail",
+      "profile": "fallout",
+      "shader_layout": "real",
+      "user_version": 11,
+      "user_ver2": 131,
+      "header_line_ending": "crlf",
+      "texture_set_count_u16": true,
+      "texture_set_layout_shift": 4,
+      "shader_type": 0,
+      "flags1": 32,
+      "texture_paths": [
+        "textures\\clutter\\industrial\\breakerpanel.dds",
+        "",
+        "",
+        "textures\\clutter\\industrial\\breakerpanel_n.dds",
+        "",
+        "textures\\clutter\\industrial\\breakerpanel_orm.dds",
+        "",
+        "",
+        ""
+      ],
+      "num_blocks_delta": 1,
+      "extra_shader_texture_set_refs": [
+        88
+      ],
+      "block_size_delta_overrides": [
+        {
+          "ordinal": 1,
+          "delta": 14
+        },
+        {
+          "ordinal": 3,
+          "delta": -8
+        }
+      ]
+    },
+    {
+      "id": "unknown_header_signature",
+      "profile": "unknown",
+      "shader_layout": "legacy",
+      "user_ver2": 155
+    },
+    {
+      "id": "broken_header_truncated_32",
+      "profile": "unknown",
+      "shader_layout": "legacy",
+      "broken_header": true,
+      "truncated_bytes": 32
+    },
+    {
+      "id": "skyrim_shifted_texture_set_layout",
+      "profile": "skyrim",
+      "shader_layout": "legacy",
+      "user_ver2": 83,
+      "texture_set_layout_shift": 4
+    }
+  ]
+}

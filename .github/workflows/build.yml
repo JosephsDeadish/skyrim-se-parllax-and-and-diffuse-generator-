@@ -20,19 +20,19 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run tests
+      - name: Run full unittest suite
         run: python -m unittest discover -s tests -p "test_*.py" -v
 
-  build-exe:
-    name: Build Windows exe & upload zip
-    runs-on: windows-latest
+  large-batch-smoke:
+    name: Large-batch smoke checks (Ubuntu)
+    runs-on: ubuntu-latest
     environment: pr-build-approval
     needs: test
 
@@ -43,7 +43,103 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run large-batch smoke tests
+        run: |
+          python -m unittest -v \
+            tests.test_generate_textures.GenerateTexturesTests.test_compute_preview_refresh_delay_ms_throttles_for_huge_batches \
+            tests.test_generate_textures.GenerateTexturesTests.test_compute_deferred_preview_tile_interval_ms_increases_for_huge_batches \
+            tests.test_generate_textures.GenerateTexturesTests.test_should_update_live_batch_preview_throttles_dense_updates_for_huge_batches \
+            tests.test_generate_textures.GenerateTexturesTests.test_build_batch_bottleneck_hints_includes_large_run_resume_guidance \
+            tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_writes_checkpoint_file \
+            tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_resume_checkpoint_skips_completed_successes \
+            tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_recovers_interrupted_multiresolution_batch \
+            tests.test_generate_textures.GenerateTexturesTests.test_run_batch_with_options_recovers_failed_file_under_parallel_queue_pressure \
+            tests.test_generate_textures.GenerateTexturesTests.test_gui_processing_queue_smoke_done_event_reports_outputs_failures_and_autopatch
+
+  release-readiness:
+    name: Release validation gate artifacts (Ubuntu)
+    runs-on: ubuntu-latest
+    environment: pr-build-approval
+    needs:
+      - test
+      - large-batch-smoke
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Download prior release-readiness artifacts (history seed)
+        uses: dawidd6/action-download-artifact@v6
+        continue-on-error: true
+        with:
+          workflow: build.yml
+          branch: ${{ github.event.repository.default_branch }}
+          name: release-readiness-artifacts
+          path: artifacts/previous_release_readiness
+          if_no_artifact_found: warn
+
+      - name: Ensure seeded parity-delta baseline artifacts
+        run: |
+          mkdir -p artifacts/previous_release_readiness
+          if [ ! -f artifacts/previous_release_readiness/nif_realmod_parity_delta_report.json ]; then
+            cp tests/fixtures/nif_realmod_parity_delta_seed.json artifacts/previous_release_readiness/nif_realmod_parity_delta_report.json
+          fi
+
+      - name: Pre-release validation gate + artifact generation
+        run: |
+          python scripts/pre_release_validation.py \
+            --repeat-validation-loops 4 \
+            --packaged-smoke-loops 3 \
+            --strict-localization-completeness \
+            --max-fallback-ratio-drift 0.03 \
+            --max-fallback-group-drift 1 \
+            --artifact-dir artifacts/release_readiness \
+            --history-file artifacts/release_readiness/nif_family_trend_history.json \
+            --seed-history-file artifacts/previous_release_readiness/nif_family_trend_history.json \
+            --seed-realmod-delta-file tests/fixtures/nif_realmod_parity_delta_seed.json \
+            --seed-realmod-delta-file artifacts/previous_release_readiness/nif_realmod_parity_delta_report.json
+
+      - name: Upload release-readiness artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-readiness-artifacts
+          path: artifacts/release_readiness
+          if-no-files-found: error
+
+  build-exe:
+    name: Build Windows exe & upload zip
+    runs-on: windows-latest
+    environment: pr-build-approval
+    needs:
+      - test
+      - large-batch-smoke
+      - release-readiness
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Install dependencies
         run: |
@@ -54,7 +150,283 @@ jobs:
         run: python assets/create_panda_ico.py
 
       - name: Build executable with PyInstaller
-        run: pyinstaller --onefile --windowed --collect-all numpy --add-data "nif_patcher.py;." --name generate_textures --icon assets\panda.ico generate_textures.py
+        run: pyinstaller --onefile --windowed --collect-all numpy --add-data "nif_patcher.py;." --add-data "assets;assets" --name generate_textures --icon assets\panda.ico generate_textures.py
+
+      - name: Install Qt migration-preview dependency
+        run: python -m pip install PySide6==6.12.0
+
+      - name: Build Qt migration-preview executable
+        run: >-
+          pyinstaller --onefile --windowed --collect-all numpy --collect-all PySide6
+          --hidden-import scripts.qt_gui_acceptance
+          --add-data "nif_patcher.py;." --add-data "assets;assets"
+          --name generate_textures_qt --icon assets\panda.ico --distpath dist\qt --workpath build\pyinstaller-qt
+          generate_textures.py
+
+      - name: Smoke run packaged executable
+        run: .\dist\generate_textures.exe --help
+
+      - name: Smoke run packaged Qt executable
+        run: .\dist\qt\generate_textures_qt.exe --help
+
+      - name: Validate Qt themes, scales, editor writes, and generation cancellation/resume
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest -v tests.test_generate_textures.TestQtNifEditorRunner tests.test_generate_textures.TestQtNifEditorEventLoop
+
+      - name: Exercise packaged Qt tabs, themes, generation, cancellation and checkpoint recovery
+        run: >-
+          python -c "import json, subprocess; from pathlib import Path;
+          report = Path('artifacts/qt_gui_acceptance/report.json');
+          report.parent.mkdir(parents=True, exist_ok=True);
+          result = subprocess.run([str(Path('dist/qt/generate_textures_qt.exe').resolve()),
+          '--qt-acceptance-report', str(report.resolve())], timeout=1200);
+          assert result.returncode == 0, f'Packaged Qt acceptance exited {result.returncode}';
+          assert json.loads(report.read_text(encoding='utf-8'))['status'] == 'pass',
+          'Packaged Qt GUI acceptance did not pass'"
+
+      - name: Upload packaged Qt interaction acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-qt-interaction-acceptance
+          path: |
+            artifacts/qt_gui_acceptance/**/*.json
+            artifacts/qt_gui_acceptance/**/*.png
+          if-no-files-found: warn
+
+      - name: Smoke launch packaged Tk and Qt GUIs
+        shell: pwsh
+        run: |
+          Add-Type @"
+          using System;
+          using System.Text;
+          using System.Runtime.InteropServices;
+          public static class WindowSmoke {
+            private delegate bool EnumWindowProc(IntPtr hWnd, IntPtr param);
+            [DllImport("user32.dll")]
+            private static extern bool EnumWindows(EnumWindowProc callback, IntPtr param);
+            [DllImport("user32.dll")]
+            private static extern bool IsWindowVisible(IntPtr hWnd);
+            [DllImport("user32.dll")]
+            private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+            [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+            private static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+            public static string Title(IntPtr hWnd) {
+              var title = new StringBuilder(512);
+              GetWindowText(hWnd, title, title.Capacity);
+              return title.ToString();
+            }
+            public static IntPtr FindMainWindow(int processId) {
+              IntPtr found = IntPtr.Zero;
+              EnumWindows((hWnd, param) => {
+                uint owner;
+                GetWindowThreadProcessId(hWnd, out owner);
+                if (owner != (uint)processId || !IsWindowVisible(hWnd)) return true;
+                if (!Title(hWnd).StartsWith("Skyrim Texture Generator", StringComparison.Ordinal)) return true;
+                found = hWnd;
+                return false;
+              }, IntPtr.Zero);
+              return found;
+            }
+            [StructLayout(LayoutKind.Sequential)]
+            public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+            [DllImport("user32.dll", SetLastError = true)]
+            public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int width, int height, uint flags);
+            [DllImport("user32.dll", SetLastError = true)]
+            public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+          }
+          "@
+          $statePath = Join-Path $HOME ".skyrim_texture_generator_gui_state.json"
+          $qtScreenshotDir = Join-Path $PWD "artifacts/qt_gui_window_smoke"
+          New-Item -ItemType Directory -Force -Path $qtScreenshotDir | Out-Null
+          $cases = @(
+            @{ Name = "light-small"; Dark = $false; Scale = 0.9; Width = 800; Height = 600 },
+            @{ Name = "dark-large"; Dark = $true; Scale = 1.5; Width = 960; Height = 700 },
+            @{ Name = "light-medium"; Dark = $false; Scale = 1.15; Width = 900; Height = 660 },
+            @{ Name = "dark-200-percent"; Dark = $true; Scale = 2.0; Width = 960; Height = 700 }
+          )
+          $backends = @(
+            @{ Name = "Tk"; ProcessName = "generate_textures"; Path = ".\dist\generate_textures.exe"; Backend = "tk"; StartupTimeout = 60 },
+            @{ Name = "Qt"; ProcessName = "generate_textures_qt"; Path = ".\dist\qt\generate_textures_qt.exe"; Backend = "qt"; StartupTimeout = 120 }
+          )
+          foreach ($backend in $backends) {
+            foreach ($case in $cases) {
+              $existingIds = @(Get-Process -Name $backend.ProcessName -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+              @{
+                dark_mode = $case.Dark
+                ui_scale = $case.Scale
+              } | ConvertTo-Json | Set-Content -Path $statePath -Encoding utf8
+              $launcher = Start-Process -FilePath $backend.Path -ArgumentList @("--gui", "--gui-backend", $backend.Backend) -PassThru
+              try {
+                $deadline = (Get-Date).AddSeconds($backend.StartupTimeout)
+                $windowProcess = $null
+                do {
+                  $launchedProcesses = @(Get-Process -Name $backend.ProcessName -ErrorAction SilentlyContinue | Where-Object { $existingIds -notcontains $_.Id })
+                  $windowProcess = $launchedProcesses | Where-Object {
+                    [WindowSmoke]::FindMainWindow($_.Id) -ne [IntPtr]::Zero
+                  } | Select-Object -First 1
+                  if ($windowProcess) { break }
+                  Start-Sleep -Seconds 1
+                } while ((Get-Date) -lt $deadline)
+                if (-not $windowProcess) {
+                  $launcher.Refresh()
+                  $launcherState = if ($launcher.HasExited) { "exited with code $($launcher.ExitCode)" } else { "still running (PID=$($launcher.Id))" }
+                  $details = ($launchedProcesses | ForEach-Object { "PID=$($_.Id) Handle=$($_.MainWindowHandle) Title='$($_.MainWindowTitle)'" }) -join "; "
+                  $startupError = Join-Path $HOME ".skyrim_texture_generator_startup_error.log"
+                  if (Test-Path $startupError) { Get-Content $startupError | Write-Host }
+                  throw "Packaged $($backend.Name) GUI '$($case.Name)' did not create a main window within $($backend.StartupTimeout)s. Launcher $launcherState. Processes: $details"
+                }
+                $windowProcess.Refresh()
+                $windowTitle = [WindowSmoke]::Title([WindowSmoke]::FindMainWindow($windowProcess.Id))
+                if ($backend.Backend -eq "qt" -and $windowTitle -notlike "*Qt migration preview*") {
+                  throw "Packaged Qt GUI launched an unexpected window: '$windowTitle'."
+                }
+                $resizeDeadline = (Get-Date).AddSeconds(10)
+                $boundsRead = $false
+                $resizeError = 0
+                $boundsError = 0
+                $rect = New-Object WindowSmoke+RECT
+                do {
+                  $windowProcess.Refresh()
+                  if ($windowProcess.HasExited) {
+                    throw "Packaged $($backend.Name) GUI '$($case.Name)' exited before resize verification."
+                  }
+                  $handle = [WindowSmoke]::FindMainWindow($windowProcess.Id)
+                  $resized = $false
+                  if ($handle -ne [IntPtr]::Zero) {
+                    $resized = [WindowSmoke]::SetWindowPos($handle, [IntPtr]::Zero, 20, 20, $case.Width, $case.Height, 0x0040)
+                    if (-not $resized) { $resizeError = [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
+                  }
+                  if ($resized) {
+                    Start-Sleep -Milliseconds 500
+                    $handle = [WindowSmoke]::FindMainWindow($windowProcess.Id)
+                    $boundsRead = [WindowSmoke]::GetWindowRect($handle, [ref]$rect)
+                    if (-not $boundsRead) { $boundsError = [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
+                    if ($boundsRead) { break }
+                  }
+                  Start-Sleep -Milliseconds 500
+                } while ((Get-Date) -lt $resizeDeadline)
+                if (-not $boundsRead) {
+                  throw "Could not resize/read packaged $($backend.Name) GUI '$($case.Name)' bounds: PID=$($windowProcess.Id), HWND=$handle, resize error=$resizeError, bounds error=$boundsError."
+                }
+                $actualWidth = $rect.Right - $rect.Left
+                $actualHeight = $rect.Bottom - $rect.Top
+                if ([Math]::Abs($actualWidth - $case.Width) -gt 4 -or [Math]::Abs($actualHeight - $case.Height) -gt 4) {
+                  throw "Packaged $($backend.Name) GUI '$($case.Name)' window bounds were ${actualWidth}x${actualHeight}; expected $($case.Width)x$($case.Height)."
+                }
+                if ($backend.Backend -eq "qt") {
+                  $screenshotPath = Join-Path $qtScreenshotDir "$($case.Name).png"
+                  python -c "import sys; from PIL import ImageGrab; ImageGrab.grab(bbox=tuple(map(int, sys.argv[1:5]))).save(sys.argv[5])" $rect.Left $rect.Top $rect.Right $rect.Bottom $screenshotPath
+                  if ($LASTEXITCODE -ne 0) { throw "Could not capture packaged Qt GUI '$($case.Name)' screenshot." }
+                }
+                Write-Host "Packaged $($backend.Name) GUI '$($case.Name)' started: $($case.Width)x$($case.Height), scale $($case.Scale), dark=$($case.Dark)."
+              }
+              finally {
+                $startupError = Join-Path $HOME ".skyrim_texture_generator_startup_error.log"
+                if (Test-Path $startupError) {
+                  Get-Content $startupError | Write-Host
+                  Copy-Item $startupError (Join-Path $qtScreenshotDir "$($backend.Backend)-$($case.Name)-error.log")
+                  Remove-Item $startupError
+                }
+                @(Get-Process -Name $backend.ProcessName -ErrorAction SilentlyContinue | Where-Object { $existingIds -notcontains $_.Id }) | Stop-Process -Force -ErrorAction SilentlyContinue
+                Start-Sleep -Milliseconds 500
+              }
+            }
+          }
+
+      - name: Validate Tk Advanced output visibility settings
+        run: python -m unittest -v tests.test_generate_textures.GenerateTexturesTests.test_tk_advanced_workflow_visibility_round_trips_saved_settings
+
+      - name: Validate Tk startup visibility, themes, scaling, and responsive window sizes
+        run: python -m unittest -v tests.test_generate_textures.GenerateTexturesTests.test_tk_main_window_is_mapped_after_initial_layout tests.test_generate_textures.GenerateTexturesTests.test_tk_theme_scale_and_window_sizes_remain_usable
+
+      - name: Validate NIF Editor Tk tabs and close behavior
+        run: python -m unittest -v tests.test_generate_textures.GenerateTexturesTests.test_tk_nif_editor_opens_all_tabs_and_closes_cleanly
+
+      - name: Validate Tk cancellation checkpoint resume
+        run: python -m unittest -v tests.test_generate_textures.GenerateTexturesTests.test_gui_batch_worker_cancellation_checkpoint_resumes_long_run
+
+      - name: Realistic mixed-resolution packaged batch recovery and resume
+        if: ${{ !cancelled() }}
+        run: |
+          python scripts/pre_release_validation.py --batch-acceptance-only --batch-acceptance-count 500 --batch-acceptance-timeout 3600 --batch-acceptance-binary dist/generate_textures.exe --artifact-dir artifacts/windows_batch_acceptance/tk
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/pre_release_validation.py --batch-acceptance-only --batch-acceptance-count 500 --batch-acceptance-timeout 3600 --batch-acceptance-binary dist/qt/generate_textures_qt.exe --artifact-dir artifacts/windows_batch_acceptance/qt
+
+      - name: Upload realistic packaged batch acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-batch-acceptance
+          path: |
+            artifacts/windows_batch_acceptance/**/acceptance_report.json
+            artifacts/windows_batch_acceptance/**/*.log
+            artifacts/windows_batch_acceptance/**/*telemetry.json
+            artifacts/windows_batch_acceptance/**/checkpoint.json
+          if-no-files-found: warn
+
+      - name: End-to-end packaged executable smoke generation
+        run: |
+          python - <<'PY'
+          import shutil
+          from pathlib import Path
+          from scripts.pre_release_validation import _run_packaged_executable_smoke
+
+          artifact_dir = Path("artifacts")
+          smoke_dist = artifact_dir / "packaging_smoke" / "dist"
+          smoke_dist.mkdir(parents=True, exist_ok=True)
+          shutil.copy2(
+              Path("dist") / "generate_textures.exe",
+              smoke_dist / "generate_textures_smoke.exe",
+          )
+          _run_packaged_executable_smoke(artifact_dir, loops=3)
+          PY
+        shell: bash
+
+      - name: End-to-end packaged Qt checkpoint and recovery smoke
+        run: |
+          python - <<'PY'
+          import shutil
+          from pathlib import Path
+          from scripts.pre_release_validation import _run_packaged_executable_smoke
+
+          artifact_dir = Path("artifacts/qt_packaging_smoke")
+          smoke_dist = artifact_dir / "packaging_smoke" / "dist"
+          smoke_dist.mkdir(parents=True, exist_ok=True)
+          smoke_binary = smoke_dist / "generate_textures_smoke.exe"
+          shutil.copy2(
+              Path("dist/qt/generate_textures_qt.exe"),
+              smoke_binary,
+          )
+          try:
+              _run_packaged_executable_smoke(artifact_dir, loops=1)
+          finally:
+              smoke_binary.unlink(missing_ok=True)
+          PY
+        shell: bash
+
+      - name: Upload packaged smoke artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-smoke-artifacts
+          path: artifacts/packaging_smoke
+          if-no-files-found: error
+
+      - name: Upload packaged Qt smoke artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-qt-smoke-artifacts
+          path: artifacts/qt_packaging_smoke/packaging_smoke
+          if-no-files-found: error
+
+      - name: Upload packaged Qt GUI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packaged-qt-gui-screenshots
+          path: artifacts/qt_gui_window_smoke
+          if-no-files-found: warn
 
       - name: Create application zip
         run: |
@@ -64,8 +436,20 @@ jobs:
 
       - name: Create source zip
         run: |
-          Compress-Archive -Path generate_textures.py, nif_patcher.py, README.md, requirements.txt, assets, tests -DestinationPath skyrim-texture-generator-source.zip
+          Compress-Archive -Path generate_textures.py, nif_patcher.py, README.md, requirements.txt, assets, scripts, tests -DestinationPath skyrim-texture-generator-source.zip
         shell: pwsh
+
+      - name: Create Qt migration-preview application zip
+        run: |
+          Compress-Archive -Path dist\qt\generate_textures_qt.exe, generate_textures.py, nif_patcher.py, README.md, requirements.txt, assets, fomod -DestinationPath skyrim-texture-generator-qt.zip
+        shell: pwsh
+
+      - name: Upload Qt migration-preview application artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: skyrim-texture-generator-qt-migration-preview
+          path: skyrim-texture-generator-qt.zip
+          if-no-files-found: error
 
       - name: Upload application artifact
         uses: actions/upload-artifact@v4

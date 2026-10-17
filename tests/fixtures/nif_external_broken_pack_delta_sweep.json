@@ -1,0 +1,371 @@
+{
+  "packs": [
+    {
+      "id": "external_broken_longtail_pack",
+      "expected_max_fallback_ratio": 0.0,
+      "cases": [
+        {
+          "id": "ext_fallout_real_numblocktypes_refskew_malformed_v4",
+          "family": "external_longtail",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 155,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "num_block_types_delta": -1,
+          "extra_shader_texture_set_refs": [
+            101
+          ],
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift.unparsed.header_field_alignment_drift.stream_header_shift."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_refskew_recovery",
+          "local_strategy": "guarded_manual_review_for_refskew",
+          "intentional_strategy_difference": true
+        },
+        {
+          "id": "ext_fallout_legacy_singlepass_table_drift_malformed_v4",
+          "family": "external_longtail",
+          "profile": "fallout",
+          "shader_layout": "legacy",
+          "user_version": 11,
+          "user_ver2": 155,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 0,
+          "flags1": 32,
+          "num_block_types_delta": -1,
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift.unparsed.header_field_alignment_drift.stream_header_shift."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_singlepass_layout_recovery",
+          "local_strategy": "guarded_manual_review_for_singlepass_table_drift",
+          "intentional_strategy_difference": true
+        },
+        {
+          "id": "ext_fallout_real_profile_drift_u2140_v5",
+          "family": "external_longtail",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 140,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "num_block_types_delta": -1,
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift.unparsed.header_field_alignment_drift.stream_header_shift."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_profile_drift_recovery",
+          "local_strategy": "guarded_manual_review_for_profile_drift",
+          "intentional_strategy_difference": true
+        },
+        {
+          "id": "ext_fallout_real_numblocks_drift_u2130_v6",
+          "family": "external_longtail",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "num_blocks_delta": 3,
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift.signature_only.user_version_parse_failure.",
+            "unsupported_header.reexport_resolution."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_numblocks_drift_recovery",
+          "local_strategy": "guarded_manual_review_for_numblocks_drift",
+          "intentional_strategy_difference": true
+        },
+        {
+          "id": "ext_fallout_real_shader_block_past_eof_crossblock",
+          "family": "external_longtail",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "block_size_delta_overrides": [
+            {
+              "ordinal": 0,
+              "delta": 256
+            }
+          ],
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift.u11_u2131.header_table_drift."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_crossblock_reflow",
+          "local_strategy": "guarded_manual_review_for_block_past_eof_drift",
+          "intentional_strategy_difference": true
+        },
+        {
+          "id": "ext_skyrim_real_shifted_env_alias_without_flag",
+          "family": "external_skyrim_real",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_paths": [
+            "textures\\architecture\\ruins\\ruinwall01.dds",
+            "",
+            "",
+            "",
+            "",
+            "textures\\architecture\\ruins\\ruinwall01_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "path_slot_env_mask.generic_alias_suffix.skyrim.",
+            "shader_state.envmap_missing_slot4."
+          ]
+        },
+        {
+          "id": "ext_skyrim_real_shifted_parallax_envmap_mixed_unresolved",
+          "family": "external_skyrim_real",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 268437632,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\architecture\\dwemer\\dwepillar.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.parallax_envmap_glow_missing_slots2_3_4_5."
+          ]
+        },
+        {
+          "id": "ext_skyrim_real_crossblock_ref_drift_mixed",
+          "family": "external_skyrim_real",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "flags1": 2176,
+              "flags2": 64,
+              "texture_paths": [
+                "textures\\architecture\\farmhouse\\farmhouse01.dds",
+                "textures\\architecture\\farmhouse\\farmhouse01_n.dds",
+                "",
+                "textures\\architecture\\farmhouse\\farmhouse01_n.dds",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            101
+          ],
+          "expected_prefixes": [
+            "missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift.skyrim."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.skyrim."
+          ]
+        },
+        {
+          "id": "ext_skyrim_real_crossblock_default_fallback_slot3_combo_variant",
+          "family": "external_skyrim_real",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "extra_shader_blocks": [
+            {
+              "shader_type": 0,
+              "flags1": 2176,
+              "flags2": 64,
+              "texture_paths": [
+                "textures\\architecture\\farmhouse\\farmwall02.dds",
+                "textures\\architecture\\farmhouse\\farmwall02_n.dds",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            101
+          ],
+          "expected_prefixes": [
+            "missing_parallax_slot3.empty.default_fallback_unresolved_real_layout_drift.skyrim."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.skyrim."
+          ]
+        },
+        {
+          "id": "ext_fallout_real_repeated_semantic_slot3_drift_combo_v9",
+          "family": "external_longtail",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "shader_type": 1,
+          "flags1": 128,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\architecture\\vault\\vaultpanel.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "block_type_index_overrides": [
+            {
+              "ordinal": 0,
+              "value": 65535
+            }
+          ],
+          "extra_shader_texture_set_refs": [
+            0
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 1,
+              "flags1": 128,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\architecture\\vault\\vaultpanel.dds",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "missing_parallax_slot3.empty.semantic_resolved_real_layout_drift.repeated_blocks.fallout.real"
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": false
+        },
+        {
+          "id": "ext_fallout_real_repeated_payload_slot3_drift_combo_v9",
+          "family": "external_longtail",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 131,
+          "shader_type": 305419896,
+          "flags1": 2176,
+          "texture_set_layout_shift": 4,
+          "texture_paths": [
+            "textures\\effects\\reactor\\arcgrid.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "extra_shader_blocks": [
+            {
+              "shader_type": 305419896,
+              "flags1": 2176,
+              "texture_set_layout_shift": 4,
+              "texture_paths": [
+                "textures\\effects\\reactor\\arcgrid.dds",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                ""
+              ]
+            }
+          ],
+          "expected_prefixes": [
+            "missing_parallax_slot3.empty.payload_resolved_real_layout_drift.repeated_blocks.fallout.real"
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": false
+        }
+      ]
+    }
+  ]
+}

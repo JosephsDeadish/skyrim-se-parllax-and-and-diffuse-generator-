@@ -1,0 +1,142 @@
+{
+  "packs": [
+    {
+      "id": "external_broken_large_pack",
+      "expected_max_fallback_ratio": 0.0,
+      "cases": [
+        {
+          "id": "ext_large_skyrim_envmap_glow_slots2_4_5_unresolved",
+          "family": "external_large",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "shader_type": 1,
+          "flags1": 128,
+          "flags2": 64,
+          "texture_paths": [
+            "textures\\architecture\\castle\\castlewall01.dds",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.envmap_glow_missing_slots2_4_5."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "disable_env_mapping_for_envmap_glow_mixed_unresolved",
+            "disable_glow_map_for_envmap_glow_mixed_unresolved"
+          ],
+          "pgpatcher_strategy": "disable_envmap_and_glow_when_slots_missing",
+          "local_strategy": "mixed_disable_until_slots_are_restored",
+          "expected_difference_bucket": "safety_first",
+          "intentional_strategy_difference": false
+        },
+        {
+          "id": "ext_large_skyrim_parallax_envmap_slot5_missing_on_disk",
+          "family": "external_large",
+          "profile": "skyrim",
+          "shader_layout": "real",
+          "user_ver2": 130,
+          "shader_type": 1,
+          "flags1": 2176,
+          "texture_paths": [
+            "textures\\architecture\\castle\\castlewall01.dds",
+            "",
+            "",
+            "textures\\architecture\\castle\\castlewall01_p.dds",
+            "textures\\cubemaps\\castlewall01_e.dds",
+            "textures\\architecture\\castle\\missing_castlewall01_m.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "shader_state.parallax_envmap_missing_slots3_4_5.slot3_missing_on_disk_slot4_missing_on_disk_slot5_missing_on_disk.skyrim."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot5_env_mask_for_parallax_envmap_slot5",
+            "enable_env_mapping_for_parallax_envmap_slot5"
+          ],
+          "pgpatcher_strategy": "rebuild_slot5_when_possible",
+          "local_strategy": "prefer_safe_guess_for_slot5_before_disable",
+          "expected_difference_bucket": "safety_first",
+          "intentional_strategy_difference": true,
+          "safety_difference_note": "Prefer deterministic slot-5 guess before disabling environment mapping."
+        },
+        {
+          "id": "ext_large_skyrim_env_alias_and_slot4_without_flag",
+          "family": "external_large",
+          "profile": "skyrim",
+          "shader_layout": "legacy",
+          "user_ver2": 83,
+          "shader_type": 0,
+          "flags1": 0,
+          "texture_paths": [
+            "textures\\architecture\\castle\\castlewall01.dds",
+            "",
+            "",
+            "",
+            "textures\\architecture\\castle\\castlewall01_n.dds",
+            "textures\\architecture\\castle\\castlewall01_orm.dds",
+            "",
+            "",
+            ""
+          ],
+          "expected_prefixes": [
+            "path_slot_env_mask.generic_alias_suffix.skyrim.",
+            "flag_env_mapping.slot4_filled_without_flag.skyrim."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.skyrim."
+          ],
+          "expected_remediation_steps": [
+            "set_slot5_env_mask",
+            "enable_env_mapping"
+          ],
+          "pgpatcher_strategy": "guarded_env_alias_normalization",
+          "local_strategy": "safe_slot_rewrite_to_canonical_suffixes",
+          "expected_difference_bucket": "safety_first",
+          "intentional_strategy_difference": true,
+          "safety_difference_note": "Normalize ambiguous env aliases before broader workflow writes."
+        },
+        {
+          "id": "ext_large_fallout_signature_only_header_drift_variant",
+          "family": "external_large",
+          "profile": "fallout",
+          "shader_layout": "real",
+          "user_version": 11,
+          "user_ver2": 130,
+          "header_line_ending": "crlf",
+          "texture_set_count_u16": true,
+          "texture_set_layout_shift": 4,
+          "shader_type": 1,
+          "flags1": 128,
+          "num_blocks_delta": 4,
+          "expected_prefixes": [
+            "unsupported_header.profile_value_drift.signature_only.user_version_parse_failure."
+          ],
+          "expected_absent_prefixes": [
+            "fallback_or_unknown.fallout."
+          ],
+          "expected_no_auto_remediation": true,
+          "pgpatcher_strategy": "attempt_signature_only_reflow",
+          "local_strategy": "guarded_manual_review_for_signature_only_drift",
+          "expected_difference_bucket": "guarded_fallout",
+          "intentional_strategy_difference": true,
+          "safety_difference_note": "Malformed signature-only drift remains manual-review/no-op in guarded Fallout mode."
+        }
+      ]
+    }
+  ]
+}

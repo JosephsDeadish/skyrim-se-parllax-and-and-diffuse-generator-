@@ -1,0 +1,447 @@
+{
+  "generated_at_utc": "2026-10-08T01:58:02.404352+00:00",
+  "packs": [
+    {
+      "family_rows": [
+        {
+          "case_count": 7,
+          "fail_count": 0,
+          "family": "architecture",
+          "pass_count": 7,
+          "strategy_aligned_count": 1,
+          "strategy_alignment_ratio": 0.5,
+          "strategy_annotated_count": 2,
+          "top_conflicts": [
+            {
+              "base_code": "missing_parallax_flag.flag1_not_set",
+              "count": 6
+            },
+            {
+              "base_code": "missing_parallax_slot3.empty",
+              "count": 6
+            },
+            {
+              "base_code": "fallback_or_unknown",
+              "count": 3
+            },
+            {
+              "base_code": "path_slot_parallax.wrong_suffix",
+              "count": 3
+            },
+            {
+              "base_code": "shader_state.envmap_missing_slots4_5",
+              "count": 3
+            }
+          ]
+        },
+        {
+          "case_count": 1,
+          "fail_count": 0,
+          "family": "armor",
+          "pass_count": 1,
+          "strategy_aligned_count": 0,
+          "strategy_alignment_ratio": 0.0,
+          "strategy_annotated_count": 0,
+          "top_conflicts": [
+            {
+              "base_code": "missing_parallax_flag.flag1_not_set",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_slot3.empty",
+              "count": 1
+            },
+            {
+              "base_code": "shader_state.envmap_missing_slot5",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "case_count": 2,
+          "fail_count": 0,
+          "family": "clutter",
+          "pass_count": 2,
+          "strategy_aligned_count": 1,
+          "strategy_alignment_ratio": 1.0,
+          "strategy_annotated_count": 1,
+          "top_conflicts": [
+            {
+              "base_code": "missing_parallax_flag.flag1_not_set",
+              "count": 2
+            },
+            {
+              "base_code": "missing_parallax_slot3.empty",
+              "count": 1
+            },
+            {
+              "base_code": "path_slot_parallax.matches_normal",
+              "count": 1
+            },
+            {
+              "base_code": "path_slot_parallax.wrong_suffix",
+              "count": 1
+            },
+            {
+              "base_code": "shader_state.envmap_missing_slot4",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "case_count": 4,
+          "fail_count": 0,
+          "family": "effects",
+          "pass_count": 4,
+          "strategy_aligned_count": 1,
+          "strategy_alignment_ratio": 0.5,
+          "strategy_annotated_count": 2,
+          "top_conflicts": [
+            {
+              "base_code": "missing_parallax_slot3.empty",
+              "count": 4
+            },
+            {
+              "base_code": "shader_state.envmap_missing_slots4_5",
+              "count": 3
+            },
+            {
+              "base_code": "shader_state.parallax_envmap_missing_slots3_4_5",
+              "count": 3
+            },
+            {
+              "base_code": "flag_glow_map.flag_set_without_slot2",
+              "count": 2
+            },
+            {
+              "base_code": "flag_pom.non_heightmap_shader",
+              "count": 2
+            }
+          ]
+        },
+        {
+          "case_count": 1,
+          "fail_count": 0,
+          "family": "foliage",
+          "pass_count": 1,
+          "strategy_aligned_count": 0,
+          "strategy_alignment_ratio": 0.0,
+          "strategy_annotated_count": 0,
+          "top_conflicts": [
+            {
+              "base_code": "flag_env_mapping.slot4_filled_without_flag",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_flag.flag1_not_set",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_slot3.empty",
+              "count": 1
+            },
+            {
+              "base_code": "path_slot_cubemap.wrong_suffix",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "case_count": 1,
+          "fail_count": 0,
+          "family": "landscape",
+          "pass_count": 1,
+          "strategy_aligned_count": 0,
+          "strategy_alignment_ratio": 0.0,
+          "strategy_annotated_count": 0,
+          "top_conflicts": [
+            {
+              "base_code": "flag_env_mapping.slot5_filled_without_flag",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_flag.flag1_not_set",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_slot3.empty",
+              "count": 1
+            },
+            {
+              "base_code": "path_slot_env_mask.generic_alias_suffix",
+              "count": 1
+            }
+          ]
+        }
+      ],
+      "pack_id": "skyrim_realmod_family_pack"
+    },
+    {
+      "family_rows": [
+        {
+          "case_count": 6,
+          "fail_count": 0,
+          "family": "architecture",
+          "pass_count": 6,
+          "strategy_aligned_count": 2,
+          "strategy_alignment_ratio": 0.3333333333333333,
+          "strategy_annotated_count": 6,
+          "top_conflicts": [
+            {
+              "base_code": "fallback_or_unknown",
+              "count": 8
+            },
+            {
+              "base_code": "missing_parallax_slot3.empty",
+              "count": 3
+            },
+            {
+              "base_code": "shader_state.envmap_missing_slots4_5",
+              "count": 3
+            },
+            {
+              "base_code": "unsupported_header",
+              "count": 3
+            },
+            {
+              "base_code": "missing_parallax_flag.flag1_not_set",
+              "count": 2
+            }
+          ]
+        },
+        {
+          "case_count": 1,
+          "fail_count": 0,
+          "family": "armor",
+          "pass_count": 1,
+          "strategy_aligned_count": 0,
+          "strategy_alignment_ratio": 0.0,
+          "strategy_annotated_count": 0,
+          "top_conflicts": [
+            {
+              "base_code": "fallback_or_unknown",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_flag.flag1_not_set",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_slot3.empty",
+              "count": 1
+            },
+            {
+              "base_code": "shader_state.envmap_missing_slot4",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "case_count": 2,
+          "fail_count": 0,
+          "family": "clutter",
+          "pass_count": 2,
+          "strategy_aligned_count": 0,
+          "strategy_alignment_ratio": 0.0,
+          "strategy_annotated_count": 0,
+          "top_conflicts": [
+            {
+              "base_code": "fallback_or_unknown",
+              "count": 3
+            },
+            {
+              "base_code": "missing_parallax_flag.flag1_not_set",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_slot3.empty",
+              "count": 1
+            },
+            {
+              "base_code": "path_slot_parallax.matches_diffuse",
+              "count": 1
+            },
+            {
+              "base_code": "path_slot_parallax.wrong_suffix",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "case_count": 1,
+          "fail_count": 0,
+          "family": "effects",
+          "pass_count": 1,
+          "strategy_aligned_count": 0,
+          "strategy_alignment_ratio": 0.0,
+          "strategy_annotated_count": 0,
+          "top_conflicts": [
+            {
+              "base_code": "fallback_or_unknown",
+              "count": 1
+            },
+            {
+              "base_code": "flag_env_mapping.slot5_filled_without_flag",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_flag.flag1_not_set",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_slot3.empty",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "case_count": 1,
+          "fail_count": 0,
+          "family": "env_scale_gate",
+          "pass_count": 1,
+          "strategy_aligned_count": 0,
+          "strategy_alignment_ratio": 0.0,
+          "strategy_annotated_count": 0,
+          "top_conflicts": [
+            {
+              "base_code": "fallback_or_unknown",
+              "count": 2
+            },
+            {
+              "base_code": "missing_parallax_flag.flag1_not_set",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_slot3.empty",
+              "count": 1
+            },
+            {
+              "base_code": "shader_state.envmap_missing_slot4",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "case_count": 1,
+          "fail_count": 0,
+          "family": "fix_lighting_gate",
+          "pass_count": 1,
+          "strategy_aligned_count": 0,
+          "strategy_alignment_ratio": 0.0,
+          "strategy_annotated_count": 0,
+          "top_conflicts": [
+            {
+              "base_code": "fallback_or_unknown",
+              "count": 1
+            },
+            {
+              "base_code": "skip_single_pass",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "case_count": 1,
+          "fail_count": 0,
+          "family": "landscape",
+          "pass_count": 1,
+          "strategy_aligned_count": 0,
+          "strategy_alignment_ratio": 0.0,
+          "strategy_annotated_count": 0,
+          "top_conflicts": [
+            {
+              "base_code": "fallback_or_unknown",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_flag.flag1_not_set",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_slot3.empty",
+              "count": 1
+            },
+            {
+              "base_code": "shader_state.envmap_missing_slot5",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "case_count": 1,
+          "fail_count": 0,
+          "family": "parallax_scale_gate",
+          "pass_count": 1,
+          "strategy_aligned_count": 0,
+          "strategy_alignment_ratio": 0.0,
+          "strategy_annotated_count": 0,
+          "top_conflicts": [
+            {
+              "base_code": "fallback_or_unknown",
+              "count": 2
+            },
+            {
+              "base_code": "missing_parallax_slot3.empty",
+              "count": 1
+            },
+            {
+              "base_code": "shader_state.parallax_type_missing_slot3",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "case_count": 1,
+          "fail_count": 0,
+          "family": "spec_color_gate",
+          "pass_count": 1,
+          "strategy_aligned_count": 0,
+          "strategy_alignment_ratio": 0.0,
+          "strategy_annotated_count": 0,
+          "top_conflicts": [
+            {
+              "base_code": "fallback_or_unknown",
+              "count": 1
+            },
+            {
+              "base_code": "flag_env_mapping.slot5_filled_without_flag",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_flag.flag1_not_set",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_slot3.empty",
+              "count": 1
+            }
+          ]
+        },
+        {
+          "case_count": 1,
+          "fail_count": 0,
+          "family": "spec_gate",
+          "pass_count": 1,
+          "strategy_aligned_count": 0,
+          "strategy_alignment_ratio": 0.0,
+          "strategy_annotated_count": 0,
+          "top_conflicts": [
+            {
+              "base_code": "fallback_or_unknown",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_flag.flag1_not_set",
+              "count": 1
+            },
+            {
+              "base_code": "missing_parallax_slot3.empty",
+              "count": 1
+            }
+          ]
+        }
+      ],
+      "pack_id": "fallout_guarded_family_pack"
+    }
+  ]
+}
