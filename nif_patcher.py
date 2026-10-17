@@ -43,8 +43,11 @@ Usage (CLI)::
 
 from __future__ import annotations
 import math
+import os
 import re
+import stat
 import struct
+import tempfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -3292,6 +3295,16 @@ def _validate_patched_bytes_before_write(
     if header is None:
         errors.append("Pre-write header validation failed: unsupported NIF header/profile values.")
         return errors
+    block_cursor = header.blocks_start
+    for block_index, block_size in enumerate(header.block_sizes):
+        block_end = block_cursor + block_size
+        if block_end > len(new_data):
+            errors.append(
+                "Pre-write block bounds validation failed: "
+                f"Block {block_index} ends at 0x{block_end:X}, beyond file size 0x{len(new_data):X}."
+            )
+            return errors
+        block_cursor = block_end
     try:
         shader_props, _texture_sets, parse_errors = _build_block_map(
             new_data,
@@ -3318,6 +3331,31 @@ def _validate_patched_bytes_before_write(
     if parse_errors:
         errors.extend(f"Pre-write block-map warning/error: {item}" for item in parse_errors)
     return errors
+
+
+def _write_bytes_atomically(path: Path, data: bytes) -> None:
+    target_path = path.resolve()
+    target_mode = stat.S_IMODE(target_path.stat().st_mode)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            prefix=f".{target_path.name}.",
+            suffix=".tmp",
+            dir=target_path.parent,
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            written = temporary_file.write(data)
+            if written != len(data):
+                raise OSError(f"Short write: expected {len(data)} bytes, wrote {written}.")
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.chmod(temporary_path, target_mode)
+        os.replace(temporary_path, target_path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def validate_nif_bytes_for_restore(data: bytes) -> list[str]:
@@ -3721,7 +3759,7 @@ def patch_nif(nif_path: Path, opts: NifPatchOptions) -> NifPatchResult:
             )
 
     try:
-        nif_path.write_bytes(new_data)
+        _write_bytes_atomically(nif_path, new_data)
     except OSError as exc:
         result.errors.append(f"Cannot write patched file: {exc}")
         result.message = str(exc)
@@ -5453,6 +5491,11 @@ def build_auto_remediation_patch_options(
     )
     applied_steps: list[str] = []
     guessed_parallax = guess_parallax_path_for_nif(nif_path)
+    shader_infos = scan_nif(nif_path)
+    has_parallax_slot = any(
+        str(shader.texture_paths.get(TEXTURE_SLOT_PARALLAX, "") or "").strip()
+        for shader in shader_infos
+    )
     guessed_normal = guess_normal_path_for_nif(nif_path)
     guessed_glow = guess_glow_path_for_nif(nif_path)
     guessed_env = guess_env_mask_path_for_nif(nif_path)
@@ -5499,14 +5542,25 @@ def build_auto_remediation_patch_options(
     )
 
     if any(code.startswith("missing_parallax_flag") for code in base_codes):
-        opts.enable_parallax = True
-        applied_steps.append("enable_parallax")
+        if has_parallax_slot or guessed_parallax:
+            if not has_parallax_slot and guessed_parallax:
+                opts.parallax_texture_path = guessed_parallax
+                applied_steps.append("set_slot3_parallax")
+            opts.enable_parallax = True
+            applied_steps.append("enable_parallax")
     if (
         any(code.startswith("flag_pom.without_base_parallax") for code in base_codes)
         and not has_non_heightmap_pom_conflict
     ):
-        opts.enable_parallax = True
-        applied_steps.append("enable_parallax_for_pom")
+        if has_parallax_slot or guessed_parallax:
+            if not has_parallax_slot and guessed_parallax:
+                opts.parallax_texture_path = guessed_parallax
+                applied_steps.append("set_slot3_parallax")
+            opts.enable_parallax = True
+            applied_steps.append("enable_parallax_for_pom")
+        else:
+            opts.disable_pom = True
+            applied_steps.append("disable_pom_for_missing_parallax_slot")
     if any(
         code.startswith("flag_env_mapping.slot5_filled_without_flag")
         or code.startswith("flag_env_mapping.slot4_filled_without_flag")
@@ -5526,8 +5580,9 @@ def build_auto_remediation_patch_options(
         applied_steps.append("disable_glow_map_for_missing_slot2")
     if any(code.startswith("path_slot_parallax") or code.startswith("missing_parallax_slot3") for code in base_codes):
         if guessed_parallax:
-            opts.parallax_texture_path = guessed_parallax
-            applied_steps.append("set_slot3_parallax")
+            if opts.parallax_texture_path != guessed_parallax:
+                opts.parallax_texture_path = guessed_parallax
+                applied_steps.append("set_slot3_parallax")
     if (
         has_semantic_slot3_real_layout_combo
         or has_payload_slot3_real_layout_combo

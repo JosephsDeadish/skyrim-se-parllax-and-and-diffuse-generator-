@@ -5474,6 +5474,36 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertIn("enable_env_mapping", steps)
         self.assertIn("enable_glow_map", steps)
 
+    def test_auto_remediation_does_not_enable_parallax_without_slot_or_guess(self) -> None:
+        nif = _write_nif(self.tmp, texture_paths=[""] * 9)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["missing_parallax_flag.flag1_not_set.skyrim.legacy"],
+            backup=False,
+        )
+
+        self.assertIsNone(opts)
+        self.assertIn("No safe auto-remediation actions", steps[0])
+
+    def test_auto_remediation_disables_pom_without_parallax_slot_or_guess(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            texture_paths=[""] * 9,
+            shader_type=SHADER_TYPE_HEIGHTMAP,
+            flags1=SLSF1_PARALLAX_OCCLUSION,
+        )
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["flag_pom.without_base_parallax.skyrim.legacy"],
+            backup=False,
+        )
+
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertFalse(opts.enable_parallax)
+        self.assertTrue(opts.disable_pom)
+        self.assertIn("disable_pom_for_missing_parallax_slot", steps)
+
     def test_auto_remediate_conflicts_applies_changes(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8
         paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone_p.dds"
@@ -5638,7 +5668,9 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         )
 
     def test_auto_remediation_build_options_carries_fallout_gate_flags(self) -> None:
-        nif = _write_nif(self.tmp, user_ver2=130)
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone_p.dds"
+        nif = _write_nif(self.tmp, user_ver2=130, texture_paths=paths)
         _rewrite_user_version(nif, 11)
         opts, _steps = build_auto_remediation_patch_options(
             nif,
@@ -5661,7 +5693,9 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertTrue(opts.fallout_allow_env_map_scale)
 
     def test_auto_remediation_build_options_propagates_single_pass_policy(self) -> None:
-        nif = _write_nif(self.tmp, flags1=SLSF1_SINGLE_PASS)
+        paths = [""] * 9
+        paths[TEXTURE_SLOT_PARALLAX] = "textures\\arch\\stone_p.dds"
+        nif = _write_nif(self.tmp, flags1=SLSF1_SINGLE_PASS, texture_paths=paths)
         opts, _steps = build_auto_remediation_patch_options(
             nif,
             ["missing_parallax_flag.skyrim.real"],
@@ -6830,6 +6864,29 @@ class TestBackupOverwriteProtection(unittest.TestCase):
 
         self.assertTrue(validate_nif_bytes_for_restore(valid_data[:90]))
         self.assertTrue(validate_nif_bytes_for_restore(b"not a NIF"))
+
+    def test_restore_validator_rejects_unparsed_blocks_extending_past_eof(self) -> None:
+        raw = bytearray(_build_minimal_nif(shader_block_type="NiNode"))
+        header = _read_header(_Buf(bytes(raw)))
+        self.assertIsNotNone(header)
+        assert header is not None
+        last_block_size_offset = header.block_sizes_offset + (header.num_blocks - 1) * 4
+        struct.pack_into("<I", raw, last_block_size_offset, len(raw))
+
+        errors = validate_nif_bytes_for_restore(bytes(raw))
+
+        self.assertTrue(any("block bounds validation failed" in error for error in errors), errors)
+
+    def test_failed_atomic_patch_write_preserves_original_nif(self) -> None:
+        nif = _write_nif(self.tmp)
+        original = nif.read_bytes()
+
+        with mock.patch("nif_patcher.os.replace", side_effect=OSError("simulated replace failure")):
+            result = patch_nif(nif, NifPatchOptions(enable_parallax=True, backup=False))
+
+        self.assertFalse(result.success)
+        self.assertEqual(nif.read_bytes(), original)
+        self.assertEqual(list(self.tmp.glob(f".{nif.name}.*.tmp")), [])
 
     def test_backup_created_when_none_exists(self) -> None:
         """A .nif.bak file is created on the first patch when no backup exists."""
