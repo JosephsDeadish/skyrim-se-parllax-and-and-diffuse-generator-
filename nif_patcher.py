@@ -5060,6 +5060,8 @@ def _build_conflict_report(
             block_code_sets.setdefault(bucket_key, set()).add(base_code)
 
     for (profile, layout, block_idx), block_codes in block_code_sets.items():
+        if layout != "real":
+            continue
         has_missing_slot3_empty = any(code.startswith("missing_parallax_slot3.empty") for code in block_codes)
         if (
             has_missing_slot3_empty
@@ -5074,8 +5076,6 @@ def _build_conflict_report(
             ).append(
                 f"Block {block_idx}: real-layout drift combo detected — default fallback shader resolution is unresolved while slot 3 remains unresolved."
             )
-        if layout != "real":
-            continue
         if (
             has_missing_slot3_empty
             and any(code.startswith("unknown_shader_type.semantic_resolved") for code in block_codes)

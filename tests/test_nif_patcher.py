@@ -4386,6 +4386,29 @@ class TestMixedModValidationBatches(unittest.TestCase):
         self.assertTrue(any(".skyrim.real" in code for code in all_codes))
         self.assertTrue(any(".fallout." in code for code in all_codes))
 
+    def test_legacy_default_fallback_does_not_trigger_real_layout_remediation(self) -> None:
+        nif = _write_nif(
+            self.tmp,
+            shader_layout="legacy",
+            user_ver2=130,
+            texture_set_layout_shift=4,
+            shader_type=0x12345678,
+            texture_paths=[""] * 9,
+        )
+
+        validation = validate_nif_for_parallax(nif)
+        codes = [group.code for group in validation.conflict_report]
+        self.assertIn("unknown_shader_type.default_fallback_unresolved.skyrim.legacy", codes)
+        self.assertFalse(
+            any("default_fallback_unresolved_real_layout_drift" in code for code in codes),
+            codes,
+        )
+
+        options, steps = build_auto_remediation_patch_options(nif, codes, backup=False)
+        self.assertIsNone(options)
+        self.assertNotIn("disable_parallax_for_resolved_real_layout_drift", steps)
+        self.assertNotIn("disable_pom_for_resolved_real_layout_drift", steps)
+
 
 class TestParitySampleMatrix(unittest.TestCase):
     def setUp(self) -> None:

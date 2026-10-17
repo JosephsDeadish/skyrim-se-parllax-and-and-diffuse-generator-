@@ -4212,6 +4212,12 @@ class GenerateTexturesTests(unittest.TestCase):
             detect_workflow_profile(Path("Data/PBRTextureSets/LandscapeDirt01.json")),
             "truepbr",
         )
+        self.assertEqual(
+            detect_workflow_profile(
+                Path("mods/Community Shaders/TruePBR/textures/architecture/stone.dds")
+            ),
+            "truepbr",
+        )
 
     def test_detect_workflow_profile_detects_renderer_and_content_profiles(self) -> None:
         self.assertEqual(detect_workflow_profile(Path("textures/vr/armor/helmet.dds")), "vr")
@@ -4222,6 +4228,12 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(
             recommend_render_profile(Path("mods/ENBSeries/textures/architecture/stone.dds")),
             "enb",
+        )
+        self.assertEqual(
+            recommend_render_profile(
+                Path("mods/Community Shaders/TruePBR/textures/architecture/stone.dds")
+            ),
+            "truepbr",
         )
 
     def test_recommend_render_profile_detects_community_shaders_from_cm_role(self) -> None:
@@ -5797,7 +5809,19 @@ class GenerateTexturesTests(unittest.TestCase):
                 "include_diffuse": True,
                 "include_normal": True,
                 "include_parallax": False,
+                "include_wetness_mask": True,
+                "wetness_name": "missing_wetness",
+                "include_snow_mask": True,
+                "snow_name": "missing_snow",
             }
+            wetness_output = gt.build_wetness_mask_output_path(
+                missing_source, output_dir, wetness_name="missing_wetness"
+            )
+            snow_output = gt.build_snow_mask_output_path(
+                missing_source, output_dir, snow_name="missing_snow"
+            )
+            wetness_output.write_bytes(b"partial wetness output")
+            snow_output.write_bytes(b"partial snow output")
             expected_outputs = gt._generation_output_paths_for_input(
                 missing_source,
                 generation_options,
@@ -5807,11 +5831,15 @@ class GenerateTexturesTests(unittest.TestCase):
             backups: dict[Path, Path] = {}
             gt._backup_existing_generation_outputs(expected_outputs, backup_dir, backups)
             backed_up_partial_output = backups[partial_output].read_bytes()
+            backed_up_wetness_output = backups[wetness_output].read_bytes()
+            backed_up_snow_output = backups[snow_output].read_bytes()
 
         self.assertEqual(pending, [missing_source, pending_source])
         self.assertEqual(valid_completed, {str(complete_source.resolve())})
         self.assertIn(partial_output, backups)
         self.assertEqual(backed_up_partial_output, b"partial output")
+        self.assertEqual(backed_up_wetness_output, b"partial wetness output")
+        self.assertEqual(backed_up_snow_output, b"partial snow output")
 
     def test_checkpoint_fingerprint_tolerates_stat_and_fstat_identity_differences(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -7609,6 +7637,23 @@ class GenerateTexturesTests(unittest.TestCase):
             render_profile="community_shaders",
         )
         self.assertTrue(options.enable_env_mapping)
+        self.assertEqual(options.env_mask_texture_path, "textures\\stone_cm.dds")
+
+    def test_build_nif_patch_options_for_community_shaders_keeps_cm_slot_when_standalone_mask_is_off(self) -> None:
+        outputs = {"complex_material": Path("/tmp/textures/stone_cm.dds")}
+        options = build_nif_patch_options_for_generated_outputs(
+            None,
+            outputs,
+            complex_format="cm",
+            env_mask_mode="standard",
+            parallax_mode="standard",
+            parallax_scale=None,
+            render_profile="community_shaders",
+            include_environment_mask=False,
+        )
+        self.assertTrue(options.enable_env_mapping)
+        self.assertFalse(options.disable_env_mapping)
+        self.assertFalse(options.clear_env_mask_texture_path)
         self.assertEqual(options.env_mask_texture_path, "textures\\stone_cm.dds")
 
     def test_build_nif_patch_options_no_parallax_never_forces_type3(self) -> None:

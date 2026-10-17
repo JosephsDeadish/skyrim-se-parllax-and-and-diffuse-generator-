@@ -1262,6 +1262,22 @@ def _generation_output_paths_for_input(
         )
     if bool(generation_kwargs.get("include_pbr_texture_sets", False)):
         expected_paths.append(build_pbr_texture_sets_output_path(input_path, output_dir))
+    if bool(generation_kwargs.get("include_wetness_mask", False)):
+        expected_paths.append(
+            build_wetness_mask_output_path(
+                input_path=input_path,
+                output_dir=output_dir,
+                wetness_name=generation_kwargs.get("wetness_name"),
+            )
+        )
+    if bool(generation_kwargs.get("include_snow_mask", False)):
+        expected_paths.append(
+            build_snow_mask_output_path(
+                input_path=input_path,
+                output_dir=output_dir,
+                snow_name=generation_kwargs.get("snow_name"),
+            )
+        )
     if bool(generation_kwargs.get("include_ao", False)):
         expected_paths.append(build_ao_output_path(input_path=input_path, output_dir=output_dir))
     if bool(generation_kwargs.get("include_roughness", False)):
@@ -4262,19 +4278,6 @@ _RENDER_PROFILE_OUTPUT_LABELS: dict[str, str] = {
 
 _RENDER_PROFILE_PATH_HINTS: dict[str, tuple[str, ...]] = {
     "enb": ("enb", "enbseries"),
-    "community_shaders": (
-        "community shaders",
-        "communityshaders",
-        "community_shaders",
-        "community-shaders",
-        "cs",
-        "dynamic cubemap",
-        "dynamic cubemaps",
-        "dynamic cube map",
-        "dynamic cube maps",
-        "dynamiccubemap",
-        "dynamiccubemaps",
-    ),
     "truepbr": (
         "true pbr",
         "truepbr",
@@ -4287,6 +4290,19 @@ _RENDER_PROFILE_PATH_HINTS: dict[str, tuple[str, ...]] = {
         "pbrtexturesets",
         "data/pbrtexturesets",
         "pbrtextureset",
+    ),
+    "community_shaders": (
+        "community shaders",
+        "communityshaders",
+        "community_shaders",
+        "community-shaders",
+        "cs",
+        "dynamic cubemap",
+        "dynamic cubemaps",
+        "dynamic cube map",
+        "dynamic cube maps",
+        "dynamiccubemap",
+        "dynamiccubemaps",
     ),
 }
 
@@ -8592,7 +8608,7 @@ def build_nif_patch_options_for_generated_outputs(
     env_mask_disabled_by_options = include_environment_mask is False
     glow_disabled_by_options = include_glow is False
     env_mask_path_source = env_mask_output if env_mask_output is not None else rmaos_output
-    if env_mask_path_source is None and cm_complex_output is not None and not env_mask_disabled_by_options:
+    if env_mask_path_source is None and cm_complex_output is not None:
         env_mask_path_source = cm_complex_output
     enable_env_mapping = env_mask_path_source is not None
     if (
