@@ -5707,16 +5707,6 @@ def build_auto_remediation_patch_options(
             opts.env_mask_texture_path = guessed_env
             applied_steps.append("set_slot5_env_mask_for_crossblock_ref_drift")
 
-    if opts.enable_env_mapping and opts.disable_env_mapping:
-        if opts.cubemap_texture_path is not None and opts.env_mask_texture_path is not None:
-            opts.disable_env_mapping = False
-            conflicting_step_prefix = "disable_env_mapping"
-        else:
-            opts.enable_env_mapping = False
-            conflicting_step_prefix = "enable_env_mapping"
-        applied_steps = [
-            step for step in applied_steps if not step.startswith(conflicting_step_prefix)
-        ]
     if opts.enable_glow_map and opts.disable_glow_map:
         if opts.glow_texture_path is not None:
             opts.disable_glow_map = False

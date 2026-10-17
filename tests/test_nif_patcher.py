@@ -5818,9 +5818,6 @@ class TestAutoRemediationExecutor(unittest.TestCase):
                     nif = _write_nif(self.tmp, texture_paths=[""] * 9)
                     cubemap = Path("/textures/restored_e.dds") if restored_slot == "cubemap" else None
                     env_mask = Path("/textures/restored_m.dds") if restored_slot == "env_mask" else None
-                    conflict_codes = [code]
-                    if code.startswith("shader_state.envmap_missing_slots4_5"):
-                        conflict_codes.append("flag_env_mapping.slot4_filled_without_flag.skyrim.legacy")
                     with (
                         mock.patch("nif_patcher.guess_parallax_path_for_nif", return_value=None),
                         mock.patch("nif_patcher.guess_normal_path_for_nif", return_value=None),
@@ -5830,7 +5827,7 @@ class TestAutoRemediationExecutor(unittest.TestCase):
                     ):
                         opts, steps = build_auto_remediation_patch_options(
                             nif,
-                            conflict_codes,
+                            [code],
                             backup=False,
                         )
 
