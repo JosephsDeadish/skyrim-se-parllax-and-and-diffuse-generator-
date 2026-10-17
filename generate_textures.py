@@ -8610,6 +8610,7 @@ def build_nif_patch_options_for_generated_outputs(
     env_mask_path_source = env_mask_output if env_mask_output is not None else rmaos_output
     if env_mask_path_source is None and cm_complex_output is not None:
         env_mask_path_source = cm_complex_output
+        env_mask_disabled_by_options = False
     enable_env_mapping = env_mask_path_source is not None
     if (
         normalized_env_mask_mode == "complex"
