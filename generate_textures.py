@@ -13549,7 +13549,10 @@ if GUI_AVAILABLE:
             try:
                 self.root.update_idletasks()
                 self.root.geometry("960x700")
-                self.root.after_idle(self._restore_default_startup_geometry)
+                self._restore_default_startup_geometry(restore_visibility=False)
+                self.root.after_idle(
+                    lambda: self._restore_default_startup_geometry(restore_visibility=False)
+                )
             except Exception:
                 pass
             self._apply_runtime_localization()
@@ -13852,14 +13855,20 @@ if GUI_AVAILABLE:
                     pass
             self._update_slider_auto_states()
 
-        def _restore_default_startup_geometry(self, *, retries: int = 8) -> None:
+        def _restore_default_startup_geometry(
+            self,
+            *,
+            retries: int = 8,
+            restore_visibility: bool = True,
+        ) -> None:
             try:
                 self.root.update_idletasks()
-                try:
-                    self.root.state("normal")
-                    self.root.deiconify()
-                except Exception:
-                    pass
+                if restore_visibility:
+                    try:
+                        self.root.state("normal")
+                        self.root.deiconify()
+                    except Exception:
+                        pass
                 screen_width = max(1, int(self.root.winfo_screenwidth() or 0))
                 screen_height = max(1, int(self.root.winfo_screenheight() or 0))
                 safe_width, safe_height, min_width, min_height = _compute_safe_startup_geometry(
@@ -13875,11 +13884,23 @@ if GUI_AVAILABLE:
                 # restored to a tiny pre-layout size before the app settles. Reapply the
                 # safe geometry until the size is back in a sane screen-sized envelope.
                 if retries > 0 and (width < max(320, min_width * 0.8) or height < max(240, min_height * 0.8)):
-                    self.root.after(75, lambda: self._restore_default_startup_geometry(retries=retries - 1))
+                    self.root.after(
+                        75,
+                        lambda: self._restore_default_startup_geometry(
+                            retries=retries - 1,
+                            restore_visibility=restore_visibility,
+                        ),
+                    )
             except Exception:
                 if retries > 0:
                     try:
-                        self.root.after(75, lambda: self._restore_default_startup_geometry(retries=retries - 1))
+                        self.root.after(
+                            75,
+                            lambda: self._restore_default_startup_geometry(
+                                retries=retries - 1,
+                                restore_visibility=restore_visibility,
+                            ),
+                        )
                     except Exception:
                         pass
 

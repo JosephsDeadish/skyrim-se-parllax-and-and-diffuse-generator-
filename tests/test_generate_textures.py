@@ -3351,13 +3351,17 @@ class GenerateTexturesTests(unittest.TestCase):
         self._skip_unavailable_tk_display()
         original_tk = gt.tk.Tk
         mapped_child_counts: list[int] = []
+        mapped_min_sizes: list[tuple[int, int]] = []
         gui = None
 
         def track_root_mapping(*args, **kwargs):
             root = original_tk(*args, **kwargs)
             root.bind(
                 "<Map>",
-                lambda _event: mapped_child_counts.append(len(root.winfo_children())),
+                lambda _event: (
+                    mapped_child_counts.append(len(root.winfo_children())),
+                    mapped_min_sizes.append(tuple(int(value) for value in root.minsize())),
+                ),
                 add="+",
             )
             return root
@@ -3368,6 +3372,9 @@ class GenerateTexturesTests(unittest.TestCase):
             gui.root.update_idletasks()
             self.assertTrue(mapped_child_counts)
             self.assertGreater(mapped_child_counts[0], 0)
+            self.assertTrue(mapped_min_sizes)
+            self.assertLessEqual(mapped_min_sizes[0][0], 800)
+            self.assertLessEqual(mapped_min_sizes[0][1], 600)
             self.assertNotEqual(gui.root.state(), "withdrawn")
             self.assertGreaterEqual(gui.root.winfo_width(), 320)
             self.assertGreaterEqual(gui.root.winfo_height(), 240)
