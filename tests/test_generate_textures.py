@@ -17,6 +17,7 @@ from unittest import mock
 import numpy as np
 from PIL import Image, ImageOps, ImageStat
 
+import generate_textures as gt
 from generate_textures import (
     APP_VERSION,
     MODDING_WIKI_SKYRIM_URL,
@@ -3345,6 +3346,34 @@ class GenerateTexturesTests(unittest.TestCase):
                         gui.root.destroy()
         finally:
             state_file.unlink(missing_ok=True)
+
+    def test_tk_main_window_is_mapped_after_initial_layout(self) -> None:
+        self._skip_unavailable_tk_display()
+        original_tk = gt.tk.Tk
+        mapped_child_counts: list[int] = []
+        gui = None
+
+        def track_root_mapping(*args, **kwargs):
+            root = original_tk(*args, **kwargs)
+            root.bind(
+                "<Map>",
+                lambda _event: mapped_child_counts.append(len(root.winfo_children())),
+                add="+",
+            )
+            return root
+
+        try:
+            with mock.patch("generate_textures.tk.Tk", side_effect=track_root_mapping):
+                gui = TextureGeneratorGUI()
+            gui.root.update_idletasks()
+            self.assertTrue(mapped_child_counts)
+            self.assertGreater(mapped_child_counts[0], 0)
+            self.assertNotEqual(gui.root.state(), "withdrawn")
+            self.assertGreaterEqual(gui.root.winfo_width(), 320)
+            self.assertGreaterEqual(gui.root.winfo_height(), 240)
+        finally:
+            if gui is not None:
+                gui.root.destroy()
 
     def test_build_nif_editor_action_guidance_is_profile_aware(self) -> None:
         vanilla_guidance = build_nif_editor_action_guidance("vanilla")

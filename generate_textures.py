@@ -11532,6 +11532,7 @@ if GUI_AVAILABLE:
         def __init__(self) -> None:
             _enable_process_dpi_awareness()
             self.root = tk.Tk()
+            self.root.withdraw()
             self.root.title(f"Skyrim Texture Generator v{APP_VERSION}")
             self.root.minsize(860, 620)
             self.root.geometry("960x700")
@@ -13552,6 +13553,7 @@ if GUI_AVAILABLE:
             except Exception:
                 pass
             self._apply_runtime_localization()
+            self.root.deiconify()
 
         def _set_app_icon(self) -> None:
             try:
