@@ -748,7 +748,6 @@ class TestScanNif(unittest.TestCase):
             nif,
             NifPatchOptions(
                 enable_parallax=True,
-                parallax_texture_path="textures\\test\\height_p.dds",
                 backup=False,
             ),
         )

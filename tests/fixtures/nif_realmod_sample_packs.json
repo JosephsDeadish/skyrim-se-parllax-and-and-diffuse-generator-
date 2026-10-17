@@ -1469,14 +1469,14 @@
             "set_slot3_parallax_for_parallax_envmap_glow_mixed_unresolved",
             "set_slot2_glow_for_parallax_envmap_glow_mixed_unresolved",
             "set_slot4_cubemap_for_parallax_envmap_glow_mixed_unresolved",
-            "set_slot5_env_mask_for_parallax_envmap_glow_mixed_unresolved",
-            "enable_env_mapping_for_parallax_envmap_glow_mixed_unresolved"
+            "set_slot5_env_mask_for_parallax_envmap_glow_mixed_unresolved"
           ],
           "expected_absent_remediation_steps": [
             "disable_parallax_for_parallax_envmap_glow_mixed_unresolved",
             "disable_pom_for_parallax_envmap_glow_mixed_unresolved",
             "disable_glow_map_for_parallax_envmap_glow_mixed_unresolved",
-            "disable_env_mapping_for_parallax_envmap_glow_mixed_unresolved"
+            "disable_env_mapping_for_parallax_envmap_glow_mixed_unresolved",
+            "enable_env_mapping_for_parallax_envmap_glow_mixed_unresolved"
           ],
           "pgpatcher_strategy": "guarded_rebuild_parallax_env_glow_slots",
           "local_strategy": "guarded_rebuild_when_guessable_else_disable",
