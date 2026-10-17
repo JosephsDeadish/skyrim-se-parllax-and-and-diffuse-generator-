@@ -5797,6 +5797,50 @@ class TestAutoRemediationExecutor(unittest.TestCase):
         self.assertTrue(opts.disable_env_mapping)
         self.assertIn("disable_env_mapping_for_missing_slots4_5", steps)
 
+    def test_composite_envmap_remediation_requires_both_slots_to_enable_mapping(self) -> None:
+        cases = (
+            (
+                "shader_state.envmap_missing_slots4_5.slot4_empty_slot5_empty.skyrim.legacy",
+                "disable_env_mapping_for_missing_slots4_5",
+            ),
+            (
+                "shader_state.envmap_glow_missing_slots2_4_5.skyrim.legacy",
+                "disable_env_mapping_for_envmap_glow_mixed_unresolved",
+            ),
+            (
+                "shader_state.parallax_envmap_glow_missing_slots2_3_4_5.skyrim.legacy",
+                "disable_env_mapping_for_parallax_envmap_glow_mixed_unresolved",
+            ),
+        )
+        for code, disable_step in cases:
+            for restored_slot in ("cubemap", "env_mask"):
+                with self.subTest(code=code, restored_slot=restored_slot):
+                    nif = _write_nif(self.tmp, texture_paths=[""] * 9)
+                    cubemap = Path("/textures/restored_e.dds") if restored_slot == "cubemap" else None
+                    env_mask = Path("/textures/restored_m.dds") if restored_slot == "env_mask" else None
+                    conflict_codes = [code]
+                    if code.startswith("shader_state.envmap_missing_slots4_5"):
+                        conflict_codes.append("flag_env_mapping.slot4_filled_without_flag.skyrim.legacy")
+                    with (
+                        mock.patch("nif_patcher.guess_parallax_path_for_nif", return_value=None),
+                        mock.patch("nif_patcher.guess_normal_path_for_nif", return_value=None),
+                        mock.patch("nif_patcher.guess_glow_path_for_nif", return_value=None),
+                        mock.patch("nif_patcher.guess_cubemap_path_for_nif", return_value=cubemap),
+                        mock.patch("nif_patcher.guess_env_mask_path_for_nif", return_value=env_mask),
+                    ):
+                        opts, steps = build_auto_remediation_patch_options(
+                            nif,
+                            conflict_codes,
+                            backup=False,
+                        )
+
+                    self.assertIsNotNone(opts)
+                    assert opts is not None
+                    self.assertFalse(opts.enable_env_mapping)
+                    self.assertTrue(opts.disable_env_mapping)
+                    self.assertFalse(any(step.startswith("enable_env_mapping") for step in steps))
+                    self.assertIn(disable_step, steps)
+
     def test_auto_remediation_build_options_enables_env_mapping_for_slot4_flag_conflict(self) -> None:
         nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT)
         opts, steps = build_auto_remediation_patch_options(

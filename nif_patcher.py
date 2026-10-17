@@ -5568,16 +5568,13 @@ def build_auto_remediation_patch_options(
         opts.disable_parallax = True
         applied_steps.append("disable_parallax_for_missing_slot3")
     if any(code.startswith("shader_state.envmap_missing_slots4_5") for code in base_codes):
-        restored_any_env_slot = False
         if guessed_cubemap:
             opts.cubemap_texture_path = guessed_cubemap
             applied_steps.append("set_slot4_cubemap_for_missing_envmap_slots4_5")
-            restored_any_env_slot = True
         if guessed_env:
             opts.env_mask_texture_path = guessed_env
             applied_steps.append("set_slot5_env_mask_for_missing_envmap_slots4_5")
-            restored_any_env_slot = True
-        if restored_any_env_slot:
+        if guessed_cubemap and guessed_env:
             opts.enable_env_mapping = True
             applied_steps.append("enable_env_mapping_for_missing_envmap_slots4_5")
         else:
@@ -5612,22 +5609,19 @@ def build_auto_remediation_patch_options(
             opts.glow_texture_path = guessed_glow
             applied_steps.append("set_slot2_glow_for_envmap_glow_mixed_unresolved")
             restored_any_texture = True
-        restored_any_env_slot = False
         if guessed_cubemap:
             opts.cubemap_texture_path = guessed_cubemap
             applied_steps.append("set_slot4_cubemap_for_envmap_glow_mixed_unresolved")
-            restored_any_env_slot = True
         if guessed_env:
             opts.env_mask_texture_path = guessed_env
             applied_steps.append("set_slot5_env_mask_for_envmap_glow_mixed_unresolved")
-            restored_any_env_slot = True
-        if restored_any_env_slot:
+        if guessed_cubemap and guessed_env:
             opts.enable_env_mapping = True
             applied_steps.append("enable_env_mapping_for_envmap_glow_mixed_unresolved")
         if restored_any_texture:
             opts.enable_glow_map = True
             applied_steps.append("enable_glow_map_for_envmap_glow_mixed_unresolved")
-        if not restored_any_env_slot:
+        if not (guessed_cubemap and guessed_env):
             opts.disable_env_mapping = True
             applied_steps.append("disable_env_mapping_for_envmap_glow_mixed_unresolved")
         if not restored_any_texture:
@@ -5677,16 +5671,13 @@ def build_auto_remediation_patch_options(
             opts.glow_texture_path = guessed_glow
             applied_steps.append("set_slot2_glow_for_parallax_envmap_glow_mixed_unresolved")
             restored_any_texture = True
-        restored_any_env_slot = False
         if guessed_cubemap:
             opts.cubemap_texture_path = guessed_cubemap
             applied_steps.append("set_slot4_cubemap_for_parallax_envmap_glow_mixed_unresolved")
-            restored_any_env_slot = True
         if guessed_env:
             opts.env_mask_texture_path = guessed_env
             applied_steps.append("set_slot5_env_mask_for_parallax_envmap_glow_mixed_unresolved")
-            restored_any_env_slot = True
-        if restored_any_env_slot:
+        if guessed_cubemap and guessed_env:
             opts.enable_env_mapping = True
             applied_steps.append("enable_env_mapping_for_parallax_envmap_glow_mixed_unresolved")
         if not restored_any_texture:
@@ -5696,7 +5687,7 @@ def build_auto_remediation_patch_options(
             applied_steps.append("disable_parallax_for_parallax_envmap_glow_mixed_unresolved")
             applied_steps.append("disable_pom_for_parallax_envmap_glow_mixed_unresolved")
             applied_steps.append("disable_glow_map_for_parallax_envmap_glow_mixed_unresolved")
-        if not restored_any_env_slot:
+        if not (guessed_cubemap and guessed_env):
             opts.disable_env_mapping = True
             applied_steps.append("disable_env_mapping_for_parallax_envmap_glow_mixed_unresolved")
     if (
@@ -5716,6 +5707,16 @@ def build_auto_remediation_patch_options(
             opts.env_mask_texture_path = guessed_env
             applied_steps.append("set_slot5_env_mask_for_crossblock_ref_drift")
 
+    if opts.enable_env_mapping and opts.disable_env_mapping:
+        if opts.cubemap_texture_path is not None and opts.env_mask_texture_path is not None:
+            opts.disable_env_mapping = False
+            conflicting_step_prefix = "disable_env_mapping"
+        else:
+            opts.enable_env_mapping = False
+            conflicting_step_prefix = "enable_env_mapping"
+        applied_steps = [
+            step for step in applied_steps if not step.startswith(conflicting_step_prefix)
+        ]
     if opts.enable_glow_map and opts.disable_glow_map:
         if opts.glow_texture_path is not None:
             opts.disable_glow_map = False
