@@ -8047,6 +8047,54 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(sorted(path.name for path in outputs.keys()), ["inner.dds", "top.dds"])
             self.assertEqual(sorted(path.name for path in output_dir.iterdir()), ["inner.dds", "top.dds"])
 
+    def test_run_batch_rejects_sources_that_resolve_to_the_same_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "out"
+            input_dir.mkdir()
+            for name in ("stone.dds", "stone_d.dds"):
+                _sample_image().save(input_dir / name, format="DDS", pixel_format="DXT5")
+
+            with mock.patch("generate_textures.run_with_options") as generate:
+                with self.assertRaisesRegex(ValueError, "Conflicting batch output paths"):
+                    run_batch_with_options(
+                        input_path=input_dir,
+                        output_dir=output_dir,
+                        include_diffuse=True,
+                        include_normal=False,
+                        include_parallax=False,
+                        include_glow=False,
+                        include_environment_mask=False,
+                        include_complex=False,
+                        batch_workers=1,
+                    )
+
+            generate.assert_not_called()
+
+    def test_batch_output_collision_checks_completed_sources_against_pending_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            completed_source = input_dir / "stone.dds"
+            pending_source = input_dir / "stone_d.dds"
+            completed_source.touch()
+            pending_source.touch()
+
+            generation_options = {
+                "include_diffuse": True,
+                "include_normal": False,
+                "include_parallax": False,
+            }
+            with self.assertRaisesRegex(ValueError, "Conflicting batch output paths"):
+                gt._validate_batch_output_path_conflicts(
+                    [completed_source, pending_source],
+                    output_dir=root / "out",
+                    generation_options=generation_options,
+                    active_input_files=[pending_source],
+                )
+
     def test_run_batch_with_options_can_continue_on_file_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -8667,6 +8715,50 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(completed, set())
         self.assertEqual(events[1][1][3], "checkpoint unavailable")
         self.assertEqual(events[2][1][0], {})
+
+    def test_tk_batch_worker_rejects_colliding_outputs_before_generation(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_process_generation_batch"):
+            self.skipTest("Tk batch worker is unavailable in this environment.")
+
+        class _BatchWorker:
+            def __init__(self) -> None:
+                self.cancel_requested = False
+                self.processing_queue = queue.Queue()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            sources = [input_dir / "stone.dds", input_dir / "stone_d.dds"]
+            for source in sources:
+                _sample_image().save(source, format="DDS", pixel_format="DXT5")
+            worker = _BatchWorker()
+
+            with mock.patch("generate_textures.run_with_options") as generate:
+                TextureGeneratorGUI._process_generation_batch(
+                    worker,
+                    sources,
+                    {
+                        "output_dir": root / "out",
+                        "include_diffuse": True,
+                        "include_normal": False,
+                        "include_parallax": False,
+                    },
+                    input_dir,
+                    root / "checkpoint.json",
+                    set(),
+                    0,
+                    _checkpoint_source_file_fingerprints(sources),
+                    total_files_considered=len(sources),
+                )
+
+            events = []
+            while not worker.processing_queue.empty():
+                events.append(worker.processing_queue.get_nowait())
+            generate.assert_not_called()
+
+        self.assertEqual([event_type for event_type, _payload in events], ["error"])
+        self.assertIn("Conflicting batch output paths", events[0][1])
 
     def test_gui_batch_worker_cancellation_checkpoint_resumes_long_run(self) -> None:
         if not all(

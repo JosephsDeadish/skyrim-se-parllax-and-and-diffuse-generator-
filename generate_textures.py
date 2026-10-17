@@ -8139,6 +8139,92 @@ def _validate_output_path_conflicts(planned_paths: Mapping[str, Path]) -> None:
     )
 
 
+def _validate_batch_output_path_conflicts(
+    input_files: Sequence[Path],
+    *,
+    output_dir: Path | str | None,
+    generation_options: Mapping[str, object],
+    active_input_files: Sequence[Path] | None = None,
+) -> None:
+    active_source_keys = {
+        str(path.resolve())
+        for path in (input_files if active_input_files is None else active_input_files)
+    }
+    if not active_source_keys:
+        return
+
+    resolved_output_dir = Path(output_dir) if output_dir is not None else None
+    option_names: dict[str, str | None] = {}
+    for option_name in (
+        "diffuse_name",
+        "normal_name",
+        "parallax_name",
+        "glow_name",
+        "environment_mask_name",
+        "rmaos_name",
+        "complex_name",
+        "wetness_name",
+        "snow_name",
+        "ao_name",
+        "roughness_name",
+    ):
+        option_value = generation_options.get(option_name)
+        option_names[option_name] = option_value if isinstance(option_value, str) else None
+
+    by_target: dict[str, tuple[str, Path, str]] = {}
+    for input_file in input_files:
+        source_key = str(input_file.resolve())
+        planned_paths = _collect_planned_output_paths(
+            input_file=input_file,
+            output_dir=resolved_output_dir,
+            diffuse_name=option_names["diffuse_name"],
+            normal_name=option_names["normal_name"],
+            parallax_name=option_names["parallax_name"],
+            glow_name=option_names["glow_name"],
+            environment_mask_name=option_names["environment_mask_name"],
+            rmaos_name=option_names["rmaos_name"],
+            complex_name=option_names["complex_name"],
+            wetness_name=option_names["wetness_name"],
+            snow_name=option_names["snow_name"],
+            ao_name=option_names["ao_name"],
+            roughness_name=option_names["roughness_name"],
+            complex_format=str(generation_options.get("complex_format", "msn") or "msn"),
+            env_mask_mode=str(generation_options.get("env_mask_mode", "standard") or "standard"),
+            render_profile=str(generation_options.get("render_profile", "auto") or "auto"),
+            include_diffuse=bool(generation_options.get("include_diffuse", True)),
+            include_normal=bool(generation_options.get("include_normal", True)),
+            include_parallax=bool(generation_options.get("include_parallax", True)),
+            include_glow=bool(generation_options.get("include_glow", False)),
+            include_environment_mask=bool(generation_options.get("include_environment_mask", False)),
+            include_rmaos=bool(generation_options.get("include_rmaos", False)),
+            include_complex=bool(generation_options.get("include_complex", False)),
+            include_wetness_mask=bool(generation_options.get("include_wetness_mask", False)),
+            include_snow_mask=bool(generation_options.get("include_snow_mask", False)),
+            include_ao=bool(generation_options.get("include_ao", False)),
+            include_roughness=bool(generation_options.get("include_roughness", False)),
+            include_pbr_texture_sets=(
+                bool(generation_options.get("include_pbr_texture_sets", False))
+                and classify_material_type(input_file) == "terrain"
+            ),
+            target_game=str(generation_options.get("target_game", "skyrim") or "skyrim"),
+        )
+        _validate_output_path_conflicts(planned_paths)
+        for output_kind, output_path in planned_paths.items():
+            target_key = str(output_path.resolve(strict=False)).casefold()
+            previous = by_target.get(target_key)
+            if previous is None or previous[0] == source_key:
+                by_target[target_key] = (source_key, input_file, output_kind)
+                continue
+            previous_source_key, previous_input, _previous_kind = previous
+            if source_key not in active_source_keys and previous_source_key not in active_source_keys:
+                continue
+            raise ValueError(
+                "Conflicting batch output paths detected. "
+                f"Both '{previous_input}' and '{input_file}' would write '{output_path}'. "
+                "Rename one input or choose an output folder that preserves distinct paths."
+            )
+
+
 def _normalize_texture_family_stem(path_like: Path | str) -> str:
     normalized = str(path_like).replace("\\", "/").strip()
     stem = Path(normalized).stem.lower()
@@ -10911,6 +10997,7 @@ def run_batch_with_options(
 ) -> dict[Path, dict[str, Path]]:
     batch_start_time = time.perf_counter()
     input_files = collect_source_textures(input_path)
+    all_input_files = list(input_files)
     source_file_fingerprints = (
         _checkpoint_source_file_fingerprints(input_files)
         if checkpoint_file is not None
@@ -11028,6 +11115,12 @@ def run_batch_with_options(
         resumed_completed_count = len(completed_success_files)
         input_files = [path for path in input_files if _checkpoint_key(path) not in completed_success_files]
 
+    _validate_batch_output_path_conflicts(
+        all_input_files,
+        output_dir=output_dir,
+        generation_options=generation_options,
+        active_input_files=input_files,
+    )
     results: dict[Path, dict[str, Path]] = {}
     total = len(input_files)
     batch_metrics = _summarize_batch_texture_dimensions(input_files)
@@ -15289,6 +15382,13 @@ if GUI_AVAILABLE:
                 generation_call_kwargs = dict(generation_kwargs)
                 auto_patch_nifs = bool(generation_call_kwargs.pop("auto_patch_nifs", False))
                 manager_context = generation_call_kwargs.pop("manager_context", None)
+                all_input_files = getattr(self, "checkpoint_source_files", None) or input_files
+                _validate_batch_output_path_conflicts(
+                    all_input_files,
+                    output_dir=generation_call_kwargs.get("output_dir"),
+                    generation_options=generation_call_kwargs,
+                    active_input_files=input_files,
+                )
                 batch_metrics = _summarize_batch_texture_dimensions(input_files)
                 folder_summary_lines = _summarize_batch_source_folders(input_files, input_root)
                 high_res_4k_count = int(batch_metrics.get("high_res_4k_count", 0) or 0)
@@ -20367,6 +20467,28 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                             }
                         )
                         return
+
+                    _validate_batch_output_path_conflicts(
+                        all_files,
+                        output_dir=output_dir,
+                        generation_options={
+                            "include_diffuse": include_diffuse,
+                            "include_normal": include_normal,
+                            "include_parallax": include_parallax,
+                            "include_glow": include_glow,
+                            "include_environment_mask": include_environment_mask,
+                            "include_rmaos": include_rmaos,
+                            "include_complex": include_complex,
+                            "include_wetness_mask": include_wetness_mask,
+                            "include_snow_mask": include_snow_mask,
+                            "include_ao": include_ao,
+                            "include_roughness": include_roughness,
+                            "complex_format": complex_format,
+                            "env_mask_mode": env_mask_mode,
+                            "render_profile": render_profile,
+                        },
+                        active_input_files=pending_files,
+                    )
 
                     for index, source_path in enumerate(pending_files, start=1):
                         if self._cancel_requested:
