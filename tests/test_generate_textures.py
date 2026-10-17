@@ -5806,11 +5806,12 @@ class GenerateTexturesTests(unittest.TestCase):
             backup_dir.mkdir()
             backups: dict[Path, Path] = {}
             gt._backup_existing_generation_outputs(expected_outputs, backup_dir, backups)
+            backed_up_partial_output = backups[partial_output].read_bytes()
 
         self.assertEqual(pending, [missing_source, pending_source])
         self.assertEqual(valid_completed, {str(complete_source.resolve())})
         self.assertIn(partial_output, backups)
-        self.assertEqual(backups[partial_output].read_bytes(), b"partial output")
+        self.assertEqual(backed_up_partial_output, b"partial output")
 
     def test_checkpoint_fingerprint_tolerates_stat_and_fstat_identity_differences(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
