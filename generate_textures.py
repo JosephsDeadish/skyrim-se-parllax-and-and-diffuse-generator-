@@ -1146,6 +1146,25 @@ def _write_checkpoint_payload_atomically(
             temporary_path.unlink(missing_ok=True)
 
 
+def _record_qt_batch_success(
+    source_path: Path,
+    output_payload: Mapping[str, str],
+    completed_success_files: set[str],
+    result_rows: list[dict[str, object]],
+    write_checkpoint: Callable[[], None],
+) -> None:
+    source_key = str(source_path.resolve())
+    already_completed = source_key in completed_success_files
+    completed_success_files.add(source_key)
+    try:
+        write_checkpoint()
+    except Exception:
+        if not already_completed:
+            completed_success_files.discard(source_key)
+        raise
+    result_rows.append({"source": str(source_path), "outputs": dict(output_payload)})
+
+
 def _tk_checkpoint_generation_options(generation_kwargs: Mapping[str, object]) -> dict[str, object]:
     non_generation_keys = {"manager_context", "output_dir"}
     return {
@@ -20330,17 +20349,21 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                                 render_profile=render_profile,
                             )
                             output_payload = {name: str(path) for name, path in outputs.items()}
-                            result_rows.append({"source": str(source_path), "outputs": output_payload})
-                            completed_success_files.add(str(source_path.resolve()))
-                            self._write_checkpoint_state(
-                                checkpoint_path,
-                                completed_success_files=completed_success_files,
-                                resumed_completed_count=resumed_completed_count,
-                                input_root=input_path,
-                                output_dir=output_dir,
-                                total_files_considered=len(all_files),
-                                generation_options=checkpoint_generation_options,
-                                source_file_fingerprints=source_file_fingerprints,
+                            _record_qt_batch_success(
+                                source_path,
+                                output_payload,
+                                completed_success_files,
+                                result_rows,
+                                lambda: self._write_checkpoint_state(
+                                    checkpoint_path,
+                                    completed_success_files=completed_success_files,
+                                    resumed_completed_count=resumed_completed_count,
+                                    input_root=input_path,
+                                    output_dir=output_dir,
+                                    total_files_considered=len(all_files),
+                                    generation_options=checkpoint_generation_options,
+                                    source_file_fingerprints=source_file_fingerprints,
+                                ),
                             )
                             self.event.emit("file_done", {"source": display_label, "outputs": output_payload})
                         except Exception as exc:

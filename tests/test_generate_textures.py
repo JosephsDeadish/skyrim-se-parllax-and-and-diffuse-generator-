@@ -5818,6 +5818,29 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(checkpoint.read_text(encoding="utf-8"), original_contents)
             self.assertEqual(list(root.glob(f".{checkpoint.name}.*.tmp")), [])
 
+    def test_qt_batch_success_is_not_recorded_when_checkpoint_write_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.dds"
+            completed: set[str] = set()
+            results: list[dict[str, object]] = []
+            source_key = str(source.resolve())
+
+            def fail_checkpoint_write() -> None:
+                self.assertIn(source_key, completed)
+                raise OSError("checkpoint unavailable")
+
+            with self.assertRaisesRegex(OSError, "checkpoint unavailable"):
+                gt._record_qt_batch_success(
+                    source,
+                    {"diffuse": "output.dds"},
+                    completed,
+                    results,
+                    fail_checkpoint_write,
+                )
+
+            self.assertEqual(completed, set())
+            self.assertEqual(results, [])
+
     def test_basic_preview_outputs_hide_advanced_workflow_tiles(self) -> None:
         self.assertEqual(
             _visible_preview_output_keys(show_advanced_workflow_outputs=False),
