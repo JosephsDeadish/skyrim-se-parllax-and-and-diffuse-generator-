@@ -77,6 +77,7 @@ from generate_textures import (
     _qt_checkpoint_generation_options,
     _qt_resume_completed_files,
     _qt_resume_mode_guidance,
+    _checkpointable_completed_files,
     _checkpoint_source_file_fingerprints,
     _matching_checkpoint_completed_files,
     _tk_checkpoint_generation_options,
@@ -5793,6 +5794,17 @@ class GenerateTexturesTests(unittest.TestCase):
 
         self.assertEqual(matching, set())
 
+    def test_checkpointable_completed_files_require_complete_content_fingerprints(self) -> None:
+        matching = _checkpointable_completed_files(
+            {"valid", "missing", "incomplete"},
+            {
+                "valid": {"size_bytes": 12, "mtime_ns": 34, "sha256": "a" * 64},
+                "incomplete": {"size_bytes": 12, "mtime_ns": 34},
+            },
+        )
+
+        self.assertEqual(matching, {"valid"})
+
     def test_checkpoint_payload_write_replaces_file_atomically(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -5840,6 +5852,30 @@ class GenerateTexturesTests(unittest.TestCase):
 
             self.assertEqual(completed, set())
             self.assertEqual(results, [])
+
+    def test_tk_checkpoint_write_excludes_successes_without_fingerprints(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            checkpoint = root / "batch.json"
+            source_key = str((root / "source.dds").resolve())
+
+            TextureGeneratorGUI._write_batch_checkpoint_state(
+                None,
+                checkpoint,
+                input_root=root,
+                completed_success_files={source_key},
+                resumed_completed_count=0,
+                source_file_fingerprints={
+                    source_key: {"size_bytes": 10, "mtime_ns": 20},
+                },
+                total_files_considered=1,
+            )
+
+            payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["completed_success_count"], 0)
+        self.assertEqual(payload["completed_success_files"], [])
+        self.assertEqual(payload["completed_file_fingerprints"], {})
 
     def test_basic_preview_outputs_hide_advanced_workflow_tiles(self) -> None:
         self.assertEqual(
@@ -8095,6 +8131,112 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertTrue(payload["generation_options"]["include_diffuse"])
             self.assertEqual(len(outputs), 2)
 
+    def test_run_batch_does_not_checkpoint_success_without_a_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "out"
+            checkpoint = root / "checkpoint.json"
+            input_dir.mkdir()
+            source = input_dir / "source.dds"
+            _sample_image().save(source, format="DDS", pixel_format="DXT5")
+            output = output_dir / "source.dds"
+            generation_options = {
+                "input_path": input_dir,
+                "output_dir": output_dir,
+                "include_diffuse": True,
+                "include_normal": False,
+                "include_parallax": False,
+                "include_glow": False,
+                "include_environment_mask": False,
+                "include_complex": False,
+                "batch_workers": 1,
+                "checkpoint_file": checkpoint,
+            }
+            original_fingerprinter = gt._checkpoint_source_file_fingerprints
+            with (
+                mock.patch("generate_textures._checkpoint_source_file_fingerprints", return_value={}),
+                mock.patch(
+                    "generate_textures.run_with_options",
+                    return_value={"diffuse": output},
+                ) as generate,
+            ):
+                outputs = run_batch_with_options(**generation_options)
+
+            payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(len(outputs), 1)
+            self.assertEqual(payload["completed_success_count"], 0)
+            self.assertEqual(payload["completed_success_files"], [])
+            self.assertEqual(payload["completed_file_fingerprints"], {})
+
+            with (
+                mock.patch(
+                    "generate_textures._checkpoint_source_file_fingerprints",
+                    side_effect=original_fingerprinter,
+                ),
+                mock.patch(
+                    "generate_textures.run_with_options",
+                    return_value={"diffuse": output},
+                ) as resumed_generate,
+            ):
+                resumed_outputs = run_batch_with_options(
+                    **generation_options,
+                    resume_from_checkpoint=True,
+                )
+
+            self.assertEqual(generate.call_count, 1)
+            self.assertEqual(resumed_generate.call_count, 1)
+            self.assertEqual(len(resumed_outputs), 1)
+            resumed_payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(resumed_payload["completed_success_count"], 1)
+            self.assertEqual(
+                resumed_payload["completed_success_files"],
+                [str(source.resolve())],
+            )
+            self.assertEqual(
+                set(resumed_payload["completed_file_fingerprints"]),
+                set(resumed_payload["completed_success_files"]),
+            )
+
+    def test_run_batch_checkpoint_write_failure_is_not_counted_as_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            for name in ("a.dds", "b.dds"):
+                _sample_image().save(input_dir / name, format="DDS", pixel_format="DXT5")
+            errors: list[str] = []
+
+            def generate(**kwargs: object) -> dict[str, Path]:
+                input_file = kwargs["input_file"]
+                assert isinstance(input_file, Path)
+                return {"diffuse": root / "out" / input_file.name}
+
+            with (
+                mock.patch("generate_textures.run_with_options", side_effect=generate),
+                mock.patch(
+                    "generate_textures._write_checkpoint_payload_atomically",
+                    side_effect=OSError("checkpoint unavailable"),
+                ),
+            ):
+                outputs = run_batch_with_options(
+                    input_path=input_dir,
+                    output_dir=root / "out",
+                    include_diffuse=True,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                    continue_on_error=True,
+                    batch_workers=2,
+                    checkpoint_file=root / "checkpoint.json",
+                    error_callback=lambda _index, _total, source, _error: errors.append(source.name),
+                )
+
+        self.assertEqual(outputs, {})
+        self.assertCountEqual(errors, ["a.dds", "b.dds"])
+
     def test_run_batch_with_options_rejects_resume_with_changed_output_or_generation_settings(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -8470,6 +8612,59 @@ class GenerateTexturesTests(unittest.TestCase):
             resumed_state = json.loads(checkpoint.read_text(encoding="utf-8"))
             self.assertEqual(resumed_state["resumed_completed_count"], 8)
             self.assertEqual(resumed_state["completed_success_count"], 12)
+
+    def test_tk_batch_success_is_not_recorded_when_checkpoint_write_fails(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_process_generation_batch"):
+            self.skipTest("Tk batch worker is unavailable in this environment.")
+
+        class _BatchWorker:
+            _record_created_outputs = TextureGeneratorGUI._record_created_outputs
+
+            def __init__(self) -> None:
+                self.cancel_requested = False
+                self.processing_queue = queue.Queue()
+                self.last_generation_backups: dict[Path, Path] = {}
+                self.last_generation_created_files: set[Path] = set()
+
+            def _write_batch_checkpoint_state(self, *_args: object, **_kwargs: object) -> None:
+                raise OSError("checkpoint unavailable")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "out"
+            checkpoint = root / "checkpoint.json"
+            input_dir.mkdir()
+            source = input_dir / "source.dds"
+            _sample_image().save(source, format="DDS", pixel_format="DXT5")
+            worker = _BatchWorker()
+            completed: set[str] = set()
+            output_paths = {"diffuse": output_dir / "source.dds"}
+
+            with mock.patch("generate_textures.run_with_options", return_value=output_paths):
+                TextureGeneratorGUI._process_generation_batch(
+                    worker,
+                    [source],
+                    {
+                        "output_dir": output_dir,
+                        "normal_strength": 1.0,
+                        "include_diffuse": True,
+                    },
+                    input_dir,
+                    checkpoint,
+                    completed,
+                    0,
+                    _checkpoint_source_file_fingerprints((source,)),
+                )
+
+            events = []
+            while not worker.processing_queue.empty():
+                events.append(worker.processing_queue.get_nowait())
+
+        self.assertEqual([event_type for event_type, _payload in events], ["progress", "file_error", "done"])
+        self.assertEqual(completed, set())
+        self.assertEqual(events[1][1][3], "checkpoint unavailable")
+        self.assertEqual(events[2][1][0], {})
 
     def test_gui_batch_worker_cancellation_checkpoint_resumes_long_run(self) -> None:
         if not all(

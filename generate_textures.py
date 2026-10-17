@@ -1111,6 +1111,27 @@ def _checkpoint_source_file_fingerprints(
     return fingerprints
 
 
+def _checkpointable_completed_files(
+    completed_files: set[str],
+    source_file_fingerprints: Mapping[str, Mapping[str, object]],
+) -> set[str]:
+    return {
+        path_key
+        for path_key in completed_files
+        if (
+            isinstance(source_file_fingerprints.get(path_key), Mapping)
+            and isinstance(source_file_fingerprints[path_key].get("size_bytes"), int)
+            and isinstance(source_file_fingerprints[path_key].get("mtime_ns"), int)
+            and isinstance(source_file_fingerprints[path_key].get("sha256"), str)
+            and len(str(source_file_fingerprints[path_key].get("sha256"))) == 64
+            and all(
+                character in "0123456789abcdefABCDEF"
+                for character in str(source_file_fingerprints[path_key].get("sha256"))
+            )
+        )
+    }
+
+
 def _checkpoint_stat_signature(stat_result: os.stat_result) -> tuple[int, int, int, int, int]:
     return (
         int(stat_result.st_dev),
@@ -10955,19 +10976,22 @@ def run_batch_with_options(
     def _write_checkpoint_state() -> None:
         if checkpoint_file is None:
             return
+        checkpoint_completed_files = _checkpointable_completed_files(
+            completed_success_files,
+            source_file_fingerprints,
+        )
         payload = {
             "tool": "generate_textures",
             "version": APP_VERSION,
             "input_root": _checkpoint_key(input_path),
             "output_root": _checkpoint_key(effective_output_root),
             "generation_options": generation_options,
-            "completed_success_count": len(completed_success_files),
+            "completed_success_count": len(checkpoint_completed_files),
             "resumed_completed_count": resumed_completed_count,
-            "completed_success_files": sorted(completed_success_files),
+            "completed_success_files": sorted(checkpoint_completed_files),
             "completed_file_fingerprints": {
                 path_key: source_file_fingerprints[path_key]
-                for path_key in sorted(completed_success_files)
-                if path_key in source_file_fingerprints
+                for path_key in sorted(checkpoint_completed_files)
             },
         }
         _write_checkpoint_payload_atomically(checkpoint_file, payload)
@@ -11058,6 +11082,12 @@ def run_batch_with_options(
         batch_telemetry_file.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def _process_one(target_file: Path) -> dict[str, Path]:
+        if checkpoint_file is not None:
+            target_key = _checkpoint_key(target_file)
+            if target_key not in source_file_fingerprints:
+                source_file_fingerprints.update(
+                    _checkpoint_source_file_fingerprints((target_file,))
+                )
         return run_with_options(
             input_file=target_file,
             output_dir=output_dir,
@@ -11104,6 +11134,27 @@ def run_batch_with_options(
             roughness_name=roughness_name,
             truepbr_material_overrides=truepbr_material_overrides,
         )
+
+    def _record_success(input_file: Path, output_paths: dict[str, Path]) -> None:
+        source_key = _checkpoint_key(input_file)
+        can_checkpoint = (
+            checkpoint_file is not None
+            and source_key in _checkpointable_completed_files(
+                {source_key},
+                source_file_fingerprints,
+            )
+        )
+        already_completed = source_key in completed_success_files
+        if can_checkpoint:
+            completed_success_files.add(source_key)
+        try:
+            _write_checkpoint_state()
+        except Exception:
+            if can_checkpoint and not already_completed:
+                completed_success_files.discard(source_key)
+            raise
+        results[input_file] = output_paths
+
     try:
         if workers == 1:
             for index, input_file in enumerate(input_files, start=1):
@@ -11111,9 +11162,8 @@ def run_batch_with_options(
                     progress_callback(index, total, input_file)
                 started = time.perf_counter()
                 try:
-                    results[input_file] = _process_one(input_file)
-                    completed_success_files.add(_checkpoint_key(input_file))
-                    _write_checkpoint_state()
+                    output_paths = _process_one(input_file)
+                    _record_success(input_file, output_paths)
                 except Exception as exc:
                     failure_count += 1
                     if error_callback is not None:
@@ -11137,9 +11187,8 @@ def run_batch_with_options(
                     progress_callback(completed, total, input_file)
                 started = start_times.get(future, time.perf_counter())
                 try:
-                    results[input_file] = future.result()
-                    completed_success_files.add(_checkpoint_key(input_file))
-                    _write_checkpoint_state()
+                    output_paths = future.result()
+                    _record_success(input_file, output_paths)
                 except Exception as exc:
                     failure_count += 1
                     if error_callback is not None:
@@ -14942,19 +14991,22 @@ if GUI_AVAILABLE:
             total_files_considered: int = 0,
             generation_options: Mapping[str, object] | None = None,
         ) -> None:
+            checkpoint_completed_files = _checkpointable_completed_files(
+                completed_success_files,
+                source_file_fingerprints or {},
+            )
             payload = {
                 "tool": "generate_textures",
                 "version": APP_VERSION,
                 "input_root": str(input_root.resolve()),
                 "output_root": output_root,
                 "total_files_considered": int(total_files_considered),
-                "completed_success_count": len(completed_success_files),
+                "completed_success_count": len(checkpoint_completed_files),
                 "resumed_completed_count": int(resumed_completed_count),
-                "completed_success_files": sorted(completed_success_files),
+                "completed_success_files": sorted(checkpoint_completed_files),
                 "completed_file_fingerprints": {
                     path_key: dict(source_file_fingerprints[path_key])
-                    for path_key in sorted(completed_success_files)
-                    if source_file_fingerprints is not None and path_key in source_file_fingerprints
+                    for path_key in sorted(checkpoint_completed_files)
                 },
                 "generation_options": dict(generation_options or {}),
             }
@@ -15222,6 +15274,8 @@ if GUI_AVAILABLE:
             try:
                 if source_file_fingerprints is None:
                     source_file_fingerprints = _checkpoint_source_file_fingerprints(input_files)
+                else:
+                    source_file_fingerprints = dict(source_file_fingerprints)
                 if total_files_considered is None:
                     total_files_considered = len(source_file_fingerprints) or len(input_files)
                 total = len(input_files)
@@ -15269,6 +15323,11 @@ if GUI_AVAILABLE:
                     ))
                     file_started = time.perf_counter()
                     try:
+                        source_key = str(input_file.resolve())
+                        if source_key not in source_file_fingerprints:
+                            source_file_fingerprints.update(
+                                _checkpoint_source_file_fingerprints((input_file,))
+                            )
                         outputs = run_with_options(
                             input_file=input_file,
                             **generation_call_kwargs,
@@ -15296,20 +15355,31 @@ if GUI_AVAILABLE:
                             patched = sum(1 for result in nif_patch_results if getattr(result, "success", False))
                             failed = sum(1 for result in nif_patch_results if not getattr(result, "success", False))
                             self.processing_queue.put(("nif_patch", (display_label, patched, failed)))
-                        results[input_file] = outputs
                         self._record_created_outputs(list(outputs.values()))
-                        completed_checkpoint_files.add(str(input_file.resolve()))
                         output_dir = generation_kwargs.get("output_dir")
-                        self._write_batch_checkpoint_state(
-                            checkpoint_path,
-                            input_root=input_root,
-                            completed_success_files=completed_checkpoint_files,
-                            resumed_completed_count=resumed_completed_count,
-                            source_file_fingerprints=source_file_fingerprints,
-                            output_root=str(Path(output_dir).resolve()) if output_dir is not None else "",
-                            total_files_considered=total_files_considered,
-                            generation_options=_tk_checkpoint_generation_options(generation_kwargs),
+                        can_checkpoint = source_key in _checkpointable_completed_files(
+                            {source_key},
+                            source_file_fingerprints,
                         )
+                        already_completed = source_key in completed_checkpoint_files
+                        if can_checkpoint:
+                            completed_checkpoint_files.add(source_key)
+                        try:
+                            self._write_batch_checkpoint_state(
+                                checkpoint_path,
+                                input_root=input_root,
+                                completed_success_files=completed_checkpoint_files,
+                                resumed_completed_count=resumed_completed_count,
+                                source_file_fingerprints=source_file_fingerprints,
+                                output_root=str(Path(output_dir).resolve()) if output_dir is not None else "",
+                                total_files_considered=total_files_considered,
+                                generation_options=_tk_checkpoint_generation_options(generation_kwargs),
+                            )
+                        except Exception:
+                            if can_checkpoint and not already_completed:
+                                completed_checkpoint_files.discard(source_key)
+                            raise
+                        results[input_file] = outputs
                     except Exception as exc:
                         self.processing_queue.put((
                             "file_error",
@@ -20154,19 +20224,22 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
             generation_options: Mapping[str, object],
             source_file_fingerprints: Mapping[str, Mapping[str, int | str]],
         ) -> None:
+            checkpoint_completed_files = _checkpointable_completed_files(
+                completed_success_files,
+                source_file_fingerprints,
+            )
             payload = {
                 "tool": "generate_textures",
                 "version": APP_VERSION,
                 "input_root": str(input_root.resolve()),
                 "output_root": str(output_dir.resolve()) if output_dir is not None else "",
                 "total_files_considered": int(total_files_considered),
-                "completed_success_count": len(completed_success_files),
+                "completed_success_count": len(checkpoint_completed_files),
                 "resumed_completed_count": int(resumed_completed_count),
-                "completed_success_files": sorted(completed_success_files),
+                "completed_success_files": sorted(checkpoint_completed_files),
                 "completed_file_fingerprints": {
                     path_key: dict(source_file_fingerprints[path_key])
-                    for path_key in sorted(completed_success_files)
-                    if path_key in source_file_fingerprints
+                    for path_key in sorted(checkpoint_completed_files)
                 },
                 "generation_options": dict(generation_options),
             }
@@ -20318,6 +20391,11 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                         display_label = _batch_source_display_label(input_path, source_path)
                         self.progress.emit(index, total, display_label, elapsed, eta)
                         try:
+                            source_key = str(source_path.resolve())
+                            if source_key not in source_file_fingerprints:
+                                source_file_fingerprints.update(
+                                    _checkpoint_source_file_fingerprints((source_path,))
+                                )
                             outputs = run_with_options(
                                 input_file=source_path,
                                 output_dir=output_dir,
@@ -20349,12 +20427,9 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                                 render_profile=render_profile,
                             )
                             output_payload = {name: str(path) for name, path in outputs.items()}
-                            _record_qt_batch_success(
-                                source_path,
-                                output_payload,
-                                completed_success_files,
-                                result_rows,
-                                lambda: self._write_checkpoint_state(
+
+                            def write_checkpoint() -> None:
+                                self._write_checkpoint_state(
                                     checkpoint_path,
                                     completed_success_files=completed_success_files,
                                     resumed_completed_count=resumed_completed_count,
@@ -20363,8 +20438,24 @@ def _launch_qt_migration_gui(*, on_ready: Callable[[Any], None] | None = None) -
                                     total_files_considered=len(all_files),
                                     generation_options=checkpoint_generation_options,
                                     source_file_fingerprints=source_file_fingerprints,
-                                ),
-                            )
+                                )
+
+                            if source_key in _checkpointable_completed_files(
+                                {source_key},
+                                source_file_fingerprints,
+                            ):
+                                _record_qt_batch_success(
+                                    source_path,
+                                    output_payload,
+                                    completed_success_files,
+                                    result_rows,
+                                    write_checkpoint,
+                                )
+                            else:
+                                write_checkpoint()
+                                result_rows.append(
+                                    {"source": str(source_path), "outputs": dict(output_payload)}
+                                )
                             self.event.emit("file_done", {"source": display_label, "outputs": output_payload})
                         except Exception as exc:
                             failures.append((str(source_path), str(exc)))
