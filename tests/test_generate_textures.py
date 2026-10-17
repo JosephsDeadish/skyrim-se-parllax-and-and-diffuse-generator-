@@ -9094,10 +9094,20 @@ class GenerateTexturesTests(unittest.TestCase):
                 )
                 input_files.append(input_file)
 
+            output_dir.mkdir()
             worker = _BatchWorker()
             interrupted_after = 11
             first_attempts: list[str] = []
             source_fingerprints = _checkpoint_source_file_fingerprints(input_files)
+
+            def generate_outputs(input_file: Path) -> dict[str, Path]:
+                outputs = {
+                    "diffuse": output_dir / f"{input_file.stem}.dds",
+                    "normal": output_dir / f"{input_file.stem}_n.dds",
+                }
+                for output_name, output_path in outputs.items():
+                    output_path.write_bytes(f"{input_file.name}:{output_name}".encode())
+                return outputs
 
             def cancel_after_completed_files(**kwargs: object) -> dict[str, Path]:
                 input_file = kwargs["input_file"]
@@ -9105,10 +9115,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 first_attempts.append(input_file.stem)
                 if len(first_attempts) == interrupted_after:
                     worker.cancel_requested = True
-                return {
-                    "diffuse": output_dir / f"{input_file.stem}.dds",
-                    "normal": output_dir / f"{input_file.stem}_n.dds",
-                }
+                return generate_outputs(input_file)
 
             with mock.patch(
                 "generate_textures.run_with_options",
@@ -9170,10 +9177,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 input_file = kwargs["input_file"]
                 assert isinstance(input_file, Path)
                 resumed_attempts.append(input_file.stem)
-                return {
-                    "diffuse": output_dir / f"{input_file.stem}.dds",
-                    "normal": output_dir / f"{input_file.stem}_n.dds",
-                }
+                return generate_outputs(input_file)
 
             worker.cancel_requested = False
             with mock.patch(
