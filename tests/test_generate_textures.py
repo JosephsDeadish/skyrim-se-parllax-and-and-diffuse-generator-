@@ -5865,6 +5865,7 @@ class GenerateTexturesTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             source = Path(temp_dir) / "source.dds"
             completed: set[str] = set()
+            completed_outputs: dict[str, dict[str, str]] = {}
             results: list[dict[str, object]] = []
             source_key = str(source.resolve())
 
@@ -5877,11 +5878,13 @@ class GenerateTexturesTests(unittest.TestCase):
                     source,
                     {"diffuse": "output.dds"},
                     completed,
+                    completed_outputs,
                     results,
                     fail_checkpoint_write,
                 )
 
             self.assertEqual(completed, set())
+            self.assertEqual(completed_outputs, {})
             self.assertEqual(results, [])
 
     def test_tk_checkpoint_write_excludes_successes_without_fingerprints(self) -> None:
@@ -8249,7 +8252,10 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(payload["completed_success_count"], 0)
             self.assertEqual(payload["completed_success_files"], [])
             self.assertEqual(payload["completed_file_fingerprints"], {})
+            self.assertEqual(payload["completed_file_outputs"], {})
 
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"generated")
             with (
                 mock.patch(
                     "generate_textures._checkpoint_source_file_fingerprints",
