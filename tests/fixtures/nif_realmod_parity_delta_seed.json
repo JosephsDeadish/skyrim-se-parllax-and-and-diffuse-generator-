@@ -298,8 +298,7 @@
         "set_slot3_parallax_for_parallax_envmap_glow_mixed_unresolved",
         "set_slot2_glow_for_parallax_envmap_glow_mixed_unresolved",
         "set_slot4_cubemap_for_parallax_envmap_glow_mixed_unresolved",
-        "set_slot5_env_mask_for_parallax_envmap_glow_mixed_unresolved",
-        "enable_env_mapping_for_parallax_envmap_glow_mixed_unresolved"
+        "set_slot5_env_mask_for_parallax_envmap_glow_mixed_unresolved"
       ],
       "safety_difference_note": "",
       "shader_layout": "legacy"

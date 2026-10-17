@@ -42,6 +42,7 @@ Usage (CLI)::
 """
 
 from __future__ import annotations
+import math
 import re
 import struct
 from dataclasses import dataclass, field, replace
@@ -1771,16 +1772,6 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         shader_type_value=real_shader_type,
         shader_type_resolution=real_resolution,
     )
-    if real_candidate is not None:
-        real_score, real_block = real_candidate
-        if (
-            raw_shader_type in _KNOWN_SHADER_TYPES
-            and real_block.shader_type_resolution == "real_payload_unknown_aligned"
-        ):
-            # The legacy interpretation can mistake real-layout flags at offset
-            # 12 for a standalone shader type and win on apparent payload size.
-            real_candidate = (real_score + 3, real_block)
-        candidates.append(real_candidate)
 
     legacy_shader_type, legacy_resolution = _decode_shader_type(raw_shader_type)
     legacy_candidate = _build_candidate(
@@ -1796,6 +1787,34 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         shader_type_value=legacy_shader_type,
         shader_type_resolution=legacy_resolution,
     )
+
+    if real_candidate is not None:
+        real_score, real_block = real_candidate
+        legacy_type3_payload_is_plausible = False
+        if legacy_candidate is not None:
+            legacy_block = legacy_candidate[1]
+            max_passes = legacy_block.parallax_max_passes
+            scale = legacy_block.parallax_scale
+            legacy_type3_payload_is_plausible = (
+                legacy_block.shader_type == SHADER_TYPE_HEIGHTMAP
+                and max_passes is not None
+                and math.isfinite(max_passes)
+                and 1.0 <= max_passes <= 64.0
+                and max_passes.is_integer()
+                and scale is not None
+                and math.isfinite(scale)
+                and abs(scale) <= 100.0
+            )
+        if (
+            raw_shader_type in _KNOWN_SHADER_TYPES
+            and real_block.shader_type_resolution == "real_payload_unknown_aligned"
+            and not legacy_type3_payload_is_plausible
+        ):
+            # Prefer a real layout with unknown payload over a false legacy
+            # shader-type match, unless the legacy type-3 payload is plausible.
+            real_candidate = (real_score + 3, real_block)
+        candidates.append(real_candidate)
+
     if legacy_candidate is not None:
         candidates.append(legacy_candidate)
 

@@ -729,6 +729,39 @@ class TestScanNif(unittest.TestCase):
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
         self.assertAlmostEqual(infos[0].env_map_scale or 0.0, 2.5, places=3)
 
+    def test_legacy_heightmap_with_zero_uv_scale_keeps_shader_type_when_patched(self) -> None:
+        nif = self.tmp / "legacy_heightmap_zero_uv_scale.nif"
+        raw = bytearray(_build_minimal_nif(shader_type=SHADER_TYPE_HEIGHTMAP))
+        header = _read_header(_Buf(bytes(raw)))
+        self.assertIsNotNone(header)
+        assert header is not None
+        shader_start = header.blocks_start + header.block_sizes[0]
+        struct.pack_into("<f", raw, shader_start + 36, 0.0)
+        nif.write_bytes(raw)
+
+        infos = scan_nif(nif)
+        self.assertEqual(len(infos), 1)
+        self.assertEqual(infos[0].layout_name, "legacy")
+        self.assertEqual(infos[0].shader_type, SHADER_TYPE_HEIGHTMAP)
+
+        result = patch_nif(
+            nif,
+            NifPatchOptions(
+                enable_parallax=True,
+                parallax_texture_path="textures\\test\\height_p.dds",
+                backup=False,
+            ),
+        )
+        self.assertTrue(result.success, result.errors)
+        patched = nif.read_bytes()
+        self.assertEqual(
+            struct.unpack_from("<I", patched, shader_start + 12)[0],
+            SHADER_TYPE_HEIGHTMAP,
+        )
+        self.assertTrue(
+            struct.unpack_from("<I", patched, shader_start + 16)[0] & SLSF1_PARALLAX
+        )
+
     def test_unresolved_real_layout_payload_is_never_treated_as_type_specific_data(self) -> None:
         for payload_size in (12, 16):
             with self.subTest(payload_size=payload_size):
