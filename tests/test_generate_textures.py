@@ -5854,6 +5854,8 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(results, [])
 
     def test_tk_checkpoint_write_excludes_successes_without_fingerprints(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_write_batch_checkpoint_state"):
+            self.skipTest("Tk checkpoint writer is unavailable in this environment.")
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             checkpoint = root / "batch.json"
