@@ -1674,7 +1674,10 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         psc_offset: int | None = None
         pmx_val: float | None = None
         psc_val: float | None = None
-        if shader_type == SHADER_TYPE_HEIGHTMAP and payload_size >= 8:
+        has_resolved_shader_type = (
+            shader_type_value is not None and shader_type_value in _KNOWN_SHADER_TYPES
+        )
+        if has_resolved_shader_type and shader_type == SHADER_TYPE_HEIGHTMAP and payload_size >= 8:
             pmx_offset = common_end
             psc_offset = common_end + 4
             pmx_val = struct.unpack_from("<f", buf._b, pmx_offset)[0]
@@ -1697,7 +1700,7 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
 
         envmap_scale_off: int | None = None
         envmap_scale_val: float | None = None
-        if shader_type == SHADER_TYPE_ENVMAP:
+        if has_resolved_shader_type and shader_type == SHADER_TYPE_ENVMAP:
             esc_off = common_end + _ENVMAP_SCALE_OFFSET_FROM_COMMON
             if esc_off + 4 <= block_end:
                 envmap_scale_off = esc_off
@@ -1769,6 +1772,14 @@ def _parse_shader_prop(buf: _Buf, block_index: int, block_start: int,
         shader_type_resolution=real_resolution,
     )
     if real_candidate is not None:
+        real_score, real_block = real_candidate
+        if (
+            raw_shader_type in _KNOWN_SHADER_TYPES
+            and real_block.shader_type_resolution == "real_payload_unknown_aligned"
+        ):
+            # The legacy interpretation can mistake real-layout flags at offset
+            # 12 for a standalone shader type and win on apparent payload size.
+            real_candidate = (real_score + 3, real_block)
         candidates.append(real_candidate)
 
     legacy_shader_type, legacy_resolution = _decode_shader_type(raw_shader_type)
@@ -5484,7 +5495,11 @@ def build_auto_remediation_patch_options(
     ):
         opts.enable_env_mapping = True
         applied_steps.append("enable_env_mapping")
-    if any(code.startswith("flag_glow_map.slot2_filled_without_flag") for code in base_codes):
+    has_glow_path_conflict = any(code.startswith("path_slot_glow") for code in base_codes)
+    if (
+        any(code.startswith("flag_glow_map.slot2_filled_without_flag") for code in base_codes)
+        and (not has_glow_path_conflict or guessed_glow is not None)
+    ):
         opts.enable_glow_map = True
         applied_steps.append("enable_glow_map")
     if any(code.startswith("flag_glow_map.flag_set_without_slot2") for code in base_codes):
@@ -6618,25 +6633,48 @@ def find_nif_files(root: Path) -> list[Path]:
     )
 
 
+def _consistent_texture_path_guess(
+    infos: list[NifShaderInfo],
+    source_slots: tuple[tuple[int, tuple[str, ...]], ...],
+    output_suffix: str,
+) -> str | None:
+    """Return a shared guess only when every shader block yields the same path."""
+    if not infos:
+        return None
+    guesses: list[str] = []
+    for info in infos:
+        source = ""
+        strip_suffixes: tuple[str, ...] = ()
+        for slot, suffixes in source_slots:
+            source = info.texture_paths.get(slot, "").strip()
+            if source:
+                strip_suffixes = suffixes
+                break
+        if not source:
+            return None
+        source_path = Path(source.replace("\\", "/"))
+        stem = source_path.stem
+        for suffix in strip_suffixes:
+            if stem.lower().endswith(suffix):
+                stem = stem[: -len(suffix)]
+                break
+        guesses.append(str(source_path.parent / (stem + output_suffix)).replace("/", "\\"))
+    if len({_normalise_slot_path(guess) for guess in guesses}) != 1:
+        return None
+    return guesses[0]
+
+
 def guess_parallax_path_for_nif(nif_path: Path) -> str | None:
     """Guess the ``_p.dds`` parallax texture path from a NIF's diffuse slot.
 
     Returns a Windows-style relative path, or ``None`` if no diffuse path is
     found in the NIF.
     """
-    infos = scan_nif(nif_path)
-    for info in infos:
-        diffuse = info.texture_paths.get(TEXTURE_SLOT_DIFFUSE, "").strip()
-        if not diffuse:
-            continue
-        diffuse_p = Path(diffuse.replace("\\", "/"))
-        stem = diffuse_p.stem
-        for suffix in ("_d", "_diff", "_diffuse", "_albedo"):
-            if stem.lower().endswith(suffix):
-                stem = stem[: -len(suffix)]
-                break
-        return str(diffuse_p.parent / (stem + "_p.dds")).replace("/", "\\")
-    return None
+    return _consistent_texture_path_guess(
+        scan_nif(nif_path),
+        ((TEXTURE_SLOT_DIFFUSE, ("_d", "_diff", "_diffuse", "_albedo")),),
+        "_p.dds",
+    )
 
 
 def guess_normal_path_for_nif(nif_path: Path, *, msn: bool = False) -> str | None:
@@ -6648,30 +6686,15 @@ def guess_normal_path_for_nif(nif_path: Path, *, msn: bool = False) -> str | Non
         When ``True``, return a ``_msn.dds`` path (ENB complex material);
         otherwise return a standard ``_n.dds`` path.
     """
-    infos = scan_nif(nif_path)
-    for info in infos:
-        existing = info.texture_paths.get(TEXTURE_SLOT_NORMAL, "").strip()
-        if existing:
-            p = Path(existing.replace("\\", "/"))
-            stem = p.stem
-            for s in ("_n", "_normal", "_msn"):
-                if stem.lower().endswith(s):
-                    stem = stem[: -len(s)]
-                    break
-            suffix = "_msn.dds" if msn else "_n.dds"
-            return str(p.parent / (stem + suffix)).replace("/", "\\")
-        diffuse = info.texture_paths.get(TEXTURE_SLOT_DIFFUSE, "").strip()
-        if not diffuse:
-            continue
-        p = Path(diffuse.replace("\\", "/"))
-        stem = p.stem
-        for s in ("_d", "_diff", "_diffuse", "_albedo"):
-            if stem.lower().endswith(s):
-                stem = stem[: -len(s)]
-                break
-        suffix = "_msn.dds" if msn else "_n.dds"
-        return str(p.parent / (stem + suffix)).replace("/", "\\")
-    return None
+    suffix = "_msn.dds" if msn else "_n.dds"
+    return _consistent_texture_path_guess(
+        scan_nif(nif_path),
+        (
+            (TEXTURE_SLOT_NORMAL, ("_n", "_normal", "_msn")),
+            (TEXTURE_SLOT_DIFFUSE, ("_d", "_diff", "_diffuse", "_albedo")),
+        ),
+        suffix,
+    )
 
 
 def guess_glow_path_for_nif(nif_path: Path) -> str | None:
@@ -6680,28 +6703,17 @@ def guess_glow_path_for_nif(nif_path: Path) -> str | None:
     Returns a Windows-style relative ``_g.dds`` path, or ``None`` if no
     suitable texture path is found in the NIF.
     """
-    infos = scan_nif(nif_path)
-    for info in infos:
-        existing = info.texture_paths.get(TEXTURE_SLOT_GLOW, "").strip()
-        if existing:
-            p = Path(existing.replace("\\", "/"))
-            stem = p.stem
-            for s in ("_g", "_glow", "_em", "_emis", "_emissive", "_emit", "_sk"):
-                if stem.lower().endswith(s):
-                    stem = stem[: -len(s)]
-                    break
-            return str(p.parent / (stem + "_g.dds")).replace("/", "\\")
-        diffuse = info.texture_paths.get(TEXTURE_SLOT_DIFFUSE, "").strip()
-        if not diffuse:
-            continue
-        p = Path(diffuse.replace("\\", "/"))
-        stem = p.stem
-        for s in ("_d", "_diff", "_diffuse", "_albedo"):
-            if stem.lower().endswith(s):
-                stem = stem[: -len(s)]
-                break
-        return str(p.parent / (stem + "_g.dds")).replace("/", "\\")
-    return None
+    return _consistent_texture_path_guess(
+        scan_nif(nif_path),
+        (
+            (
+                TEXTURE_SLOT_GLOW,
+                ("_g", "_glow", "_em", "_emis", "_emissive", "_emit", "_sk", "_n", "_normal", "_msn"),
+            ),
+            (TEXTURE_SLOT_DIFFUSE, ("_d", "_diff", "_diffuse", "_albedo")),
+        ),
+        "_g.dds",
+    )
 
 
 def guess_cubemap_path_for_nif(nif_path: Path) -> str | None:
@@ -6710,28 +6722,14 @@ def guess_cubemap_path_for_nif(nif_path: Path) -> str | None:
     Returns a Windows-style relative ``_e.dds`` path, or ``None`` if no
     suitable texture path is found in the NIF.
     """
-    infos = scan_nif(nif_path)
-    for info in infos:
-        existing = info.texture_paths.get(TEXTURE_SLOT_CUBEMAP, "").strip()
-        if existing:
-            p = Path(existing.replace("\\", "/"))
-            stem = p.stem
-            for s in ("_cubemap", "_cube", "_envmap", "_env", "_e"):
-                if stem.lower().endswith(s):
-                    stem = stem[: -len(s)]
-                    break
-            return str(p.parent / (stem + "_e.dds")).replace("/", "\\")
-        diffuse = info.texture_paths.get(TEXTURE_SLOT_DIFFUSE, "").strip()
-        if not diffuse:
-            continue
-        p = Path(diffuse.replace("\\", "/"))
-        stem = p.stem
-        for s in ("_d", "_diff", "_diffuse", "_albedo"):
-            if stem.lower().endswith(s):
-                stem = stem[: -len(s)]
-                break
-        return str(p.parent / (stem + "_e.dds")).replace("/", "\\")
-    return None
+    return _consistent_texture_path_guess(
+        scan_nif(nif_path),
+        (
+            (TEXTURE_SLOT_CUBEMAP, ("_cubemap", "_cube", "_envmap", "_env", "_e")),
+            (TEXTURE_SLOT_DIFFUSE, ("_d", "_diff", "_diffuse", "_albedo")),
+        ),
+        "_e.dds",
+    )
 
 
 def guess_env_mask_path_for_nif(nif_path: Path, *, preferred_suffix: str = "_m.dds") -> str | None:
@@ -6759,40 +6757,20 @@ def guess_env_mask_path_for_nif(nif_path: Path, *, preferred_suffix: str = "_m.d
         "_mra.dds": "_rmaos.dds",
     }
     resolved_suffix = suffix_aliases.get(str(preferred_suffix or "").strip().lower(), "_m.dds")
-    infos = scan_nif(nif_path)
-    for info in infos:
-        existing = info.texture_paths.get(TEXTURE_SLOT_ENV_MASK, "").strip()
-        if existing:
-            p = Path(existing.replace("\\", "/"))
-            stem = p.stem
-            for s in (
-                "_m",
-                "_mask",
-                "_envmask",
-                "_rmaos",
-                "_ramos",
-                "_orm",
-                "_orms",
-                "_mrao",
-                "_mra",
-                "_cm",
-                "_c",
-            ):
-                if stem.lower().endswith(s):
-                    stem = stem[: -len(s)]
-                    break
-            return str(p.parent / (stem + resolved_suffix)).replace("/", "\\")
-        diffuse = info.texture_paths.get(TEXTURE_SLOT_DIFFUSE, "").strip()
-        if not diffuse:
-            continue
-        p = Path(diffuse.replace("\\", "/"))
-        stem = p.stem
-        for s in ("_d", "_diff", "_diffuse", "_albedo"):
-            if stem.lower().endswith(s):
-                stem = stem[: -len(s)]
-                break
-        return str(p.parent / (stem + resolved_suffix)).replace("/", "\\")
-    return None
+    return _consistent_texture_path_guess(
+        scan_nif(nif_path),
+        (
+            (
+                TEXTURE_SLOT_ENV_MASK,
+                (
+                    "_m", "_mask", "_envmask", "_rmaos", "_ramos", "_orm",
+                    "_orms", "_mrao", "_mra", "_cm", "_c",
+                ),
+            ),
+            (TEXTURE_SLOT_DIFFUSE, ("_d", "_diff", "_diffuse", "_albedo")),
+        ),
+        resolved_suffix,
+    )
 
 
 def batch_patch_nif(

@@ -729,6 +729,45 @@ class TestScanNif(unittest.TestCase):
         self.assertEqual(infos[0].shader_type, SHADER_TYPE_ENVMAP)
         self.assertAlmostEqual(infos[0].env_map_scale or 0.0, 2.5, places=3)
 
+    def test_unresolved_real_layout_payload_is_never_treated_as_type_specific_data(self) -> None:
+        for payload_size in (12, 16):
+            with self.subTest(payload_size=payload_size):
+                nif = self.tmp / f"real_unknown_payload_{payload_size}.nif"
+                raw = bytearray(
+                    _build_minimal_nif(
+                        shader_layout="real",
+                        flags1=SHADER_TYPE_HEIGHTMAP,
+                    )
+                )
+                header = _read_header(_Buf(bytes(raw)))
+                self.assertIsNotNone(header)
+                assert header is not None
+                shader_block_index = 1
+                shader_start = header.blocks_start + header.block_sizes[0]
+                original_size = header.block_sizes[shader_block_index]
+                unknown_payload = bytes(range(1, payload_size + 1))
+                raw[shader_start + original_size:shader_start + original_size] = unknown_payload
+                struct.pack_into(
+                    "<I",
+                    raw,
+                    header.block_sizes_offset + shader_block_index * 4,
+                    original_size + payload_size,
+                )
+                nif.write_bytes(raw)
+
+                infos = scan_nif(nif)
+                self.assertEqual(len(infos), 1)
+                self.assertEqual(infos[0].layout_name, "real")
+                self.assertEqual(infos[0].shader_type_resolution, "real_payload_unknown_aligned")
+                self.assertIsNone(infos[0].parallax_scale)
+
+                result = patch_nif(
+                    nif,
+                    NifPatchOptions(parallax_scale=9.0, backup=False),
+                )
+                self.assertTrue(result.success, result.errors)
+                self.assertEqual(nif.read_bytes(), bytes(raw))
+
     def test_scan_real_layout_tolerates_extended_shader_payload(self) -> None:
         nif = _write_nif(
             self.tmp,
@@ -3835,6 +3874,63 @@ class TestHelpers(unittest.TestCase):
         nif = _write_nif(self.tmp)
         self.assertIsNone(guess_parallax_path_for_nif(nif))
 
+    def test_texture_path_guesses_refuse_conflicting_materials(self) -> None:
+        nif = self.tmp / "multi_material.nif"
+        first_paths = ["textures\\one\\wood_d.dds"] + [""] * 8
+        first_paths[TEXTURE_SLOT_GLOW] = "textures\\one\\wood_n.dds"
+        second_paths = ["textures\\two\\metal_d.dds"] + [""] * 8
+        second_paths[TEXTURE_SLOT_GLOW] = "textures\\two\\metal_n.dds"
+        nif.write_bytes(
+            _build_minimal_nif(
+                texture_paths=first_paths,
+                extra_shader_blocks=[
+                    {
+                        "shader_type": SHADER_TYPE_DEFAULT,
+                        "texture_paths": second_paths,
+                    }
+                ],
+            )
+        )
+
+        self.assertIsNone(guess_parallax_path_for_nif(nif))
+        self.assertIsNone(guess_normal_path_for_nif(nif))
+        self.assertIsNone(guess_glow_path_for_nif(nif))
+        self.assertIsNone(guess_cubemap_path_for_nif(nif))
+        self.assertIsNone(guess_env_mask_path_for_nif(nif))
+
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            ["path_slot_parallax.missing.skyrim.real"],
+            backup=False,
+        )
+        self.assertIsNone(opts)
+        self.assertNotIn("set_slot3_parallax", steps)
+
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            [
+                "flag_glow_map.slot2_filled_without_flag.skyrim.real",
+                "path_slot_glow.wrong_suffix.skyrim.real",
+            ],
+            backup=False,
+        )
+        self.assertIsNone(opts)
+        self.assertNotIn("enable_glow_map", steps)
+
+        result, _steps = auto_remediate_nif_conflicts(
+            nif,
+            ["path_slot_parallax.missing.skyrim.real"],
+            backup=False,
+        )
+        self.assertIsNone(result)
+        infos = scan_nif(nif)
+        self.assertEqual(
+            [info.texture_paths.get(TEXTURE_SLOT_DIFFUSE) for info in infos],
+            ["textures\\one\\wood_d.dds", "textures\\two\\metal_d.dds"],
+        )
+        self.assertTrue(all(not info.texture_paths.get(TEXTURE_SLOT_PARALLAX) for info in infos))
+        self.assertTrue(all(not info.has_glow_map_flag for info in infos))
+
     def test_guess_normal_path_standard(self) -> None:
         paths = ["textures\\arch\\stone.dds"] + [""] * 8
         nif = _write_nif(self.tmp, texture_paths=paths)
@@ -4079,6 +4175,12 @@ class TestGuessHelpers(unittest.TestCase):
         nif = _write_nif(self.tmp, texture_paths=paths)
         guessed = guess_glow_path_for_nif(nif)
         self.assertEqual(guessed, "textures\\actors\\dragon\\dragon_g.dds")
+
+    def test_guess_glow_path_from_normal_suffix_in_glow_slot(self) -> None:
+        paths = ["textures\\arch\\stone.dds"] + [""] * 8
+        paths[TEXTURE_SLOT_GLOW] = "textures\\arch\\stone_n.dds"
+        nif = _write_nif(self.tmp, texture_paths=paths)
+        self.assertEqual(guess_glow_path_for_nif(nif), "textures\\arch\\stone_g.dds")
 
     def test_guess_glow_returns_none_for_no_diffuse(self) -> None:
         nif = _write_nif(self.tmp)
