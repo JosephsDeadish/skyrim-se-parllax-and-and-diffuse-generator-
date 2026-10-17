@@ -5838,6 +5838,24 @@ class TestAutoRemediationExecutor(unittest.TestCase):
                     self.assertFalse(any(step.startswith("enable_env_mapping") for step in steps))
                     self.assertIn(disable_step, steps)
 
+    def test_envmap_disable_remediation_removes_conflicting_enable_guidance(self) -> None:
+        nif = _write_nif(self.tmp, texture_paths=[""] * 9)
+        opts, steps = build_auto_remediation_patch_options(
+            nif,
+            [
+                "flag_env_mapping.slot4_filled_without_flag.skyrim.legacy",
+                "shader_state.envmap_missing_slots4_5.slot4_empty_slot5_empty.skyrim.legacy",
+            ],
+            backup=False,
+        )
+
+        self.assertIsNotNone(opts)
+        assert opts is not None
+        self.assertFalse(opts.enable_env_mapping)
+        self.assertTrue(opts.disable_env_mapping)
+        self.assertFalse(any(step.startswith("enable_env_mapping") for step in steps))
+        self.assertIn("disable_env_mapping_for_missing_slots4_5", steps)
+
     def test_auto_remediation_build_options_enables_env_mapping_for_slot4_flag_conflict(self) -> None:
         nif = _write_nif(self.tmp, shader_type=SHADER_TYPE_DEFAULT)
         opts, steps = build_auto_remediation_patch_options(

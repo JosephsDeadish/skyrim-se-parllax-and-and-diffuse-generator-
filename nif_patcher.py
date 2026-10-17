@@ -5718,6 +5718,12 @@ def build_auto_remediation_patch_options(
             step for step in applied_steps if not step.startswith(conflicting_step_prefix)
         ]
 
+    if opts.enable_env_mapping and opts.disable_env_mapping:
+        opts.enable_env_mapping = False
+        applied_steps = [
+            step for step in applied_steps if not step.startswith("enable_env_mapping")
+        ]
+
     if not applied_steps:
         return None, (
             "No safe auto-remediation actions matched the selected conflict codes.",
