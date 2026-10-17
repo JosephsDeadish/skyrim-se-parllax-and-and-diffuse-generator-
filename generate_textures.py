@@ -10852,6 +10852,7 @@ def run_batch_with_options(
     checkpoint_file: Path | None = None,
     resume_from_checkpoint: bool = False,
     batch_telemetry_file: Path | None = None,
+    truepbr_material_overrides: Mapping[str, object] | None = None,
 ) -> dict[Path, dict[str, Path]]:
     batch_start_time = time.perf_counter()
     input_files = collect_source_textures(input_path)
@@ -10914,6 +10915,8 @@ def run_batch_with_options(
         "roughness_name": roughness_name,
         "include_pbr_texture_sets": include_pbr_texture_sets,
     }
+    if truepbr_material_overrides:
+        generation_options["truepbr_material_overrides"] = dict(truepbr_material_overrides)
 
     def _write_checkpoint_state() -> None:
         if checkpoint_file is None:
@@ -11065,6 +11068,7 @@ def run_batch_with_options(
             include_roughness=include_roughness,
             roughness_strength=roughness_strength,
             roughness_name=roughness_name,
+            truepbr_material_overrides=truepbr_material_overrides,
         )
     try:
         if workers == 1:

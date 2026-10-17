@@ -8187,6 +8187,55 @@ class GenerateTexturesTests(unittest.TestCase):
             original_changed_fingerprint,
         )
 
+    def test_run_batch_forwards_truepbr_overrides_and_tracks_checkpoint_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            input_dir.mkdir()
+            source_path = input_dir / "skin.dds"
+            _sample_image().save(source_path, format="DDS", pixel_format="DXT5")
+            checkpoint = temp_path / "batch_checkpoint.json"
+            overrides = {
+                "parallax": True,
+                "displacement_scale": 0.35,
+                "specular_level": 0.08,
+                "roughness_scale": 0.7,
+            }
+            options = {
+                "input_path": input_dir,
+                "output_dir": temp_path / "out",
+                "include_diffuse": False,
+                "include_normal": False,
+                "include_parallax": False,
+                "include_glow": False,
+                "include_environment_mask": False,
+                "include_rmaos": True,
+                "include_complex": False,
+                "batch_workers": 1,
+                "checkpoint_file": checkpoint,
+                "truepbr_material_overrides": overrides,
+            }
+
+            outputs = run_batch_with_options(**options)
+            sidecar = outputs[source_path]["rmaos_json"]
+            payload = json.loads(sidecar.read_text(encoding="utf-8"))[0]
+
+            self.assertTrue(payload["parallax"])
+            self.assertAlmostEqual(payload["displacement_scale"], 0.35)
+            self.assertAlmostEqual(payload["specular_level"], 0.08)
+            self.assertAlmostEqual(payload["roughness_scale"], 0.7)
+            checkpoint_payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(checkpoint_payload["generation_options"]["truepbr_material_overrides"], overrides)
+
+            changed_overrides = {**overrides, "specular_level": 0.12}
+            changed_options = {
+                **options,
+                "truepbr_material_overrides": changed_overrides,
+                "resume_from_checkpoint": True,
+            }
+            with self.assertRaisesRegex(ValueError, "generation settings differ"):
+                run_batch_with_options(**changed_options)
+
     def test_run_batch_without_checkpoint_does_not_hash_source_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
