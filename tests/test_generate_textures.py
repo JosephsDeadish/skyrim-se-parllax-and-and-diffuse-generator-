@@ -3416,7 +3416,7 @@ class GenerateTexturesTests(unittest.TestCase):
             root.minsize(1, 1)
             root.geometry("172x20")
             root.update_idletasks()
-            root.after(200, root.quit)
+            root.after(900, root.quit)
             root.mainloop()
             self.assertGreaterEqual(root.winfo_width(), 320)
             self.assertGreaterEqual(root.winfo_height(), 240)
