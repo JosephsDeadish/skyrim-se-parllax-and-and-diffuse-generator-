@@ -2312,6 +2312,10 @@ def _prepare_tk_startup_geometry(
             finally:
                 if show_window is not None:
                     show_window()
+                    try:
+                        root.after(100, restore_geometry)
+                    except Exception:
+                        pass
 
         root.after_idle(restore_after_idle)
     except Exception:

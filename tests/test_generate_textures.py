@@ -3375,12 +3375,16 @@ class GenerateTexturesTests(unittest.TestCase):
 
         def track_root_mapping(*args, **kwargs):
             root = original_tk(*args, **kwargs)
+
+            def record_root_mapping(event) -> None:
+                if event.widget is not root:
+                    return
+                mapped_child_counts.append(len(root.winfo_children()))
+                mapped_min_sizes.append(tuple(int(value) for value in root.minsize()))
+
             root.bind(
                 "<Map>",
-                lambda _event: (
-                    mapped_child_counts.append(len(root.winfo_children())),
-                    mapped_min_sizes.append(tuple(int(value) for value in root.minsize())),
-                ),
+                record_root_mapping,
                 add="+",
             )
             return root
@@ -3402,8 +3406,27 @@ class GenerateTexturesTests(unittest.TestCase):
             if gui is not None:
                 gui.root.destroy()
 
+    def test_tk_collapsed_window_is_repaired_after_mapping(self) -> None:
+        self._skip_unavailable_tk_display()
+        gui = None
+        try:
+            gui = TextureGeneratorGUI()
+            root = gui.root
+            root.update_idletasks()
+            root.minsize(1, 1)
+            root.geometry("172x20")
+            root.update_idletasks()
+            root.after(200, root.quit)
+            root.mainloop()
+            self.assertGreaterEqual(root.winfo_width(), 320)
+            self.assertGreaterEqual(root.winfo_height(), 240)
+        finally:
+            if gui is not None:
+                gui.root.destroy()
+
     def test_tk_startup_window_is_shown_after_deferred_geometry_restore(self) -> None:
-        scheduled: list[object] = []
+        idle_callbacks: list[object] = []
+        delayed_callbacks: list[tuple[int, object]] = []
         events: list[str] = []
 
         class StartupRoot:
@@ -3414,7 +3437,10 @@ class GenerateTexturesTests(unittest.TestCase):
                 return None
 
             def after_idle(self, callback) -> None:
-                scheduled.append(callback)
+                idle_callbacks.append(callback)
+
+            def after(self, delay: int, callback) -> None:
+                delayed_callbacks.append((delay, callback))
 
         gt._prepare_tk_startup_geometry(
             StartupRoot(),
@@ -3423,9 +3449,13 @@ class GenerateTexturesTests(unittest.TestCase):
         )
 
         self.assertEqual(events, ["restore"])
-        self.assertEqual(len(scheduled), 1)
-        scheduled[0]()
+        self.assertEqual(len(idle_callbacks), 1)
+        idle_callbacks[0]()
         self.assertEqual(events, ["restore", "restore", "show"])
+        self.assertEqual(len(delayed_callbacks), 1)
+        self.assertEqual(delayed_callbacks[0][0], 100)
+        delayed_callbacks[0][1]()
+        self.assertEqual(events, ["restore", "restore", "show", "restore"])
 
     def test_tk_startup_geometry_clamps_small_screen_and_preserves_resized_window(self) -> None:
         safe_width, safe_height, min_width, min_height = _compute_safe_startup_geometry(800, 600)
