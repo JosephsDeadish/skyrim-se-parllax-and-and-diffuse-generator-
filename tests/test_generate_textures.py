@@ -3402,6 +3402,8 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertNotEqual(gui.root.state(), "withdrawn")
             self.assertGreaterEqual(gui.root.winfo_width(), 320)
             self.assertGreaterEqual(gui.root.winfo_height(), 240)
+            gui.root.after(150, gui.root.quit)
+            gui.root.mainloop()
         finally:
             if gui is not None:
                 gui.root.destroy()
