@@ -1,6 +1,6 @@
 # skyrim-se-parllax-and-and-diffuse-generator-
 
-Current version: **0.5.5**
+Current version: **0.9**
 
 Texture generator that supports both GUI and command-line usage. It can generate:
 - a diffuse texture
@@ -33,8 +33,9 @@ When the tool is launched from **MO2** or **Vortex**, it now tries to detect the
 - **MO2**: reads the active profile, enabled mods from `modlist.txt`, enabled plugins from `plugins.txt`, and load order from `loadorder.txt`, then exposes detected loaded mod texture folders in the GUI.
 - **Vortex**: looks for the active profile/staging layout, reads `modlist.txt` plus `plugins.txt`/`loadorder.txt` when present, and exposes detected managed texture folders in the GUI.
 - Renderer auto-detect now uses loaded mod names plus concrete runtime markers from that MO2/Vortex context (for example `d3d11.dll`/`enbseries.ini`, `SKSE/Plugins/CommunityShaders.dll`, and `SKSE/Plugins/PBRNifPatcher.dll`) to better infer `ENB`, `Community Shaders`, or `TruePBR` defaults when texture path hints are unclear.
+- If the mod names expose version strings, the GUI surfaces those hints too and flags TruePBR setups that look older than the release-aligned compatibility baseline so you can verify the installed shader/config version before export.
 - Context detection now also surfaces body/skeleton compatibility hints (for example `CBBE`, `3BA`, `UNP`, `BHUNP`, `HIMBO`, `SAM`, and `XPMSSE`) from enabled mod/plugin/load-order names.
-- The GUI shows the detected context under the file picker and adds a **Loaded Mod** button for faster browsing.
+- The GUI shows the detected context under the file picker, remembers the last renderer/output setup per mod-manager profile, and adds **Detected Mod (Hint)** plus **Restore remembered setup** buttons for faster switching.
 
 ## Usage
 
@@ -44,20 +45,43 @@ When the tool is launched from **MO2** or **Vortex**, it now tries to detect the
 python generate_textures.py
 ```
 
+Tkinter remains the full-featured default UI.  
+An experimental Qt migration bootstrap can be launched with:
+
+```bash
+python generate_textures.py --gui --gui-backend qt
+```
+
+If Qt dependencies are missing, install `PySide6` first.
+
+A successful Windows build also uploads `skyrim-texture-generator-qt-migration-preview` for packaged review. The Qt-named executable defaults to Qt; explicit `--gui-backend tk|qt` overrides remain available. Launch `generate_textures_qt.exe --gui --gui-backend qt` explicitly when comparing backends; the Tk application remains the full-featured release path.
+
 This opens a desktop interface where you can:
 - select one input texture or an entire folder of source DDS textures
 - pick an output folder
-- see detected MO2/Vortex context and loaded-mod texture folders when launched through a mod manager
+- see detected MO2/Vortex context and loaded-mod texture folders when launched through a mod manager, and use the **Detected Mod (Hint)** button for faster browsing (advisory only; manual input/output paths still win)
 - use a **Use different output folder** toggle to switch between writing beside the input or writing to a custom location
-- choose diffuse/normal/parallax/glow/environment mask/RMAOS/complex material outputs
-- preview the **Before** source image and the currently selected output types (diffuse/normal/parallax/glow/environment mask/RMAOS/complex)
-- tune normal/parallax/glow/environment mask/RMAOS/complex/specular strengths
+- import/export portable project settings JSON snapshots from the GUI or with `--import-project-settings` / `--export-project-settings`
+- choose core maps (diffuse/normal/parallax/glow) plus renderer-specific and standalone outputs (environment mask, TruePBR RMAOS, complex material, wetness/snow masks, AO, and roughness)
+- preview generated maps and inspect individual image channels; TruePBR RMAOS previews label RGBA meanings and warn when alpha is missing
+- tune map-pixel strengths separately from the Qt TruePBR material-sidecar overrides, which are opt-in and do not create Community Shaders `PBRTextureSets` landscape JSON
 - choose the **Env mask mode**: `standard` (greyscale, vanilla Skyrim SE) or `complex` (RGBA packed, renderer-specific)
 - choose the **Target renderer** profile (**default: `custom`**) — includes `custom`, `vanilla`, `community_shaders`, `truepbr`, and `enb`
+- choose the **Target game** (`skyrim` or Fallout) so filename suffixes and default outputs match the intended family
+- when switching MO2/Vortex profiles, use the remembered setup/restore controls to reapply the last renderer + target game + output choice for that profile, and save multiple named presets when you want alternate safe setups
+- use the Terrain profile for individual texture maps; it does not build tiled landscape layers or terrain feature sets
+- the complex material, environment mask, and parallax mode controls spell out which output family they belong to so you can spot ENB / CS / TruePBR mismatches before export
 - generation applies renderer guardrails before processing so locked/auto-detected profiles automatically realign complex format, env mask mode, and parallax mode when they conflict
+- generation now shows dismissible safety warnings for renderer-family mismatches, suspicious source textures, and conflicting output-folder formats; remembered dismissals persist per warning ID
 - toggle **Emboss depth** for edge-ridge normal generation on flat printed assets (books/cards/scrolls/posters)
 - choose **Parallax mode**: `standard` (vanilla / Community Shaders Extended Materials) or `occlusion (ENB/POM)` for smoother ENBSeries POM heightmaps
 - scroll through all controls in smaller windows
+- inspect individual NIF files or mesh folders in the Qt **NIF Scan** tab using read-only diagnostics, status/text filters, paged results, options to hide grouped conflict-code details or their examples, and conflict-only rescan, patch, and safe-remediation actions
+- copy or export the generation event log, or export a diagnostics bundle with the current GUI state, for diagnostics and support
+- use the Qt **NIF Editor** for flag/texture-slot edits, auto-fill texture-path suggestions from the selected NIF or first usable NIF in a folder, safe conflict remediation, read-only compare against sibling `.nif.bak` files, and backup restore on the target chosen in NIF Scan; cleared slots are left untouched by auto-fill. Dry-run is enabled by default, with an optional byte-range diff summary, writes require confirmation and always create backups, transient per-file exceptions can be retried 0–3 times (default 1, persisted), cancellation finishes the current file first, and the editor shows a safety banner that keeps Fallout writes obviously experimental. Review auto-fill guesses before patching. The Tk editor retains additional advanced presets and tuning controls.
+- use keyboard shortcuts: `Ctrl+O` opens a texture, `Ctrl+Shift+O` opens a folder, `Ctrl+Enter` starts generation, and `Esc` requests cancellation
+- switch **Workflow mode** between **Beginner**, **Standard**, and **Advanced**; Beginner keeps core controls visible, Standard shows the full layout, and Advanced also enables the extra setup/output groups
+- use the first-run **Quick start** banner or the **Wizard…** button: Step 1 choose a renderer family, Step 2 use **Next safe step** to restore a saved setup or reuse a detected mod folder, Step 3 pick input/output, Step 4 use Suggested or Generate/Scan, Step 5 compare against the sibling `.nif.bak` before writing; the wizard adds the recommendation rationale plus a safer next-step summary, `Ctrl+1`/`2`/`3`/`4` apply safe families, `Ctrl+Shift+H` hides the banner once you know what you need, and the quick-start card can be reopened from the top bar later.
 - auto-update output folder when a different input texture is selected
 - get adaptive recommended defaults based on richer image-content analysis
 - use a clearly labeled **Automatic suggestions (analyze image and set sliders)** toggle to turn auto slider updates on/off
@@ -70,7 +94,7 @@ This opens a desktop interface where you can:
 - use the NIF Editor's resizable results log to review full untruncated scan/patch details while processing whole mesh folders — always keep backups of your NIF files
 - when a folder is selected, only process original `.dds` source textures and skip generated `_n`, `_p`, `_g`/legacy glow aliases, `_m`, packed `_rmaos`/`_orm` variants, `_s`, `_sk`, `_msn`, `_cm`, `_wt`, `_sm`, and common non-Skyrim authoring-suffix aliases such as `_ao`, `_roughness`, and `_metalness`
 - continue processing remaining files in folder mode even if one file is corrupt/unreadable
-- toggle **dark mode** for low-light modding sessions
+- switch between **light**, **dark**, and **high-contrast** theme presets for different lighting and accessibility needs
 - get file-type sanity warnings (with per-warning “don’t show again”) for combinations that usually produce incorrect in-game results
 
 ### Command line
@@ -83,11 +107,11 @@ Optional arguments:
 
 - positional input may also be a folder; folder mode scans subfolders, processes only original `.dds` source textures, and skips generated `_n`, `_p`, `_g`/legacy glow aliases, `_m`, packed `_rmaos`/`_orm` variants, `_s`, `_sk`, `_msn`, `_cm`, `_wt`, `_sm`, and common non-Skyrim authoring-suffix aliases such as `_ao`, `_roughness`, and `_metalness`
 
-- `--diffuse-name` (default: `<input_stem>`, e.g. `stonewall.dds`)
+- `--diffuse-name` (default: game-aware: Skyrim/Fallout 3/NV -> `<input_stem>`, Fallout 4/76 -> `<input_stem>_d`)
 - `--normal-name` (default: `<input_stem>_n`, e.g. `stonewall_n.dds`)
 - `--parallax-name` (default: `<input_stem>_p`, e.g. `stonewall_p.dds`)
 - `--glow-name` (default: `<input_stem>_g`, e.g. `stonewall_g.dds`)
-- `--environment-mask-name` (default: `<input_stem>_m`)
+- `--environment-mask-name` (default: game-aware: Skyrim/Fallout 3/NV -> `<input_stem>_m`, Fallout 4/76 -> `<input_stem>_s`)
 - `--rmaos-name` / `--ramos-name` (default: `<input_stem>_rmaos`)
 - `--complex-name` (default from format: `<input_stem>_msn` or `<input_stem>_cm`)
   - use `<input_stem>_c` here when a shader pack expects `_c.dds` naming
@@ -118,13 +142,39 @@ Optional arguments:
 - `--snow-mask-strength` (snow mask strength, 0.1–3.0; default: 1.0)
 - `--pbr-material` (shortcut for the app's Community Shaders Extended Materials packed output: enables complex material, forces `--complex-format cm`, and keeps compatible standard env/parallax modes; not an ENB workflow)
 - `--render-profile` (`auto`, `custom`, `vanilla`, `performance`, `vr`, `terrain`, `architecture`, `characters`, `community_shaders`, `truepbr`, `enb`)
+  - `auto` now also consults detected MO2/Vortex context from the launch environment or input-path location, so the CLI gets the same renderer/version advisory hints as the GUI when it can recognize a mod-manager profile
+
+## Pre-release validation
+
+Run the full release gate locally before packaging or publishing:
+
+```bash
+python scripts/pre_release_validation.py
+```
+
+This gate runs:
+- full unittest suite (`tests/test_generate_textures.py` + `tests/test_nif_patcher.py` and related modules),
+- targeted NIF fixture/conflict stress checks,
+- Python compile checks,
+- a lightweight tracked-file secret scan.
+- repeated release-like loops when `--repeat-validation-loops <N>` is set (for example `2` for back-to-back stability runs),
+- local PyInstaller packaging smoke build plus packaged executable `--help` smoke execution,
+- localization sweep artifacts for current translation catalogs:
+  - `localization_coverage_report.json`
+  - `localization_coverage_report.md`
+  - optional strict mode via `--strict-localization-completeness` to fail if non-English catalogs are missing `en.json` keys.
+  - optional parity-fallback drift guard via `--max-fallback-ratio-drift` / `--max-fallback-group-drift` against prior seeded `nif_realmod_parity_delta_report.json` artifacts.
   - locked profiles (and `auto` in single-file mode) now auto-correct conflicting `--complex-format`, `--environment-mask-mode`, and `--parallax-mode` values, then print the applied guardrail changes to stderr
+- `--target-game` (`skyrim`, `fallout3`, `falloutnv`, `fallout4`, `fallout76`; default: `skyrim`)
+  - controls generated filename conventions (for example, Fallout 4/76 diffuse defaults to `_d.dds` and env-mask defaults to `_s.dds`)
 - `--batch-workers` (parallel workers for folder mode; `0` = automatic)
 - `--gui` (force GUI mode)
 
 ### Community Shaders quick start (`_cm` / `_c` / `_C`)
 
 This app supports the **Community Shaders Extended Materials** packed workflow via `_cm` output.
+
+Release-aligned note: Community Shaders `v1.9.1` release metadata lists **Extended Materials `1-4-0`** and **TruePBR `1-0-0`** in its compatibility table. Keep your installed CS plugin stack close to that baseline (or newer) when validating generated `_cm/_c/_C` and `_rmaos/_ramos` outputs.
 
 - In GUI:
   1. Set **Target renderer** to `community_shaders`
@@ -145,23 +195,30 @@ Some packs use `_c.dds` (or `_C.dds` on Windows) for the same role — set `--co
 
 This app now has a dedicated **TruePBR** renderer profile path for Community Shaders TruePBR workflows.
 
+For latest runtime compatibility checks, compare your installed CS plugin versions against the current release page:  
+https://github.com/community-shaders/skyrim-community-shaders/releases
+
 - In GUI:
   1. Set **Target renderer** to `truepbr`
   2. Keep **Normal / _n** enabled
   3. Enable **RMAOS / _rmaos**
   4. Generate textures; the tool writes `_rmaos` (or `_ramos`) plus a PBRNifPatcher JSON sidecar (placed in a `PBRNifPatcher/` folder next to `textures/` when a textures root is detected)
   5. Validate the generated JSON/channels against your installed TruePBR schema
+  6. For terrain/landscape inputs, enable **Landscape PBRTextureSets JSON** (or `--pbr-texture-sets` in CLI) to write the separate `Data/PBRTextureSets/<TXST_EDID>.json` export.
 
-The generated sidecar uses pgen/PBRNifPatcher-style texture entries (for example: `texture`, `parallax`, `specular_level`, `roughness_scale`, `smooth_angle`, `displacement_scale`, `emissive_scale`, `vertex_color_lum_mult`) and is intended as a practical starting point you can tune per asset pack.
+The generated sidecar uses PGPatcher/PBRNifPatcher per-shape entries (for example: `texture`, `parallax`, `specular_level`, `roughness_scale`, `smooth_angle`, `displacement_scale`, `emissive_scale`, `vertex_color_lum_mult`). These snake_case fields are distinct from Community Shaders' built-in `Data/PBRTextureSets/<EDID>.json` camelCase fields (`specularLevel`, `roughnessScale`, `displacementScale`); the target patcher maps its sidecar values into the material parameters. The emitted `texture` matcher is retained for compatibility and is the legacy alias of `match_diffuse` in the [current PGPatcher schema](https://github.com/hakasapl/PGPatcher/blob/main/schema/pbr.schema.json). In the current Community Shaders TruePBR material contract, RMAOS alpha is **non-metal reflectance**, not height; the implementation is documented in [`BSLightingShaderMaterialPBR.h`](https://github.com/community-shaders/skyrim-community-shaders/blob/master/src/TruePBR/BSLightingShaderMaterialPBR.h). Validate against the PGPatcher/Community Shaders versions installed by the user.
+
+The Qt migration UI keeps **Advanced map strengths** (which change generated pixels) separate from **TruePBR material settings (sidecar)** (which change JSON only). Sidecar overrides are opt-in; when disabled, material-specific inferred values are preserved. When enabled, the explicit parallax, displacement, specular, and roughness values replace those inferred values in PGPatcher per-shape JSON. These controls do not author Community Shaders `PBRTextureSets` landscape JSON.
 
 ### True PBR workflow notes (users vs creators)
 
 #### For users (installing mods)
 
-- True PBR brings a more modern physically based look than vanilla or ENB/CS complex-material-only setups, and can combine effects such as parallax, glow, subsurface scattering, or dual-layer materials on the same shader path.
+- True PBR is the Community Shaders PBR path; it brings a more modern physically based look than vanilla or ENB/CS complex-material-only setups, and can combine effects such as parallax, glow, subsurface scattering, or dual-layer materials when the shader path supports them.
 - Because it follows a standard PBR workflow, materials exported from modern tools/texturing suites are easier to reuse without blindly retuning brightness/specular for Skyrim's older vanilla conventions.
 - True PBR requires **Community Shaders** to render correctly in-game.
 - True PBR texture packs will not display correctly in tools/render paths that do not run Community Shaders (for example Creation Kit, Outfit Studio, or Bodyslide preview paths).
+- If you already have exported PBR textures, TruePBR Manager can assemble them into a working Skyrim mod; it handles channel packing, compression formats, texture-slot mapping, JSON sidecars, and folder structure.
 - Keep renderer workflows separate:
   - TruePBR: `_n + _rmaos/_ramos + JSON` metadata workflow
   - Community Shaders Extended Materials: `_cm/_c/_C`
@@ -174,7 +231,7 @@ To ship a complete True PBR set, do both:
 1. **Mesh/config setup**  
    Enable PBR on target meshes (`BSLightingShaderProperty` with `SLSF2 Unused01/PBR` flag), or ship PBRNifPatcher/PGPatcher JSON rules for user-side patching. The app's NIF Editor TruePBR preset now enables that flag instead of stripping it during parallax/env-mask patching.
 2. **Texture setup**  
-   Provide `<stem>.dds` diffuse/base color, `<stem>_n.dds` DirectX normal, and packed `<stem>_rmaos.dds`/`<stem>_ramos.dds` data in this tool (R=Roughness, G=Metallic, B=AO, A=Specular/other depending on config) — plus optional emission/parallax/feature maps. Do not treat standalone Blender-style `_rough`, `_metallic`, or `_ao` exports as the primary Skyrim runtime names for this workflow.
+   Provide `<stem>.dds` diffuse/base color, `<stem>_n.dds` DirectX normal, and packed `<stem>_rmaos.dds`/`<stem>_ramos.dds` data in this tool (R=Roughness, G=Metallic, B=AO, A=non-metal reflectance) — plus optional emission/parallax/feature maps. Height/displacement is a separate map/config value. Do not treat standalone Blender-style `_rough`, `_metallic`, or `_ao` exports as the primary Skyrim runtime names for this workflow.
 
 Key mesh-side tuning values (when authoring NIFs):
 
@@ -191,6 +248,7 @@ Landscape TruePBR:
 
 - Uses `Data/PBRTextureSets/<TXST_EDID>.json` sidecars (for example `LandscapeDirt02.json`)
 - Typical JSON values: `roughnessScale`, `displacementScale`, `specularLevel`
+- Material-object workflows use `Data/PBRMaterialObjects/<EDID>.json` plus single-pass records, and they only render on PBR-enabled surfaces.
 
 Feature compatibility summary:
 
@@ -236,13 +294,13 @@ Generated outputs default to `.dds` filenames regardless of the input format. Ex
 - Output generation now enforces per-map Skyrim-safe channel profiles during preview and file export (for example: normal maps always RGB with blue channel floor, standard env masks always greyscale, complex outputs always RGBA).
 - **Environment mask** (`*_m` / `*_rmaos`) has two modes:
   - **Standard** (default) — greyscale `L`-mode texture. Texture Slot 5 in the NIF. Controls per-pixel environment/specular reflection intensity (brighter = more reflection). Requires `SLSF1_Environment_Mapping` shader flag. Works with vanilla Skyrim SE — **no ENBSeries required**. Typically stored as DXT1.
-  - **Complex** (select in GUI or via `--environment-mask-mode complex`) — RGBA channel-packed for renderer-specific workflows. In this app's ENB preset: R=Reflection/specular brightness, G=Glossiness, B=Metalness (cubemap tint), A=Parallax height. In TruePBR workflows: R=Roughness, G=Metallic, B=Ambient Occlusion, A=Other/smoothness/height (JSON-driven). **ENBSeries required** with `ComplexParallaxMaterial=true` in `enbseries.ini` for ENB usage. The generator defaults naming to `*_rmaos.dds` for TruePBR and `*_m.dds` for ENB preset output (custom naming still works).
+  - **Complex** (select in GUI or via `--environment-mask-mode complex`) — RGBA channel-packed for renderer-specific workflows. In this app's ENB preset: R=Reflection/specular brightness, G=Glossiness, B=Metalness (cubemap tint), A=Parallax height. TruePBR RMAOS: R=Roughness, G=Metallic, B=Ambient Occlusion, A=non-metal reflectance; displacement is separate. **ENBSeries required** with `ComplexParallaxMaterial=true` in `enbseries.ini` for ENB usage. The generator defaults naming to `*_rmaos.dds` for TruePBR and `*_m.dds` for ENB preset output (custom naming still works).
 - For large/high-detail sources (2K/4K/8K), generation applies adaptive detail dampening to reduce over-sharpened normals/parallax and complex-material sparkle artifacts. Analysis and auto-recommendation calculations are automatically performed on a downscaled copy so large textures are processed faster without sacrificing output quality.
 - Generation warnings now include extra guardrails for UI/interface texture paths and paper/card-like assets when map combinations are likely to look incorrect in-game.
 - Parallax warnings are now strength-aware: terrain textures always warn when parallax is enabled; snow/ice warns above strength 1.5; dirt/sand warns above strength 2.0 to prevent mipmap shimmer and depth-noise artefacts at those material types.
 - Material classification for `sand` now uses distinct tokens (`sand`, `dune`, `arid`, `dust`) that do not overlap with the `dirt` category, preventing a class of silent mis-classification where dirt-named paths could fall through to sand.
 - Specular generation uses numpy float32 arithmetic with percentile-based range normalisation so true-black hole artefacts cannot be introduced by integer rounding, regardless of texture size or content.
-- `_msn` output stores normal RGB with specular in alpha (ENBSeries Slot 1); `_cm`/`_c`/`_C` stores packed Community Shaders Extended Materials channels (R=environment reflection amount, G=glossiness, B=metallic, A=height/mode-control alpha); `_rmaos` is reserved for TruePBR (R=roughness, G=metallic, B=AO, A=other/height), while this app's ENB preset writes complex ENB channel packing to `_m`.
+- `_msn` output stores normal RGB with specular in alpha (ENBSeries Slot 1); `_cm`/`_c`/`_C` stores packed Community Shaders Extended Materials channels (R=environment reflection amount, G=glossiness, B=metallic, A=height/mode-control alpha); `_rmaos` is reserved for TruePBR (R=roughness, G=metallic, B=AO, A=non-metal reflectance), while this app's ENB preset writes complex ENB channel packing to `_m`.
 
 ## File name recognition
 
@@ -258,7 +316,7 @@ The tool recognises a mix of common Skyrim SE suffix conventions and workflow-sp
 | `_p` | Parallax Heightmap | Greyscale, Slot 3, requires a parallax-capable runtime path (vanilla-compatible setup, Community Shaders, or ENB depending on workflow) |
 | `_g` | Glow / Emissive | Slot 2, requires `SLSF1_Own_Emit` flag |
 | `_m` | Environment Mask | Context-dependent Slot 5 map. Vanilla workflow uses greyscale reflection intensity; this app's ENB complex preset can also write channel-packed `_m` data. |
-| `_rmaos` | Complex Env Mask (TruePBR naming) | RGBA Slot 5 packed data map for Community Shaders TruePBR. Channels: R=Roughness, G=Metallic, B=AO, A=Other/smoothness/height (JSON-driven). |
+| `_rmaos` | Complex Env Mask (TruePBR naming) | RGBA Slot 5 packed data map for Community Shaders TruePBR. Channels: R=Roughness, G=Metallic, B=AO, A=non-metal reflectance. Displacement is separate. |
 | `_s` | Subsurface Scattering | Slot 6, skin/character textures |
 | `_sk` | Skin Specular | Slot 7, character-specific |
 | `_msn` | Complex Parallax Material (ENBSeries) | RGBA Slot 1 — replaces `_n` when ENBSeries complex material is active. Channels: R=Normal X, G=Normal Y, B=Normal Z, A=Specular intensity. **ENBSeries only — not vanilla Skyrim SE.** |
@@ -277,15 +335,136 @@ Batch folder mode scans subfolders and automatically skips generated variants (`
 |----------|---------------|-------|
 | **Vanilla Skyrim SE** | diffuse + `_n` | Add `_m` (greyscale) for reflective materials; add `_p` for parallax meshes |
 | **Community Shaders (Extended Materials)** | diffuse + `_n` + `_p` + `_cm` (or `_c` / `_C`) | `_cm`/`_c`/`_C`: R=Env reflection, G=Glossiness, B=Metallic, A=Height / mode-control alpha |
-| **Community Shaders TruePBR** | diffuse + `_n` + `_rmaos` (+ optional `_p`) | JSON-driven workflow; channel interpretation can vary by TruePBR config |
+| **Community Shaders TruePBR** | diffuse + `_n` + `_rmaos` (+ optional `_p`) | This app writes R=roughness, G=metallic, B=AO, A=non-metal reflectance; JSON-driven material settings are separate. Verify compatibility with your installed shader/config version. |
 | **ENBSeries complex (this app preset)** | diffuse + `_msn` + `_p` + `_m` | `_msn`: R=Nx, G=Ny, B=Nz, A=Spec; `_m` (complex preset): R=Reflection, G=Glossiness, B=Metalness, A=Height |
 
 Community Shaders Extended Materials and ENB complex material are separate workflows. Pick one target renderer **per mesh/material**, instead of trying to mix `_cm/_c` and ENB `_msn/_m` on the same asset.
 
 When both Community Shaders and ENB markers are detected in mod-manager context, the app's auto renderer recommendation now prefers **ENB**. This mirrors Community Shaders compatibility guidance that CS disables itself when ENB is active, so ENB reflects the effective runtime path in mixed installs.
 
-### NIF Editor — Experimental Feature
+### NIF Editor — Supported Skyrim Workflows
 
-The **NIF Editor** (accessible from the toolbar button) lets you patch BSLightingShaderProperty flags and texture slots in Skyrim SE mesh files.
-**This is an experimental feature.** Always keep backups of your NIF files before patching.
-The **Auto-patch NIFs after generation** checkbox (off by default) triggers NIF patching automatically after each generation run.
+The **NIF Editor** (accessible from the toolbar button) patches Skyrim-format BSLightingShaderProperty flags and texture slots for supported Skyrim LE/SE/AE/VR/CK variants. Fallout-era headers are now detected with an experimental profile path and should be treated as best-effort.
+Skyrim NIF editing is a supported workflow; review scan results and keep backups before patching. Fallout-era writes remain experimental and best-effort.
+When backups are requested, patching refuses to write if backup creation fails or the existing backup is not a readable, structurally valid regular NIF file; existing valid backups are never overwritten. Restore also validates the backup and refuses symlink or non-regular paths before atomically replacing the mesh.
+
+Qt editor regressions exercise synthetic Skyrim and Fallout meshes, including dry-run, guarded writes, remediation, and backup restoration. These fixtures are not redistributed real Fallout mod meshes. Real-mod validation remains blocked until samples with explicit permission for use and redistribution are available; synthetic diagnostics and successful writes do not establish in-game compatibility.
+The **Auto-patch NIFs after generation** checkbox (off by default) triggers NIF patching automatically after each generation run and carries the selected texture game profile through to related-mesh checks. Fallout profiles remain guarded: auto-patching does not enable experimental Fallout writes.
+For safety, parallax auto-patching skips known-problem cases by default (Havok-attached meshes, skinned/alpha meshes, decal/anisotropic/soft-lighting variants, and single-pass shader blocks).
+For CLI runs, `nif_patcher.py --target-game auto|skyrim|fallout` now makes profile intent explicit. With `--validate`, explicit target/header mismatches are reported while diagnostics continue to use the profile detected from the NIF header. Fallout writes require `--experimental-fallout-write` and default to guarded flag/texture-slot patching.
+CLI patching is dry-run by default; add `--write` when you are ready to apply changes after reviewing the preview and backups. In interactive shells, `--write` also asks for a typed confirmation unless you pass `--yes`.
+If you explicitly accept higher-risk Fallout writes, per-operation safety gates are available:
+`--fallout-allow-parallax-scale`, `--fallout-allow-fix-mesh-lighting`, `--fallout-allow-spec-strength`, `--fallout-allow-spec-color`, and `--fallout-allow-env-map-scale`.
+The NIF Editor now exposes matching controls (**NIF game profile** + **Enable experimental Fallout writes**) and per-operation Fallout safety gate checkboxes so GUI patch/remediation behavior aligns with CLI behavior.
+Validation can now emit a grouped conflict-resolution view with `--validate --conflict-report`, listing conflict categories plus suggested auto-fix actions per file.
+For larger mod-folder runs, add `--conflict-report-summary` to print a cross-file top-conflict summary, and use the NIF Editor scan view's batch summary row to quickly identify the highest-frequency conflict groups.
+You can also provide `--plugin-conflict-context <json>` (mesh path → plugin refs) to print plugin-aware conflict summaries, and `--auto-remediate` (optionally with `--auto-remediate-codes ...`) to apply safe best-effort fixes from detected conflict codes.
+The GUI now includes a language selector backed by `assets/translations/*.json` and a UI scale selector (0.75x–2.00x) for high-DPI display tuning.
+NIF scan runs also include retry/cancellation controls and a conflict-only incremental rerun action for faster follow-up passes after resolving issues.
+Plugin-aware conflict discovery now attempts lightweight plugin record parsing (record type + FormID + model-path subrecords) before raw mesh-string fallback so conflict summaries can carry real plugin-record metadata when available.
+NIF Editor conflict reruns include conflict-only patch and conflict-only auto-remediation actions in addition to conflict-only scan reruns. The Qt NIF Scan tab offers these operations for successfully scanned files with conflict codes; scan failures remain eligible for rescanning, not patching or remediation. Write-mode patching, remediation, or backup restoration of a current conflict/scan-failure candidate invalidates the scan candidates and requires a fresh scan before conflict-only actions can be used again; dry-runs remain read-only.
+Use `nif_patcher.py --compatibility-report` to print a current game/version support matrix (profiles, layouts, and guarded-operation policy).
+Use `nif_patcher.py --validate --conflict-report-summary --parity-delta-report <nif_or_folder>` to emit a markdown parity-gap table (conflict family, count, auto-remediation support level, suggested next action) for structured comparisons against external patchers such as PGPatcher.
+For repeatable parity-regression checks in CI/local runs, see `tests/fixtures/nif_parity_sample_matrix.json` and its corresponding `tests/test_nif_patcher.py` matrix assertions (including expected conflict-family prefixes and expected auto-remediation step coverage per scenario).
+For repeatable family-level trend baselines (architecture/clutter/armor/landscape/foliage/effects plus guarded Fallout sets), see `tests/fixtures/nif_realmod_sample_packs.json` and `TestRealModSamplePacks` in `tests/test_nif_patcher.py`.
+Each sample-pack baseline can now declare `expected_max_fallback_ratio` / `expected_max_fallback_groups` so future fixture additions fail fast if `fallback_or_unknown.*` classification drifts above the configured near-zero threshold.
+Real-sample pack baselines now also enforce **family-level strategy-alignment thresholds** (in addition to pass-ratio and remediation-coverage thresholds) to keep parity drift visible when local safety behavior intentionally diverges from external patcher strategies.
+Parity fixtures also include explicit **manual-review-required** families (for example `skip_single_pass` and `unsupported_header`) alongside auto-remediable families so parity checks track both automated and intentionally non-automated conflict classes.
+Intentional strategy-divergence rows now require explicit bucket/justification metadata (`expected_difference_bucket` + `safety_difference_note`) with per-family allowed-bucket checks in fixture-pack tests.
+Guarded Fallout parity fixtures now include deeper subsurface/anisotropic multi-flag cross-block variants plus additional architecture/effects/clutter mixed-state drift combinations (single-pass + env/glow/parallax alias interactions with offset/table-size/ref-skew), split into partial-recoverability vs guarded-noop tracking buckets.
+The CI release-readiness gate now roll-forwards `nif_family_trend_history.json` by seeding from the latest uploaded `release-readiness-artifacts` history when available, so trend timelines persist across workflow runs instead of resetting each run.
+The same release-readiness gate now emits `nif_parity_feature_report.json` and `nif_parity_feature_report.md` from the parity matrix, including per-case detected families, remediation steps, fallback usage, and intentional safety-first strategy-difference metadata for side-by-side parity triage.
+It also emits `nif_realmod_parity_delta_report.json` and `nif_realmod_parity_delta_report.md` for direct real-sample-pack side-by-side parity deltas, including intended-difference buckets (`safety_first`, `guarded_fallout`, `destructive_disabled`).
+Release-readiness parity sweeps now include `tests/fixtures/nif_realmod_sample_packs.json`, the larger long-tail pack `tests/fixtures/nif_external_broken_pack_delta_sweep.json`, the additional external follow-up pack `tests/fixtures/nif_external_broken_pack_delta_sweep_additional.json`, and the expanded long-tail sweep pack `tests/fixtures/nif_external_broken_pack_delta_sweep_large.json` by default.  
+When you want to add even more external broken-mod packs in the same report pipeline, pass one or more `--extra-realmod-pack-file <json>` arguments to `scripts/pre_release_validation.py` (same `packs[]` schema as `tests/fixtures/nif_realmod_sample_packs.json`).
+Release validation additionally supports a bucket-distribution drift gate against prior `nif_realmod_parity_delta_report.json` artifacts, so large parity strategy-bucket shifts are flagged before release cut.
+Release validation also emits `nif_realmod_fallback_drift_report.json` / `.md` and applies per-pack fallback drift gates (`--max-fallback-ratio-drift`, `--max-fallback-group-drift`) when prior parity-delta seeds are provided.
+The regression suite also includes a locked fixture corpus baseline at `tests/fixtures/nif_fixture_corpus*.json` for cross-profile/layout conflict-matrix stability checks, including truncated-header and shifted texture-set layout edge signatures.
+CLI folder batch runs now emit `batch_failure_report.json` and `batch_failure_report.csv` when any source files fail, with per-file action/conflict/error fields for triage.
+For long-running folder batches, use `--checkpoint-file <path>` to persist successful-file progress and `--resume-checkpoint` to skip already completed files after interruption/restart. Checkpoints record source size, modification time, and a streaming SHA-256 digest, as well as output folder and generation settings. Resume hashes selected sources and skips only matching inputs, so even same-size changes with preserved timestamps are processed again; removed sources no longer count as completed, and resuming with different output/settings is rejected. Legacy checkpoints without a content digest remain readable, but completed entries are reprocessed because their inputs cannot be fully verified.
+The Tk GUI also records output location, full source count, and generation settings in its batch checkpoint; Resume mode prompts before continuing when these differ or cannot be verified.
+Batch completion summaries also include a top-level folder breakdown so large folder-mode runs are easier to triage at a glance.
+
+### Large real-sample batch verification checklist (release readiness)
+
+Before publishing a release, run at least one real mod-scale verification pass:
+
+For bounded high-resolution acceptance, run `python scripts/pre_release_validation.py --batch-acceptance-only --artifact-dir /tmp/batch-acceptance` locally, or add `--batch-acceptance-binary <packaged-executable>` for an existing build. The default is 64 striped inputs (including two 4K textures, mixed 2K/1K and rectangular textures); `--batch-acceptance-count 500 --batch-acceptance-timeout 3600` increases the synthetic workload. Checks cover parallel queue pressure, one corrupt input, repair/resume, no-op resume, and resume after a source content change with its size and mtime preserved. Reports record timings, telemetry, checkpoint membership, source digests, output dimensions, decoded payloads, hashes, and unchanged successful outputs. The approval-gated Windows workflow runs 500 inputs against each executable and uploads evidence. This synthetic workload is **not** a real mod-scale sign-off. CLI recovery is not cooperative cancellation; GUI cancellation has separate regression coverage.
+
+Packaged GUI screenshots and automated window checks are acceptance evidence, not a substitute for manual review of every tab at different Windows display scales and themes. Windows execution still requires approval of the `pr-build-approval` environment. Versioned shader compatibility validation and terrain-layer authoring are not implemented product features; Terrain remains per-texture map generation.
+
+The Qt build additionally runs `generate_textures_qt.exe --qt-acceptance-report <report.json>` inside the packaged application. This opt-in acceptance mode captures each tab at different sizes/themes/UI scales, drives the actual GUI generation worker through cancellation, corrupt-input recovery and checkpoint resume, and records output-integrity evidence. Packaged CLI smoke also verifies that a source-content change with preserved size and mtime invalidates its checkpoint digest and regenerates only that source's outputs. Its generated fixtures and screenshots are synthetic acceptance data, not real-mod samples. Source runs can use the same option with `python generate_textures.py`.
+
+1. Prepare a representative sample set (minimum recommended: **500+ textures**, include some **4K/8K** sources).
+2. Run one pass in **start_fresh** mode and one pass in **resume** mode.
+3. Confirm checkpoint behavior:
+   - checkpoint file is created,
+   - resume skips completed entries,
+   - start_fresh clear/reset prompts are shown as expected.
+4. Confirm preview guardrails:
+   - lazy/staged preview remains responsive,
+   - manual pause and auto speed-off badges are clear,
+   - re-enable live preview works mid-run.
+5. Confirm output integrity:
+   - generated file count matches enabled outputs,
+   - `batch_failure_report.json/csv` is created if failures occur,
+   - NIF auto-patching (if enabled) reports accurate success/fail counts.
+6. Run pre-release validation gate:
+   - `python scripts/pre_release_validation.py`
+   - This runs the full test suite, conflict-stress checks, large-batch/queue verification checks, compile checks, and a tracked-file secret scan.
+   - By default it also performs a local PyInstaller smoke build and validates packaged CLI `--help` plus a tiny end-to-end sample generation output.
+7. Complete manual release-candidate verification:
+   - review uploaded `release-readiness-artifacts` from CI for unexpected parity/family drift,
+   - smoke-test representative mod sets in game (minimum: one Skyrim set and one guarded Fallout set),
+   - confirm no new visual regressions or patch-induced instability before publishing.
+
+### Known limits and operating guidance
+
+- Very large batches (1000+ sources) can become UI-heavy if live preview is forced on continuously; use Resume mode and keep lazy/staged preview enabled.
+- 8K-heavy runs may require lower worker counts and longer preview refresh intervals; this is expected to avoid memory spikes.
+- Skyrim NIF Editor workflows are supported; keep backups and validate changes in game. Fallout-era writes remain experimental and should be treated as best-effort.
+- TruePBR/Community Shaders/ENB outputs are workflow-specific; avoid mixing output families on the same mesh/material unless you explicitly know that pipeline is supported.
+
+### Consolidated compatibility matrix (game + workflow + profile)
+
+| Game/profile | Texture generation workflows | NIF patching mode | Recommended defaults |
+| --- | --- | --- | --- |
+| Skyrim LE/SE/AE/VR (auto/skyrim profile) | Vanilla (`_m`), ENB (`_msn` + optional POM), CS Extended Materials (`_cm/_c`), CS TruePBR (`_rmaos/_ramos` + JSON) | Supported | Start with a safe preset, keep lazy/staged preview on for large sets, use `resume` mode for 1000+ runs |
+| Fallout-era headers (fallout profile) | Texture generation outputs are available, but keep workflows separated per mesh/material | Guarded experimental patch mode only (`--experimental-fallout-write`) | Keep guarded mode, enable only required per-operation gates, validate in game after patching |
+| Unknown/unsupported headers | Texture generation unaffected | Validation-only guidance, patching may be blocked | Run `--validate --conflict-report` first and fix header/profile issues before patching |
+
+### Which preset should I use?
+
+If you are not sure which renderer family to choose, use the shortest matching path:
+
+| Family | Canonical outputs | When to use | When not to use |
+| --- | --- | --- | --- |
+| Vanilla | `_m.dds`, `_n.dds`, `_p.dds` | Skyrim-safe parallax defaults | ENB, Community Shaders, or TruePBR |
+| ENB | `_msn.dds`, `_m.dds` | ENB complex material or POM | Community Shaders or TruePBR |
+| Community Shaders | `_cm.dds`, `_c.dds` | Extended Materials workflows | ENB or TruePBR |
+| TruePBR | `_rmaos.dds`, `_ramos.dds`, JSON sidecars | CS TruePBR JSON workflows | ENB or plain Community Shaders |
+| Custom | manual-only | You already know the pipeline and want full control | You want guardrails or one-click safe defaults |
+
+Do not mix ENB / Community Shaders / TruePBR families on the same mesh unless you are intentionally switching workflows.
+
+### Troubleshooting decision tree (common NIF patch failures)
+
+1. **Patch failed before write**
+   - Run `nif_patcher.py --validate --conflict-report <mesh_or_folder>`.
+   - If fallout-profile warnings appear, re-run with `--target-game fallout --experimental-fallout-write` and only necessary safety gates.
+2. **Parallax enabled but no in-game depth**
+   - Check slot 3 path and naming (`_p.dds`) and confirm it resolves on disk near the mesh.
+   - Review conflicts for `missing_parallax_slot3.*` or `shader_state.parallax_type_missing_slot3.*`.
+3. **EnvMap/reflective behavior missing or broken**
+   - Check slot 4 cubemap and slot 5 env-mask paths plus `SLSF1_Environment_Mapping`.
+   - Review `shader_state.envmap_missing_slot4.*`, `shader_state.envmap_missing_slot5.*`, and `flag_env_mapping.*` conflicts.
+4. **Glow/emissive not visible**
+   - Confirm slot 2 uses `_g.dds`-style emissive path and `SLSF2_Glow_Map` alignment.
+   - Review `flag_glow_map.*` and `path_slot_glow.*` conflicts.
+5. **Wrong preset / wrong renderer / wrong folder**
+   - Use the Suggested preset, the saved-setups dropdown, the **Wizard…** button, or the first-run quick start buttons (including **Next safe step**) to get back to the correct family or a restored saved setup/preset.
+   - If the preview or scan still looks wrong, compare against the sibling `.nif.bak` before writing and restore instead of forcing the change.
+   - Make sure the selected input folder is the source texture set, not a generated-output folder from a previous run.
+6. **Large batch run is too slow or reruns unexpectedly**
+   - Keep lazy/staged preview enabled, disable live batch preview, and use `resume` mode with checkpoint status checks.
+   - Use generated failure artifacts (`batch_failure_report.json/csv`) to isolate repeat offenders before rerun.

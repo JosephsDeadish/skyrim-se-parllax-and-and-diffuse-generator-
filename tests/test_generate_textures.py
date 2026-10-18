@@ -1,13 +1,24 @@
+import csv
+import hashlib
+import inspect
 import json
+import io
+import os
+import queue
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
-from PIL import Image, ImageStat
+from PIL import Image, ImageOps, ImageStat
 
+import generate_textures as gt
 from generate_textures import (
     APP_VERSION,
     MODDING_WIKI_SKYRIM_URL,
@@ -15,28 +26,124 @@ from generate_textures import (
     _create_panda_icon_image,
     _map_parallax_strength_to_nif_scale,
     _compute_tooltip_position,
+    _compute_qt_initial_window_size,
+    _compute_safe_startup_geometry,
     _candidate_nif_patcher_search_dirs,
+    compute_effective_ui_scale,
     _compute_nif_editor_controls_pane_height,
     _compute_nif_editor_result_details_height,
+    _drain_nif_editor_ui_updates,
+    _make_batched_nif_result_enqueuer,
+    _make_debounced_callback,
+    _make_latest_progress_update_enqueuer,
+    _connect_qt_worker_thread_lifecycle,
+    _configure_qt_field_label,
+    _nif_editor_result_matches_filters,
+    _slice_nif_editor_result_page,
+    _load_qt_preview_png,
+    _recommend_qt_render_profile,
+    _bind_tk_main_window_shortcuts,
+    _batch_source_display_label,
+    _describe_qt_output_channels,
+    _choose_qt_input_path,
+    _should_render_nif_editor_results,
+    _set_nif_editor_controls_active,
     _format_nif_result_row_details,
+    _should_refresh_qt_nif_scan_page,
+    _format_qt_nif_scan_page_summary,
+    _qt_nif_scan_status_color,
+    _nif_editor_confirmation_title,
+    _preview_qt_nif_auto_remediation,
+    discover_plugin_conflict_context_from_manager,
+    discover_ui_languages,
+    extract_mesh_paths_from_plugin_bytes,
+    extract_plugin_mesh_record_refs,
+    infer_nif_editor_texture_paths,
+    load_ui_translations,
     _normalize_nif_editor_texture_input_path,
     _load_nif_patcher_exports,
+    ModManagerContext,
+    _normalize_render_profile,
+    NIF_PATCHER_AVAILABLE,
     _normalize_nif_result_details,
     _preferred_dds_formats_for_output,
+    build_pbr_texture_sets_output_path,
     _RENDER_PROFILE_GUI_VALUES,
     _run_cli,
     _normalize_gui_state,
+    _merge_qt_generation_gui_state,
+    _qt_profile_output_defaults,
+    _qt_render_profile_modes,
+    _qt_checkpoint_generation_options,
+    _qt_resume_completed_files,
+    _qt_resume_mode_guidance,
+    _checkpointable_completed_files,
+    _checkpoint_source_file_fingerprints,
+    _matching_checkpoint_completed_files,
+    _tk_checkpoint_generation_options,
+    _write_checkpoint_payload_atomically,
+    _qt_truepbr_material_overrides,
+    _apply_qt_profile_output_defaults,
+    _QT_OUTPUT_GROUPS,
+    _describe_qt_profile_guidance,
+    _profile_setup_memory_items,
+    _profile_setup_memory_key,
+    _detect_renderer_version_hints,
+    _format_short_guidance_tooltip,
+    _render_profile_family_matrix_text,
+    _render_profile_family_quick_check_text,
+    _render_profile_family_tooltip,
+    _render_profile_guidance,
+    _format_log_export_text,
+    _format_qt_preview_channel_note,
+    _format_qt_log_export_text,
+    build_diagnostics_bundle_text,
+    _qt_migration_status_text,
+    _resolve_app_icon_source_path,
+    _nif_editor_confirmation_text,
+    _nif_editor_safety_banner_text,
+    compare_nif_backups,
+    _workflow_preset_onboarding_text,
+    _workflow_quick_start_steps_text,
+    _bind_tk_quick_start_shortcuts,
+    _build_truepbr_version_note,
+    resolve_startup_guidance_action,
+    _qt_preview_channel_options,
+    _inspect_qt_output_image,
+    _DARK_THEME,
+    _HIGH_CONTRAST_THEME,
+    _LIGHT_THEME,
+    _THEME_MODE_LABELS,
+    _resolve_batch_workers,
+    _summarize_batch_texture_dimensions,
+    _visible_preview_output_keys,
+    build_batch_bottleneck_hints,
+    summarize_batch_nif_patch_activity,
+    _summarize_batch_source_folders,
+    build_mod_manager_profile_setup_hint,
+    build_startup_guidance_text,
+    build_startup_wizard_summary,
+    compute_checkpoint_mismatch_flags,
+    compute_checkpoint_resume_counts,
+    compute_processing_queue_event_budget,
+    compute_deferred_preview_tile_interval_ms,
+    compute_preview_refresh_delay_ms,
     _save_with_dds_fallback,
     _to_dds_compatible_image,
+    TextureGeneratorGUI,
     analyze_image_content,
     auto_patch_related_nifs_for_texture,
     apply_recommendations_by_auto_flags,
     build_nif_patch_options_for_generated_outputs,
     build_nif_patch_options_for_nif_editor,
+    build_mod_manager_context_hint,
+    build_render_profile_brief_message,
     build_render_profile_recommendation_message,
+    build_render_profile_family_mismatch_warning,
     build_complex_preview_image,
     build_complex_output_path,
     build_environment_mask_output_path,
+    build_nif_editor_action_guidance,
     build_rmaos_output_path,
     classify_material_type,
     collect_source_textures,
@@ -71,6 +178,8 @@ from generate_textures import (
     parse_preview_jump_input,
     recommend_generation_settings,
     recommend_render_profile,
+    recommend_render_profile_details,
+    RenderProfileRecommendation,
     resolve_nif_patch_defaults_for_render_profile,
     resolve_render_profile_guardrails,
     resolve_render_profile_mode_control_states,
@@ -80,17 +189,29 @@ from generate_textures import (
     build_render_profile_mode_controls_hint,
     render_profile_has_locked_controls,
     restore_nif_backups,
+    resolve_nif_editor_targets,
+    _scan_nif_validation_rows,
+    _write_qt_nif_scan_csv,
+    _format_qt_nif_scan_detail,
     resolve_env_mask_complex_workflow,
     resolve_nif_editor_patch_options_for_target,
     load_gui_state,
+    export_project_settings,
+    export_project_settings_state,
+    import_project_settings,
     main,
     parse_args,
     run_batch_with_options,
     run_with_options,
+    resolve_lazy_preview_deferred_outputs,
     save_gui_state,
     should_apply_preview_recommendations,
+    should_update_batch_status_line,
+    should_update_live_batch_preview,
     select_generation_context_source,
+    translate_ui_text,
     get_output_folder_format_warnings,
+    write_batch_failure_artifacts,
     generate_ambient_occlusion,
     generate_roughness,
     analyze_material_type_from_image,
@@ -111,6 +232,19 @@ def _sample_image() -> Image.Image:
     return Image.new("RGB", (8, 8), color=(60, 100, 140))
 
 
+class TestUiLocalizationAssetResolution(unittest.TestCase):
+    def test_discover_ui_languages_uses_meipass_assets_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bundle_root = Path(temp_dir)
+            translations_dir = bundle_root / "assets" / "translations"
+            translations_dir.mkdir(parents=True)
+            (translations_dir / "de.json").write_text('{"strings": {}}', encoding="utf-8")
+            (translations_dir / "en.json").write_text('{"strings": {}}', encoding="utf-8")
+            with mock.patch("generate_textures.sys._MEIPASS", str(bundle_root), create=True):
+                self.assertEqual(discover_ui_languages(), ("de", "en"))
+                self.assertEqual(load_ui_translations("en"), {})
+
+
 class TestNifPatcherLoading(unittest.TestCase):
     def test_candidate_nif_patcher_search_dirs_deduplicates(self) -> None:
         base = Path("/tmp/skyrim-texture-generator")
@@ -129,7 +263,13 @@ class TestNifPatcherLoading(unittest.TestCase):
             module_path.write_text(
                 "\n".join(
                     [
+                        "class NifPluginConflictRef:",
+                        "    def __init__(self, plugin_name, record_id='', record_type=''):",
+                        "        self.plugin_name = plugin_name",
+                        "        self.record_id = record_id",
+                        "        self.record_type = record_type",
                         "class NifPatchOptions: pass",
+                        "def auto_remediate_nif_conflicts(*args, **kwargs): return (None, ())",
                         "def find_nif_files(*args, **kwargs): return []",
                         "def guess_cubemap_path_for_nif(*args, **kwargs): return None",
                         "def guess_env_mask_path_for_nif(*args, **kwargs): return None",
@@ -138,17 +278,24 @@ class TestNifPatcherLoading(unittest.TestCase):
                         "def guess_parallax_path_for_nif(*args, **kwargs): return None",
                         "def patch_nif(*args, **kwargs): return None",
                         "def scan_nif(*args, **kwargs): return None",
+                        "def summarize_plugin_aware_validation_conflicts(*args, **kwargs): return []",
+                        "def summarize_validation_conflicts(*args, **kwargs): return []",
                         "def validate_nif_for_parallax(*args, **kwargs): return None",
+                        "def validate_nif_bytes_for_restore(*args, **kwargs): return []",
                     ]
                 ),
                 encoding="utf-8",
             )
             original_sys_path = list(sys.path)
+            original_nif_patcher = sys.modules.get("nif_patcher")
             try:
                 sys.modules.pop("nif_patcher", None)
                 exports = _load_nif_patcher_exports((Path(temp_dir),))
             finally:
-                sys.modules.pop("nif_patcher", None)
+                if original_nif_patcher is None:
+                    sys.modules.pop("nif_patcher", None)
+                else:
+                    sys.modules["nif_patcher"] = original_nif_patcher
                 sys.path[:] = original_sys_path
             self.assertIn("patch_nif", exports)
             self.assertTrue(callable(exports["patch_nif"]))
@@ -183,6 +330,781 @@ class TestNifEditorLayoutSizing(unittest.TestCase):
             ),
             160,
         )
+
+
+class TestNifEditorUiUpdateQueue(unittest.TestCase):
+    def test_qt_worker_completion_and_failure_stop_thread_before_cleanup(self) -> None:
+        class FakeSignal:
+            def __init__(self) -> None:
+                self.callbacks: list[object] = []
+
+            def connect(self, callback: object) -> None:
+                self.callbacks.append(callback)
+
+            def emit(self) -> None:
+                for callback in self.callbacks:
+                    callback()  # type: ignore[operator]
+
+        class FakeWorker:
+            def __init__(self) -> None:
+                self.finished = FakeSignal()
+                self.failed = FakeSignal()
+                self.deleted = False
+
+            def deleteLater(self) -> None:
+                self.deleted = True
+
+        class FakeThread:
+            def __init__(self) -> None:
+                self.finished = FakeSignal()
+                self.quit_requests = 0
+
+            def quit(self) -> None:
+                self.quit_requests += 1
+
+        worker = FakeWorker()
+        thread = FakeThread()
+        cleanup: list[str] = []
+        _connect_qt_worker_thread_lifecycle(worker, thread, lambda: cleanup.append("finished"))
+
+        worker.finished.emit()
+        worker.failed.emit()
+        self.assertEqual(thread.quit_requests, 2)
+        self.assertFalse(worker.deleted)
+        self.assertEqual(cleanup, [])
+
+        thread.finished.emit()
+        self.assertTrue(worker.deleted)
+        self.assertEqual(cleanup, ["finished"])
+
+    def test_debounced_callback_runs_only_after_latest_request(self) -> None:
+        scheduled: dict[int, tuple[int, object]] = {}
+        callbacks: dict[int, object] = {}
+        cancelled: list[int] = []
+        calls: list[str] = []
+        next_id = [0]
+
+        def _schedule(delay_ms: int, callback: object) -> int:
+            next_id[0] += 1
+            scheduled[next_id[0]] = (delay_ms, callback)
+            callbacks[next_id[0]] = callback
+            return next_id[0]
+
+        def _cancel(token: object) -> None:
+            cancelled.append(int(token))
+            scheduled.pop(int(token), None)
+
+        request, cancel_pending = _make_debounced_callback(
+            _schedule,
+            _cancel,
+            lambda: calls.append("render"),
+            delay_ms=120,
+        )
+
+        request()
+        request()
+
+        self.assertEqual(cancelled, [1])
+        self.assertEqual(list(scheduled), [2])
+        self.assertEqual(scheduled[2][0], 120)
+        self.assertEqual(calls, [])
+        scheduled.pop(2)
+        callbacks[1]()  # type: ignore[operator]
+        self.assertEqual(calls, [])
+        callbacks[2]()  # type: ignore[operator]
+        self.assertEqual(calls, ["render"])
+
+        request()
+        cancel_pending()
+        self.assertEqual(len(cancelled), 2)
+        self.assertEqual(scheduled, {})
+
+    def test_result_updates_batch_with_bounded_ui_work_and_defer_completion(self) -> None:
+        updates: queue.Queue = queue.Queue()
+        applied: list[tuple[str, str, str, int]] = []
+        completion_threads: list[int] = []
+        ui_thread_id = threading.get_ident()
+        enqueue_row, after_rows = _make_batched_nif_result_enqueuer(
+            updates,
+            lambda rows: applied.extend((*row, threading.get_ident()) for row in rows),
+            max_batch_size=25,
+        )
+
+        def _produce_rows() -> None:
+            for index in range(1000):
+                enqueue_row("OK", f"{index:04d}.nif", "scanned")
+            after_rows(lambda: completion_threads.append(threading.get_ident()))
+
+        worker = threading.Thread(target=_produce_rows)
+        worker.start()
+        worker.join()
+
+        self.assertEqual(updates.qsize(), 1)
+        self.assertEqual(_drain_nif_editor_ui_updates(updates, limit=1), 1)
+        self.assertEqual(len(applied), 25)
+        self.assertEqual(updates.qsize(), 1)
+        self.assertEqual(completion_threads, [])
+
+        while not updates.empty():
+            self.assertEqual(_drain_nif_editor_ui_updates(updates, limit=1), 1)
+
+        self.assertEqual([row[1] for row in applied], [f"{index:04d}.nif" for index in range(1000)])
+        self.assertTrue(all(row[3] == ui_thread_id for row in applied))
+        self.assertEqual(completion_threads, [ui_thread_id])
+
+    def test_completion_without_pending_results_stays_queued(self) -> None:
+        updates: queue.Queue = queue.Queue()
+        completed: list[int] = []
+        ui_thread_id = threading.get_ident()
+        _enqueue_row, after_rows = _make_batched_nif_result_enqueuer(updates, lambda _rows: None)
+
+        worker = threading.Thread(target=lambda: after_rows(lambda: completed.append(threading.get_ident())))
+        worker.start()
+        worker.join()
+
+        self.assertEqual(completed, [])
+        self.assertEqual(_drain_nif_editor_ui_updates(updates), 1)
+        self.assertEqual(completed, [ui_thread_id])
+
+    def test_progress_updates_coalesce_to_latest_value_on_ui_thread(self) -> None:
+        updates: queue.Queue = queue.Queue()
+        applied: list[tuple[float, int]] = []
+        ui_thread_id = threading.get_ident()
+        enqueue_progress = _make_latest_progress_update_enqueuer(
+            updates,
+            lambda value: applied.append((value, threading.get_ident())),
+        )
+
+        def _enqueue_from_worker() -> None:
+            for value in range(1000):
+                enqueue_progress(float(value))
+
+        worker = threading.Thread(target=_enqueue_from_worker)
+        worker.start()
+        worker.join()
+
+        self.assertEqual(updates.qsize(), 1)
+        self.assertEqual(_drain_nif_editor_ui_updates(updates), 1)
+        self.assertEqual(applied, [(999.0, ui_thread_id)])
+
+    def test_drains_callbacks_in_fifo_batches_on_calling_thread(self) -> None:
+        updates: queue.Queue = queue.Queue()
+        completed: list[tuple[int, int]] = []
+        ui_thread_id = threading.get_ident()
+
+        def _enqueue_from_worker() -> None:
+            for index in range(3):
+                updates.put(lambda i=index: completed.append((i, threading.get_ident())))
+
+        worker = threading.Thread(target=_enqueue_from_worker)
+        worker.start()
+        worker.join()
+
+        self.assertEqual(_drain_nif_editor_ui_updates(updates, limit=2), 2)
+        self.assertEqual([index for index, _ in completed], [0, 1])
+        self.assertTrue(all(thread_id == ui_thread_id for _, thread_id in completed))
+        self.assertEqual(_drain_nif_editor_ui_updates(updates), 1)
+        self.assertEqual([index for index, _ in completed], [0, 1, 2])
+
+    def test_callback_error_does_not_prevent_later_updates(self) -> None:
+        updates: queue.Queue = queue.Queue()
+        completed: list[str] = []
+        errors: list[str] = []
+
+        def _fail() -> None:
+            raise RuntimeError("callback failed")
+
+        updates.put(_fail)
+        updates.put(lambda: completed.append("later"))
+
+        drained = _drain_nif_editor_ui_updates(
+            updates,
+            on_error=lambda exc: errors.append(str(exc)),
+        )
+
+        self.assertEqual(drained, 2)
+        self.assertEqual(errors, ["callback failed"])
+        self.assertEqual(completed, ["later"])
+
+    def test_results_redraw_periodically_during_backlog_and_immediately_when_drained(self) -> None:
+        self.assertFalse(
+            _should_render_nif_editor_results(
+                dirty=True,
+                queue_empty=False,
+                seconds_since_render=0.1,
+            )
+        )
+        self.assertTrue(
+            _should_render_nif_editor_results(
+                dirty=True,
+                queue_empty=False,
+                seconds_since_render=0.25,
+            )
+        )
+        self.assertTrue(
+            _should_render_nif_editor_results(
+                dirty=True,
+                queue_empty=True,
+                seconds_since_render=0.0,
+            )
+        )
+        self.assertFalse(
+            _should_render_nif_editor_results(
+                dirty=False,
+                queue_empty=False,
+                seconds_since_render=1.0,
+            )
+        )
+
+    def test_result_filters_match_status_and_search_fields(self) -> None:
+        row = {
+            "status": "WARN",
+            "file_name": "stone01.nif",
+            "details": "Missing parallax",
+            "preview": "needs patch",
+        }
+        self.assertTrue(
+            _nif_editor_result_matches_filters(
+                row,
+                keyword="STONE01",
+                status_filter="ALL",
+            )
+        )
+        self.assertTrue(
+            _nif_editor_result_matches_filters(
+                row,
+                keyword="parallax",
+                status_filter="WARN",
+            )
+        )
+        self.assertTrue(
+            _nif_editor_result_matches_filters(
+                {
+                    "status": "WARN",
+                    "file_name": "stone01.nif",
+                    "details": "Renderer information only",
+                    "preview": "/mods/stone01.nif",
+                    "conflict_codes": "shader_state.parallax_missing_slot3",
+                },
+                keyword="parallax_missing_slot3",
+                status_filter="ALL",
+            )
+        )
+        self.assertFalse(
+            _nif_editor_result_matches_filters(
+                {
+                    "status": "WARN",
+                    "file_name": "stone01.nif",
+                    "details": "Renderer information only",
+                    "preview": "/mods/stone01.nif",
+                },
+                keyword="parallax_missing_slot3",
+                status_filter="ALL",
+            )
+        )
+        self.assertFalse(
+            _nif_editor_result_matches_filters(
+                row,
+                keyword="",
+                status_filter="FAIL",
+            )
+        )
+        self.assertFalse(
+            _nif_editor_result_matches_filters(
+                row,
+                keyword="absent",
+                status_filter="ALL",
+            )
+        )
+
+    def test_result_pages_slice_and_clamp_indices(self) -> None:
+        rows = [{"file_name": f"mesh-{index}.nif"} for index in range(5)]
+
+        page, page_index, page_count = _slice_nif_editor_result_page(rows, 1, page_size=2)
+
+        self.assertEqual([row["file_name"] for row in page], ["mesh-2.nif", "mesh-3.nif"])
+        self.assertEqual((page_index, page_count), (1, 3))
+
+        last_page, page_index, page_count = _slice_nif_editor_result_page(rows, 99, page_size=2)
+        self.assertEqual([row["file_name"] for row in last_page], ["mesh-4.nif"])
+        self.assertEqual((page_index, page_count), (2, 3))
+
+    def test_empty_results_have_single_empty_page_and_size_is_at_least_one(self) -> None:
+        page, page_index, page_count = _slice_nif_editor_result_page([], -1, page_size=0)
+        self.assertEqual(page, [])
+        self.assertEqual((page_index, page_count), (0, 1))
+
+
+class TestNifEditorOperationControlStates(unittest.TestCase):
+    class FakeControl:
+        def __init__(self, state: str) -> None:
+            self.state = state
+
+        def cget(self, option: str) -> str:
+            if option != "state":
+                raise ValueError(option)
+            return self.state
+
+        def configure(self, *, state: str) -> None:
+            self.state = state
+
+    def test_disables_controls_and_restores_each_original_state(self) -> None:
+        controls = [
+            self.FakeControl("normal"),
+            self.FakeControl("readonly"),
+            self.FakeControl("disabled"),
+        ]
+        saved_states: dict[object, str] = {}
+
+        _set_nif_editor_controls_active(controls, saved_states, active=False)
+        self.assertEqual([control.state for control in controls], ["disabled"] * 3)
+
+        _set_nif_editor_controls_active(controls, saved_states, active=True)
+        self.assertEqual([control.state for control in controls], ["normal", "readonly", "disabled"])
+        self.assertEqual(saved_states, {})
+
+
+class TestNifEditorTargetResolution(unittest.TestCase):
+    def test_single_file_mode_rejects_folder_even_if_it_contains_nifs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "mesh.nif").write_bytes(b"nif")
+            targets, error = resolve_nif_editor_targets(str(root), "file")
+
+        self.assertEqual(targets, [])
+        self.assertIn("Single NIF mode", str(error))
+
+    def test_folder_mode_rejects_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"nif")
+            targets, error = resolve_nif_editor_targets(str(nif_path), "folder")
+
+        self.assertEqual(targets, [])
+        self.assertIn("Folder mode", str(error))
+
+    def test_single_file_mode_accepts_existing_nif(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"nif")
+            targets, error = resolve_nif_editor_targets(str(nif_path), "file")
+
+        self.assertEqual(targets, [nif_path])
+        self.assertIsNone(error)
+
+    def test_folder_mode_finds_nifs_recursively(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            nested = root / "nested"
+            nested.mkdir()
+            (root / "root.nif").write_bytes(b"nif")
+            (nested / "child.nif").write_bytes(b"nif")
+            targets, error = resolve_nif_editor_targets(str(root), "folder")
+
+        self.assertEqual(set(targets), {root / "root.nif", nested / "child.nif"})
+        self.assertIsNone(error)
+
+    def test_missing_target_returns_actionable_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            targets, error = resolve_nif_editor_targets(str(Path(temp_dir) / "missing.nif"), "file")
+
+        self.assertEqual(targets, [])
+        self.assertIn("does not exist", str(error))
+
+
+class TestQtNifValidationScan(unittest.TestCase):
+    def test_scan_status_colors_are_theme_aware(self) -> None:
+        self.assertEqual(_qt_nif_scan_status_color("OK", dark_mode=True), "#7ee2a8")
+        self.assertEqual(_qt_nif_scan_status_color("warn", dark_mode=False), "#8a5a00")
+        self.assertEqual(
+            _qt_nif_scan_status_color("PROBABLY INCOMPATIBLE", dark_mode=True),
+            "#f97316",
+        )
+        self.assertEqual(_qt_nif_scan_status_color("SKIP", dark_mode=True), "#b2bac5")
+        self.assertEqual(_qt_nif_scan_status_color("FAIL", dark_mode=False), "#b42318")
+        self.assertIsNone(_qt_nif_scan_status_color("UNKNOWN", dark_mode=False))
+
+    def test_scan_page_summary_counts_filtered_statuses(self) -> None:
+        summary = _format_qt_nif_scan_page_summary(
+            [
+                {"status": "OK"},
+                {"status": "warn"},
+                {"status": "WARN"},
+                {"status": "PROBABLY INCOMPATIBLE"},
+                {"status": "SKIP", "conflict_codes": "shader_state.slot"},
+                {"status": "FAIL"},
+                {"status": "UNKNOWN"},
+            ],
+            1,
+            3,
+            page_size=3,
+        )
+        self.assertEqual(
+            summary,
+            "Page 2 of 3 · showing 4–6 of 7 filtered · filtered status: OK 1, WARN 2, PROBABLY INCOMPATIBLE 1, SKIP 1, FAIL 1 · conflict-coded NIFs 1 filtered",
+        )
+
+    def test_scan_page_summary_shows_partial_final_page_range(self) -> None:
+        self.assertEqual(
+            _format_qt_nif_scan_page_summary(
+                [{"status": "OK"} for _ in range(6)] + [{"status": "FAIL"}],
+                2,
+                3,
+                page_size=3,
+            ),
+            "Page 3 of 3 · showing 7–7 of 7 filtered · filtered status: OK 6, FAIL 1 · conflict-coded NIFs 0 filtered",
+        )
+
+    def test_scan_page_summary_handles_empty_filtered_results(self) -> None:
+        self.assertEqual(
+            _format_qt_nif_scan_page_summary([], 0, 0),
+            "Page 1 of 1 · showing 0 of 0 filtered · conflict-coded NIFs 0 filtered",
+        )
+
+    def test_scan_page_refresh_cadence_matches_page_size(self) -> None:
+        self.assertFalse(_should_refresh_qt_nif_scan_page(0))
+        self.assertFalse(_should_refresh_qt_nif_scan_page(25))
+        self.assertFalse(_should_refresh_qt_nif_scan_page(199))
+        self.assertTrue(_should_refresh_qt_nif_scan_page(200))
+        self.assertTrue(_should_refresh_qt_nif_scan_page(400))
+        self.assertTrue(_should_refresh_qt_nif_scan_page(8, page_size=4))
+
+    def test_remediation_preview_reports_non_destructive_steps_without_writing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"fixture")
+            validation = SimpleNamespace(
+                conflict_report=[
+                    SimpleNamespace(code="shader_state.envmap_missing_slot5"),
+                    SimpleNamespace(code="shader_state.envmap_missing_slot5"),
+                ]
+            )
+            patch_result = SimpleNamespace(
+                message="Dry run complete.",
+                warnings=["No texture path could be guessed."],
+                errors=[],
+            )
+            with (
+                mock.patch("generate_textures.NIF_PATCHER_AVAILABLE", True),
+                mock.patch("generate_textures.validate_nif_for_parallax", return_value=validation),
+                mock.patch(
+                    "generate_textures.auto_remediate_nif_conflicts",
+                    return_value=(patch_result, ("Would disable environment mapping.",)),
+                ) as remediate,
+            ):
+                preview = _preview_qt_nif_auto_remediation(nif_path)
+
+        self.assertIn("Read-only remediation preview", preview)
+        self.assertIn("No NIF file was written.", preview)
+        self.assertIn("shader_state.envmap_missing_slot5", preview)
+        self.assertEqual(preview.count("Conflict:"), 1)
+        self.assertIn("What this file needs:", preview)
+        self.assertIn("Safe fix path:", preview)
+        self.assertIn("Rollback path:", preview)
+        self.assertIn("Rollback path: no sibling .nif.bak backup found", preview)
+        self.assertIn("Would disable environment mapping.", preview)
+        self.assertIn("Dry run complete.", preview)
+        remediate.assert_called_once_with(
+            nif_path,
+            ["shader_state.envmap_missing_slot5"],
+            target_game="auto",
+            experimental_fallout_write=False,
+            allow_destructive=False,
+            backup=False,
+            dry_run=True,
+        )
+
+    def test_remediation_preview_reports_when_no_conflicts_exist(self) -> None:
+        with (
+            mock.patch("generate_textures.NIF_PATCHER_AVAILABLE", True),
+            mock.patch(
+                "generate_textures.validate_nif_for_parallax",
+                return_value=SimpleNamespace(conflict_report=[]),
+            ),
+            mock.patch("generate_textures.auto_remediate_nif_conflicts") as remediate,
+        ):
+            preview = _preview_qt_nif_auto_remediation("mesh.nif")
+
+        self.assertIn("No conflict-code remediation is available", preview)
+        self.assertIn("What this file needs:", preview)
+        self.assertIn("Rollback path:", preview)
+        self.assertIn("Rollback path: no sibling .nif.bak backup found", preview)
+        remediate.assert_not_called()
+
+    def test_remediation_preview_reports_when_no_safe_steps_are_proposed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            with (
+                mock.patch("generate_textures.NIF_PATCHER_AVAILABLE", True),
+                mock.patch(
+                    "generate_textures.validate_nif_for_parallax",
+                    return_value=SimpleNamespace(
+                        conflict_report=[SimpleNamespace(code="shader_state.unknown")]
+                    ),
+                ),
+                mock.patch(
+                    "generate_textures.auto_remediate_nif_conflicts",
+                    return_value=(None, ()),
+                ),
+            ):
+                preview = _preview_qt_nif_auto_remediation(nif_path)
+
+        self.assertIn("No non-destructive automatic remediation is available.", preview)
+        self.assertIn("Safe fix path:", preview)
+        self.assertIn("Rollback path:", preview)
+        self.assertIn("Rollback path: no sibling .nif.bak backup found", preview)
+
+    def test_remediation_preview_requires_nif_patcher(self) -> None:
+        with mock.patch("generate_textures.NIF_PATCHER_AVAILABLE", False):
+            with self.assertRaisesRegex(RuntimeError, "NIF patcher is unavailable"):
+                _preview_qt_nif_auto_remediation("mesh.nif")
+
+    def test_scan_selected_result_details_include_full_path_and_diagnostics(self) -> None:
+        details = _format_qt_nif_scan_detail(
+            {
+                "status": "WARN",
+                "file_name": "mesh.nif",
+                "preview": "C:/mods/example/meshes/mesh.nif",
+                "details": "Issue: missing texture slot\nConflict: shader_state.flag",
+            }
+        )
+        self.assertIn("Status: WARN", details)
+        self.assertIn("C:/mods/example/meshes/mesh.nif", details)
+        self.assertIn("Issue: missing texture slot\nConflict: shader_state.flag", details)
+
+    def test_scan_validation_rows_include_file_needs_and_fix_paths(self) -> None:
+        validation = SimpleNamespace(
+            shader_count=2,
+            ready_count=1,
+            needs_patch_count=1,
+            skip_count=0,
+            detected_game_profile="skyrim",
+            has_havok=False,
+            skip_reasons=["Block 0: skinned/animated mesh (NiSkinInstance) — parallax on skinned geometry causes CTD in Skyrim SE"],
+            issues=["Block 1: Texture slot 5 is filled ('textures\\architecture\\stone_m.dds') but SLSF1_Environment_Mapping is not enabled."],
+            suggestions=["Enable environment mapping in BSLightingShaderProperty or clear slot 5 if this mesh should not be reflective."],
+            renderer_verdicts={
+                "vanilla": "Vanilla parallax: Mesh-side setup looks ready.",
+                "enb": "ENB complex material/POM: Won't work yet: slot 5 is missing.",
+                "community_shaders": "Community Shaders parallax: Mesh-side setup looks ready.",
+                "truepbr": "TruePBR: Mesh-side setup looks ready, but TruePBR still needs a matching JSON entry that this scan cannot verify.",
+            },
+            conflict_report=[
+                SimpleNamespace(
+                    code="shader_state.envmap_missing_slot5",
+                    count=2,
+                    game_profile="skyrim",
+                    shader_layout="real",
+                    examples=("Block 1: slot 5 is filled without environment mapping.",),
+                    suggested_actions=("Enable environment mapping", "Use a matching _m.dds mask."),
+                )
+            ],
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"fixture")
+            nif_path.with_suffix(".nif.bak").write_bytes(b"backup")
+            with mock.patch("generate_textures.validate_nif_for_parallax", return_value=validation):
+                rows, cancelled = _scan_nif_validation_rows([nif_path])
+
+        self.assertFalse(cancelled)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["status"], "WARN")
+        details = rows[0]["details"]
+        self.assertIn("What this file needs:", details)
+        self.assertIn("Slot / workflow state:", details)
+        self.assertIn("Shader-family fit:", details)
+        self.assertIn("Probably incompatible", details)
+        self.assertIn("Safe fix path:", details)
+        self.assertIn("Experimental fix path:", details)
+        self.assertIn("Grouped conflict codes:", details)
+        self.assertIn("examples:", details)
+        self.assertIn("fix actions:", details)
+        self.assertIn("Rollback path: sibling backup found", details)
+        self.assertEqual(rows[0]["conflict_codes"], "shader_state.envmap_missing_slot5")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"fixture")
+            with mock.patch("generate_textures.validate_nif_for_parallax", return_value=validation):
+                rows, cancelled = _scan_nif_validation_rows(
+                    [nif_path],
+                    include_conflict_report=False,
+                )
+
+        self.assertFalse(cancelled)
+        self.assertNotIn("Grouped conflict codes:", rows[0]["details"])
+        self.assertIn("What this file needs:", rows[0]["details"])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"fixture")
+            with mock.patch("generate_textures.validate_nif_for_parallax", return_value=validation):
+                rows, cancelled = _scan_nif_validation_rows(
+                    [nif_path],
+                    include_conflict_examples=False,
+                )
+
+        self.assertFalse(cancelled)
+        self.assertIn("Grouped conflict codes:", rows[0]["details"])
+        self.assertIn("fix actions:", rows[0]["details"])
+        self.assertNotIn("examples:", rows[0]["details"])
+
+    def test_scan_validation_rows_mark_fully_ready_uncertain_results_as_probably_incompatible(self) -> None:
+        validation = SimpleNamespace(
+            shader_count=1,
+            ready_count=1,
+            needs_patch_count=0,
+            skip_count=0,
+            detected_game_profile="skyrim",
+            has_havok=False,
+            skip_reasons=[],
+            issues=[],
+            suggestions=[],
+            renderer_verdicts={
+                "truepbr": "TruePBR: Mesh-side setup looks ready, but TruePBR still needs a matching JSON entry that this scan cannot verify.",
+            },
+            conflict_report=[],
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "mesh.nif"
+            nif_path.write_bytes(b"fixture")
+            with mock.patch("generate_textures.validate_nif_for_parallax", return_value=validation):
+                rows, cancelled = _scan_nif_validation_rows([nif_path])
+
+        self.assertFalse(cancelled)
+        self.assertEqual(rows[0]["status"], "PROBABLY INCOMPATIBLE")
+        self.assertIn("Probably incompatible", rows[0]["details"])
+        self.assertIn("Rollback path: no sibling .nif.bak backup found", rows[0]["details"])
+
+    def test_scan_selected_result_details_have_empty_selection_guidance(self) -> None:
+        self.assertIn("Select a scan result", _format_qt_nif_scan_detail(None))
+
+    def test_scan_csv_export_round_trips_full_diagnostics_and_paths(self) -> None:
+        rows = [
+            {
+                "status": "WARN",
+                "file_name": "mesh, variant.nif",
+                "preview": "/mods/mesh, variant.nif",
+                "details": "Issue: missing slot\nConflict: shader_state.flag",
+                "conflict_codes": "shader_state.flag\nshader_state.missing_texture",
+                "extra": "ignored",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "scan.csv"
+            exported_count = _write_qt_nif_scan_csv(csv_path, rows)
+            with csv_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
+                exported_rows = list(csv.DictReader(csv_file))
+
+        self.assertEqual(exported_count, 1)
+        self.assertEqual(
+            exported_rows,
+            [
+                {
+                    "status": "WARN",
+                    "file_name": "mesh, variant.nif",
+                    "preview": "/mods/mesh, variant.nif",
+                    "details": "Issue: missing slot\nConflict: shader_state.flag",
+                    "conflict_codes": "shader_state.flag\nshader_state.missing_texture",
+                }
+            ],
+        )
+
+    def test_scan_csv_export_writes_headers_for_empty_results(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            csv_path = Path(temp_dir) / "empty.csv"
+            self.assertEqual(_write_qt_nif_scan_csv(csv_path, []), 0)
+            with csv_path.open("r", encoding="utf-8-sig", newline="") as csv_file:
+                reader = csv.reader(csv_file)
+                self.assertEqual(
+                    next(reader),
+                    ["status", "file_name", "preview", "details", "conflict_codes"],
+                )
+                self.assertEqual(list(reader), [])
+
+    def test_scan_rows_classify_results_and_include_diagnostic_context(self) -> None:
+        validations = [
+            SimpleNamespace(
+                shader_count=2,
+                ready_count=2,
+                skip_count=0,
+                detected_game_profile="fallout4",
+                has_havok=False,
+                issues=[],
+                conflict_report=[SimpleNamespace(code="shader_state.flag", count=1)],
+            ),
+            SimpleNamespace(
+                shader_count=2,
+                ready_count=1,
+                skip_count=0,
+                detected_game_profile="skyrim",
+                has_havok=True,
+                issues=["missing parallax slot"],
+                conflict_report=[],
+            ),
+            SimpleNamespace(
+                shader_count=0,
+                ready_count=0,
+                skip_count=0,
+                detected_game_profile="unknown",
+                has_havok=False,
+                issues=[],
+                conflict_report=[],
+            ),
+        ]
+        progress: list[tuple[int, int, str]] = []
+        nif_paths = [Path("ready.nif"), Path("warn.nif"), Path("empty.nif"), Path("bad.nif")]
+        with mock.patch(
+            "generate_textures.validate_nif_for_parallax",
+            side_effect=[*validations, OSError("corrupt mesh")],
+        ):
+            rows, cancelled = _scan_nif_validation_rows(
+                nif_paths,
+                on_progress=lambda *values: progress.append(values),
+            )
+        self.assertFalse(cancelled)
+        self.assertEqual([row["status"] for row in rows], ["OK", "WARN", "SKIP", "FAIL"])
+        self.assertIn("Detected profile: fallout4", rows[0]["details"])
+        self.assertIn("Conflict shader_state.flag: 1", rows[0]["details"])
+        self.assertIn("Havok animation graph", rows[1]["details"])
+        self.assertIn("missing parallax slot", rows[1]["details"])
+        self.assertIn("No BSLightingShaderProperty", rows[2]["details"])
+        self.assertIn("corrupt mesh", rows[3]["details"])
+        self.assertEqual(len(progress), len(nif_paths))
+        self.assertEqual(progress[-1][:2], (4, 4))
+
+    def test_scan_can_cancel_after_current_mesh_and_preserve_partial_rows(self) -> None:
+        cancelled = [False]
+        emitted: list[dict[str, str]] = []
+        progress: list[tuple[int, int, str]] = []
+        validation = SimpleNamespace(
+            shader_count=1,
+            ready_count=1,
+            skip_count=0,
+            detected_game_profile="skyrim",
+            has_havok=False,
+            issues=[],
+            conflict_report=[],
+        )
+
+        def request_cancel_after_row(row: dict[str, str]) -> None:
+            emitted.append(row)
+            cancelled[0] = True
+
+        with mock.patch("generate_textures.validate_nif_for_parallax", return_value=validation):
+            rows, was_cancelled = _scan_nif_validation_rows(
+                [Path("one.nif"), Path("two.nif"), Path("three.nif")],
+                is_cancelled=lambda: cancelled[0],
+                on_progress=lambda *values: progress.append(values),
+                on_row=request_cancel_after_row,
+            )
+        self.assertTrue(was_cancelled)
+        self.assertEqual([row["file_name"] for row in rows], ["one.nif"])
+        self.assertEqual(emitted, rows)
+        self.assertEqual(len(progress), 1)
 
 
 def _flat_dark_image() -> Image.Image:
@@ -303,8 +1225,214 @@ def _shield_art_image() -> Image.Image:
 
 
 class GenerateTexturesTests(unittest.TestCase):
-    def test_app_version_is_0_7(self) -> None:
-        self.assertEqual(APP_VERSION, "0.7")
+    def test_compute_safe_startup_geometry_scales_to_screen_size(self) -> None:
+        default_width, default_height, min_width, min_height = _compute_safe_startup_geometry(1920, 1080)
+        self.assertEqual(default_width, 960)
+        self.assertEqual(default_height, 700)
+        self.assertEqual(min_width, 720)
+        self.assertEqual(min_height, 520)
+
+        narrow_width, narrow_height, narrow_min_width, narrow_min_height = _compute_safe_startup_geometry(800, 600)
+        self.assertEqual(narrow_width, 720)
+        self.assertEqual(narrow_height, 520)
+        self.assertEqual(narrow_min_width, 720)
+        self.assertEqual(narrow_min_height, 520)
+        self.assertLessEqual(narrow_width, 800)
+        self.assertLessEqual(narrow_height, 600)
+        self.assertLessEqual(narrow_min_width, narrow_width)
+        self.assertLessEqual(narrow_min_height, narrow_height)
+
+    def test_qt_field_label_adds_mnemonic_and_focus_buddy(self) -> None:
+        class FakeLabel:
+            text = ""
+            buddy = None
+
+            def setText(self, text: str) -> None:
+                self.text = text
+
+            def setBuddy(self, control: object) -> None:
+                self.buddy = control
+
+        label = FakeLabel()
+        control = object()
+        _configure_qt_field_label(label, "&Input file or folder", control)
+        self.assertEqual(label.text, "&Input file or folder")
+        self.assertIs(label.buddy, control)
+
+    def test_qt_output_groups_cover_each_map_choice_once(self) -> None:
+        flattened = [key for _, keys in _QT_OUTPUT_GROUPS for key in keys]
+        self.assertEqual(len(flattened), 12)
+        self.assertEqual(len(flattened), len(set(flattened)))
+        self.assertEqual(
+            set(flattened),
+            {
+                "diffuse",
+                "normal",
+                "parallax",
+                "glow",
+                "environment_mask",
+                "rmaos",
+                "complex",
+                "wetness_mask",
+                "snow_mask",
+                "ao",
+                "roughness",
+                "pbr_texture_sets",
+            },
+        )
+        self.assertEqual(_QT_OUTPUT_GROUPS[0][0], "Core maps")
+        self.assertIn("standalone", _QT_OUTPUT_GROUPS[1][0].lower())
+
+    def test_qt_input_picker_routes_file_and_folder_actions_and_preserves_cancel(self) -> None:
+        selections = []
+        applied = []
+
+        result = _choose_qt_input_path(
+            select_file=lambda: selections.append("file") or "/textures/a.dds",
+            select_folder=lambda: selections.append("folder") or "/textures/batch",
+            set_path=applied.append,
+        )
+        self.assertTrue(result)
+        self.assertEqual(selections, ["file"])
+        self.assertEqual(applied, ["/textures/a.dds"])
+
+        result = _choose_qt_input_path(
+            select_file=lambda: selections.append("unexpected file") or "",
+            select_folder=lambda: selections.append("folder") or "/textures/batch",
+            set_path=applied.append,
+            folder=True,
+        )
+        self.assertTrue(result)
+        self.assertEqual(selections[-1], "folder")
+        self.assertEqual(applied[-1], "/textures/batch")
+
+        result = _choose_qt_input_path(
+            select_file=lambda: "",
+            select_folder=lambda: "",
+            set_path=applied.append,
+            folder=True,
+        )
+        self.assertFalse(result)
+        self.assertEqual(applied, ["/textures/a.dds", "/textures/batch"])
+
+    def _skip_unavailable_tk_display(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_apply_persisted_gui_state"):
+            self.skipTest("Tk GUI is unavailable in this environment.")
+        if sys.platform not in {"win32", "darwin"} and not os.environ.get("DISPLAY"):
+            self.skipTest("Tk GUI tests require a display.")
+
+    def test_app_version_is_0_9(self) -> None:
+        self.assertEqual(APP_VERSION, "0.9")
+
+    def test_tk_main_shortcuts_dispatch_actions_and_cancel_only_during_processing(self) -> None:
+        class FakeRoot:
+            def __init__(self) -> None:
+                self.bindings = {}
+
+            def bind(self, sequence, callback, add=None) -> None:
+                self.bindings[sequence] = callback
+
+        root = FakeRoot()
+        calls = []
+        processing = [False]
+        _bind_tk_main_window_shortcuts(
+            root,
+            open_file=lambda: calls.append("file"),
+            open_folder=lambda: calls.append("folder"),
+            generate=lambda: calls.append("generate"),
+            cancel=lambda: calls.append("cancel"),
+            is_processing=lambda: processing[0],
+        )
+        self.assertEqual(set(root.bindings), {
+            "<Control-o>",
+            "<Control-Shift-o>",
+            "<Control-Return>",
+            "<Escape>",
+        })
+        for sequence, expected_action in (
+            ("<Control-o>", "file"),
+            ("<Control-Shift-o>", "folder"),
+            ("<Control-Return>", "generate"),
+        ):
+            self.assertEqual(root.bindings[sequence](object()), "break")
+            self.assertEqual(calls[-1], expected_action)
+
+        self.assertEqual(root.bindings["<Escape>"](object()), "break")
+        self.assertNotIn("cancel", calls)
+        processing[0] = True
+        self.assertEqual(root.bindings["<Escape>"](object()), "break")
+        self.assertEqual(calls[-1], "cancel")
+
+    def test_tk_quick_start_shortcuts_dispatch_safe_preset_and_hide_actions(self) -> None:
+        class FakeRoot:
+            def __init__(self) -> None:
+                self.bindings = {}
+
+            def bind(self, sequence, callback, add=None) -> None:
+                self.bindings[sequence] = callback
+
+        root = FakeRoot()
+        calls = []
+        _bind_tk_quick_start_shortcuts(
+            root,
+            apply_preset=lambda profile_key: calls.append(profile_key),
+            dismiss=lambda: calls.append("dismiss"),
+        )
+        self.assertEqual(set(root.bindings), {
+            "<Control-1>",
+            "<Control-2>",
+            "<Control-3>",
+            "<Control-4>",
+            "<Control-Shift-h>",
+        })
+        for sequence, expected_action in (
+            ("<Control-1>", "vanilla"),
+            ("<Control-2>", "enb"),
+            ("<Control-3>", "community_shaders"),
+            ("<Control-4>", "truepbr"),
+        ):
+            self.assertEqual(root.bindings[sequence](object()), "break")
+            self.assertEqual(calls[-1], expected_action)
+
+        self.assertEqual(root.bindings["<Control-Shift-h>"](object()), "break")
+        self.assertEqual(calls[-1], "dismiss")
+
+    def test_theme_text_colors_meet_wcag_aa_contrast(self) -> None:
+        def relative_luminance(color: str) -> float:
+            channels = [int(color[index:index + 2], 16) / 255 for index in (1, 3, 5)]
+            linear = [
+                channel / 12.92 if channel <= 0.04045 else ((channel + 0.055) / 1.055) ** 2.4
+                for channel in channels
+            ]
+            return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+
+        for theme in (_LIGHT_THEME, _DARK_THEME, _HIGH_CONTRAST_THEME):
+            background = relative_luminance(theme["bg"])
+            for key in ("muted_fg", "info_fg", "success_fg", "warning_fg", "error_fg"):
+                foreground = relative_luminance(theme[key])
+                contrast = (max(background, foreground) + 0.05) / (min(background, foreground) + 0.05)
+                with self.subTest(theme=theme["bg"], color=key):
+                    self.assertGreaterEqual(contrast, 4.5)
+
+    def test_tk_muted_and_status_styles_follow_light_and_dark_themes(self) -> None:
+        self._skip_unavailable_tk_display()
+        gui = TextureGeneratorGUI()
+        try:
+            style = gui.root.tk.call
+            with mock.patch("generate_textures.save_gui_state"):
+                gui._set_theme_mode("light")
+                self.assertEqual(style("ttk::style", "lookup", "Muted.TLabel", "-foreground"), _LIGHT_THEME["muted_fg"])
+                self.assertEqual(style("ttk::style", "lookup", "Status.Error.TLabel", "-foreground"), _LIGHT_THEME["error_fg"])
+
+                gui._set_theme_mode("dark")
+                self.assertEqual(style("ttk::style", "lookup", "Muted.TLabel", "-foreground"), _DARK_THEME["muted_fg"])
+                self.assertEqual(style("ttk::style", "lookup", "Status.Error.TLabel", "-foreground"), _DARK_THEME["error_fg"])
+
+                gui._set_theme_mode("high_contrast")
+                self.assertEqual(style("ttk::style", "lookup", "Muted.TLabel", "-foreground"), _HIGH_CONTRAST_THEME["muted_fg"])
+                self.assertEqual(style("ttk::style", "lookup", "Status.Error.TLabel", "-foreground"), _HIGH_CONTRAST_THEME["error_fg"])
+        finally:
+            gui.root.destroy()
 
     def test_normalize_gui_state_turns_off_individual_auto_flags_when_master_off(self) -> None:
         normalized = _normalize_gui_state(
@@ -339,13 +1467,1096 @@ class GenerateTexturesTests(unittest.TestCase):
         normalized = _normalize_gui_state({"use_custom_output": True, "output_path": ""})
         self.assertFalse(bool(normalized["use_custom_output"]))
 
+    def test_normalize_gui_state_tracks_theme_mode(self) -> None:
+        normalized = _normalize_gui_state({"theme_mode": "High Contrast", "dark_mode": False})
+        self.assertEqual(str(normalized["theme_mode"]), "high_contrast")
+        self.assertTrue(bool(normalized["dark_mode"]))
+        fallback = _normalize_gui_state({"dark_mode": True})
+        self.assertEqual(str(fallback["theme_mode"]), "dark")
+
+    def test_normalize_gui_state_preserves_last_mod_context_memory(self) -> None:
+        normalized = _normalize_gui_state(
+            {
+                "last_mod_manager": "  Mod Organizer 2  ",
+                "last_mod_profile": "  Main  ",
+                "last_renderer": "  community_shaders  ",
+                "last_output_target": "  next to input  ",
+            }
+        )
+        self.assertEqual(normalized["last_mod_manager"], "Mod Organizer 2")
+        self.assertEqual(normalized["last_mod_profile"], "Main")
+        self.assertEqual(normalized["last_renderer"], "community_shaders")
+        self.assertEqual(normalized["last_output_target"], "next to input")
+
+    def test_normalize_gui_state_preserves_profile_setup_memory(self) -> None:
+        normalized = _normalize_gui_state(
+            {
+                "last_profile_setup_key": "Mod Organizer 2::Main::Architecture",
+                "profile_setup_memory": {
+                    "Mod Organizer 2::Main::Architecture": {
+                        "render_profile": "community shaders",
+                        "output_target": "D:/Skyrim/Output",
+                        "use_custom_output": True,
+                        "workflow_mode": "advanced",
+                        "target_game": "fallout4",
+                    }
+                }
+            }
+        )
+        self.assertEqual(normalized["last_profile_setup_key"], "Mod Organizer 2::Main::Architecture")
+        memory = normalized["profile_setup_memory"]
+        self.assertIn("Mod Organizer 2::Main::Architecture", memory)
+        entry = memory["Mod Organizer 2::Main::Architecture"]
+        self.assertEqual(entry["render_profile"], "community_shaders")
+        self.assertEqual(entry["output_target"], "D:/Skyrim/Output")
+        self.assertTrue(entry["use_custom_output"])
+        self.assertEqual(entry["workflow_mode"], "advanced")
+        self.assertEqual(entry["target_game"], "fallout4")
+
     def test_load_gui_state_defaults_when_file_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             state = load_gui_state(Path(temp_dir) / "missing-state.json")
         self.assertEqual(state["input_path"], "")
         self.assertEqual(state["output_path"], "")
+        self.assertEqual(state["last_mod_manager"], "")
+        self.assertEqual(state["last_mod_profile"], "")
+        self.assertEqual(state["last_renderer"], "")
+        self.assertEqual(state["last_output_target"], "")
+        self.assertEqual(state["profile_setup_memory"], {})
         self.assertFalse(bool(state["dark_mode"]))
+        self.assertEqual(str(state["theme_mode"]), "light")
+        self.assertEqual(str(state["workflow_mode"]), "beginner")
+        self.assertTrue(bool(state["simplified_main_layout"]))
+        self.assertTrue(bool(state["show_startup_onboarding"]))
         self.assertTrue(bool(state["auto_suggestions"]))
+        self.assertFalse(bool(state["qt_show_advanced_map_strengths"]))
+        self.assertFalse(bool(state["qt_show_truepbr_sidecar_settings"]))
+
+    def test_build_mod_manager_context_hint_includes_remembered_setup_when_current_detection_missing(self) -> None:
+        message = build_mod_manager_context_hint(
+            None,
+            last_mod_manager="Mod Organizer 2",
+            last_mod_profile="Main",
+            last_renderer="community_shaders",
+            last_output_target="next to input",
+        )
+        self.assertIn("not detected", message.lower())
+        self.assertIn("Mod Organizer 2", message)
+        self.assertIn("Main", message)
+        self.assertIn("renderer Community Shaders", message)
+        self.assertIn("output target next to input", message)
+
+    def test_build_mod_manager_context_hint_includes_truepbr_version_warning(self) -> None:
+        context = ModManagerContext(
+            manager="Mod Organizer 2",
+            profile_name="Main",
+            renderer_version_hints=("TruePBR 0.9.0",),
+        )
+        message = build_mod_manager_context_hint(context)
+        self.assertIn("TruePBR version hint(s) TruePBR 0.9.0", message)
+        self.assertIn("probably incompatible", message)
+
+    def test_build_mod_manager_profile_setup_hint_tracks_current_profile_setup(self) -> None:
+        hint = build_mod_manager_profile_setup_hint(
+            {
+                "Mod Organizer 2::Main": {
+                    "render_profile": "community_shaders",
+                    "output_target": "D:/Skyrim/Output",
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                }
+            },
+            manager="Mod Organizer 2",
+            profile="Main",
+        )
+        self.assertIn("renderer Community Shaders", hint)
+        self.assertIn("output D:/Skyrim/Output", hint)
+        self.assertIn("workflow mode Advanced", hint)
+        self.assertIn("target game fallout4", hint)
+        message = build_mod_manager_context_hint(None, profile_setup_hint=hint)
+        self.assertIn("Remembered setup for this profile", message)
+        self.assertIn(hint, message)
+
+    def test_build_mod_manager_profile_setup_hint_prefers_selected_named_preset(self) -> None:
+        hint = build_mod_manager_profile_setup_hint(
+            {
+                "Mod Organizer 2::Main": {
+                    "render_profile": "vanilla",
+                    "output_target": "next to input",
+                    "use_custom_output": False,
+                    "workflow_mode": "standard",
+                    "target_game": "skyrim",
+                },
+                "Mod Organizer 2::Main::Architecture": {
+                    "render_profile": "community_shaders",
+                    "output_target": "D:/Skyrim/Output",
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                },
+            },
+            manager="Mod Organizer 2",
+            profile="Main",
+            selected_key="Mod Organizer 2::Main::Architecture",
+        )
+        self.assertIn("preset Architecture", hint)
+        self.assertIn("renderer Community Shaders", hint)
+        self.assertIn("output D:/Skyrim/Output", hint)
+
+    def test_startup_guidance_prefers_saved_setup_then_detected_folder_then_suggestion(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            detected_folder = Path(temp_dir) / "mods" / "Texture Pack"
+            detected_folder.mkdir(parents=True)
+            saved_state = {
+                "Mod Organizer 2::Main": {
+                    "render_profile": "community_shaders",
+                    "output_target": "D:/Skyrim/Output",
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                }
+            }
+            context = ModManagerContext(
+                manager="Mod Organizer 2",
+                profile_name="Main",
+                loaded_texture_dirs=(detected_folder,),
+            )
+            restore_action = resolve_startup_guidance_action(
+                context,
+                profile_setup_memory=saved_state,
+                current_render_profile="custom",
+                current_workflow_mode="beginner",
+                current_output_target="",
+                current_use_custom_output=False,
+                current_target_game="skyrim",
+            )
+            self.assertEqual(restore_action, "restore_profile_setup")
+            restore_text = build_startup_guidance_text(
+                context,
+                profile_setup_memory=saved_state,
+                selected_render_profile="custom",
+                current_workflow_mode="beginner",
+                current_output_target="",
+                current_use_custom_output=False,
+                current_target_game="skyrim",
+            )
+            self.assertIn("Recommended next step: restore the remembered setup", restore_text)
+            self.assertIn("Compare against the sibling .nif.bak", restore_text)
+            self.assertIn("Why not the others:", restore_text)
+
+            detected_action = resolve_startup_guidance_action(
+                context,
+                profile_setup_memory={},
+                input_path="",
+            )
+            self.assertEqual(detected_action, "pick_detected_mod_folder")
+            detected_text = build_startup_guidance_text(
+                context,
+                profile_setup_memory={},
+                input_path="",
+            )
+            self.assertIn("use the detected mod folder first", detected_text)
+
+            suggested_source = Path(temp_dir) / "textures" / "enb" / "stone_msn.dds"
+            suggested_action = resolve_startup_guidance_action(
+                None,
+                profile_setup_memory={},
+                input_path=str(suggested_source),
+            )
+            self.assertEqual(suggested_action, "apply_suggested_preset")
+            suggested_text = build_startup_guidance_text(
+                None,
+                profile_setup_memory={},
+                input_path=str(suggested_source),
+                selected_render_profile="community_shaders",
+            )
+            self.assertIn("apply the suggested renderer family", suggested_text)
+            self.assertIn("Why this was recommended:", suggested_text)
+            self.assertIn("Why not the others:", suggested_text)
+
+    def test_startup_guidance_action_respects_selected_named_preset(self) -> None:
+        memory = {
+            "Mod Organizer 2::Main": {
+                "render_profile": "vanilla",
+                "output_target": "next to input",
+                "use_custom_output": False,
+                "workflow_mode": "standard",
+                "target_game": "skyrim",
+            },
+            "Mod Organizer 2::Main::Architecture": {
+                "render_profile": "community_shaders",
+                "output_target": "D:/Skyrim/Output",
+                "use_custom_output": True,
+                "workflow_mode": "advanced",
+                "target_game": "fallout4",
+            },
+        }
+        action = resolve_startup_guidance_action(
+            None,
+            profile_setup_memory=memory,
+            selected_profile_setup_key="Mod Organizer 2::Main::Architecture",
+            last_mod_manager="Mod Organizer 2",
+            last_mod_profile="Main",
+            current_render_profile="community_shaders",
+            current_workflow_mode="advanced",
+            current_output_target="D:/Skyrim/Output",
+            current_use_custom_output=True,
+            current_target_game="fallout4",
+        )
+        self.assertEqual(action, "browse_input_folder")
+
+    def test_profile_setup_memory_items_include_descriptive_labels(self) -> None:
+        items = _profile_setup_memory_items(
+            {
+                "Mod Organizer 2::Main": {
+                    "render_profile": "truepbr",
+                    "output_target": "D:/Skyrim/Output",
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                },
+                "Mod Organizer 2::Main::Architecture": {
+                    "render_profile": "truepbr",
+                    "output_target": "D:/Skyrim/Output",
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                },
+                "Mod Organizer 2::Alt": {
+                    "render_profile": "community_shaders",
+                    "output_target": "",
+                    "use_custom_output": False,
+                    "workflow_mode": "beginner",
+                    "target_game": "skyrim",
+                },
+            }
+        )
+        self.assertEqual(
+            [key for key, _ in items],
+            ["Mod Organizer 2::Alt", "Mod Organizer 2::Main", "Mod Organizer 2::Main::Architecture"],
+        )
+        self.assertIn("renderer Community Shaders", items[0][1])
+        self.assertIn("workflow mode Beginner", items[0][1])
+        self.assertIn("current setup", items[1][1])
+        self.assertIn("renderer Community Shaders PBR", items[1][1])
+        self.assertIn("preset Architecture", items[2][1])
+        self.assertIn("output D:/Skyrim/Output", items[1][1])
+        self.assertIn("workflow mode Advanced", items[1][1])
+        self.assertIn("target game fallout4", items[1][1])
+
+    def test_qt_generation_settings_merge_with_shared_gui_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "source.dds"
+            input_path.write_bytes(b"source")
+            merged = _merge_qt_generation_gui_state(
+                {"dark_mode": True, "show_advanced_workflow_outputs": True, "workflow_mode": "standard"},
+                input_path=str(input_path),
+                output_path=str(Path(temp_dir) / "out"),
+                include_diffuse=False,
+                include_normal=True,
+                include_parallax=False,
+                include_glow=True,
+                include_environment_mask=True,
+                resume_mode="resume",
+                checkpoint_path=str(Path(temp_dir) / "checkpoint.json"),
+                include_rmaos=True,
+                include_pbr_texture_sets=True,
+                include_complex=True,
+                include_wetness_mask=True,
+                include_snow_mask=True,
+                include_ao=True,
+                include_roughness=True,
+                render_profile="terrain",
+                complex_format="cm",
+                env_mask_mode="complex",
+                parallax_mode="occlusion",
+                normal_strength=3.25,
+                parallax_strength=2.5,
+                glow_threshold=140,
+                environment_mask_strength=1.8,
+                rmaos_strength=2.1,
+                complex_strength=1.7,
+                wetness_mask_strength=1.3,
+                snow_mask_strength=0.8,
+                ao_strength=2.2,
+                roughness_strength=1.4,
+                truepbr_sidecar_overrides_enabled=True,
+                truepbr_sidecar_parallax=False,
+                truepbr_sidecar_displacement_scale=0.14,
+                truepbr_sidecar_specular_level=0.07,
+                truepbr_sidecar_roughness_scale=1.3,
+                dark_mode=True,
+                theme_mode="high_contrast",
+                ui_scale=1.3,
+                workflow_mode="advanced",
+                show_startup_onboarding=False,
+                show_advanced_map_strengths=True,
+                show_truepbr_sidecar_settings=False,
+                target_game="fo4",
+            )
+
+        self.assertEqual(merged["input_path"], str(input_path))
+        self.assertEqual(merged["output_path"], str(Path(temp_dir) / "out"))
+        self.assertTrue(bool(merged["dark_mode"]))
+        self.assertEqual(str(merged["theme_mode"]), "high_contrast")
+        self.assertTrue(bool(merged["show_advanced_workflow_outputs"]))
+        self.assertEqual(str(merged["workflow_mode"]), "advanced")
+        self.assertFalse(bool(merged["show_startup_onboarding"]))
+        self.assertEqual(str(merged["target_game"]), "fallout4")
+        self.assertTrue(bool(merged["qt_show_advanced_map_strengths"]))
+        self.assertFalse(bool(merged["qt_show_truepbr_sidecar_settings"]))
+        self.assertFalse(bool(merged["include_diffuse"]))
+        self.assertTrue(bool(merged["include_normal"]))
+        self.assertFalse(bool(merged["include_parallax"]))
+        self.assertTrue(bool(merged["include_glow"]))
+        self.assertTrue(bool(merged["include_environment_mask"]))
+        self.assertTrue(bool(merged["include_rmaos"]))
+        self.assertTrue(bool(merged["include_pbr_texture_sets"]))
+        self.assertTrue(bool(merged["include_complex"]))
+        self.assertTrue(bool(merged["include_wetness_mask"]))
+        self.assertTrue(bool(merged["include_snow_mask"]))
+        self.assertTrue(bool(merged["include_ao"]))
+        self.assertTrue(bool(merged["include_roughness"]))
+        self.assertEqual(merged["qt_render_profile"], "terrain")
+        self.assertEqual(merged["render_profile"], "custom")
+        self.assertEqual(merged["complex_format"], "cm")
+        self.assertEqual(merged["env_mask_mode"], "complex")
+        self.assertEqual(merged["parallax_mode"], "occlusion (ENB/POM)")
+        self.assertEqual(merged["normal_strength"], 3.25)
+        self.assertEqual(merged["parallax_strength"], 2.5)
+        self.assertEqual(merged["glow_threshold"], 140)
+        self.assertEqual(merged["environment_mask_strength"], 1.8)
+        self.assertEqual(merged["rmaos_strength"], 2.1)
+        self.assertEqual(merged["complex_strength"], 1.7)
+        self.assertAlmostEqual(merged["wetness_mask_strength"], 1.3)
+        self.assertAlmostEqual(merged["snow_mask_strength"], 0.8)
+        self.assertAlmostEqual(merged["ao_strength"], 2.2)
+        self.assertAlmostEqual(merged["roughness_strength"], 1.4)
+        self.assertTrue(merged["truepbr_sidecar_overrides_enabled"])
+        self.assertFalse(merged["truepbr_sidecar_parallax"])
+        self.assertAlmostEqual(merged["truepbr_sidecar_displacement_scale"], 0.14)
+        self.assertAlmostEqual(merged["truepbr_sidecar_specular_level"], 0.07)
+        self.assertAlmostEqual(merged["truepbr_sidecar_roughness_scale"], 1.3)
+        self.assertTrue(bool(merged["dark_mode"]))
+        self.assertAlmostEqual(float(merged["ui_scale"]), 1.3)
+        self.assertEqual(merged["batch_resume_mode"], "resume")
+        self.assertEqual(merged["batch_checkpoint_path"], str(Path(temp_dir) / "checkpoint.json"))
+
+    def test_qt_checkpoint_generation_options_ignore_paths_and_preview_only_settings(self) -> None:
+        options = {
+            "input_path": "/input",
+            "output_dir": "/output",
+            "checkpoint_path": "/state.json",
+            "resume_mode": "resume",
+            "lazy_preview": True,
+            "force_full_preview": False,
+            "include_normal": True,
+            "normal_strength": 2.0,
+        }
+        self.assertEqual(
+            _qt_checkpoint_generation_options(options),
+            {"include_normal": True, "normal_strength": 2.0},
+        )
+
+    def test_qt_resume_mode_guidance_explains_checkpoint_matching(self) -> None:
+        resume_guidance = _qt_resume_mode_guidance("resume").lower()
+        self.assertIn("source fingerprint", resume_guidance)
+        self.assertIn("input", resume_guidance)
+        self.assertIn("output folder", resume_guidance)
+        self.assertIn("outputs still exist", resume_guidance)
+        self.assertIn("generation settings", resume_guidance)
+        self.assertIn("regenerated", resume_guidance)
+        self.assertEqual(
+            _qt_resume_mode_guidance("start_fresh"),
+            "Start fresh ignores prior checkpoint entries.",
+        )
+
+    def test_qt_resume_checkpoint_requires_matching_roots_and_generation_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_root = root / "input"
+            output_root = root / "output"
+            options = {"include_normal": True, "normal_strength": 2.0}
+            source_key = str((input_root / "done.dds").resolve())
+            recorded_output = output_root / "done_n.dds"
+            recorded_output.parent.mkdir(parents=True)
+            recorded_output.write_bytes(b"generated")
+            payload = {
+                "input_root": str(input_root.resolve()),
+                "output_root": str(output_root.resolve()),
+                "generation_options": options,
+                "completed_success_files": [str((input_root / "done.dds").resolve()), 3],
+                "completed_file_fingerprints": {
+                    source_key: {
+                        "size_bytes": 42,
+                        "mtime_ns": 1234,
+                        "sha256": "a" * 64,
+                    }
+                },
+                "completed_file_outputs": {
+                    source_key: {"normal": str(recorded_output.resolve())},
+                },
+            }
+            source_fingerprints = {
+                source_key: {
+                    "size_bytes": 42,
+                    "mtime_ns": 1234,
+                    "sha256": "a" * 64,
+                }
+            }
+            self.assertEqual(
+                _qt_resume_completed_files(
+                    payload,
+                    input_root=input_root,
+                    output_dir=output_root,
+                    generation_options=options,
+                    source_file_fingerprints=source_fingerprints,
+                ),
+                {str((input_root / "done.dds").resolve())},
+            )
+            self.assertEqual(
+                _qt_resume_completed_files(
+                    payload,
+                    input_root=input_root,
+                    output_dir=output_root,
+                    generation_options=options,
+                    source_file_fingerprints={
+                        str((input_root / "done.dds").resolve()): {
+                            "size_bytes": 42,
+                            "mtime_ns": 9999,
+                            "sha256": "a" * 64,
+                        }
+                    },
+                ),
+                set(),
+            )
+            self.assertEqual(
+                _qt_resume_completed_files(
+                    payload,
+                    input_root=input_root,
+                    output_dir=output_root,
+                    generation_options=options,
+                    source_file_fingerprints={
+                        str((input_root / "done.dds").resolve()): {
+                            "size_bytes": 42,
+                            "mtime_ns": 1234,
+                            "sha256": "b" * 64,
+                        }
+                    },
+                ),
+                set(),
+            )
+            self.assertEqual(
+                _qt_resume_completed_files(
+                    {key: value for key, value in payload.items() if key != "completed_file_fingerprints"},
+                    input_root=input_root,
+                    output_dir=output_root,
+                    generation_options=options,
+                    source_file_fingerprints=source_fingerprints,
+                ),
+                set(),
+            )
+
+            invalid_cases = (
+                (
+                    {**payload, "input_root": str((root / "other-input").resolve())},
+                    "input path differs",
+                ),
+                (
+                    {**payload, "output_root": str((root / "other-output").resolve())},
+                    "output folder differs",
+                ),
+                (
+                    {**payload, "generation_options": {"include_normal": False}},
+                    "generation settings differ",
+                ),
+                (
+                    {key: value for key, value in payload.items() if key != "generation_options"},
+                    "no valid generation settings snapshot",
+                ),
+                (
+                    {**payload, "completed_success_files": "not-a-list"},
+                    "completed-file list is invalid",
+                ),
+            )
+            for invalid_payload, message in invalid_cases:
+                with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                    _qt_resume_completed_files(
+                        invalid_payload,
+                        input_root=input_root,
+                        output_dir=output_root,
+                        generation_options=options,
+                        source_file_fingerprints=source_fingerprints,
+                    )
+
+    def test_qt_profile_recommendation_uses_existing_filename_and_path_hints(self) -> None:
+        self.assertEqual(
+            _recommend_qt_render_profile("mods/PBRNifPatcher/textures/architecture/stone.dds"),
+            "truepbr",
+        )
+        self.assertEqual(
+            _recommend_qt_render_profile("textures/architecture/stone_cm.dds"),
+            "community_shaders",
+        )
+
+    def test_qt_profile_recommendation_is_not_collapsed_for_batch_folders(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder = Path(temp_dir) / "textures"
+            folder.mkdir()
+            self.assertIsNone(_recommend_qt_render_profile(str(folder)))
+        self.assertIsNone(_recommend_qt_render_profile(""))
+
+    def test_qt_profile_recommendation_uses_mod_manager_context(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            profile_name="Default",
+            loaded_mods=("Community Shaders",),
+        )
+        self.assertEqual(
+            _recommend_qt_render_profile(
+                "textures/misc/neutral_asset.dds",
+                manager_context=context,
+            ),
+            "community_shaders",
+        )
+
+    def test_qt_profile_output_defaults_match_renderer_workflows(self) -> None:
+        truepbr = _qt_profile_output_defaults("truepbr")
+        self.assertTrue(truepbr["include_rmaos"])
+        self.assertFalse(truepbr["include_environment_mask"])
+        self.assertFalse(truepbr["include_complex"])
+
+        community_shaders = _qt_profile_output_defaults("community_shaders")
+        self.assertTrue(community_shaders["include_complex"])
+        self.assertFalse(community_shaders["include_rmaos"])
+        self.assertFalse(community_shaders["include_environment_mask"])
+
+        self.assertFalse(any(_qt_profile_output_defaults("custom").values()))
+        self.assertTrue(_qt_profile_output_defaults("vanilla")["include_diffuse"])
+
+    def test_generation_log_helpers_append_copy_and_export(self) -> None:
+        self.assertEqual(
+            _format_log_export_text("First line\nSecond line\n\n"),
+            "First line\nSecond line\n",
+        )
+        if not hasattr(TextureGeneratorGUI, "_append_generation_log"):
+            self.skipTest("Tk generation log helpers are unavailable in this environment.")
+
+        class FakeText:
+            def __init__(self) -> None:
+                self.content = ""
+                self.seen: list[str] = []
+                self.state_changes: list[object] = []
+
+            def configure(self, **kwargs) -> None:
+                self.state_changes.append(kwargs.get("state"))
+
+            def get(self, start: str, end: str) -> str:
+                return self.content
+
+            def insert(self, index: str, text: str) -> None:
+                self.content += text
+
+            def see(self, index: str) -> None:
+                self.seen.append(index)
+
+        class FakeVar:
+            def __init__(self) -> None:
+                self.value = ""
+
+            def set(self, value: str) -> None:
+                self.value = value
+
+            def get(self) -> str:
+                return self.value
+
+        fake_log = FakeText()
+        fake_status = FakeVar()
+        copied: list[str] = []
+        clipboard_root = SimpleNamespace(
+            clipboard_clear=lambda: copied.append("clear"),
+            clipboard_append=lambda text: copied.append(text),
+        )
+        fake_gui = SimpleNamespace(
+            generation_log_text=fake_log,
+            status_var=fake_status,
+            root=clipboard_root,
+            _default_output_browse_dir=lambda: Path(tempfile.gettempdir()),
+            _tr=lambda text: text,
+        )
+
+        TextureGeneratorGUI._append_generation_log(fake_gui, "First line")
+        TextureGeneratorGUI._append_generation_log(fake_gui, ["Second line", "Third line"])
+        self.assertEqual(fake_log.content, "First line\nSecond line\nThird line")
+        self.assertEqual(fake_log.seen, ["end", "end"])
+
+        TextureGeneratorGUI._copy_generation_log(fake_gui)
+        self.assertEqual(copied, ["clear", "First line\nSecond line\nThird line"])
+        self.assertEqual(fake_status.get(), "Copied generation log to clipboard.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_path = Path(temp_dir) / "generation.log"
+            fake_gui._default_output_browse_dir = lambda: Path(temp_dir)
+            with mock.patch("generate_textures.filedialog.asksaveasfilename", return_value=str(export_path)):
+                TextureGeneratorGUI._export_generation_log(fake_gui)
+            self.assertEqual(export_path.read_text(encoding="utf-8"), "First line\nSecond line\nThird line\n")
+            self.assertIn("Exported generation log to", fake_status.get())
+
+    def test_qt_truepbr_material_overrides_are_opt_in(self) -> None:
+        self.assertIsNone(
+            _qt_truepbr_material_overrides(
+                False,
+                parallax=True,
+                displacement_scale=0.4,
+                specular_level=0.06,
+                roughness_scale=1.2,
+            )
+        )
+        self.assertEqual(
+            _qt_truepbr_material_overrides(
+                True,
+                parallax=False,
+                displacement_scale=0.4,
+                specular_level=0.06,
+                roughness_scale=1.2,
+            ),
+            {
+                "parallax": False,
+                "displacement_scale": 0.4,
+                "specular_level": 0.06,
+                "roughness_scale": 1.2,
+            },
+        )
+
+    def test_qt_renderer_modes_follow_presets_and_preserve_custom_choices(self) -> None:
+        current = {
+            "complex_format": "cm",
+            "env_mask_mode": "complex",
+            "parallax_mode": "occlusion",
+        }
+        self.assertEqual(
+            _qt_render_profile_modes("enb", current),
+            {
+                "selected_profile": "enb",
+                "effective_profile": "enb",
+                "complex_format": "msn",
+                "env_mask_mode": "complex",
+                "parallax_mode": "occlusion",
+            },
+        )
+        self.assertEqual(
+            _qt_render_profile_modes("community_shaders", current)["complex_format"],
+            "cm",
+        )
+        self.assertEqual(
+            _qt_render_profile_modes("custom", current),
+            {
+                "selected_profile": "custom",
+                "effective_profile": "custom",
+                **current,
+            },
+        )
+
+    def test_qt_profile_output_defaults_preserve_unrelated_optional_maps(self) -> None:
+        current = {
+            "include_diffuse": True,
+            "include_normal": True,
+            "include_parallax": False,
+            "include_glow": False,
+            "include_environment_mask": False,
+            "include_rmaos": False,
+            "include_complex": False,
+            "include_wetness_mask": True,
+            "include_snow_mask": True,
+            "include_ao": True,
+            "include_roughness": True,
+        }
+        applied = _apply_qt_profile_output_defaults(
+            current,
+            _qt_profile_output_defaults("community_shaders"),
+        )
+        self.assertTrue(applied["include_wetness_mask"])
+        self.assertTrue(applied["include_snow_mask"])
+        self.assertTrue(applied["include_ao"])
+        self.assertTrue(applied["include_roughness"])
+        self.assertTrue(applied["include_complex"])
+        self.assertFalse(applied["include_environment_mask"])
+        self.assertFalse(applied["include_rmaos"])
+
+    def test_qt_profile_output_defaults_resolve_conflicting_slot_five_maps(self) -> None:
+        applied = _apply_qt_profile_output_defaults(
+            {
+                "include_environment_mask": True,
+                "include_rmaos": False,
+            },
+            {"include_environment_mask": True, "include_rmaos": True},
+        )
+        self.assertTrue(applied["include_environment_mask"])
+        self.assertFalse(applied["include_rmaos"])
+
+    def test_qt_profile_guidance_documents_recommended_outputs_and_terrain_scope(self) -> None:
+        terrain_guidance = _describe_qt_profile_guidance("terrain").lower()
+        self.assertIn("<stem>_p.dds", terrain_guidance)
+        self.assertIn("not a tiled terrain generator", terrain_guidance)
+        self.assertIn("profile selection does not change checked outputs", terrain_guidance)
+        self.assertIn("never mix enb / community shaders / truepbr families", terrain_guidance)
+
+        truepbr_guidance = _describe_qt_profile_guidance("truepbr").lower()
+        self.assertIn("<stem>_rmaos.dds", truepbr_guidance)
+        self.assertIn("apply profile map defaults", truepbr_guidance)
+        self.assertIn("if you're unsure", truepbr_guidance)
+
+    def test_workflow_preset_onboarding_text_mentions_safe_family_selection(self) -> None:
+        onboarding = _workflow_preset_onboarding_text().lower()
+        self.assertIn("vanilla", onboarding)
+        self.assertIn("community shaders", onboarding)
+        self.assertIn("truepbr", onboarding)
+        self.assertIn("never mix enb / community shaders / truepbr families", onboarding)
+
+    def test_render_profile_guidance_data_captures_family_specific_rules(self) -> None:
+        truepbr = _render_profile_guidance("truepbr")
+        self.assertIsNotNone(truepbr)
+        self.assertIn("_rmaos", truepbr.what_it_does)
+        self.assertIn("json", truepbr.when_to_use_it.lower())
+        self.assertTrue(any("Not ENB" in text for text in truepbr.why_not_others))
+        self.assertIn("_rmaos.dds", truepbr.canonical_outputs[0])
+
+    def test_render_profile_family_tooltip_uses_structured_guidance(self) -> None:
+        tooltip = _render_profile_family_tooltip("community_shaders").lower()
+        self.assertIn("what it does:", tooltip)
+        self.assertIn("when to use it:", tooltip)
+        self.assertIn("when not to use it:", tooltip)
+        self.assertIn("_cm.dds", tooltip)
+        self.assertIn("_c.dds", tooltip)
+
+    def test_render_profile_family_quick_check_text_lists_renderer_families(self) -> None:
+        quick_check = _render_profile_family_quick_check_text()
+        self.assertIn("Quick check:", quick_check)
+        self.assertIn("Vanilla =", quick_check)
+        self.assertIn("ENB =", quick_check)
+        self.assertIn("Community Shaders =", quick_check)
+        self.assertIn("TruePBR =", quick_check)
+
+    def test_render_profile_family_matrix_text_lists_canonical_outputs(self) -> None:
+        matrix = _render_profile_family_matrix_text()
+        self.assertIn("Family matrix:", matrix)
+        self.assertIn("Vanilla: _m.dds, _n.dds, _p.dds", matrix)
+        self.assertIn("ENB: _msn.dds, _m.dds", matrix)
+        self.assertIn("Community Shaders: _cm.dds, _c.dds", matrix)
+        self.assertIn("TruePBR: _rmaos.dds, _ramos.dds, JSON sidecars", matrix)
+        self.assertIn("Custom: manual-only", matrix)
+
+    def test_workflow_quick_start_steps_text_mentions_step_flow(self) -> None:
+        quick_start = _workflow_quick_start_steps_text().lower()
+        self.assertIn("if you're unsure", quick_start)
+        self.assertIn("family matrix:", quick_start)
+        self.assertIn("step 1:", quick_start)
+        self.assertIn("step 2:", quick_start)
+        self.assertIn("step 3:", quick_start)
+        self.assertIn("step 4:", quick_start)
+        self.assertIn("step 5:", quick_start)
+        self.assertIn("next safe step", quick_start)
+        self.assertIn("suggested", quick_start)
+        self.assertIn("compare against the sibling .nif.bak backup", quick_start)
+        self.assertIn("restore from it instead of forcing a risky change", quick_start)
+        self.assertIn("never mix enb / community shaders / truepbr families", quick_start)
+
+    def test_startup_wizard_summary_combines_recommendation_and_guidance(self) -> None:
+        recommendation = recommend_render_profile_details(None, manager_context=ModManagerContext())
+        guidance = build_startup_guidance_text(
+            ModManagerContext(),
+            profile_setup_memory={},
+            input_path="",
+            selected_render_profile="custom",
+            current_workflow_mode="",
+            current_output_target="",
+            current_use_custom_output=False,
+            current_target_game="skyrim",
+        )
+        wizard_summary = build_startup_wizard_summary(
+            recommendation,
+            selected_render_profile="custom",
+            guidance_text=guidance,
+        )
+        self.assertEqual(wizard_summary.safe_family_profile, "vanilla")
+        self.assertEqual(wizard_summary.safe_family_label, "Vanilla")
+        self.assertIn("Confidence:", wizard_summary.recommendation_text)
+        self.assertIn("Why not the others:", wizard_summary.recommendation_text)
+        self.assertIn("Probably incompatible", wizard_summary.recommendation_text)
+        self.assertIn("Recommended next step:", wizard_summary.guidance_text)
+        self.assertIn("choose an input file or folder", wizard_summary.guidance_text)
+
+    def test_short_guidance_tooltip_uses_three_sections(self) -> None:
+        tooltip = _format_short_guidance_tooltip(
+            "switches a control",
+            "you need the safe preset path",
+            "you want full manual control",
+        ).lower()
+        self.assertEqual(len(tooltip.splitlines()), 3)
+        self.assertIn("what it does: switches a control", tooltip)
+        self.assertIn("when to use it: you need the safe preset path", tooltip)
+        self.assertIn("when not to use it: you want full manual control", tooltip)
+
+    def test_diagnostics_bundle_text_includes_state_context_and_log(self) -> None:
+        bundle = build_diagnostics_bundle_text(
+            {
+                "render_profile": "enb",
+                "show_startup_onboarding": False,
+                "last_renderer": "enb",
+                "last_output_target": "next to input",
+            },
+            "line one\nline two",
+            context_summary="Detected Mod (Hint): detected MO2 context",
+            title="Custom diagnostics bundle",
+        )
+        self.assertIn("Custom diagnostics bundle", bundle)
+        self.assertIn("App version:", bundle)
+        self.assertIn("Detected mod context:", bundle)
+        self.assertIn("Detected Mod (Hint): detected MO2 context", bundle)
+        self.assertIn('"render_profile": "enb"', bundle)
+        self.assertIn("Generation event log:", bundle)
+        self.assertIn("line one\nline two", bundle)
+
+    def test_qt_preview_channel_note_formatter_includes_legends_and_viewing_state(self) -> None:
+        note = _format_qt_preview_channel_note(
+            "complex_material",
+            "enb",
+            inspection="channels RGBA",
+            viewing_label="Alpha",
+        ).lower()
+        self.assertIn("channel meanings:", note)
+        self.assertIn("enb _msn", note)
+        self.assertIn("inspection: channels rgba", note)
+        self.assertIn("viewing: alpha.", note)
+
+    def test_qt_preview_channel_note_warns_when_output_family_mismatches(self) -> None:
+        note = _format_qt_preview_channel_note(
+            "complex_material",
+            "truepbr",
+            inspection="channels RGBA",
+            viewing_label="Composite",
+        ).lower()
+        self.assertIn("probably incompatible", note)
+        self.assertIn("truepbr does not use complex material outputs", note)
+        self.assertIn("channel meanings:", note)
+
+    def test_qt_log_export_text_ends_with_single_newline_when_non_empty(self) -> None:
+        self.assertEqual(_format_qt_log_export_text("line 1\nline 2\n"), "line 1\nline 2\n")
+        self.assertEqual(_format_qt_log_export_text(""), "")
+
+    def test_nif_editor_safety_banner_mentions_backup_rollback_and_fallout(self) -> None:
+        banner = _nif_editor_safety_banner_text().lower()
+        self.assertIn("dry-run", banner)
+        self.assertIn("backup originals", banner)
+        self.assertIn("compare against .bak", banner)
+        self.assertIn("rollback path", banner)
+        self.assertIn("fallout writes stay off unless you opt in", banner)
+
+    def test_nif_editor_safety_banner_switches_for_fallout_write_mode(self) -> None:
+        banner = _nif_editor_safety_banner_text(
+            "fallout",
+            dry_run=False,
+            experimental_fallout_write=True,
+        ).lower()
+        self.assertIn("🚨 write mode is on", banner)
+        self.assertIn("🧪 fallout writes are experimental best-effort only", banner)
+
+    def test_nif_editor_safety_banner_highlights_missing_backup(self) -> None:
+        banner = _nif_editor_safety_banner_text(dry_run=False, backup=False).lower()
+        self.assertIn("backup originals are off", banner)
+        self.assertIn("no new .nif.bak rollback copy will be created", banner)
+
+    def test_qt_migration_status_text_summarizes_scope_and_remaining_parity(self) -> None:
+        status = _qt_migration_status_text().lower()
+        self.assertIn("qt migration preview scope", status)
+        self.assertIn("overview, generation, nif scan, nif editor, batch/resume, and status tabs are available", status)
+        self.assertIn("restore/compare flows", status)
+        self.assertIn("generation rows and queue/preview parity are still being ported from tkinter", status)
+        self.assertIn("tkinter ui remains the full-featured release path", status)
+
+    def test_nif_editor_confirmation_text_emphasizes_safe_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            backed_up = root / "with_backup.nif"
+            backed_up.write_bytes(b"nif")
+            backed_up.with_suffix(".nif.bak").write_bytes(b"backup")
+            missing_backup = root / "missing_backup.nif"
+            missing_backup.write_bytes(b"nif")
+
+            patch_message = _nif_editor_confirmation_text(
+                "patch",
+                2,
+                nif_paths=[backed_up, missing_backup],
+                experimental_fallout_write=True,
+            ).lower()
+            self.assertIn("what it does: apply patch edits to 2 nif files and write them to disk with sibling .nif.bak backups for rollback", patch_message)
+            self.assertIn("when to use it: the dry-run preview looks correct", patch_message)
+            self.assertIn("when not to use it: you need to keep the current mesh untouched", patch_message)
+            self.assertIn("rollback path: 1/2 selected nifs have sibling .nif.bak backups", patch_message)
+            self.assertIn("rollback path: write mode modifies the meshes on disk and relies on .nif.bak backups for rollback.", patch_message)
+            self.assertIn("dry-run first and backups enabled are the safe default.", patch_message)
+            self.assertIn("best-effort", patch_message)
+            self.assertIn("🚨 write mode", patch_message)
+
+            risky_patch_message = _nif_editor_confirmation_text(
+                "patch",
+                2,
+                nif_paths=[backed_up, missing_backup],
+                backup=False,
+                experimental_fallout_write=True,
+            ).lower()
+            self.assertIn("backup originals are disabled", risky_patch_message)
+            self.assertIn("no new .nif.bak rollback copy will be created", risky_patch_message)
+            self.assertIn("continue with write mode?", risky_patch_message)
+
+            safe_fix_message = _nif_editor_confirmation_text(
+                "remediate",
+                2,
+                nif_paths=[backed_up, missing_backup],
+                backup=False,
+            ).lower()
+            self.assertIn("safe-fix write", safe_fix_message)
+            self.assertIn("apply grouped safe fixes", safe_fix_message)
+            self.assertIn("continue with safe-fix write mode?", safe_fix_message)
+
+            restore_message = _nif_editor_confirmation_text(
+                "restore",
+                1,
+                nif_paths=[backed_up],
+            ).lower()
+            self.assertIn("what it does: restore 1 nif file from sibling .nif.bak backups and overwrite the current .nif files", restore_message)
+            self.assertIn("when to use it: you are rolling back a write preview", restore_message)
+            self.assertIn("when not to use it: you need to preserve the current file contents", restore_message)
+            self.assertIn("rollback path: all selected nifs have sibling .nif.bak backups", restore_message)
+            self.assertIn("rollback path: restore replaces the current mesh with the sibling backup.", restore_message)
+            self.assertIn("⚠ restore / rollback", restore_message)
+
+            unpatch_message = _nif_editor_confirmation_text(
+                "unpatch",
+                3,
+                nif_paths=[backed_up, missing_backup],
+                experimental_fallout_write=True,
+            ).lower()
+            self.assertIn("what it does: remove the selected features from 3 nif files and write the changes to disk", unpatch_message)
+            self.assertIn("when to use it: you intentionally want to strip features", unpatch_message)
+            self.assertIn("when not to use it: you want to preserve the mesh", unpatch_message)
+            self.assertIn("rollback path: 1/2 selected nifs have sibling .nif.bak backups", unpatch_message)
+            self.assertIn("🚨 destructive write", unpatch_message)
+            self.assertIn("🧪 fallout writes are experimental best-effort only.", unpatch_message)
+            self.assertIn("continue with destructive write mode?", unpatch_message)
+
+    def test_nif_editor_confirmation_title_matches_action(self) -> None:
+        self.assertEqual(_nif_editor_confirmation_title("patch"), "Confirm NIF write mode")
+        self.assertEqual(_nif_editor_confirmation_title("patch", backup=False), "Confirm NIF write without backup")
+        self.assertEqual(_nif_editor_confirmation_title("unpatch"), "Confirm destructive unpatch")
+        self.assertEqual(_nif_editor_confirmation_title("unpatch", backup=False), "Confirm destructive unpatch without backup")
+        self.assertEqual(_nif_editor_confirmation_title("remediate"), "Confirm safe-fix writes")
+        self.assertEqual(_nif_editor_confirmation_title("remediate", backup=False), "Confirm safe-fix writes without backup")
+        self.assertEqual(_nif_editor_confirmation_title("restore"), "Confirm NIF restore")
+
+    def test_qt_preview_loader_decodes_and_bounds_image_dimensions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = Path(temp_dir) / "source.png"
+            Image.new("RGB", (1600, 800), color=(120, 80, 40)).save(source_path)
+
+            preview_bytes = _load_qt_preview_png(source_path, max_dimension=256)
+
+        with Image.open(io.BytesIO(preview_bytes)) as preview:
+            self.assertEqual(preview.format, "PNG")
+            self.assertEqual(preview.size, (256, 128))
+
+    def test_qt_preview_loader_can_inspect_rgba_channels(self) -> None:
+        image = Image.new("RGBA", (2, 1))
+        image.putdata([(10, 40, 90, 180), (20, 50, 100, 200)])
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "channels.png"
+            image.save(image_path)
+            channel_png = _load_qt_preview_png(image_path, channel="A")
+            with Image.open(io.BytesIO(channel_png)) as channel:
+                self.assertEqual(channel.mode, "L")
+                self.assertEqual(list(channel.getdata()), [180, 200])
+            rgb_path = image_path.with_name("rgb.png")
+            Image.new("RGB", (2, 1), (1, 2, 3)).save(rgb_path)
+            with self.assertRaisesRegex(ValueError, "no alpha channel"):
+                _load_qt_preview_png(rgb_path, channel="A")
+
+    def test_qt_preview_channel_options_follow_actual_image_bands(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            rgb_path = Path(temp_dir) / "rgb.png"
+            Image.new("RGB", (1, 1), (1, 2, 3)).save(rgb_path)
+            self.assertEqual(
+                _qt_preview_channel_options(rgb_path),
+                (
+                    ("Composite", None),
+                    ("R channel", "R"),
+                    ("G channel", "G"),
+                    ("B channel", "B"),
+                ),
+            )
+            grayscale_path = Path(temp_dir) / "gray.png"
+            Image.new("L", (1, 1), 128).save(grayscale_path)
+            self.assertEqual(
+                _qt_preview_channel_options(grayscale_path),
+                (("Composite", None), ("Grayscale", "L")),
+            )
+            grayscale_preview = _load_qt_preview_png(grayscale_path, channel="L")
+            with Image.open(io.BytesIO(grayscale_preview)) as preview:
+                self.assertEqual(preview.mode, "L")
+                self.assertEqual(list(preview.getdata()), [128])
+            with self.assertRaisesRegex(ValueError, "no separate RGB channels"):
+                _load_qt_preview_png(grayscale_path, channel="R")
+
+    def test_qt_output_inspection_validates_truepbr_rgba_channels(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            rgba_path = Path(temp_dir) / "rmaos.png"
+            Image.new("RGBA", (4, 3), (10, 20, 30, 40)).save(rgba_path)
+            valid_message = _inspect_qt_output_image(rgba_path, "rmaos")
+            self.assertIn("Validation passed", valid_message)
+            self.assertIn("4 × 3 px", valid_message)
+            self.assertIn("R, G, B, A", valid_message)
+            self.assertEqual(
+                _qt_preview_channel_options(rgba_path, "rmaos"),
+                (
+                    ("Composite", None),
+                    ("R — Roughness", "R"),
+                    ("G — Metallic", "G"),
+                    ("B — Ambient occlusion", "B"),
+                    ("A — Non-metal reflectance", "A"),
+                ),
+            )
+
+            rgb_path = Path(temp_dir) / "rmaos_without_alpha.png"
+            Image.new("RGB", (4, 3), (10, 20, 30)).save(rgb_path)
+            warning_message = _inspect_qt_output_image(rgb_path, "rmaos")
+            self.assertIn("Validation warning", warning_message)
+            self.assertIn("should contain RGBA channels", warning_message)
+            self.assertNotIn(
+                ("A — Non-metal reflectance", "A"),
+                _qt_preview_channel_options(rgb_path, "rmaos"),
+            )
+
+    def test_qt_output_inspection_does_not_impose_rgba_on_grayscale_masks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            mask_path = Path(temp_dir) / "ao.png"
+            Image.new("L", (2, 2), 128).save(mask_path)
+            inspection = _inspect_qt_output_image(mask_path, "ao")
+        self.assertNotIn("Validation warning", inspection)
+        self.assertIn("channels L", inspection)
+
+    def test_qt_channel_guidance_matches_supported_workflow_contracts(self) -> None:
+        self.assertIn(
+            "A non-metal reflectance",
+            _describe_qt_output_channels("rmaos", "truepbr"),
+        )
+        self.assertIn(
+            "ENB _msn",
+            _describe_qt_output_channels("complex_material", "enb"),
+        )
+        self.assertIn(
+            "not a universal vanilla map",
+            _describe_qt_output_channels("wetness_mask", "community_shaders"),
+        )
 
     def test_save_gui_state_round_trips_expected_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -357,13 +2568,22 @@ class GenerateTexturesTests(unittest.TestCase):
                     "input_path": str(input_file),
                     "output_path": "/tmp/out",
                     "use_custom_output": True,
-                    "dark_mode": True,
+                    "theme_mode": "high_contrast",
                     "show_batch_preview": True,
+                    "show_startup_onboarding": False,
+                    "workflow_mode": "advanced",
+                    "simplified_main_layout": False,
+                    "show_advanced_generation_controls": True,
+                    "show_advanced_workflow_outputs": True,
                     "preview_size": "XL",
                     "complex_format": "cm",
                     "env_mask_mode": "complex",
                     "parallax_mode": "occlusion",
                     "render_profile": "community_shaders",
+                    "last_mod_manager": "Mod Organizer 2",
+                    "last_mod_profile": "Main",
+                    "last_renderer": "community_shaders",
+                    "last_output_target": "/tmp/out",
                     "emboss_mode": True,
                     "include_diffuse": False,
                     "include_normal": True,
@@ -391,13 +2611,23 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(loaded["input_path"], str(input_file))
         self.assertEqual(loaded["output_path"], "/tmp/out")
         self.assertTrue(bool(loaded["use_custom_output"]))
+        self.assertEqual(str(loaded["theme_mode"]), "high_contrast")
         self.assertTrue(bool(loaded["dark_mode"]))
         self.assertTrue(bool(loaded["show_batch_preview"]))
+        self.assertFalse(bool(loaded["show_startup_onboarding"]))
+        self.assertFalse(bool(loaded["simplified_main_layout"]))
+        self.assertTrue(bool(loaded["show_advanced_generation_controls"]))
+        self.assertTrue(bool(loaded["show_advanced_workflow_outputs"]))
+        self.assertEqual(str(loaded["workflow_mode"]), "advanced")
         self.assertEqual(str(loaded["preview_size"]), "XL")
         self.assertEqual(str(loaded["complex_format"]), "cm")
         self.assertEqual(str(loaded["env_mask_mode"]), "complex")
         self.assertEqual(str(loaded["parallax_mode"]), "occlusion (ENB/POM)")
         self.assertEqual(str(loaded["render_profile"]), "community_shaders")
+        self.assertEqual(str(loaded["last_mod_manager"]), "Mod Organizer 2")
+        self.assertEqual(str(loaded["last_mod_profile"]), "Main")
+        self.assertEqual(str(loaded["last_renderer"]), "community_shaders")
+        self.assertEqual(str(loaded["last_output_target"]), "/tmp/out")
         self.assertTrue(bool(loaded["emboss_mode"]))
         self.assertFalse(bool(loaded["include_diffuse"]))
         self.assertTrue(bool(loaded["include_normal"]))
@@ -419,6 +2649,1011 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertAlmostEqual(float(loaded["complex_strength"]), 2.2)
         self.assertAlmostEqual(float(loaded["specular_strength"]), 2.3)
 
+    def test_project_settings_import_and_export_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_input = temp_path / "source.dds"
+            source_input.write_bytes(b"fake")
+            source_state = temp_path / "source-state.json"
+            imported_state = temp_path / "imported-state.json"
+            exported_state = temp_path / "exported-state.json"
+            save_gui_state(
+                {
+                    "input_path": str(source_input),
+                    "output_path": "/tmp/out",
+                    "use_custom_output": True,
+                    "theme_mode": "dark",
+                    "last_mod_manager": "Mod Organizer 2",
+                    "last_mod_profile": "Main",
+                    "last_renderer": "community_shaders",
+                    "last_output_target": "/tmp/out",
+                    "render_profile": "truepbr",
+                    "show_advanced_workflow_outputs": True,
+                    "show_startup_onboarding": False,
+                },
+                source_state,
+            )
+
+            import_project_settings(source_state, destination_state_file=imported_state)
+            imported = load_gui_state(imported_state)
+            self.assertEqual(imported["input_path"], str(source_input))
+            self.assertEqual(imported["output_path"], "/tmp/out")
+            self.assertTrue(bool(imported["use_custom_output"]))
+            self.assertEqual(str(imported["theme_mode"]), "dark")
+            self.assertTrue(bool(imported["dark_mode"]))
+            self.assertEqual(imported["last_mod_manager"], "Mod Organizer 2")
+            self.assertEqual(imported["last_mod_profile"], "Main")
+            self.assertEqual(imported["last_renderer"], "community_shaders")
+            self.assertEqual(imported["last_output_target"], "/tmp/out")
+            self.assertFalse(bool(imported["show_startup_onboarding"]))
+
+            export_project_settings(exported_state, source_state_file=imported_state)
+            exported = load_gui_state(exported_state)
+            self.assertEqual(exported["input_path"], str(source_input))
+            self.assertEqual(exported["output_path"], "/tmp/out")
+            self.assertTrue(bool(exported["show_advanced_workflow_outputs"]))
+            self.assertFalse(bool(exported["show_startup_onboarding"]))
+
+    def test_export_project_settings_raises_on_invalid_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_state = temp_path / "broken-state.json"
+            source_state.write_text("not json", encoding="utf-8")
+            export_state = temp_path / "exported-settings.json"
+            with self.assertRaises(json.JSONDecodeError):
+                export_project_settings(export_state, source_state_file=source_state)
+            self.assertFalse(export_state.exists())
+
+    def test_export_project_settings_state_writes_live_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_input = temp_path / "source.dds"
+            source_input.write_bytes(b"fake")
+            export_state = temp_path / "live-export.json"
+            export_project_settings_state(
+                {
+                    "input_path": str(source_input),
+                    "output_path": "/tmp/out",
+                    "use_custom_output": True,
+                    "theme_mode": "high_contrast",
+                    "last_mod_manager": "Vortex",
+                    "last_mod_profile": "Default",
+                    "last_renderer": "community_shaders",
+                    "last_output_target": "/tmp/out",
+                    "show_advanced_workflow_outputs": True,
+                },
+                export_state,
+            )
+            loaded = load_gui_state(export_state)
+            self.assertEqual(loaded["input_path"], str(source_input))
+            self.assertEqual(loaded["output_path"], "/tmp/out")
+            self.assertTrue(bool(loaded["use_custom_output"]))
+            self.assertEqual(str(loaded["theme_mode"]), "high_contrast")
+            self.assertTrue(bool(loaded["dark_mode"]))
+            self.assertEqual(loaded["last_renderer"], "community_shaders")
+            self.assertEqual(loaded["last_output_target"], "/tmp/out")
+            self.assertEqual(str(loaded["workflow_mode"]), "advanced")
+            self.assertTrue(bool(loaded["show_advanced_workflow_outputs"]))
+
+    def test_tk_advanced_workflow_visibility_round_trips_saved_settings(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        def find_label_frame(root, title: str):
+            pending = list(root.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TLabelframe" and widget.cget("text") == title:
+                    return widget
+                pending.extend(widget.winfo_children())
+            self.fail(f"Could not find Tk section '{title}'.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_file = Path(temp_dir) / "gui-state.json"
+            saved_state = load_gui_state(state_file)
+            saved_state["simplified_main_layout"] = False
+            saved_state["show_advanced_workflow_outputs"] = True
+            saved_state["workflow_mode"] = "advanced"
+            first_gui = None
+            restored_gui = None
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state):
+                    first_gui = TextureGeneratorGUI()
+                first_gui.root.update_idletasks()
+                pbr_section = find_label_frame(first_gui.root, "Community Shaders PBR Workflow")
+                self.assertEqual(first_gui.workflow_mode_var.get(), "Advanced")
+                self.assertTrue(first_gui.show_advanced_workflow_outputs_var.get())
+                self.assertFalse(first_gui.simplified_main_layout_var.get())
+                self.assertTrue(pbr_section.grid_info())
+
+                first_gui.show_advanced_workflow_outputs_var.set(False)
+                first_gui.root.update_idletasks()
+                self.assertEqual(first_gui.workflow_mode_var.get(), "Standard")
+                self.assertFalse(pbr_section.grid_info())
+                first_gui.show_advanced_workflow_outputs_var.set(True)
+                first_gui.root.geometry("1120x820")
+                first_gui.root.update_idletasks()
+                self.assertEqual(first_gui.workflow_mode_var.get(), "Advanced")
+                self.assertTrue(pbr_section.grid_info())
+
+                save_gui_state(first_gui._build_gui_state(), state_file)
+                persisted_state = load_gui_state(state_file)
+                self.assertFalse(bool(persisted_state["simplified_main_layout"]))
+                self.assertTrue(bool(persisted_state["show_advanced_workflow_outputs"]))
+                self.assertEqual(str(persisted_state["workflow_mode"]), "advanced")
+            finally:
+                if first_gui is not None:
+                    first_gui.root.destroy()
+
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=persisted_state):
+                    restored_gui = TextureGeneratorGUI()
+                restored_gui.root.update_idletasks()
+                restored_pbr_section = find_label_frame(restored_gui.root, "Community Shaders PBR Workflow")
+                self.assertEqual(restored_gui.workflow_mode_var.get(), "Advanced")
+                self.assertTrue(restored_gui.show_advanced_workflow_outputs_var.get())
+                self.assertTrue(restored_pbr_section.grid_info())
+                restored_gui.simplified_main_layout_var.set(True)
+                restored_gui.root.update_idletasks()
+                self.assertEqual(restored_gui.workflow_mode_var.get(), "Beginner")
+                self.assertFalse(restored_pbr_section.grid_info())
+            finally:
+                if restored_gui is not None:
+                    restored_gui.root.destroy()
+
+    def test_tk_workflow_mode_selection_updates_layout_toggles(self) -> None:
+        self._skip_unavailable_tk_display()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            gui = None
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state):
+                    gui = TextureGeneratorGUI()
+                gui.root.update_idletasks()
+                self.assertEqual(gui.workflow_mode_var.get(), "Beginner")
+
+                gui._apply_workflow_mode("advanced")
+                gui.root.update_idletasks()
+                self.assertFalse(gui.simplified_main_layout_var.get())
+                self.assertTrue(gui.show_advanced_generation_var.get())
+                self.assertTrue(gui.show_advanced_workflow_outputs_var.get())
+                self.assertEqual(gui.workflow_mode_var.get(), "Advanced")
+
+                gui._apply_workflow_mode("standard")
+                gui.root.update_idletasks()
+                self.assertFalse(gui.simplified_main_layout_var.get())
+                self.assertFalse(gui.show_advanced_generation_var.get())
+                self.assertFalse(gui.show_advanced_workflow_outputs_var.get())
+                self.assertEqual(gui.workflow_mode_var.get(), "Standard")
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_profile_setup_hint_label_shows_remembered_setup(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            saved_state["last_mod_manager"] = "Mod Organizer 2"
+            saved_state["last_mod_profile"] = "Main"
+            saved_state["profile_setup_memory"] = {
+                "Mod Organizer 2::Main": {
+                    "render_profile": "community_shaders",
+                    "output_target": "D:/Skyrim/Output",
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                }
+            }
+            gui = None
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state), mock.patch(
+                    "generate_textures.detect_mod_manager_context",
+                    return_value=ModManagerContext(manager="Mod Organizer 2", profile_name="Main"),
+                ):
+                    gui = TextureGeneratorGUI()
+                gui.root.update_idletasks()
+                hint = gui.profile_setup_hint_var.get()
+                self.assertIn("Remembered setup for this profile", hint)
+                self.assertIn("renderer Community Shaders", hint)
+                self.assertIn("output D:/Skyrim/Output", hint)
+                self.assertTrue(gui.profile_setup_restore_button.instate(("!disabled",)))
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_profile_setup_switcher_restores_selected_saved_setup(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "output"
+            output_dir.mkdir()
+            manager = "Mod Organizer 2"
+            profile = "Main"
+            current_key = _profile_setup_memory_key(manager, profile)
+            alternate_key = _profile_setup_memory_key(manager, "Alt")
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            saved_state["last_mod_manager"] = manager
+            saved_state["last_mod_profile"] = profile
+            saved_state["profile_setup_memory"] = {
+                current_key: {
+                    "render_profile": "truepbr",
+                    "output_target": str(output_dir),
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                },
+                alternate_key: {
+                    "render_profile": "community_shaders",
+                    "output_target": "",
+                    "use_custom_output": False,
+                    "workflow_mode": "standard",
+                    "target_game": "skyrim",
+                },
+            }
+            gui = None
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state), mock.patch(
+                    "generate_textures.detect_mod_manager_context",
+                    return_value=ModManagerContext(manager=manager, profile_name=profile),
+                ):
+                    gui = TextureGeneratorGUI()
+                gui.root.update_idletasks()
+                values = tuple(gui.profile_setup_choice_combo["values"])
+                self.assertEqual(len(values), 2)
+                self.assertTrue(any("renderer Community Shaders PBR" in value for value in values))
+                self.assertTrue(any("renderer Community Shaders" in value for value in values))
+                alt_label = next(value for value in values if "renderer Community Shaders" in value)
+                gui.profile_setup_choice_var.set(alt_label)
+                gui._update_profile_setup_restore_controls()
+                self.assertTrue(gui.profile_setup_restore_button.instate(("!disabled",)))
+                gui.profile_setup_restore_button.invoke()
+                gui.root.update_idletasks()
+                self.assertEqual(gui.render_profile_var.get(), "community_shaders")
+                self.assertEqual(gui.workflow_mode_var.get(), "Standard")
+                self.assertFalse(gui.use_custom_output_var.get())
+                self.assertEqual(gui.output_var.get(), "")
+                self.assertEqual(gui.target_game_var.get(), "skyrim")
+                restored_state = gui._build_gui_state()
+                restored_entry = restored_state["profile_setup_memory"][current_key]
+                self.assertEqual(restored_entry["render_profile"], "community_shaders")
+                self.assertEqual(restored_entry["workflow_mode"], "standard")
+                self.assertFalse(restored_entry["use_custom_output"])
+                self.assertEqual(restored_entry["output_target"], "next to input")
+                self.assertEqual(restored_entry["target_game"], "skyrim")
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_profile_setup_switcher_restores_named_preset_for_same_profile(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir) / "output"
+            output_dir.mkdir()
+            manager = "Mod Organizer 2"
+            profile = "Main"
+            current_key = _profile_setup_memory_key(manager, profile)
+            named_key = _profile_setup_memory_key(manager, profile, "Architecture")
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            saved_state["last_mod_manager"] = manager
+            saved_state["last_mod_profile"] = profile
+            saved_state["profile_setup_memory"] = {
+                current_key: {
+                    "render_profile": "vanilla",
+                    "output_target": "",
+                    "use_custom_output": False,
+                    "workflow_mode": "standard",
+                    "target_game": "skyrim",
+                },
+                named_key: {
+                    "render_profile": "community_shaders",
+                    "output_target": str(output_dir),
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                },
+            }
+            gui = None
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state), mock.patch(
+                    "generate_textures.detect_mod_manager_context",
+                    return_value=ModManagerContext(manager=manager, profile_name=profile),
+                ):
+                    gui = TextureGeneratorGUI()
+                gui.root.update_idletasks()
+                values = tuple(gui.profile_setup_choice_combo["values"])
+                self.assertEqual(len(values), 2)
+                self.assertTrue(any("current setup" in value for value in values))
+                self.assertTrue(any("preset Architecture" in value for value in values))
+                named_label = next(value for value in values if "preset Architecture" in value)
+                gui.profile_setup_choice_var.set(named_label)
+                gui._refresh_detected_context_hint()
+                gui._update_profile_setup_restore_controls()
+                self.assertTrue(gui.profile_setup_restore_button.instate(("!disabled",)))
+                gui.profile_setup_restore_button.invoke()
+                gui.root.update_idletasks()
+                self.assertEqual(gui.render_profile_var.get(), "community_shaders")
+                self.assertEqual(gui.workflow_mode_var.get(), "Advanced")
+                self.assertTrue(gui.use_custom_output_var.get())
+                self.assertEqual(gui.output_var.get(), str(output_dir))
+                self.assertEqual(gui.target_game_var.get(), "fallout4")
+                self.assertIn("preset Architecture", gui.profile_setup_hint_var.get())
+                self.assertIn("preset Architecture", gui.status_var.get())
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_startup_onboarding_banner_can_be_dismissed(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        def find_label_frame(root, title: str):
+            pending = list(root.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TLabelframe" and widget.cget("text") == title:
+                    return widget
+                pending.extend(widget.winfo_children())
+            self.fail(f"Could not find Tk section '{title}'.")
+
+        def find_button(root, title: str):
+            pending = list(root.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TButton" and str(widget.cget("text")) == title:
+                    return widget
+                pending.extend(widget.winfo_children())
+            self.fail(f"Could not find Tk button '{title}'.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            gui = None
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state), \
+                     mock.patch("generate_textures.save_gui_state") as save_state:
+                    gui = TextureGeneratorGUI()
+                    gui.root.update_idletasks()
+                    banner = find_label_frame(gui.root, "Quick start")
+                    self.assertTrue(banner.winfo_ismapped())
+                    label_texts = [
+                        str(child.cget("text"))
+                        for child in banner.winfo_children()
+                        if child.winfo_class() in {"TLabel", "Label"}
+                    ]
+                    self.assertTrue(any("Recommended next step:" in text for text in label_texts))
+                    self.assertTrue(any("choose an input file or folder" in text for text in label_texts))
+                    self.assertTrue(any("If you're unsure" in text for text in label_texts))
+                    self.assertTrue(any("Step 1:" in text for text in label_texts))
+                    self.assertTrue(any("Step 4:" in text for text in label_texts))
+                    self.assertTrue(any("Step 5:" in text for text in label_texts))
+                    find_button(banner, "Hide").invoke()
+                    gui.root.update_idletasks()
+                    self.assertFalse(gui.show_startup_onboarding_var.get())
+                    self.assertFalse(banner.winfo_ismapped())
+                    show_button = find_button(gui.root, "Show quick start")
+                    self.assertTrue(show_button.winfo_ismapped())
+                    self.assertTrue(show_button.bind("<Enter>"))
+                    show_button.invoke()
+                    gui.root.update_idletasks()
+                    self.assertTrue(gui.show_startup_onboarding_var.get())
+                    self.assertTrue(banner.winfo_ismapped())
+                    save_state.assert_called()
+                    persisted = save_state.call_args.args[0]
+                    self.assertTrue(bool(persisted["show_startup_onboarding"]))
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_startup_show_quick_start_tooltip_is_bound(self) -> None:
+        self._skip_unavailable_tk_display()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_file = Path(temp_dir) / "gui-state.json"
+            saved_state = load_gui_state(state_file)
+            gui = None
+            try:
+                with mock.patch("generate_textures.GUI_STATE_FILE", state_file), \
+                     mock.patch("generate_textures.load_gui_state", return_value=saved_state), \
+                     mock.patch("generate_textures.save_gui_state"):
+                    gui = TextureGeneratorGUI()
+                    pending = [gui.root]
+                    show_button = None
+                    while pending:
+                        widget = pending.pop()
+                        if (
+                            widget.winfo_class() == "TButton"
+                            and str(widget.cget("text")) == "Show quick start"
+                        ):
+                            show_button = widget
+                            break
+                        pending.extend(widget.winfo_children())
+                    self.assertIsNotNone(show_button)
+                    self.assertTrue(show_button.bind("<Enter>"))
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_startup_wizard_shows_rationale_and_applies_safe_family(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        def find_button(root, title: str):
+            pending = list(root.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TButton" and str(widget.cget("text")) == title:
+                    return widget
+                pending.extend(widget.winfo_children())
+            self.fail(f"Could not find Tk button '{title}'.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            saved_states = []
+            gui = None
+
+            def capture_state(state_data):
+                saved_states.append(json.loads(json.dumps(state_data)))
+
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state), \
+                     mock.patch("generate_textures.save_gui_state", side_effect=capture_state), \
+                     mock.patch("generate_textures.detect_mod_manager_context", return_value=ModManagerContext()):
+                    gui = TextureGeneratorGUI()
+                    gui.root.update_idletasks()
+                    find_button(gui.root, "Wizard…").invoke()
+                    gui.root.update_idletasks()
+                    wizard = gui.startup_wizard_window
+                    self.assertIsNotNone(wizard)
+                    self.assertTrue(wizard.winfo_exists())
+                    label_texts = []
+                    pending = list(wizard.winfo_children())
+                    while pending:
+                        widget = pending.pop()
+                        if widget.winfo_class() in {"TLabel", "Label"}:
+                            label_texts.append(str(widget.cget("text")))
+                        pending.extend(widget.winfo_children())
+                    self.assertTrue(any("Confidence:" in text for text in label_texts))
+                    self.assertTrue(any("Why not the others:" in text for text in label_texts))
+                    self.assertTrue(any("Probably incompatible" in text for text in label_texts))
+                    self.assertTrue(any("Recommended next step:" in text for text in label_texts))
+                    find_button(wizard, "Use safe family: Vanilla").invoke()
+                    gui.root.update_idletasks()
+                    self.assertEqual(gui.render_profile_var.get(), "vanilla")
+                    self.assertFalse(gui.show_startup_onboarding_var.get())
+                    self.assertFalse(gui.startup_wizard_window)
+                    self.assertTrue(saved_states)
+                    self.assertFalse(saved_states[-1]["show_startup_onboarding"])
+                    self.assertEqual(saved_states[-1]["render_profile"], "vanilla")
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_startup_onboarding_guided_step_restores_saved_setup_before_detected_folder(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        def find_label_frame(root, title: str):
+            pending = list(root.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TLabelframe" and widget.cget("text") == title:
+                    return widget
+                pending.extend(widget.winfo_children())
+            self.fail(f"Could not find Tk section '{title}'.")
+
+        def find_button(root, title: str):
+            pending = list(root.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TButton" and str(widget.cget("text")) == title:
+                    return widget
+                pending.extend(widget.winfo_children())
+            self.fail(f"Could not find Tk button '{title}'.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            manager = "Mod Organizer 2"
+            profile = "Main"
+            profile_key = _profile_setup_memory_key(manager, profile)
+            saved_state["last_mod_manager"] = manager
+            saved_state["last_mod_profile"] = profile
+            saved_state["profile_setup_memory"] = {
+                profile_key: {
+                    "render_profile": "community_shaders",
+                    "output_target": "D:/Skyrim/Output",
+                    "use_custom_output": True,
+                    "workflow_mode": "advanced",
+                    "target_game": "fallout4",
+                }
+            }
+            detected_folder = Path(temp_dir) / "mods" / "Texture Pack" / "textures"
+            detected_folder.mkdir(parents=True)
+            context = ModManagerContext(
+                manager=manager,
+                profile_name=profile,
+                loaded_texture_dirs=(detected_folder,),
+            )
+            gui = None
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state), \
+                     mock.patch("generate_textures.detect_mod_manager_context", return_value=context), \
+                     mock.patch("generate_textures.save_gui_state") as save_state:
+                    gui = TextureGeneratorGUI()
+                    gui.root.update_idletasks()
+                    banner = find_label_frame(gui.root, "Quick start")
+                    label_texts = [
+                        str(child.cget("text"))
+                        for child in banner.winfo_children()
+                        if child.winfo_class() in {"TLabel", "Label"}
+                    ]
+                    self.assertTrue(any("restore the remembered setup" in text for text in label_texts))
+                    find_button(banner, "Next safe step").invoke()
+                    gui.root.update_idletasks()
+                    self.assertEqual(gui.render_profile_var.get(), "community_shaders")
+                    self.assertEqual(gui.workflow_mode_var.get(), "Advanced")
+                    self.assertTrue(gui.use_custom_output_var.get())
+                    self.assertEqual(gui.output_var.get(), "D:/Skyrim/Output")
+                    self.assertEqual(gui.target_game_var.get(), "fallout4")
+                    refreshed_texts = [
+                        str(child.cget("text"))
+                        for child in banner.winfo_children()
+                        if child.winfo_class() in {"TLabel", "Label"}
+                    ]
+                    self.assertTrue(any("use the detected mod folder first" in text for text in refreshed_texts))
+                    save_state.assert_called()
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_startup_onboarding_suggested_button_uses_manager_context(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        def find_label_frame(root, title: str):
+            pending = list(root.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TLabelframe" and widget.cget("text") == title:
+                    return widget
+                pending.extend(widget.winfo_children())
+            self.fail(f"Could not find Tk section '{title}'.")
+
+        def find_button(root, title: str):
+            pending = list(root.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TButton" and str(widget.cget("text")) == title:
+                    return widget
+                pending.extend(widget.winfo_children())
+            self.fail(f"Could not find Tk button '{title}'.")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            gui = None
+            context = ModManagerContext(manager="Mod Organizer 2", loaded_mods=("ENBSeries",))
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state), \
+                     mock.patch("generate_textures.detect_mod_manager_context", return_value=context), \
+                     mock.patch("generate_textures.save_gui_state") as save_state:
+                    gui = TextureGeneratorGUI()
+                    gui.root.update_idletasks()
+                    banner = find_label_frame(gui.root, "Quick start")
+                    label_texts = [
+                        str(child.cget("text"))
+                        for child in banner.winfo_children()
+                        if child.winfo_class() in {"TLabel", "Label"}
+                    ]
+                    self.assertTrue(any("Step 3:" in text for text in label_texts))
+                    find_button(banner, "Suggested").invoke()
+                    gui.root.update_idletasks()
+                    self.assertEqual(gui.render_profile_var.get(), "enb")
+                    self.assertFalse(gui.show_startup_onboarding_var.get())
+                    self.assertFalse(banner.winfo_ismapped())
+                    save_state.assert_called()
+                    persisted = save_state.call_args.args[0]
+                    self.assertEqual(persisted["render_profile"], "enb")
+                    self.assertFalse(bool(persisted["show_startup_onboarding"]))
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_generation_log_copy_and_export(self) -> None:
+        self._skip_unavailable_tk_display()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            saved_state = load_gui_state(Path(temp_dir) / "missing-state.json")
+            export_path = Path(temp_dir) / "generation.log"
+            gui = None
+            try:
+                with mock.patch("generate_textures.load_gui_state", return_value=saved_state), \
+                     mock.patch("generate_textures.save_gui_state"), \
+                     mock.patch("generate_textures.detect_mod_manager_context", return_value=ModManagerContext()):
+                    gui = TextureGeneratorGUI()
+                gui.root.update_idletasks()
+                self.assertIsNotNone(gui.generation_log_text)
+                expected_text = (
+                    "Queued 3 source texture(s).\n"
+                    "Processing 1/3: stone.dds (elapsed 0.5s, eta 1.0s)\n"
+                    "Run summary: processed 3/3."
+                )
+                gui._append_generation_log("Queued 3 source texture(s).")
+                gui._append_generation_log(
+                    [
+                        "Processing 1/3: stone.dds (elapsed 0.5s, eta 1.0s)",
+                        "Run summary: processed 3/3.",
+                    ]
+                )
+                self.assertEqual(gui.generation_log_text.get("1.0", "end-1c"), expected_text)
+                with mock.patch.object(gui.root, "clipboard_clear") as clear_clipboard, \
+                     mock.patch.object(gui.root, "clipboard_append") as append_clipboard:
+                    gui._copy_generation_log()
+                clear_clipboard.assert_called_once()
+                append_clipboard.assert_called_once_with(expected_text)
+                self.assertIn("Copied generation log to clipboard.", gui.status_var.get())
+                with mock.patch("generate_textures.filedialog.asksaveasfilename", return_value=str(export_path)):
+                    gui._export_generation_log()
+                self.assertEqual(export_path.read_text(encoding="utf-8"), expected_text + "\n")
+                self.assertIn("Exported generation log to", gui.status_var.get())
+                bundle_path = Path(temp_dir) / "bundle.txt"
+                gui.render_profile_var.set("enb")
+                gui.use_custom_output_var.set(True)
+                gui.output_var.set(str(Path(temp_dir) / "out"))
+                with mock.patch("generate_textures.filedialog.asksaveasfilename", return_value=str(bundle_path)):
+                    gui._export_diagnostics_bundle()
+                bundle_text = bundle_path.read_text(encoding="utf-8")
+                self.assertIn("Skyrim Texture Generator diagnostics bundle", bundle_text)
+                self.assertIn("App version:", bundle_text)
+                self.assertIn('"render_profile": "enb"', bundle_text)
+                self.assertIn("Generation event log:", bundle_text)
+                self.assertIn(expected_text, bundle_text)
+                self.assertIn("Exported diagnostics bundle to", gui.status_var.get())
+            finally:
+                if gui is not None:
+                    gui.root.destroy()
+
+    def test_tk_theme_scale_and_window_sizes_remain_usable(self) -> None:
+        self._skip_unavailable_tk_display()
+        state_file = Path(tempfile.mkdtemp()) / "gui-state.json"
+        gui = None
+        try:
+            with mock.patch("generate_textures.GUI_STATE_FILE", state_file):
+                gui = TextureGeneratorGUI()
+                try:
+                    gui.root.geometry("800x600")
+                    gui.root.update_idletasks()
+                    self.assertGreater(gui.root.winfo_width(), 0)
+                    self.assertGreater(gui.root.winfo_height(), 0)
+
+                    for geometry in ("800x600", "960x700", "1280x900"):
+                        gui.root.geometry(geometry)
+                        gui.root.update_idletasks()
+                        self.assertGreater(gui.root.winfo_width(), 0)
+                        self.assertGreater(gui.root.winfo_height(), 0)
+
+                    gui.root.geometry("800x600")
+                    gui.root.update_idletasks()
+                    selected_size = (gui.root.winfo_width(), gui.root.winfo_height())
+                    gui.ui_scale_combo.set("2.0")
+                    with mock.patch("generate_textures.save_gui_state"):
+                        gui._on_ui_scale_changed()
+                    gui.root.update_idletasks()
+                    self.assertEqual(
+                        (gui.root.winfo_width(), gui.root.winfo_height()),
+                        selected_size,
+                    )
+                    gui._set_theme_mode("dark", persist=False)
+                    gui.root.update_idletasks()
+                    self.assertEqual(
+                        (gui.root.winfo_width(), gui.root.winfo_height()),
+                        selected_size,
+                    )
+
+                    style = gui.root.tk.call
+                    with mock.patch("generate_textures.save_gui_state"):
+                        for scale in ("0.9", "1.0", "1.15", "1.3", "1.5"):
+                            gui.ui_scale_combo.set(scale)
+                            gui._on_ui_scale_changed()
+                            self.assertAlmostEqual(float(gui.ui_scale_var.get()), float(scale))
+                            for theme_mode, palette in (("light", _LIGHT_THEME), ("dark", _DARK_THEME), ("high_contrast", _HIGH_CONTRAST_THEME)):
+                                gui._set_theme_mode(theme_mode)
+                                gui._restore_default_startup_geometry()
+                                self.assertEqual(
+                                    style("ttk::style", "lookup", "Muted.TLabel", "-foreground"),
+                                    palette["muted_fg"],
+                                )
+                                self.assertEqual(
+                                    style("ttk::style", "lookup", "Status.Error.TLabel", "-foreground"),
+                                    palette["error_fg"],
+                                )
+                finally:
+                    if gui is not None:
+                        gui.root.destroy()
+        finally:
+            state_file.unlink(missing_ok=True)
+
+    def test_tk_main_window_is_mapped_after_initial_layout(self) -> None:
+        self._skip_unavailable_tk_display()
+        original_tk = gt.tk.Tk
+        mapped_child_counts: list[int] = []
+        mapped_min_sizes: list[tuple[int, int]] = []
+        gui = None
+
+        def track_root_mapping(*args, **kwargs):
+            root = original_tk(*args, **kwargs)
+
+            def record_root_mapping(event) -> None:
+                if event.widget is not root:
+                    return
+                mapped_child_counts.append(len(root.winfo_children()))
+                mapped_min_sizes.append(tuple(int(value) for value in root.minsize()))
+
+            root.bind(
+                "<Map>",
+                record_root_mapping,
+                add="+",
+            )
+            return root
+
+        try:
+            with mock.patch("generate_textures.tk.Tk", side_effect=track_root_mapping):
+                gui = TextureGeneratorGUI()
+            self.assertEqual(gui.root.state(), "withdrawn")
+            gui.root.update_idletasks()
+            self.assertTrue(mapped_child_counts)
+            self.assertGreater(mapped_child_counts[0], 0)
+            self.assertTrue(mapped_min_sizes)
+            self.assertLessEqual(mapped_min_sizes[0][0], 800)
+            self.assertLessEqual(mapped_min_sizes[0][1], 600)
+            self.assertNotEqual(gui.root.state(), "withdrawn")
+            self.assertGreaterEqual(gui.root.winfo_width(), 320)
+            self.assertGreaterEqual(gui.root.winfo_height(), 240)
+            gui.root.after(150, gui.root.quit)
+            gui.root.mainloop()
+        finally:
+            if gui is not None:
+                gui.root.destroy()
+
+    def test_tk_collapsed_window_is_repaired_after_mapping(self) -> None:
+        self._skip_unavailable_tk_display()
+        gui = None
+        try:
+            gui = TextureGeneratorGUI()
+            root = gui.root
+            root.update_idletasks()
+            root.minsize(1, 1)
+            root.geometry("172x20")
+            root.update_idletasks()
+            root.after(900, root.quit)
+            root.mainloop()
+            self.assertGreaterEqual(root.winfo_width(), 320)
+            self.assertGreaterEqual(root.winfo_height(), 240)
+        finally:
+            if gui is not None:
+                gui.root.destroy()
+
+    def test_tk_startup_window_is_shown_after_deferred_geometry_restore(self) -> None:
+        idle_callbacks: list[object] = []
+        delayed_callbacks: list[tuple[int, object]] = []
+        events: list[str] = []
+
+        class StartupRoot:
+            def update_idletasks(self) -> None:
+                return None
+
+            def geometry(self, _geometry: str) -> None:
+                return None
+
+            def after_idle(self, callback) -> None:
+                idle_callbacks.append(callback)
+
+            def after(self, delay: int, callback) -> None:
+                delayed_callbacks.append((delay, callback))
+
+        gt._prepare_tk_startup_geometry(
+            StartupRoot(),
+            lambda: events.append("restore"),
+            show_window=lambda: events.append("show"),
+        )
+
+        self.assertEqual(events, ["restore"])
+        self.assertEqual(len(idle_callbacks), 1)
+        idle_callbacks[0]()
+        self.assertEqual(events, ["restore", "restore", "show"])
+        self.assertEqual(len(delayed_callbacks), 1)
+        self.assertEqual(delayed_callbacks[0][0], 100)
+        delayed_callbacks[0][1]()
+        self.assertEqual(events, ["restore", "restore", "show", "restore"])
+
+    def test_tk_startup_geometry_clamps_small_screen_and_preserves_resized_window(self) -> None:
+        safe_width, safe_height, min_width, min_height = _compute_safe_startup_geometry(800, 600)
+        self.assertTrue(
+            gt._should_apply_safe_startup_geometry(
+                960,
+                700,
+                safe_width,
+                safe_height,
+                min_width,
+                min_height,
+                force_safe_geometry=True,
+            )
+        )
+        self.assertFalse(
+            gt._should_apply_safe_startup_geometry(
+                safe_width,
+                safe_height,
+                safe_width,
+                safe_height,
+                min_width,
+                min_height,
+                force_safe_geometry=True,
+            )
+        )
+
+        large_safe_width, large_safe_height, large_min_width, large_min_height = (
+            _compute_safe_startup_geometry(1920, 1080)
+        )
+        self.assertFalse(
+            gt._should_apply_safe_startup_geometry(
+                800,
+                600,
+                large_safe_width,
+                large_safe_height,
+                large_min_width,
+                large_min_height,
+            )
+        )
+
+    def test_tk_startup_geometry_schedules_deferred_restore_after_initial_failure(self) -> None:
+        scheduled: list[object] = []
+        restore_calls: list[bool] = []
+
+        class StartupRoot:
+            def update_idletasks(self) -> None:
+                return None
+
+            def geometry(self, _geometry: str) -> None:
+                raise RuntimeError("temporary geometry failure")
+
+            def after_idle(self, callback) -> None:
+                scheduled.append(callback)
+
+        gt._prepare_tk_startup_geometry(
+            StartupRoot(),
+            lambda: restore_calls.append(True),
+        )
+
+        self.assertEqual(restore_calls, [])
+        self.assertEqual(len(scheduled), 1)
+        scheduled[0]()
+        self.assertEqual(restore_calls, [True])
+
+    def test_build_nif_editor_action_guidance_is_profile_aware(self) -> None:
+        vanilla_guidance = build_nif_editor_action_guidance("vanilla")
+        self.assertIn("Patch recipe", vanilla_guidance)
+        self.assertIn("standard parallax", vanilla_guidance)
+        self.assertIn("Likely mismatch", vanilla_guidance)
+        self.assertIn("Selected NIF", vanilla_guidance)
+        self.assertIn("Safety default: start in dry-run mode", vanilla_guidance)
+        self.assertIn("_cm.dds", build_nif_editor_action_guidance("community_shaders"))
+        self.assertIn("PBR flag", build_nif_editor_action_guidance("truepbr"))
+        self.assertIn("ENB POM", build_nif_editor_action_guidance("enb"))
+        self.assertIn("Fallout writes are guarded", build_nif_editor_action_guidance("vanilla", target_game="fallout"))
+        self.assertIn("wrong renderer workflow", build_nif_editor_action_guidance("community_shaders"))
+
+    def test_build_nif_editor_action_guidance_reports_detected_workflow_hints(self) -> None:
+        guidance = build_nif_editor_action_guidance("vanilla", nif_path="textures/character/armor_n.dds")
+        self.assertIn("Detected workflow: Characters / Skin", guidance)
+        self.assertIn("safe patch path", guidance)
+
+        mismatch = build_nif_editor_action_guidance("enb", nif_path="textures/architecture/stone_cm.dds")
+        self.assertIn("Detected workflow: Community Shaders", mismatch)
+        self.assertIn("do not force the mesh onto", mismatch)
+
+    def test_tk_nif_editor_opens_all_tabs_and_closes_cleanly(self) -> None:
+        self._skip_unavailable_tk_display()
+        if not NIF_PATCHER_AVAILABLE:
+            self.skipTest("NIF patcher is unavailable in this environment.")
+
+        gui = None
+        try:
+            with mock.patch(
+                "generate_textures.load_gui_state",
+                return_value=load_gui_state(Path("/missing/gui-state.json")),
+            ):
+                gui = TextureGeneratorGUI()
+            with mock.patch("generate_textures.messagebox.showerror") as show_error:
+                gui._open_nif_editor()
+                gui.root.update()
+                show_error.assert_not_called()
+            editors = [
+                widget for widget in gui.root.winfo_children()
+                if widget.winfo_class() == "Toplevel"
+            ]
+            self.assertEqual(len(editors), 1)
+            editor = editors[0]
+            notebooks = []
+            pending = list(editor.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TNotebook":
+                    notebooks.append(widget)
+                pending.extend(widget.winfo_children())
+            self.assertEqual(len(notebooks), 1)
+            self.assertEqual(
+                [notebooks[0].tab(tab_id, "text") for tab_id in notebooks[0].tabs()],
+                ["Patch setup", "Texture slots", "Disable / clear", "Help"],
+            )
+            self.assertEqual(str(gui.root.grab_current()), str(editor))
+            path_label = None
+            scan_button = None
+            results_tree = None
+            conflict_examples_check = None
+            pending = list(editor.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TLabel" and widget.cget("text") == "Path:":
+                    path_label = widget
+                elif widget.winfo_class() == "TButton" and widget.cget("text") == "Scan NIFs":
+                    scan_button = widget
+                elif widget.winfo_class() == "Treeview":
+                    results_tree = widget
+                elif (
+                    widget.winfo_class() == "TCheckbutton"
+                    and widget.cget("text") == "Include conflict examples"
+                ):
+                    conflict_examples_check = widget
+                pending.extend(widget.winfo_children())
+            self.assertIsNotNone(path_label)
+            self.assertIsNotNone(scan_button)
+            self.assertIsNotNone(results_tree)
+            self.assertIsNotNone(conflict_examples_check)
+            examples_var = str(conflict_examples_check.cget("variable"))
+            self.assertEqual(int(gui.root.getvar(examples_var)), 0)
+            conflict_examples_check.invoke()
+            self.assertEqual(int(gui.root.getvar(examples_var)), 1)
+            path_entries = [
+                widget for widget in path_label.master.winfo_children()
+                if widget.winfo_class() == "TEntry"
+            ]
+            self.assertEqual(len(path_entries), 1)
+            with tempfile.TemporaryDirectory() as temp_dir:
+                nif_path = Path(temp_dir) / "scan_failure.nif"
+                nif_path.write_bytes(b"fixture")
+                gui.root.setvar(str(path_entries[0].cget("textvariable")), str(nif_path))
+                with mock.patch(
+                    "generate_textures.discover_plugin_conflict_context_from_manager",
+                    side_effect=RuntimeError("simulated startup failure"),
+                ):
+                    scan_button.invoke()
+                    deadline = time.monotonic() + 5.0
+                    while scan_button.instate(("disabled",)) and time.monotonic() < deadline:
+                        gui.root.update()
+                        time.sleep(0.01)
+                    gui.root.update()
+                self.assertFalse(scan_button.instate(("disabled",)))
+                result_values = [
+                    results_tree.item(item_id, "values")
+                    for item_id in results_tree.get_children()
+                ]
+                self.assertTrue(
+                    any(
+                        values[0] == "FAIL"
+                        and values[1] == "NIF Editor"
+                        and "simulated startup failure" in values[2]
+                        for values in result_values
+                    )
+                )
+            close_buttons = []
+            pending = list(editor.winfo_children())
+            while pending:
+                widget = pending.pop()
+                if widget.winfo_class() == "TButton" and widget.cget("text") == "Close":
+                    close_buttons.append(widget)
+                pending.extend(widget.winfo_children())
+            self.assertEqual(len(close_buttons), 1)
+            close_buttons[0].invoke()
+            gui.root.update()
+            self.assertFalse(bool(editor.winfo_exists()))
+            self.assertIsNone(gui.root.grab_current())
+        finally:
+            if gui is not None:
+                gui.root.destroy()
+
     def test_normalize_gui_state_clamps_slider_values_and_sanitizes_modes(self) -> None:
         normalized = _normalize_gui_state(
             {
@@ -427,6 +3662,15 @@ class GenerateTexturesTests(unittest.TestCase):
                 "env_mask_mode": "invalid",
                 "parallax_mode": "occlusion",
                 "render_profile": "mystery",
+                "nif_render_profile": "mystery",
+                "auto_optimize_large_batches": 0,
+                "lazy_preview_mode": 0,
+                "staged_preview_mode": 0,
+                "batch_resume_mode": "unsupported",
+                "simplified_main_layout": 0,
+                "show_advanced_generation_controls": 1,
+                "show_advanced_workflow_outputs": 1,
+                "workflow_mode": "advanced",
                 "normal_strength": 500,
                 "parallax_strength": -10,
                 "glow_threshold": 999,
@@ -440,12 +3684,219 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(normalized["env_mask_mode"]), "standard")
         self.assertEqual(str(normalized["parallax_mode"]), "occlusion (ENB/POM)")
         self.assertEqual(str(normalized["render_profile"]), "custom")
-        self.assertAlmostEqual(float(normalized["normal_strength"]), 8.0)
+        self.assertEqual(str(normalized["nif_render_profile"]), "custom")
+        self.assertFalse(bool(normalized["auto_optimize_large_batches"]))
+        self.assertFalse(bool(normalized["lazy_preview_mode"]))
+        self.assertFalse(bool(normalized["staged_preview_mode"]))
+        self.assertEqual(str(normalized["batch_resume_mode"]), "start_fresh")
+        self.assertEqual(str(normalized["workflow_mode"]), "advanced")
+        self.assertFalse(bool(normalized["simplified_main_layout"]))
+        self.assertTrue(bool(normalized["show_advanced_generation_controls"]))
+        self.assertTrue(bool(normalized["show_advanced_workflow_outputs"]))
+        self.assertAlmostEqual(float(normalized["normal_strength"]), 12.0)
         self.assertAlmostEqual(float(normalized["parallax_strength"]), 0.1)
         self.assertEqual(int(normalized["glow_threshold"]), 255)
-        self.assertAlmostEqual(float(normalized["environment_mask_strength"]), 8.0)
+        self.assertAlmostEqual(float(normalized["environment_mask_strength"]), 12.0)
         self.assertAlmostEqual(float(normalized["complex_strength"]), 0.1)
         self.assertAlmostEqual(float(normalized["specular_strength"]), 0.1)
+
+    def test_discover_ui_languages_includes_default_and_detects_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            translations_dir = Path(temp_dir)
+            (translations_dir / "de.json").write_text(
+                json.dumps({"meta": {"display_name": "Deutsch"}}), encoding="utf-8"
+            )
+            languages = discover_ui_languages(translations_dir)
+        self.assertIn("en", languages)
+        self.assertIn("de", languages)
+
+    def test_load_ui_translations_reads_string_map(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            translations_dir = Path(temp_dir)
+            (translations_dir / "en.json").write_text(
+                json.dumps({"strings": {"Hello": "Hi"}}), encoding="utf-8"
+            )
+            translations = load_ui_translations("en", translations_dir)
+        self.assertEqual(translations.get("Hello"), "Hi")
+
+    def test_default_translation_catalog_offers_multiple_languages(self) -> None:
+        languages = discover_ui_languages()
+        self.assertIn("en", languages)
+        self.assertIn("de", languages)
+        self.assertIn("es", languages)
+
+    def test_non_english_translation_catalogs_match_en_keyset(self) -> None:
+        translations_dir = Path(__file__).resolve().parents[1] / "assets" / "translations"
+        en_payload = json.loads((translations_dir / "en.json").read_text(encoding="utf-8"))
+        en_strings = en_payload.get("strings", {})
+        self.assertIsInstance(en_strings, dict)
+        en_keys = set(en_strings.keys())
+        self.assertGreater(len(en_keys), 0)
+
+        for catalog_path in sorted(translations_dir.glob("*.json")):
+            if catalog_path.name == "en.json":
+                continue
+            payload = json.loads(catalog_path.read_text(encoding="utf-8"))
+            strings = payload.get("strings", {})
+            self.assertIsInstance(strings, dict, f"{catalog_path.name}: strings must be an object")
+            keys = set(strings.keys())
+            missing = sorted(en_keys - keys)
+            extras = sorted(keys - en_keys)
+            self.assertEqual(
+                missing,
+                [],
+                f"{catalog_path.name}: missing translation keys: {missing[:10]}",
+            )
+            self.assertEqual(
+                extras,
+                [],
+                f"{catalog_path.name}: stale/unknown translation keys: {extras[:10]}",
+            )
+
+    def test_translate_ui_text_formats_tokens(self) -> None:
+        self.assertEqual(
+            translate_ui_text("Ready {value}", {"Ready {value}": "Done {value}"}),
+            "Done {value}",
+        )
+
+    def test_compute_effective_ui_scale_clamps_range(self) -> None:
+        self.assertAlmostEqual(compute_effective_ui_scale(pixels_per_inch=40, user_scale=0.1), 0.8)
+        self.assertAlmostEqual(compute_effective_ui_scale(pixels_per_inch=800, user_scale=5), 2.5)
+        self.assertAlmostEqual(compute_effective_ui_scale(pixels_per_inch=96, user_scale=1.25), 1.25)
+
+    def test_qt_initial_window_size_fits_screen_with_safe_margins(self) -> None:
+        self.assertEqual(_compute_qt_initial_window_size(1920, 1080), (1080, 760))
+        self.assertEqual(_compute_qt_initial_window_size(1280, 720), (1080, 624))
+        self.assertEqual(_compute_qt_initial_window_size(800, 600), (704, 504))
+        self.assertEqual(_compute_qt_initial_window_size(40, 30), (1, 1))
+
+    def test_extract_mesh_paths_from_plugin_bytes_parses_nif_paths(self) -> None:
+        blob = (
+            b"meshes\\architecture\\stone.nif\x00"
+            b"meshes/architecture/stone.nif\x00"
+            b"meshes\\effects\\bad.txt\x00"
+        )
+        paths = extract_mesh_paths_from_plugin_bytes(blob)
+        self.assertEqual(paths, ("meshes\\architecture\\stone.nif",))
+
+    def test_extract_plugin_mesh_record_refs_parses_record_id_and_type(self) -> None:
+        mesh_bytes = b"meshes\\architecture\\stone.nif\x00"
+        record_payload = (
+            b"EDID"
+            + (4).to_bytes(2, "little")
+            + b"Test"
+            + b"MODL"
+            + len(mesh_bytes).to_bytes(2, "little")
+            + mesh_bytes
+        )
+        record = (
+            b"STAT"
+            + len(record_payload).to_bytes(4, "little")
+            + (0).to_bytes(4, "little")
+            + int("1234ABCD", 16).to_bytes(4, "little")
+            + (0).to_bytes(4, "little")
+            + (0).to_bytes(4, "little")
+            + record_payload
+        )
+        refs = extract_plugin_mesh_record_refs(record)
+        self.assertEqual(len(refs), 1)
+        self.assertEqual(refs[0].mesh_path, "meshes\\architecture\\stone.nif")
+        self.assertEqual(refs[0].record_id, "1234ABCD")
+        self.assertEqual(refs[0].record_type, "STAT")
+
+    def test_discover_plugin_conflict_context_from_manager_collects_mesh_refs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game_root = Path(temp_dir) / "Skyrim"
+            plugin_path = game_root / "Data" / "Example.esp"
+            plugin_path.parent.mkdir(parents=True)
+            plugin_path.write_bytes(b"meshes\\architecture\\stone.nif\x00")
+            context = ModManagerContext(
+                manager="Vortex",
+                game_root=game_root,
+                enabled_plugins=("Example.esp",),
+            )
+            discovered = discover_plugin_conflict_context_from_manager(
+                [Path("meshes/architecture/stone.nif")],
+                context,
+            )
+        self.assertIn("meshes/architecture/stone.nif", discovered)
+        self.assertEqual(
+            discovered["meshes/architecture/stone.nif"][0].plugin_name,
+            "Example.esp",
+        )
+        self.assertEqual(
+            discovered["meshes/architecture/stone.nif"][0].record_type,
+            "",
+        )
+
+    def test_discover_plugin_conflict_context_from_manager_records_metadata_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game_root = Path(temp_dir) / "Skyrim"
+            plugin_path = game_root / "Data" / "Example.esp"
+            plugin_path.parent.mkdir(parents=True)
+            mesh_bytes = b"meshes\\architecture\\stone.nif\x00"
+            payload = (
+                b"MODL"
+                + len(mesh_bytes).to_bytes(2, "little")
+                + mesh_bytes
+            )
+            plugin_path.write_bytes(
+                b"STAT"
+                + len(payload).to_bytes(4, "little")
+                + (0).to_bytes(4, "little")
+                + int("00000ABC", 16).to_bytes(4, "little")
+                + (0).to_bytes(4, "little")
+                + (0).to_bytes(4, "little")
+                + payload
+            )
+            context = ModManagerContext(
+                manager="Vortex",
+                game_root=game_root,
+                enabled_plugins=("Example.esp",),
+            )
+            discovered = discover_plugin_conflict_context_from_manager(
+                [Path("meshes/architecture/stone.nif")],
+                context,
+            )
+        self.assertEqual(discovered["meshes/architecture/stone.nif"][0].record_id, "00000ABC")
+        self.assertEqual(discovered["meshes/architecture/stone.nif"][0].record_type, "STAT")
+
+    def test_discover_plugin_conflict_context_normalizes_starred_plugin_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game_root = Path(temp_dir) / "Skyrim"
+            plugin_path = game_root / "Data" / "Example.esp"
+            plugin_path.parent.mkdir(parents=True)
+            plugin_path.write_bytes(b"meshes\\architecture\\stone.nif\x00")
+            context = ModManagerContext(
+                manager="Vortex",
+                game_root=game_root,
+                enabled_plugins=("*Example.esp",),
+                load_order=("Example.esp # active",),
+            )
+            discovered = discover_plugin_conflict_context_from_manager(
+                [Path("meshes/architecture/stone.nif")],
+                context,
+            )
+        self.assertIn("meshes/architecture/stone.nif", discovered)
+        self.assertEqual(discovered["meshes/architecture/stone.nif"][0].plugin_name, "Example.esp")
+
+    def test_discover_plugin_conflict_context_resolves_case_insensitive_plugin_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            game_root = Path(temp_dir) / "Skyrim"
+            plugin_path = game_root / "Data" / "Example.ESP"
+            plugin_path.parent.mkdir(parents=True)
+            plugin_path.write_bytes(b"meshes\\architecture\\stone.nif\x00")
+            context = ModManagerContext(
+                manager="Vortex",
+                game_root=game_root,
+                enabled_plugins=("example.esp",),
+            )
+            discovered = discover_plugin_conflict_context_from_manager(
+                [Path("meshes/architecture/stone.nif")],
+                context,
+            )
+        self.assertIn("meshes/architecture/stone.nif", discovered)
+        self.assertEqual(discovered["meshes/architecture/stone.nif"][0].plugin_name.lower(), "example.esp")
 
     def test_normalize_gui_state_accepts_truepbr_alias(self) -> None:
         normalized = _normalize_gui_state({"render_profile": "true pbr"})
@@ -789,6 +4240,43 @@ class GenerateTexturesTests(unittest.TestCase):
             "interface",
         )
 
+    def test_interface_render_profile_is_normalized_to_vanilla(self) -> None:
+        self.assertEqual(_normalize_render_profile("interface"), "vanilla")
+        self.assertEqual(recommend_render_profile(Path("textures/interface/cards/collectible.dds")), "vanilla")
+        self.assertIn("safe patch path: do not force the mesh onto Vanilla", build_nif_editor_action_guidance("vanilla", nif_path="textures/interface/cards/collectible.dds"))
+
+    def test_detect_workflow_profile_detects_renderer_path_hints_for_selected_nif(self) -> None:
+        self.assertEqual(
+            detect_workflow_profile(Path("mods/Dynamic Cube Maps/textures/architecture/stone.dds")),
+            "community_shaders",
+        )
+        self.assertEqual(
+            detect_workflow_profile(Path("mods/Community Shaders/textures/architecture/stone.dds")),
+            "community_shaders",
+        )
+        self.assertEqual(
+            detect_workflow_profile(Path("mods/ENBSeries/textures/architecture/stone.dds")),
+            "enb",
+        )
+        self.assertEqual(
+            detect_workflow_profile(Path("mods/True PBR/textures/architecture/stone.dds")),
+            "truepbr",
+        )
+        self.assertEqual(
+            detect_workflow_profile(Path("mods/TruePBR/textures/architecture/stone.dds")),
+            "truepbr",
+        )
+        self.assertEqual(
+            detect_workflow_profile(Path("Data/PBRTextureSets/LandscapeDirt01.json")),
+            "truepbr",
+        )
+        self.assertEqual(
+            detect_workflow_profile(
+                Path("mods/Community Shaders/TruePBR/textures/architecture/stone.dds")
+            ),
+            "truepbr",
+        )
+
     def test_detect_workflow_profile_detects_renderer_and_content_profiles(self) -> None:
         self.assertEqual(detect_workflow_profile(Path("textures/vr/armor/helmet.dds")), "vr")
         self.assertEqual(detect_workflow_profile(Path("textures/performance/stone.dds")), "performance")
@@ -799,6 +4287,12 @@ class GenerateTexturesTests(unittest.TestCase):
             recommend_render_profile(Path("mods/ENBSeries/textures/architecture/stone.dds")),
             "enb",
         )
+        self.assertEqual(
+            recommend_render_profile(
+                Path("mods/Community Shaders/TruePBR/textures/architecture/stone.dds")
+            ),
+            "truepbr",
+        )
 
     def test_recommend_render_profile_detects_community_shaders_from_cm_role(self) -> None:
         self.assertEqual(
@@ -807,6 +4301,20 @@ class GenerateTexturesTests(unittest.TestCase):
                 detected_role="complex_material_cm",
             ),
             "community_shaders",
+        )
+
+    def test_recommend_render_profile_prefers_detected_renderer_over_architecture_material_hint(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(Path("textures/architecture/stone_cm.dds")),
+            "community_shaders",
+        )
+        self.assertEqual(
+            recommend_render_profile(Path("textures/architecture/stone_rmaos.dds")),
+            "truepbr",
+        )
+        self.assertEqual(
+            recommend_render_profile(Path("mods/ENBSeries/textures/architecture/stone.dds")),
+            "enb",
         )
 
     def test_recommend_render_profile_prefers_vanilla_for_interface_or_paper(self) -> None:
@@ -885,6 +4393,12 @@ class GenerateTexturesTests(unittest.TestCase):
             ),
             "community_shaders",
         )
+        noisy_temp_path = Path("/tmp/tmpqjvr25tr/MO2/overwrite/textures/neutral_asset.dds")
+        self.assertIsNone(detect_workflow_profile(noisy_temp_path))
+        self.assertEqual(
+            recommend_render_profile(noisy_temp_path, manager_context=context),
+            "community_shaders",
+        )
 
     def test_recommend_render_profile_detects_truepbr_from_rmaos_suffix(self) -> None:
         self.assertEqual(
@@ -906,6 +4420,10 @@ class GenerateTexturesTests(unittest.TestCase):
             "truepbr",
         )
 
+    def test_detect_workflow_profile_detects_legacy_truepbr_alias_suffixes(self) -> None:
+        for suffix in ("_orm", "_orms", "_mrao", "_mra"):
+            self.assertEqual(detect_workflow_profile(Path(f"textures/architecture/stone{suffix}.dds")), "truepbr")
+
     def test_recommend_render_profile_detects_truepbr_from_orm_suffix(self) -> None:
         self.assertEqual(
             recommend_render_profile(
@@ -915,6 +4433,48 @@ class GenerateTexturesTests(unittest.TestCase):
             ),
             "truepbr",
         )
+
+    def test_recommend_render_profile_details_scores_truepbr_suffix_high(self) -> None:
+        details = recommend_render_profile_details(
+            Path("textures/architecture/stone_rmaos.dds"),
+            detected_role="environment_mask",
+            detected_suffix="_rmaos",
+        )
+        self.assertEqual(details.profile, "truepbr")
+        self.assertGreaterEqual(details.confidence, 0.95)
+        self.assertIn("TruePBR", details.recommendation_reason)
+        self.assertTrue(any("ENB" in text for text in details.why_not_others))
+        self.assertTrue(any("Community Shaders" in text for text in details.why_not_others))
+
+    def test_recommend_render_profile_details_warns_on_outdated_truepbr_metadata(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            loaded_mods=("PBRNifPatcher 0.9.0",),
+            renderer_version_hints=("Community Shaders PBR 0.9.0",),
+        )
+        details = recommend_render_profile_details(
+            Path("textures/architecture/stone_rmaos.dds"),
+            detected_role="environment_mask",
+            detected_suffix="_rmaos",
+            manager_context=context,
+        )
+        self.assertEqual(details.profile, "truepbr")
+        self.assertIn("release-aligned baseline", details.recommendation_reason)
+        self.assertLess(details.confidence, 0.95)
+
+    def test_recommend_render_profile_details_scores_mod_manager_markers_high(self) -> None:
+        context = ModManagerContext(
+            manager="MO2",
+            loaded_mods=("Community Shaders", "Texture Pack"),
+        )
+        details = recommend_render_profile_details(
+            Path("textures/misc/neutral_asset.dds"),
+            manager_context=context,
+        )
+        self.assertEqual(details.profile, "community_shaders")
+        self.assertGreaterEqual(details.confidence, 0.85)
+        self.assertIn("mod-manager", details.recommendation_reason.lower())
+        self.assertTrue(any("TruePBR" in text for text in details.why_not_others))
 
     def test_recommend_generation_settings_leather_is_less_reflective_than_metal(self) -> None:
         source = _detailed_low_saturation_image()
@@ -977,6 +4537,54 @@ class GenerateTexturesTests(unittest.TestCase):
             plugin_dir = root / "SKSE" / "Plugins"
             plugin_dir.mkdir(parents=True)
             (plugin_dir / "CommunityShaders.dll").write_bytes(b"")
+            context = ModManagerContext(
+                manager="Vortex",
+                staging_root=root,
+            )
+            self.assertEqual(detect_render_profile_from_mod_manager_context(context), "community_shaders")
+
+    def test_detect_render_profile_from_mod_manager_context_detects_cs_from_dynamic_cubemap_hint(self) -> None:
+        for mod_name, plugin_name in (
+            ("Dynamic Cubemap", "DynamicCubemap.esp"),
+            ("Dynamic Cubemaps", "DynamicCubemaps.esp"),
+            ("Dynamic Cube Map", "DynamicCubeMap.esp"),
+            ("Dynamic Cube Maps", "DynamicCubeMaps.esp"),
+        ):
+            context = ModManagerContext(
+                manager="MO2",
+                loaded_mods=(mod_name,),
+                enabled_plugins=(plugin_name,),
+            )
+            self.assertEqual(detect_render_profile_from_mod_manager_context(context), "community_shaders")
+
+    def test_recommend_render_profile_detects_cs_from_dynamic_cubemap_path_hint(self) -> None:
+        self.assertEqual(
+            recommend_render_profile(Path("mods/Dynamic Cube Maps/textures/architecture/stone.dds")),
+            "community_shaders",
+        )
+        self.assertEqual(
+            recommend_render_profile(Path("mods/DynamicCubemaps/textures/architecture/stone.dds")),
+            "community_shaders",
+        )
+
+    def test_detect_render_profile_from_mod_manager_context_detects_cs_from_singular_dynamic_cubemap_runtime_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plugin_dir = root / "SKSE" / "Plugins"
+            plugin_dir.mkdir(parents=True)
+            (plugin_dir / "DynamicCubemap.dll").write_bytes(b"")
+            context = ModManagerContext(
+                manager="Vortex",
+                staging_root=root,
+            )
+            self.assertEqual(detect_render_profile_from_mod_manager_context(context), "community_shaders")
+
+    def test_detect_render_profile_from_mod_manager_context_detects_cs_from_plural_dynamic_cubemap_runtime_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            plugin_dir = root / "SKSE" / "Plugins"
+            plugin_dir.mkdir(parents=True)
+            (plugin_dir / "DynamicCubemaps.dll").write_bytes(b"")
             context = ModManagerContext(
                 manager="Vortex",
                 staging_root=root,
@@ -1233,6 +4841,9 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("Custom mode: enable", hint)
         self.assertIn("ENB Complex Material", hint)
         self.assertIn("Parallax", hint)
+        self.assertIn("Family matrix:", hint)
+        self.assertIn("TruePBR: _rmaos.dds, _ramos.dds, JSON sidecars", hint)
+        self.assertIn("Parallax note:", hint)
 
     def test_build_render_profile_mode_controls_hint_reports_locked_state(self) -> None:
         hint = build_render_profile_mode_controls_hint(
@@ -1244,6 +4855,9 @@ class GenerateTexturesTests(unittest.TestCase):
             }
         )
         self.assertIn("locks mode selectors", hint)
+        self.assertIn("Family matrix:", hint)
+        self.assertIn("Community Shaders: _cm.dds, _c.dds", hint)
+        self.assertIn("Parallax note:", hint)
 
     def test_resolve_nif_patch_defaults_for_render_profile_returns_expected_toggles(self) -> None:
         vanilla = resolve_nif_patch_defaults_for_render_profile("vanilla")
@@ -1316,6 +4930,29 @@ class GenerateTexturesTests(unittest.TestCase):
         )
         self.assertTrue(any("Parallax slot path set" in text for text in warnings))
         self.assertTrue(any("Environment mask path set" in text for text in warnings))
+
+    def test_get_nif_patch_option_warnings_highlights_write_mode(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="vanilla",
+            enable_parallax=False,
+            enable_pom=False,
+            enable_env_mapping=False,
+            force_shader_type_3=False,
+            dry_run=False,
+        )
+        self.assertTrue(any("write mode is enabled" in text.lower() for text in warnings))
+
+    def test_get_nif_patch_option_warnings_highlights_missing_backup(self) -> None:
+        warnings = get_nif_patch_option_warnings(
+            selected_profile="vanilla",
+            enable_parallax=False,
+            enable_pom=False,
+            enable_env_mapping=False,
+            force_shader_type_3=False,
+            dry_run=False,
+            backup=False,
+        )
+        self.assertTrue(any("backup originals are disabled" in text.lower() for text in warnings))
 
     def test_get_nif_patch_option_warnings_skips_empty_env_mask_warning_for_enb(self) -> None:
         warnings = get_nif_patch_option_warnings(
@@ -1480,10 +5117,87 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertIn("TruePBR essentials (Community Shaders):", message)
         self.assertIn("For players/users", message)
         self.assertIn("Landscape workflow:", message)
+        self.assertIn("PBRTextureSets", message)
+        self.assertIn("PBRMaterialObjects", message)
+        self.assertIn("single-pass records", message)
+        self.assertIn("TruePBR Manager", message)
+        self.assertIn("channel packing", message)
         self.assertIn("Feature compatibility:", message)
         self.assertIn("<stem>_rmaos.dds", message)
         self.assertIn("do not swap in standalone blender-style _rough/_metallic/_ao names", message.lower())
         self.assertIn(MODDING_WIKI_SKYRIM_URL, message)
+
+    def test_build_render_profile_recommendation_message_includes_confidence_block(self) -> None:
+        recommendation = recommend_render_profile_details(
+            Path("textures/architecture/stone_rmaos.dds"),
+            detected_role="environment_mask",
+            detected_suffix="_rmaos",
+        )
+        message = build_render_profile_recommendation_message(
+            recommendation.profile,
+            recommendation=recommendation,
+        )
+        self.assertIn("Confidence / rationale:", message)
+        self.assertIn("Why this was recommended:", message)
+        self.assertIn("Why not the others:", message)
+
+    def test_build_render_profile_brief_message_includes_confidence_summary(self) -> None:
+        recommendation = recommend_render_profile_details(
+            Path("textures/architecture/stone_rmaos.dds"),
+            detected_role="environment_mask",
+            detected_suffix="_rmaos",
+        )
+        message = build_render_profile_brief_message(
+            recommendation.profile,
+            recommendation=recommendation,
+        )
+        self.assertIn("Confidence:", message)
+        self.assertIn("Why this was recommended:", message)
+        self.assertIn("Why not the others:", message)
+
+    def test_build_render_profile_messages_warn_on_low_confidence(self) -> None:
+        recommendation = RenderProfileRecommendation(
+            profile="vanilla",
+            confidence=0.56,
+            confidence_label="low",
+            recommendation_reason="No renderer-specific markers were found, so vanilla-safe defaults are the least risky choice.",
+            why_not_others=("Not ENB: ENB uses `_msn` or `_m`, not `_cm/_c`.", "Not TruePBR: TruePBR uses `_rmaos/_ramos` plus JSON sidecars, not `_cm/_c`."),
+            evidence=("no renderer-family markers",),
+            source="default fallback",
+        )
+
+        brief_message = build_render_profile_brief_message(recommendation.profile, recommendation=recommendation)
+        detailed_message = build_render_profile_recommendation_message(recommendation.profile, recommendation=recommendation)
+
+        self.assertIn("probably incompatible", brief_message.lower())
+        self.assertIn("probably incompatible", detailed_message.lower())
+
+    def test_build_render_profile_brief_message_warns_on_selected_family_mismatch(self) -> None:
+        recommendation = recommend_render_profile_details(
+            Path("textures/architecture/stone_rmaos.dds"),
+            detected_role="environment_mask",
+            detected_suffix="_rmaos",
+        )
+        message = build_render_profile_brief_message(
+            recommendation.profile,
+            recommendation=recommendation,
+            selected_profile="enb",
+        )
+        self.assertIn("probably incompatible", message.lower())
+        self.assertIn("Switch families before export.", message)
+
+    def test_build_render_profile_family_mismatch_warning_marks_probable_incompatibility(self) -> None:
+        recommendation = recommend_render_profile_details(
+            Path("textures/architecture/stone_rmaos.dds"),
+            detected_role="environment_mask",
+            detected_suffix="_rmaos",
+        )
+        message = build_render_profile_family_mismatch_warning("enb", recommendation)
+        self.assertIsNotNone(message)
+        self.assertIn("probably incompatible", message.lower())
+        self.assertIn("ENB", message)
+        self.assertIn("TruePBR", message)
+        self.assertIn("Quick check:", message)
 
     def test_describe_render_profile_default_outputs_mentions_auto_checked_outputs(self) -> None:
         summary = describe_render_profile_default_outputs("enb")
@@ -1609,16 +5323,20 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(compute_wrapped_preview_index(1, 3), 1)
 
     def test_restore_nif_backups_restores_from_nif_bak(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
         with tempfile.TemporaryDirectory() as tmpdir:
             mesh_path = Path(tmpdir) / "test_mesh.nif"
             backup_path = mesh_path.with_suffix(".nif.bak")
-            mesh_path.write_bytes(b"new-data")
-            backup_path.write_bytes(b"old-data")
+            current_data = _build_minimal_nif(texture_paths=[r"textures\current.dds"] + [""] * 8)
+            backup_data = _build_minimal_nif(texture_paths=[r"textures\backup.dds"] + [""] * 8)
+            mesh_path.write_bytes(current_data)
+            backup_path.write_bytes(backup_data)
 
             rows = restore_nif_backups([mesh_path])
 
             self.assertEqual(rows[0][0], "OK")
-            self.assertEqual(mesh_path.read_bytes(), b"old-data")
+            self.assertEqual(mesh_path.read_bytes(), backup_data)
 
     def test_restore_nif_backups_skips_when_backup_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1629,6 +5347,172 @@ class GenerateTexturesTests(unittest.TestCase):
 
             self.assertEqual(rows[0], ("SKIP", "test_mesh.nif", "No .nif.bak backup found."))
             self.assertEqual(mesh_path.read_bytes(), b"current-data")
+
+    def test_restore_nif_backups_stops_before_next_file_when_cancelled(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            first_mesh = Path(tmpdir) / "first.nif"
+            second_mesh = Path(tmpdir) / "second.nif"
+            first_current = _build_minimal_nif(texture_paths=[r"textures\new_first.dds"] + [""] * 8)
+            first_backup = _build_minimal_nif(texture_paths=[r"textures\old_first.dds"] + [""] * 8)
+            second_current = _build_minimal_nif(texture_paths=[r"textures\new_second.dds"] + [""] * 8)
+            second_backup = _build_minimal_nif(texture_paths=[r"textures\old_second.dds"] + [""] * 8)
+            first_mesh.write_bytes(first_current)
+            first_mesh.with_suffix(".nif.bak").write_bytes(first_backup)
+            second_mesh.write_bytes(second_current)
+            second_mesh.with_suffix(".nif.bak").write_bytes(second_backup)
+            cancel_checks = 0
+
+            def cancel_after_first_restore() -> bool:
+                nonlocal cancel_checks
+                cancel_checks += 1
+                return cancel_checks > 1
+
+            rows = restore_nif_backups(
+                [first_mesh, second_mesh],
+                should_cancel=cancel_after_first_restore,
+            )
+
+            self.assertEqual([row[1] for row in rows], ["first.nif"])
+            self.assertEqual(first_mesh.read_bytes(), first_backup)
+            self.assertEqual(second_mesh.read_bytes(), second_current)
+
+    def test_restore_nif_backups_rejects_malformed_backup_without_overwriting_mesh(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mesh_path = Path(tmpdir) / "test_mesh.nif"
+            original_data = _build_minimal_nif()
+            mesh_path.write_bytes(original_data)
+            mesh_path.with_suffix(".nif.bak").write_bytes(b"not a valid NIF")
+
+            rows = restore_nif_backups([mesh_path])
+
+            self.assertEqual(rows[0][0], "FAIL")
+            self.assertIn("not a usable NIF", rows[0][2])
+            self.assertEqual(mesh_path.read_bytes(), original_data)
+
+    def test_restore_nif_backups_rejects_symbolic_link_backup(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            mesh_path = root / "test_mesh.nif"
+            original_data = _build_minimal_nif()
+            mesh_path.write_bytes(original_data)
+            backup_path = mesh_path.with_suffix(".nif.bak")
+            valid_target = root / "valid-backup.nif"
+            valid_target.write_bytes(_build_minimal_nif(texture_paths=[r"textures\backup.dds"] + [""] * 8))
+            try:
+                backup_path.symlink_to(valid_target)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            rows = restore_nif_backups([mesh_path])
+
+            self.assertEqual(rows[0][0], "FAIL")
+            self.assertIn("symbolic link", rows[0][2])
+            self.assertEqual(mesh_path.read_bytes(), original_data)
+            self.assertTrue(backup_path.is_symlink())
+
+    def test_restore_nif_backups_rejects_symbolic_link_target(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            mesh_path = root / "test_mesh.nif"
+            backup_data = _build_minimal_nif()
+            mesh_path.with_suffix(".nif.bak").write_bytes(backup_data)
+            actual_target = root / "outside.nif"
+            original_data = _build_minimal_nif(texture_paths=[r"textures\outside.dds"] + [""] * 8)
+            actual_target.write_bytes(original_data)
+            try:
+                mesh_path.symlink_to(actual_target)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"Symbolic links are unavailable: {exc}")
+
+            rows = restore_nif_backups([mesh_path])
+
+            self.assertEqual(rows[0][0], "FAIL")
+            self.assertIn("symbolic link", rows[0][2])
+            self.assertTrue(mesh_path.is_symlink())
+            self.assertEqual(actual_target.read_bytes(), original_data)
+
+    def test_restore_nif_backups_rejects_directory_backup_without_overwriting_mesh(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mesh_path = Path(tmpdir) / "test_mesh.nif"
+            original_data = _build_minimal_nif()
+            mesh_path.write_bytes(original_data)
+            mesh_path.with_suffix(".nif.bak").mkdir()
+
+            rows = restore_nif_backups([mesh_path])
+
+            self.assertEqual(rows[0][0], "FAIL")
+            self.assertIn("regular file", rows[0][2])
+            self.assertEqual(mesh_path.read_bytes(), original_data)
+
+    def test_restore_nif_backups_rejects_hardlink_to_target(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mesh_path = Path(tmpdir) / "test_mesh.nif"
+            original_data = _build_minimal_nif()
+            mesh_path.write_bytes(original_data)
+            backup_path = mesh_path.with_suffix(".nif.bak")
+            try:
+                backup_path.hardlink_to(mesh_path)
+            except OSError as exc:
+                self.skipTest(f"Hard links are unavailable: {exc}")
+
+            rows = restore_nif_backups([mesh_path])
+
+            self.assertEqual(rows[0][0], "FAIL")
+            self.assertIn("refers to the restore target itself", rows[0][2])
+            self.assertEqual(mesh_path.read_bytes(), original_data)
+
+    def test_restore_nif_backups_replace_failure_preserves_current_mesh(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            mesh_path = Path(tmpdir) / "test_mesh.nif"
+            current_data = _build_minimal_nif(texture_paths=[r"textures\current.dds"] + [""] * 8)
+            backup_data = _build_minimal_nif(texture_paths=[r"textures\backup.dds"] + [""] * 8)
+            mesh_path.write_bytes(current_data)
+            mesh_path.with_suffix(".nif.bak").write_bytes(backup_data)
+
+            with mock.patch("generate_textures.os.replace", side_effect=OSError("replace failed")):
+                rows = restore_nif_backups([mesh_path])
+
+            self.assertEqual(rows[0][0], "FAIL")
+            self.assertIn("replace failed", rows[0][2])
+            self.assertEqual(mesh_path.read_bytes(), current_data)
+            self.assertEqual(mesh_path.with_suffix(".nif.bak").read_bytes(), backup_data)
+            self.assertEqual(list(Path(tmpdir).glob(".*.restore-*.tmp")), [])
+
+    def test_compare_nif_backups_reports_match_diff_and_missing_backup_states(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            match_mesh = root / "match.nif"
+            match_mesh.write_bytes(b"same")
+            match_mesh.with_suffix(".nif.bak").write_bytes(b"same")
+
+            diff_mesh = root / "diff.nif"
+            diff_mesh.write_bytes(b"current")
+            diff_mesh.with_suffix(".nif.bak").write_bytes(b"backup")
+
+            missing_mesh = root / "missing.nif"
+            missing_mesh.write_bytes(b"current")
+
+            rows = compare_nif_backups([match_mesh, diff_mesh, missing_mesh])
+
+        self.assertEqual(rows[0], ("OK", "match.nif", "Current file matches match.nif.bak; restore would be a no-op."))
+        self.assertEqual(rows[1][0], "WARN")
+        self.assertIn("Current file differs from diff.nif.bak", rows[1][2])
+        self.assertIn("Compare before restoring or writing.", rows[1][2])
+        self.assertEqual(rows[2], ("SKIP", "missing.nif", "No .nif.bak backup found."))
 
     def test_should_apply_preview_recommendations_disabled_when_processing(self) -> None:
         self.assertFalse(should_apply_preview_recommendations(
@@ -1647,6 +5531,639 @@ class GenerateTexturesTests(unittest.TestCase):
             auto_suggestions_enabled=False,
             is_processing=False,
         ))
+
+    def test_resolve_lazy_preview_deferred_outputs_defers_niche_outputs_for_large_sets(self) -> None:
+        include_flags = {
+            "diffuse": True,
+            "normal": True,
+            "rmaos": True,
+            "wetness_mask": True,
+            "snow_mask": True,
+            "ao": True,
+            "roughness": True,
+            "complex_material": True,
+        }
+        deferred = resolve_lazy_preview_deferred_outputs(
+            lazy_enabled=True,
+            force_full_once=False,
+            total_sources=100,
+            source_pixels=1024 * 1024,
+            include_flags=include_flags,
+        )
+        self.assertIn("rmaos", deferred)
+        self.assertIn("complex_material", deferred)
+        self.assertNotIn("diffuse", deferred)
+        self.assertNotIn("normal", deferred)
+
+    def test_resolve_lazy_preview_deferred_outputs_defers_more_outputs_for_very_large_sets(self) -> None:
+        include_flags = {
+            "diffuse": True,
+            "normal": True,
+            "parallax": True,
+            "glow": True,
+            "environment_mask": True,
+            "rmaos": True,
+            "wetness_mask": True,
+            "snow_mask": True,
+            "ao": True,
+            "roughness": True,
+            "complex_material": True,
+        }
+        deferred = resolve_lazy_preview_deferred_outputs(
+            lazy_enabled=True,
+            force_full_once=False,
+            total_sources=300,
+            source_pixels=4096 * 4096,
+            include_flags=include_flags,
+        )
+        self.assertIn("parallax", deferred)
+        self.assertIn("glow", deferred)
+        self.assertIn("environment_mask", deferred)
+        self.assertNotIn("diffuse", deferred)
+        self.assertNotIn("normal", deferred)
+
+    def test_compute_preview_refresh_delay_ms_throttles_for_huge_batches(self) -> None:
+        delay = compute_preview_refresh_delay_ms(
+            is_processing=True,
+            show_batch_preview=True,
+            total_sources=1400,
+            source_pixels=8192 * 8192,
+            lazy_preview_enabled=True,
+            staged_preview_enabled=True,
+        )
+        self.assertGreaterEqual(delay, 320)
+
+    def test_compute_preview_refresh_delay_ms_is_fast_when_idle(self) -> None:
+        delay = compute_preview_refresh_delay_ms(
+            is_processing=False,
+            show_batch_preview=False,
+            total_sources=2000,
+            source_pixels=8192 * 8192,
+            lazy_preview_enabled=True,
+            staged_preview_enabled=True,
+        )
+        self.assertEqual(delay, 75)
+
+    def test_compute_deferred_preview_tile_interval_ms_increases_for_huge_batches(self) -> None:
+        interval = compute_deferred_preview_tile_interval_ms(
+            total_sources=1200,
+            source_pixels=4096 * 4096,
+        )
+        self.assertGreaterEqual(interval, 140)
+
+    def test_should_update_live_batch_preview_throttles_dense_updates_for_huge_batches(self) -> None:
+        self.assertFalse(
+            should_update_live_batch_preview(
+                total_sources=1200,
+                current_index=101,
+                last_index=100,
+                seconds_since_last_update=0.08,
+            )
+        )
+        self.assertTrue(
+            should_update_live_batch_preview(
+                total_sources=1200,
+                current_index=107,
+                last_index=100,
+                seconds_since_last_update=0.60,
+            )
+        )
+
+    def test_should_update_live_batch_preview_uses_stricter_throttle_for_extreme_batches(self) -> None:
+        self.assertFalse(
+            should_update_live_batch_preview(
+                total_sources=2200,
+                current_index=506,
+                last_index=500,
+                seconds_since_last_update=0.40,
+            )
+        )
+        self.assertTrue(
+            should_update_live_batch_preview(
+                total_sources=2200,
+                current_index=510,
+                last_index=500,
+                seconds_since_last_update=0.80,
+            )
+        )
+
+    def test_should_update_live_batch_preview_uses_stricter_throttle_for_8k_heavy_batches(self) -> None:
+        self.assertFalse(
+            should_update_live_batch_preview(
+                total_sources=1100,
+                current_index=507,
+                last_index=500,
+                seconds_since_last_update=0.50,
+                source_pixels=8192 * 8192,
+                high_res_8k_count=10,
+            )
+        )
+        self.assertTrue(
+            should_update_live_batch_preview(
+                total_sources=1100,
+                current_index=512,
+                last_index=500,
+                seconds_since_last_update=0.90,
+                source_pixels=8192 * 8192,
+                high_res_8k_count=10,
+            )
+        )
+
+    def test_should_update_batch_status_line_throttles_dense_updates_for_huge_batches(self) -> None:
+        self.assertFalse(
+            should_update_batch_status_line(
+                total_sources=1500,
+                current_index=204,
+                last_index=200,
+                seconds_since_last_update=0.15,
+                source_pixels=8192 * 8192,
+                high_res_8k_count=12,
+            )
+        )
+        self.assertTrue(
+            should_update_batch_status_line(
+                total_sources=1500,
+                current_index=212,
+                last_index=200,
+                seconds_since_last_update=0.70,
+                source_pixels=8192 * 8192,
+                high_res_8k_count=12,
+            )
+        )
+
+    def test_should_update_batch_status_line_always_allows_first_and_last_updates(self) -> None:
+        self.assertTrue(
+            should_update_batch_status_line(
+                total_sources=2200,
+                current_index=1,
+                last_index=0,
+                seconds_since_last_update=0.01,
+            )
+        )
+        self.assertTrue(
+            should_update_batch_status_line(
+                total_sources=2200,
+                current_index=2200,
+                last_index=2190,
+                seconds_since_last_update=0.01,
+            )
+        )
+
+    def test_compute_checkpoint_mismatch_flags_detects_input_output_and_selection_drift(self) -> None:
+        mismatch = compute_checkpoint_mismatch_flags(
+            checkpoint_payload={
+                "input_root": "/a/input",
+                "output_root": "/a/output",
+                "total_files_considered": 20,
+            },
+            current_input_root="/b/input",
+            current_output_root="/b/output",
+            planned_total=30,
+        )
+        self.assertIn("checkpoint input path differs", mismatch)
+        self.assertIn("checkpoint output path differs", mismatch)
+        self.assertIn("checkpoint file count differs", mismatch)
+
+    def test_compute_checkpoint_mismatch_flags_detects_settings_and_missing_metadata(self) -> None:
+        mismatch = compute_checkpoint_mismatch_flags(
+            checkpoint_payload={
+                "input_root": "/input",
+                "output_root": "",
+                "total_files_considered": 3,
+                "generation_options": {"normal_strength": 1.0},
+            },
+            current_input_root="/input",
+            current_output_root="",
+            planned_total=3,
+            current_generation_options={"normal_strength": 2.0},
+        )
+        self.assertEqual(mismatch, ["checkpoint generation settings differ"])
+
+        missing_metadata = compute_checkpoint_mismatch_flags(
+            checkpoint_payload={"input_root": "/input"},
+            current_input_root="/input",
+            current_output_root="",
+            planned_total=3,
+            current_generation_options={},
+        )
+        self.assertIn("checkpoint output path cannot be verified", missing_metadata)
+        self.assertIn("checkpoint file count cannot be verified", missing_metadata)
+        self.assertIn("checkpoint generation settings cannot be verified", missing_metadata)
+
+    def test_tk_checkpoint_generation_options_excludes_runtime_only_fields(self) -> None:
+        self.assertEqual(
+            _tk_checkpoint_generation_options(
+                {
+                    "output_dir": Path("/tmp/output"),
+                    "manager_context": object(),
+                    "include_diffuse": True,
+                    "normal_strength": 1.75,
+                }
+            ),
+            {"include_diffuse": True, "normal_strength": 1.75},
+        )
+
+    def test_compute_checkpoint_resume_counts_reports_matching_completed_and_remaining(self) -> None:
+        selected = [Path("/input/a.dds"), Path("/input/b.dds"), Path("/input/c.dds")]
+        completed = {str(selected[0].resolve()), str(selected[2].resolve()), "/stale/old.dds"}
+        self.assertEqual(
+            compute_checkpoint_resume_counts(
+                selected_files=selected,
+                completed_success_files=completed,
+            ),
+            (2, 1),
+        )
+
+    def test_checkpoint_resume_fingerprints_skip_only_unchanged_existing_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            unchanged = root / "unchanged.dds"
+            changed = root / "changed.dds"
+            removed = root / "removed.dds"
+            for path in (unchanged, changed, removed):
+                path.write_bytes(b"same-size")
+            recorded = _checkpoint_source_file_fingerprints((unchanged, changed, removed))
+            changed_recorded_stat = changed.stat()
+            changed.write_bytes(b"new-bytes")
+            changed_stat = changed.stat()
+            os.utime(
+                changed,
+                ns=(changed_stat.st_atime_ns, changed_recorded_stat.st_mtime_ns),
+            )
+            removed.unlink()
+            current = _checkpoint_source_file_fingerprints((unchanged, changed))
+
+            matching = _matching_checkpoint_completed_files(
+                set(recorded),
+                recorded,
+                current,
+            )
+
+        self.assertEqual(recorded[str(changed.resolve())]["size_bytes"], current[str(changed.resolve())]["size_bytes"])
+        self.assertEqual(recorded[str(changed.resolve())]["mtime_ns"], current[str(changed.resolve())]["mtime_ns"])
+        self.assertNotEqual(recorded[str(changed.resolve())]["sha256"], current[str(changed.resolve())]["sha256"])
+        self.assertEqual(matching, {str(unchanged.resolve())})
+
+    def test_checkpoint_completed_sources_require_all_recorded_outputs_to_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            present_output = root / "present.dds"
+            missing_output = root / "missing.dds"
+            present_output.write_bytes(b"generated")
+            completed = {"present-source", "missing-source"}
+            output_records = {
+                "present-source": {"diffuse": str(present_output.resolve())},
+                "missing-source": {"diffuse": str(missing_output.resolve())},
+            }
+
+            matching = gt._checkpoint_completed_files_with_existing_outputs(
+                completed,
+                output_records,
+            )
+
+        self.assertEqual(matching, {"present-source"})
+        self.assertEqual(
+            gt._checkpoint_completed_files_with_existing_outputs(completed, None),
+            set(),
+        )
+
+    def test_checkpoint_reconciliation_requeues_sources_with_missing_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            input_dir.mkdir()
+            output_dir.mkdir()
+            complete_source = input_dir / "complete.dds"
+            missing_source = input_dir / "missing.dds"
+            pending_source = input_dir / "pending.dds"
+            complete_output = output_dir / "complete.dds"
+            partial_output = output_dir / "missing.dds"
+            for source in (complete_source, missing_source, pending_source):
+                source.write_bytes(b"source")
+            complete_output.write_bytes(b"complete output")
+            partial_output.write_bytes(b"partial output")
+
+            completed_files = {
+                str(complete_source.resolve()),
+                str(missing_source.resolve()),
+            }
+            output_records = {
+                str(complete_source.resolve()): {"diffuse": str(complete_output.resolve())},
+                str(missing_source.resolve()): {
+                    "diffuse": str(partial_output.resolve()),
+                    "normal": str((output_dir / "missing_n.dds").resolve()),
+                },
+            }
+            (output_dir / "missing_n.dds").unlink(missing_ok=True)
+
+            pending, valid_completed = gt._reconcile_checkpoint_batch_inputs(
+                (complete_source, missing_source, pending_source),
+                completed_files,
+                output_records,
+            )
+            generation_options = {
+                "output_dir": output_dir,
+                "include_diffuse": True,
+                "include_normal": True,
+                "include_parallax": False,
+                "include_wetness_mask": True,
+                "wetness_name": "missing_wetness",
+                "include_snow_mask": True,
+                "snow_name": "missing_snow",
+            }
+            wetness_output = gt.build_wetness_mask_output_path(
+                missing_source, output_dir, wetness_name="missing_wetness"
+            )
+            snow_output = gt.build_snow_mask_output_path(
+                missing_source, output_dir, snow_name="missing_snow"
+            )
+            wetness_output.write_bytes(b"partial wetness output")
+            snow_output.write_bytes(b"partial snow output")
+            expected_outputs = gt._generation_output_paths_for_input(
+                missing_source,
+                generation_options,
+            )
+            backup_dir = root / "backup"
+            backup_dir.mkdir()
+            backups: dict[Path, Path] = {}
+            gt._backup_existing_generation_outputs(expected_outputs, backup_dir, backups)
+            backed_up_partial_output = backups[partial_output].read_bytes()
+            backed_up_wetness_output = backups[wetness_output].read_bytes()
+            backed_up_snow_output = backups[snow_output].read_bytes()
+
+        self.assertEqual(pending, [missing_source, pending_source])
+        self.assertEqual(valid_completed, {str(complete_source.resolve())})
+        self.assertIn(partial_output, backups)
+        self.assertEqual(backed_up_partial_output, b"partial output")
+        self.assertEqual(backed_up_wetness_output, b"partial wetness output")
+        self.assertEqual(backed_up_snow_output, b"partial snow output")
+
+    def test_checkpoint_fingerprint_tolerates_stat_and_fstat_identity_differences(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.dds"
+            source.write_bytes(b"stable source")
+            original_fstat = os.fstat
+
+            def fstat_with_different_identity(file_descriptor: int) -> SimpleNamespace:
+                stat_result = original_fstat(file_descriptor)
+                return SimpleNamespace(
+                    st_dev=stat_result.st_dev + 1,
+                    st_ino=stat_result.st_ino + 1,
+                    st_size=stat_result.st_size,
+                    st_mtime_ns=stat_result.st_mtime_ns,
+                    st_ctime_ns=stat_result.st_ctime_ns + 1,
+                )
+
+            with mock.patch(
+                "generate_textures.os.fstat",
+                side_effect=fstat_with_different_identity,
+            ):
+                fingerprints = _checkpoint_source_file_fingerprints((source,))
+
+        fingerprint = fingerprints[str(source.resolve())]
+        self.assertEqual(fingerprint["size_bytes"], len(b"stable source"))
+        self.assertEqual(fingerprint["sha256"], hashlib.sha256(b"stable source").hexdigest())
+
+    def test_checkpoint_fingerprint_rejects_source_changed_during_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.dds"
+            source.write_bytes(b"stable source")
+            original_fstat = os.fstat
+            call_count = 0
+
+            def fstat_with_changed_timestamp(file_descriptor: int) -> SimpleNamespace:
+                nonlocal call_count
+                stat_result = original_fstat(file_descriptor)
+                call_count += 1
+                return SimpleNamespace(
+                    st_dev=stat_result.st_dev,
+                    st_ino=stat_result.st_ino,
+                    st_size=stat_result.st_size,
+                    st_mtime_ns=stat_result.st_mtime_ns + int(call_count > 1),
+                    st_ctime_ns=stat_result.st_ctime_ns,
+                )
+
+            with mock.patch(
+                "generate_textures.os.fstat",
+                side_effect=fstat_with_changed_timestamp,
+            ):
+                fingerprints = _checkpoint_source_file_fingerprints((source,))
+
+        self.assertNotIn(str(source.resolve()), fingerprints)
+
+    def test_checkpoint_resume_reprocesses_legacy_entries_without_fingerprints(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "legacy.dds"
+            source.write_bytes(b"source")
+            source_key = str(source.resolve())
+
+            matching = _matching_checkpoint_completed_files(
+                {source_key},
+                None,
+                _checkpoint_source_file_fingerprints((source,)),
+            )
+
+        self.assertEqual(matching, set())
+
+    def test_checkpointable_completed_files_require_complete_content_fingerprints(self) -> None:
+        matching = _checkpointable_completed_files(
+            {"valid", "missing", "incomplete"},
+            {
+                "valid": {"size_bytes": 12, "mtime_ns": 34, "sha256": "a" * 64},
+                "incomplete": {"size_bytes": 12, "mtime_ns": 34},
+            },
+        )
+
+        self.assertEqual(matching, {"valid"})
+
+    def test_checkpoint_payload_write_replaces_file_atomically(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            checkpoint = root / "batch.json"
+            checkpoint.write_text('{"state": "old"}', encoding="utf-8")
+
+            _write_checkpoint_payload_atomically(checkpoint, {"state": "new"})
+
+            self.assertEqual(json.loads(checkpoint.read_text(encoding="utf-8")), {"state": "new"})
+            self.assertEqual(list(root.glob(f".{checkpoint.name}.*.tmp")), [])
+
+    def test_checkpoint_payload_write_failure_preserves_previous_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            checkpoint = root / "batch.json"
+            original_contents = '{"state": "old"}'
+            checkpoint.write_text(original_contents, encoding="utf-8")
+
+            with mock.patch("generate_textures.os.replace", side_effect=OSError("replace failed")):
+                with self.assertRaisesRegex(OSError, "replace failed"):
+                    _write_checkpoint_payload_atomically(checkpoint, {"state": "new"})
+
+            self.assertEqual(checkpoint.read_text(encoding="utf-8"), original_contents)
+            self.assertEqual(list(root.glob(f".{checkpoint.name}.*.tmp")), [])
+
+    def test_qt_batch_success_is_not_recorded_when_checkpoint_write_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.dds"
+            completed: set[str] = set()
+            completed_outputs: dict[str, dict[str, str]] = {}
+            results: list[dict[str, object]] = []
+            source_key = str(source.resolve())
+
+            def fail_checkpoint_write() -> None:
+                self.assertIn(source_key, completed)
+                raise OSError("checkpoint unavailable")
+
+            with self.assertRaisesRegex(OSError, "checkpoint unavailable"):
+                gt._record_qt_batch_success(
+                    source,
+                    {"diffuse": "output.dds"},
+                    completed,
+                    completed_outputs,
+                    results,
+                    fail_checkpoint_write,
+                )
+
+            self.assertEqual(completed, set())
+            self.assertEqual(completed_outputs, {})
+            self.assertEqual(results, [])
+
+    def test_tk_checkpoint_write_excludes_successes_without_fingerprints(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_write_batch_checkpoint_state"):
+            self.skipTest("Tk checkpoint writer is unavailable in this environment.")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            checkpoint = root / "batch.json"
+            source_key = str((root / "source.dds").resolve())
+
+            TextureGeneratorGUI._write_batch_checkpoint_state(
+                None,
+                checkpoint,
+                input_root=root,
+                completed_success_files={source_key},
+                resumed_completed_count=0,
+                source_file_fingerprints={
+                    source_key: {"size_bytes": 10, "mtime_ns": 20},
+                },
+                total_files_considered=1,
+            )
+
+            payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+
+        self.assertEqual(payload["completed_success_count"], 0)
+        self.assertEqual(payload["completed_success_files"], [])
+        self.assertEqual(payload["completed_file_fingerprints"], {})
+
+    def test_basic_preview_outputs_hide_advanced_workflow_tiles(self) -> None:
+        self.assertEqual(
+            _visible_preview_output_keys(show_advanced_workflow_outputs=False),
+            ("diffuse", "normal", "parallax", "glow", "environment_mask"),
+        )
+        advanced = _visible_preview_output_keys(show_advanced_workflow_outputs=True)
+        self.assertIn("rmaos", advanced)
+        self.assertIn("complex_material", advanced)
+        self.assertEqual(len(advanced), 11)
+
+    def test_compute_processing_queue_event_budget_increases_for_huge_runs_when_preview_off(self) -> None:
+        budget = compute_processing_queue_event_budget(
+            queue_backlog=24,
+            total_sources=2200,
+            show_batch_preview=False,
+            source_pixels=8192 * 8192,
+        )
+        self.assertGreaterEqual(budget, 128)
+
+    def test_compute_processing_queue_event_budget_keeps_default_budget_for_small_backlog(self) -> None:
+        budget = compute_processing_queue_event_budget(
+            queue_backlog=24,
+            total_sources=80,
+            show_batch_preview=True,
+            source_pixels=2048 * 2048,
+        )
+        self.assertEqual(budget, 32)
+
+    def test_build_batch_bottleneck_hints_includes_large_run_resume_guidance(self) -> None:
+        hints = build_batch_bottleneck_hints(
+            avg_file_seconds=2.0,
+            max_file_seconds=8.0,
+            high_res_4k_count=120,
+            high_res_8k_count=4,
+            max_source_dimension=8192,
+            max_source_megapixels=67.1,
+            resumed_completed_count=0,
+            total_failed=2,
+            total_sources=1500,
+        )
+        self.assertTrue(any("Resume mode" in hint for hint in hints))
+        self.assertTrue(any("8K-heavy" in hint for hint in hints))
+        self.assertTrue(any("Very large source textures" in hint for hint in hints))
+
+    def test_build_batch_bottleneck_hints_includes_queue_backlog_guidance(self) -> None:
+        hints = build_batch_bottleneck_hints(
+            avg_file_seconds=1.3,
+            max_file_seconds=3.2,
+            high_res_4k_count=8,
+            high_res_8k_count=0,
+            max_source_dimension=4096,
+            max_source_megapixels=16.0,
+            resumed_completed_count=200,
+            total_failed=0,
+            total_sources=1200,
+            peak_queue_backlog=420,
+        )
+        self.assertTrue(any("Queue backlog spiked" in hint for hint in hints))
+
+    def test_build_batch_bottleneck_hints_respects_advanced_workflow_visibility(self) -> None:
+        shared = {
+            "avg_file_seconds": 1.0,
+            "max_file_seconds": 2.0,
+            "high_res_4k_count": 60,
+            "high_res_8k_count": 0,
+            "max_source_dimension": 4096,
+            "max_source_megapixels": 16.0,
+            "resumed_completed_count": 0,
+            "total_failed": 0,
+            "total_sources": 500,
+        }
+        advanced_hints = build_batch_bottleneck_hints(
+            **shared,
+            show_advanced_workflow_outputs=True,
+        )
+        basic_hints = build_batch_bottleneck_hints(
+            **shared,
+            show_advanced_workflow_outputs=False,
+        )
+
+        self.assertTrue(any("advanced/niche outputs" in hint for hint in advanced_hints))
+        self.assertTrue(any("enable Advanced workflow outputs" in hint for hint in basic_hints))
+        self.assertFalse(any("advanced/niche outputs" in hint for hint in basic_hints))
+
+    def test_build_batch_bottleneck_hints_prioritizes_queue_backlog_in_dense_huge_run(self) -> None:
+        hints = build_batch_bottleneck_hints(
+            avg_file_seconds=2.1,
+            max_file_seconds=9.1,
+            high_res_4k_count=120,
+            high_res_8k_count=6,
+            max_source_dimension=8192,
+            max_source_megapixels=67.1,
+            resumed_completed_count=30,
+            total_failed=4,
+            total_sources=1800,
+            peak_queue_backlog=384,
+        )
+        self.assertTrue(hints)
+        self.assertIn("Queue backlog spiked", hints[0])
+
+    def test_summarize_batch_nif_patch_activity_reports_repaired_and_failed_counts(self) -> None:
+        summary = summarize_batch_nif_patch_activity(
+            [
+                ("mesh_a.nif", 2, 1),
+                ("mesh_b.nif", 0, 3),
+            ]
+        )
+        self.assertEqual(summary, "Automatic NIF patching: 2 succeeded, 4 failed.")
+        self.assertIsNone(summarize_batch_nif_patch_activity([]))
 
     def test_get_generation_warnings_glow_on_stone_triggers_warning(self) -> None:
         warnings = get_generation_warnings(
@@ -2053,24 +6570,33 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_generate_environment_mask_complex_mode_flat_surface_avoids_black_holes(self) -> None:
         environment_mask = generate_environment_mask(_flat_dark_image(), strength=2.2, mode="complex")
-        roughness, metallic, ao, specular_height = environment_mask.split()
+        roughness, metallic, ao, nonmetal_reflectance = environment_mask.split()
         rough_min, rough_max = roughness.getextrema()
         metallic_min, _ = metallic.getextrema()
         ao_min, _ = ao.getextrema()
-        alpha_min, alpha_max = specular_height.getextrema()
+        alpha_min, alpha_max = nonmetal_reflectance.getextrema()
         self.assertGreaterEqual(rough_min, 24)
         self.assertLessEqual(rough_max - rough_min, 80)
         self.assertGreaterEqual(metallic_min, 6)
         self.assertGreaterEqual(ao_min, 24)
-        self.assertGreaterEqual(alpha_min, 24)
-        self.assertLessEqual(alpha_max, 224)
+        expected_reflectance = generate_specular(_flat_dark_image(), strength=2.35)
+        self.assertEqual(nonmetal_reflectance.tobytes(), expected_reflectance.tobytes())
+        self.assertGreaterEqual(alpha_min, 8)
+        self.assertLessEqual(alpha_max, 255)
 
     def test_generate_environment_mask_complex_mode_channel_order_matches_rmaos_contract(self) -> None:
         environment_mask = generate_environment_mask(_flat_dark_image(), strength=2.2, mode="complex")
-        roughness, metallic, ao, specular_height = environment_mask.split()
+        roughness, metallic, ao, nonmetal_reflectance = environment_mask.split()
         self.assertGreater(ImageStat.Stat(roughness).mean[0], ImageStat.Stat(metallic).mean[0])
         self.assertGreater(ImageStat.Stat(ao).mean[0], ImageStat.Stat(roughness).mean[0])
-        self.assertGreater(ImageStat.Stat(specular_height).mean[0], ImageStat.Stat(metallic).mean[0])
+        expected_reflectance = generate_specular(_flat_dark_image(), strength=2.35)
+        self.assertEqual(nonmetal_reflectance.tobytes(), expected_reflectance.tobytes())
+
+    def test_generate_environment_mask_rmaos_alpha_is_nonmetal_reflectance(self) -> None:
+        source = _sample_image()
+        environment_mask = generate_environment_mask(source, strength=1.2, mode="complex")
+        expected_reflectance = generate_specular(source, strength=1.35)
+        self.assertEqual(environment_mask.getchannel("A").tobytes(), expected_reflectance.tobytes())
 
     def test_generate_environment_mask_for_workflow_enb_uses_reflection_gloss_metal_height_layout(self) -> None:
         environment_mask = generate_environment_mask_for_workflow(
@@ -2297,6 +6823,21 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(diffuse_path.name, "brick.dds")
             self.assertEqual(parallax_path.name, "brick_p.dds")
 
+    def test_build_output_paths_fallout4_defaults_to_d_diffuse_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.dds"
+            input_path.write_bytes(b"stub")
+
+            diffuse_path, parallax_path = build_output_paths(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+                target_game="fallout4",
+            )
+
+            self.assertEqual(diffuse_path.name, "brick_d.dds")
+            self.assertEqual(parallax_path.name, "brick_p.dds")
+
     def test_custom_output_paths_preserve_textures_subfolders_for_skyrim_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -2373,6 +6914,21 @@ class GenerateTexturesTests(unittest.TestCase):
 
             self.assertEqual(environment_mask_path.name, "brick_m.dds")
 
+    def test_build_environment_mask_output_path_fallout4_defaults_to_s_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.dds"
+            input_path.write_bytes(b"stub")
+
+            environment_mask_path = build_environment_mask_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "out",
+                environment_mask_name=None,
+                target_game="fallout4",
+            )
+
+            self.assertEqual(environment_mask_path.name, "brick_s.dds")
+
     def test_build_environment_mask_output_path_uses_m_name_for_enb_complex_mode(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -2421,6 +6977,21 @@ class GenerateTexturesTests(unittest.TestCase):
 
             self.assertEqual(rmaos_path.name, "brick_rmaos.dds")
 
+    def test_build_pbr_texture_sets_output_path_uses_project_root_and_json_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "mod" / "textures" / "landscape" / "landscape.dds"
+            input_path.parent.mkdir(parents=True, exist_ok=True)
+            input_path.write_bytes(b"stub")
+
+            json_path = build_pbr_texture_sets_output_path(
+                input_path=input_path,
+                output_dir=temp_path / "mod" / "textures" / "landscape",
+            )
+
+            self.assertEqual(json_path.parent, temp_path / "mod" / "PBRTextureSets")
+            self.assertEqual(json_path.name, "landscape.json")
+
     def test_build_complex_output_path_uses_msn_default_name_and_extension(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -2467,6 +7038,69 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(glow_path.name, "brick_g.dds")
             self.assertEqual(environment_mask_path.name, "brick_m.dds")
             self.assertEqual(complex_path.name, "brick_msn.dds")
+
+    def test_run_with_options_writes_pbr_texture_sets_for_terrain_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "mod" / "textures" / "landscape" / "snowfield.png"
+            input_path.parent.mkdir(parents=True, exist_ok=True)
+            _sample_image().save(input_path)
+
+            outputs = run_with_options(
+                input_file=input_path,
+                output_dir=input_path.parent,
+                include_diffuse=False,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_rmaos=False,
+                include_complex=False,
+                include_wetness_mask=False,
+                include_snow_mask=False,
+                include_ao=False,
+                include_roughness=False,
+                include_pbr_texture_sets=True,
+                render_profile="truepbr",
+            )
+
+            self.assertIn("pbr_texture_sets", outputs)
+            json_path = outputs["pbr_texture_sets"]
+            self.assertEqual(json_path.parent, temp_path / "mod" / "PBRTextureSets")
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            self.assertAlmostEqual(payload["roughnessScale"], 1.1, places=3)
+            self.assertAlmostEqual(payload["displacementScale"], 0.08, places=3)
+            self.assertAlmostEqual(payload["specularLevel"], 0.04, places=3)
+
+    def test_run_with_options_skips_pbr_texture_sets_for_non_terrain_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "mod" / "textures" / "architecture" / "brick.png"
+            input_path.parent.mkdir(parents=True, exist_ok=True)
+            _sample_image().save(input_path)
+            stderr = io.StringIO()
+
+            with mock.patch("sys.stderr", stderr):
+                outputs = run_with_options(
+                    input_file=input_path,
+                    output_dir=input_path.parent,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_rmaos=False,
+                    include_complex=False,
+                    include_wetness_mask=False,
+                    include_snow_mask=False,
+                    include_ao=False,
+                    include_roughness=False,
+                    include_pbr_texture_sets=True,
+                    render_profile="truepbr",
+                )
+
+            self.assertEqual(outputs, {})
+            self.assertIn("terrain-only", stderr.getvalue())
 
     def test_collect_source_textures_from_directory_skips_generated_suffixes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2520,8 +7154,29 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
             self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
             self.assertEqual(context.output_dir, (instance_root / "overwrite"))
+            self.assertTrue(context.summary.startswith("Detected Mod (Hint): detected Mod Organizer 2 context"))
             self.assertIn("plugin(s)", context.summary)
             self.assertIn("load-order", context.summary)
+
+    def test_detect_mod_manager_context_flags_nonstandard_mo2_layouts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            instance_root = temp_path / "Portable MO2"
+            textures_dir = instance_root / "mods" / "Texture Pack" / "textures"
+            tool_dir = instance_root / "mods" / "Skyrim Texture Generator"
+            profile_dir = instance_root / "profiles" / "Default"
+            textures_dir.mkdir(parents=True)
+            tool_dir.mkdir(parents=True)
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "modlist.txt").write_text("+Texture Pack\n", encoding="utf-8")
+
+            context = detect_mod_manager_context(
+                {"MO_PROFILE": "Default"},
+                executable_path=tool_dir / "generate_textures.exe",
+            )
+
+            self.assertEqual(context.manager, "Mod Organizer 2")
+            self.assertIn("nonstandard MO2 layout detected at Portable MO2", context.summary)
 
     def test_detect_mod_manager_context_detects_body_and_skeleton_hints(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2582,6 +7237,106 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
             self.assertEqual(context.staging_root, staging_root.resolve())
             self.assertEqual(context.output_dir, (tool_dir / "generated_textures").resolve())
+            self.assertTrue(context.summary.startswith("Detected Mod (Hint): detected Vortex context"))
+
+    def test_detect_mod_manager_context_handles_portable_vortex_alias_layouts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            profile_root = temp_path / "Portable Vortex Profiles"
+            profile_dir = profile_root / "Skyrim Special Edition" / "profiles" / "Main"
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "modlist.txt").write_text("+Texture Pack\n", encoding="utf-8")
+            (profile_dir / "plugins.txt").write_text("*Skyrim.esm\n", encoding="utf-8")
+            (profile_dir / "loadorder.txt").write_text("Skyrim.esm\n", encoding="utf-8")
+
+            staging_root = temp_path / "Vortex Mods (Portable)" / "Skyrim Special Edition"
+            textures_dir = staging_root / "Texture Pack" / "textures"
+            meshes_dir = staging_root / "Texture Pack" / "meshes"
+            tool_dir = staging_root / "Skyrim Texture Generator"
+            textures_dir.mkdir(parents=True)
+            meshes_dir.mkdir(parents=True)
+            tool_dir.mkdir(parents=True)
+
+            context = detect_mod_manager_context(
+                {
+                    "VORTEX_PROFILE_DIR": str(profile_root),
+                    "VORTEX_PROFILE": "Main",
+                    "VORTEX_GAME_ID": "skyrimse",
+                },
+                executable_path=tool_dir / "generate_textures.exe",
+            )
+
+            self.assertEqual(context.manager, "Vortex")
+            self.assertEqual(context.profile_name, "Main")
+            self.assertEqual(context.loaded_mods, ("Texture Pack",))
+            self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
+            self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
+            self.assertEqual(context.staging_root, staging_root.resolve())
+
+    def test_detect_mod_manager_context_finds_portable_vortex_profiles_near_staging_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            profile_root = temp_path / "Vortex Profiles (Portable)"
+            profile_dir = profile_root / "Skyrim Special Edition" / "profiles" / "Main"
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "modlist.txt").write_text("+Texture Pack\n", encoding="utf-8")
+            (profile_dir / "plugins.txt").write_text("*Skyrim.esm\n", encoding="utf-8")
+            (profile_dir / "loadorder.txt").write_text("Skyrim.esm\n", encoding="utf-8")
+
+            staging_root = temp_path / "Vortex Mods (Portable)" / "Skyrim Special Edition"
+            textures_dir = staging_root / "Texture Pack" / "textures"
+            meshes_dir = staging_root / "Texture Pack" / "meshes"
+            tool_dir = staging_root / "Skyrim Texture Generator"
+            textures_dir.mkdir(parents=True)
+            meshes_dir.mkdir(parents=True)
+            tool_dir.mkdir(parents=True)
+
+            context = detect_mod_manager_context(
+                {},
+                executable_path=tool_dir / "generate_textures.exe",
+            )
+
+            self.assertEqual(context.manager, "Vortex")
+            self.assertEqual(context.profile_name, "Main")
+            self.assertEqual(context.loaded_mods, ("Texture Pack",))
+            self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
+            self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
+            self.assertEqual(context.staging_root, staging_root.resolve())
+            self.assertIn("portable Vortex profile root detected near the executable", context.summary)
+
+    def test_detect_mod_manager_context_resolves_vortex_profile_root_to_nested_profile_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            profile_root = temp_path / "Portable Vortex"
+            profile_dir = profile_root / "profiles" / "Main"
+            profile_dir.mkdir(parents=True)
+            (profile_dir / "modlist.txt").write_text("+Texture Pack\n", encoding="utf-8")
+            (profile_dir / "plugins.txt").write_text("*Skyrim.esm\n", encoding="utf-8")
+            (profile_dir / "loadorder.txt").write_text("Skyrim.esm\n", encoding="utf-8")
+
+            staging_root = temp_path / "Vortex Mods" / "skyrimse"
+            textures_dir = staging_root / "Texture Pack" / "textures"
+            meshes_dir = staging_root / "Texture Pack" / "meshes"
+            tool_dir = staging_root / "Skyrim Texture Generator"
+            textures_dir.mkdir(parents=True)
+            meshes_dir.mkdir(parents=True)
+            tool_dir.mkdir(parents=True)
+
+            context = detect_mod_manager_context(
+                {
+                    "VORTEX_PROFILE_DIR": str(profile_root),
+                    "VORTEX_STAGING_DIR": str(staging_root),
+                    "VORTEX_GAME_ID": "skyrimse",
+                },
+                executable_path=tool_dir / "generate_textures.exe",
+            )
+
+            self.assertEqual(context.manager, "Vortex")
+            self.assertEqual(context.profile_name, "Main")
+            self.assertEqual(context.loaded_mods, ("Texture Pack",))
+            self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
+            self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
+            self.assertEqual(context.staging_root, staging_root.resolve())
 
     def test_detect_mod_manager_context_vortex_falls_back_to_staging_scan_when_mod_names_do_not_match_folder_names(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2611,6 +7366,48 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(context.loaded_mods, ("Texture Pack Pretty Name",))
             self.assertEqual(context.loaded_texture_dirs, (textures_dir.resolve(),))
             self.assertEqual(context.loaded_mesh_dirs, (meshes_dir.resolve(),))
+
+    def test_mod_manager_context_summary_is_explicitly_advisory_without_detection(self) -> None:
+        context = ModManagerContext()
+
+        self.assertEqual(
+            context.summary,
+            "Detected Mod (Hint): not detected — this is only a suggestion; your chosen input/output paths still take priority.",
+        )
+
+    def test_mod_manager_context_summary_includes_renderer_version_hints(self) -> None:
+        context = ModManagerContext(
+            manager="Mod Organizer 2",
+            profile_name="Default",
+            renderer_version_hints=("Community Shaders 1.9.1", "Community Shaders PBR 1.0.0"),
+        )
+
+        self.assertIn("version hints Community Shaders 1.9.1, Community Shaders PBR 1.0.0", context.summary)
+
+    def test_detect_renderer_version_hints_prefers_family_specific_versions(self) -> None:
+        hints = _detect_renderer_version_hints(
+            (
+                "Community Shaders v1.9.1",
+                "PBRNifPatcher 0.9.0",
+                "ENBSeries 0.495",
+            )
+        )
+
+        self.assertIn("Community Shaders 1.9.1", hints)
+        self.assertIn("Community Shaders PBR 0.9.0", hints)
+
+    def test_build_truepbr_version_note_warns_on_outdated_metadata(self) -> None:
+        context = ModManagerContext(
+            manager="Mod Organizer 2",
+            loaded_mods=("PBRNifPatcher 0.9.0",),
+            renderer_version_hints=("Community Shaders PBR 0.9.0",),
+        )
+
+        note = _build_truepbr_version_note(context)
+
+        self.assertIsNotNone(note)
+        self.assertIn("fall below the release-aligned baseline", note or "")
+        self.assertIn("probably incompatible", note or "")
 
     def test_detect_mod_manager_context_includes_mo2_overwrite_dirs_and_game_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -2772,6 +7569,30 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(options.env_mask_texture_path, "textures\\sign01_m.dds")
         self.assertEqual(options.parallax_scale, 4.0)
 
+    def test_build_nif_patch_options_maps_texture_games_to_guarded_nif_profiles(self) -> None:
+        for texture_game, nif_profile in (
+            ("auto", "auto"),
+            ("skyrim", "skyrim"),
+            ("fallout3", "fallout"),
+            ("falloutnv", "fallout"),
+            ("fallout4", "fallout"),
+            ("fallout76", "fallout"),
+        ):
+            with self.subTest(texture_game=texture_game):
+                options = build_nif_patch_options_for_generated_outputs(
+                    None,
+                    {},
+                    complex_format="msn",
+                    env_mask_mode="standard",
+                    parallax_mode="standard",
+                    parallax_scale=2.0,
+                    target_game=texture_game,
+                )
+
+                self.assertEqual(options.target_game, nif_profile)
+                if nif_profile == "fallout":
+                    self.assertFalse(options.experimental_fallout_write)
+
     def test_build_nif_patch_options_for_generated_outputs_accepts_gui_occlusion_label(self) -> None:
         outputs = {"parallax": Path("/tmp/textures/sign01_p.dds")}
 
@@ -2874,6 +7695,23 @@ class GenerateTexturesTests(unittest.TestCase):
             render_profile="community_shaders",
         )
         self.assertTrue(options.enable_env_mapping)
+        self.assertEqual(options.env_mask_texture_path, "textures\\stone_cm.dds")
+
+    def test_build_nif_patch_options_for_community_shaders_keeps_cm_slot_when_standalone_mask_is_off(self) -> None:
+        outputs = {"complex_material": Path("/tmp/textures/stone_cm.dds")}
+        options = build_nif_patch_options_for_generated_outputs(
+            None,
+            outputs,
+            complex_format="cm",
+            env_mask_mode="standard",
+            parallax_mode="standard",
+            parallax_scale=None,
+            render_profile="community_shaders",
+            include_environment_mask=False,
+        )
+        self.assertTrue(options.enable_env_mapping)
+        self.assertFalse(options.disable_env_mapping)
+        self.assertFalse(options.clear_env_mask_texture_path)
         self.assertEqual(options.env_mask_texture_path, "textures\\stone_cm.dds")
 
     def test_build_nif_patch_options_no_parallax_never_forces_type3(self) -> None:
@@ -2997,6 +7835,7 @@ class GenerateTexturesTests(unittest.TestCase):
             cubemap_texture_path="textures\\cubemaps\\chrome_e.dds",
             backup=False,
             dry_run=True,
+            dry_run_diff=True,
             disable_parallax=True,
             disable_pom=True,
             disable_env_mapping=True,
@@ -3031,6 +7870,7 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertTrue(options.clear_cubemap_texture_path)
         self.assertFalse(options.backup)
         self.assertTrue(options.dry_run)
+        self.assertTrue(options.dry_run_diff)
 
     def test_build_nif_patch_options_for_nif_editor_normalizes_manual_paths_to_dds(self) -> None:
         options = build_nif_patch_options_for_nif_editor(
@@ -3055,6 +7895,29 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(options.env_mask_texture_path, r"textures\architecture\stone\stone_cm.dds")
         self.assertEqual(options.cubemap_texture_path, r"textures\cubemaps\chrome_e.dds")
 
+    def test_build_nif_patch_options_for_nif_editor_carries_fallout_gate_flags(self) -> None:
+        options = build_nif_patch_options_for_nif_editor(
+            enable_parallax=True,
+            enable_pom=False,
+            enable_env_mapping=False,
+            enable_glow_map=False,
+            enable_pbr=False,
+            parallax_scale=2.0,
+            force_shader_type_3=False,
+            target_game="fallout",
+            experimental_fallout_write=True,
+            fallout_allow_parallax_scale=True,
+            fallout_allow_fix_mesh_lighting=True,
+            fallout_allow_spec_strength=True,
+            fallout_allow_spec_color=True,
+            fallout_allow_env_map_scale=True,
+        )
+        self.assertTrue(options.fallout_allow_parallax_scale)
+        self.assertTrue(options.fallout_allow_fix_mesh_lighting)
+        self.assertTrue(options.fallout_allow_spec_strength)
+        self.assertTrue(options.fallout_allow_spec_color)
+        self.assertTrue(options.fallout_allow_env_map_scale)
+
     def test_build_nif_patch_options_for_nif_editor_prefixes_relative_paths_with_textures(self) -> None:
         options = build_nif_patch_options_for_nif_editor(
             enable_parallax=True,
@@ -3078,6 +7941,30 @@ class GenerateTexturesTests(unittest.TestCase):
 
     def test_normalize_nif_editor_texture_input_path_returns_none_for_blank(self) -> None:
         self.assertIsNone(_normalize_nif_editor_texture_input_path("   "))
+
+    def test_infer_nif_editor_texture_paths_uses_profile_aware_slot_guesses(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            nif_path = Path(temp_dir) / "stone.nif"
+            nif_path.write_bytes(b"fixture")
+            info = SimpleNamespace(texture_paths={0: r"textures\architecture\stone.dds"})
+            with mock.patch("generate_textures.scan_nif", return_value=[info]), \
+                 mock.patch("generate_textures.guess_parallax_path_for_nif", return_value=None), \
+                 mock.patch("generate_textures.guess_normal_path_for_nif", return_value=None), \
+                 mock.patch("generate_textures.guess_env_mask_path_for_nif", return_value=None), \
+                 mock.patch("generate_textures.guess_cubemap_path_for_nif", return_value=r"textures\cubemaps\stone_e.dds"):
+                guessed_from, paths = infer_nif_editor_texture_paths(
+                    nif_path,
+                    prefer_msn_normal=True,
+                    preferred_env_mask_suffix="_cm.dds",
+                )
+
+        self.assertEqual(guessed_from, nif_path)
+        self.assertEqual(paths["diffuse"], r"textures\architecture\stone.dds")
+        self.assertEqual(paths["parallax"], r"textures\architecture\stone_p.dds")
+        self.assertEqual(paths["normal"], r"textures\architecture\stone_msn.dds")
+        self.assertEqual(paths["glow"], r"textures\architecture\stone_g.dds")
+        self.assertEqual(paths["env_mask"], r"textures\architecture\stone_cm.dds")
+        self.assertEqual(paths["cubemap"], r"textures\cubemaps\stone_e.dds")
 
     def test_resolve_nif_editor_patch_options_for_target_autofills_missing_paths(self) -> None:
         base_options = build_nif_patch_options_for_nif_editor(
@@ -3160,6 +8047,7 @@ class GenerateTexturesTests(unittest.TestCase):
                     parallax_scale=2.0,
                     include_parallax=True,
                     include_environment_mask=False,
+                    target_game="falloutnv",
                 )
 
             self.assertEqual(len(results), 1)
@@ -3167,6 +8055,8 @@ class GenerateTexturesTests(unittest.TestCase):
             passed_options = patch_nif_mock.call_args.args[1]
             self.assertFalse(bool(passed_options.disable_parallax))
             self.assertTrue(bool(passed_options.disable_env_mapping))
+            self.assertEqual(passed_options.target_game, "fallout")
+            self.assertFalse(passed_options.experimental_fallout_write)
 
     def test_run_with_options_requires_at_least_one_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3350,6 +8240,54 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(sorted(path.name for path in outputs.keys()), ["inner.dds", "top.dds"])
             self.assertEqual(sorted(path.name for path in output_dir.iterdir()), ["inner.dds", "top.dds"])
 
+    def test_run_batch_rejects_sources_that_resolve_to_the_same_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "out"
+            input_dir.mkdir()
+            for name in ("stone.dds", "stone_d.dds"):
+                _sample_image().save(input_dir / name, format="DDS", pixel_format="DXT5")
+
+            with mock.patch("generate_textures.run_with_options") as generate:
+                with self.assertRaisesRegex(ValueError, "Conflicting batch output paths"):
+                    run_batch_with_options(
+                        input_path=input_dir,
+                        output_dir=output_dir,
+                        include_diffuse=True,
+                        include_normal=False,
+                        include_parallax=False,
+                        include_glow=False,
+                        include_environment_mask=False,
+                        include_complex=False,
+                        batch_workers=1,
+                    )
+
+            generate.assert_not_called()
+
+    def test_batch_output_collision_checks_completed_sources_against_pending_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            completed_source = input_dir / "stone.dds"
+            pending_source = input_dir / "stone_d.dds"
+            completed_source.touch()
+            pending_source.touch()
+
+            generation_options = {
+                "include_diffuse": True,
+                "include_normal": False,
+                "include_parallax": False,
+            }
+            with self.assertRaisesRegex(ValueError, "Conflicting batch output paths"):
+                gt._validate_batch_output_path_conflicts(
+                    [completed_source, pending_source],
+                    output_dir=root / "out",
+                    generation_options=generation_options,
+                    active_input_files=[pending_source],
+                )
+
     def test_run_batch_with_options_can_continue_on_file_errors(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -3404,6 +8342,1408 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(sorted(path.name for path in outputs.keys()), ["a.dds", "b.dds", "c.dds", "d.dds"])
             self.assertEqual(sorted(path.name for path in output_dir.iterdir()), ["a.dds", "b.dds", "c.dds", "d.dds"])
 
+    def test_run_batch_with_options_writes_checkpoint_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            checkpoint = temp_path / "state" / "batch_checkpoint.json"
+            input_dir.mkdir()
+            for name in ("a.dds", "b.dds"):
+                _sample_image().save(input_dir / name, format="DDS", pixel_format="DXT5")
+
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                batch_workers=1,
+                checkpoint_file=checkpoint,
+            )
+
+            payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(payload["version"], APP_VERSION)
+            self.assertEqual(payload["completed_success_count"], 2)
+            self.assertEqual(payload["resumed_completed_count"], 0)
+            self.assertEqual(len(payload["completed_success_files"]), 2)
+            self.assertEqual(payload["output_root"], str(output_dir.resolve()))
+            self.assertTrue(payload["generation_options"]["include_diffuse"])
+            self.assertEqual(len(outputs), 2)
+
+    def test_run_batch_does_not_checkpoint_success_without_a_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "out"
+            checkpoint = root / "checkpoint.json"
+            input_dir.mkdir()
+            source = input_dir / "source.dds"
+            _sample_image().save(source, format="DDS", pixel_format="DXT5")
+            output = output_dir / "source.dds"
+            generation_options = {
+                "input_path": input_dir,
+                "output_dir": output_dir,
+                "include_diffuse": True,
+                "include_normal": False,
+                "include_parallax": False,
+                "include_glow": False,
+                "include_environment_mask": False,
+                "include_complex": False,
+                "batch_workers": 1,
+                "checkpoint_file": checkpoint,
+            }
+            original_fingerprinter = gt._checkpoint_source_file_fingerprints
+            with (
+                mock.patch("generate_textures._checkpoint_source_file_fingerprints", return_value={}),
+                mock.patch(
+                    "generate_textures.run_with_options",
+                    return_value={"diffuse": output},
+                ) as generate,
+            ):
+                outputs = run_batch_with_options(**generation_options)
+
+            payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(len(outputs), 1)
+            self.assertEqual(payload["completed_success_count"], 0)
+            self.assertEqual(payload["completed_success_files"], [])
+            self.assertEqual(payload["completed_file_fingerprints"], {})
+            self.assertEqual(payload["completed_file_outputs"], {})
+
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"generated")
+            with (
+                mock.patch(
+                    "generate_textures._checkpoint_source_file_fingerprints",
+                    side_effect=original_fingerprinter,
+                ),
+                mock.patch(
+                    "generate_textures.run_with_options",
+                    return_value={"diffuse": output},
+                ) as resumed_generate,
+            ):
+                resumed_outputs = run_batch_with_options(
+                    **generation_options,
+                    resume_from_checkpoint=True,
+                )
+
+            self.assertEqual(generate.call_count, 1)
+            self.assertEqual(resumed_generate.call_count, 1)
+            self.assertEqual(len(resumed_outputs), 1)
+            resumed_payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(resumed_payload["completed_success_count"], 1)
+            self.assertEqual(
+                resumed_payload["completed_success_files"],
+                [str(source.resolve())],
+            )
+            self.assertEqual(
+                set(resumed_payload["completed_file_fingerprints"]),
+                set(resumed_payload["completed_success_files"]),
+            )
+
+    def test_run_batch_checkpoint_write_failure_is_not_counted_as_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            for name in ("a.dds", "b.dds"):
+                _sample_image().save(input_dir / name, format="DDS", pixel_format="DXT5")
+            errors: list[str] = []
+
+            def generate(**kwargs: object) -> dict[str, Path]:
+                input_file = kwargs["input_file"]
+                assert isinstance(input_file, Path)
+                return {"diffuse": root / "out" / input_file.name}
+
+            with (
+                mock.patch("generate_textures.run_with_options", side_effect=generate),
+                mock.patch(
+                    "generate_textures._write_checkpoint_payload_atomically",
+                    side_effect=OSError("checkpoint unavailable"),
+                ),
+            ):
+                outputs = run_batch_with_options(
+                    input_path=input_dir,
+                    output_dir=root / "out",
+                    include_diffuse=True,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                    continue_on_error=True,
+                    batch_workers=2,
+                    checkpoint_file=root / "checkpoint.json",
+                    error_callback=lambda _index, _total, source, _error: errors.append(source.name),
+                )
+
+        self.assertEqual(outputs, {})
+        self.assertCountEqual(errors, ["a.dds", "b.dds"])
+
+    def test_run_batch_with_options_rejects_resume_with_changed_output_or_generation_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            checkpoint = temp_path / "batch_checkpoint.json"
+            input_dir.mkdir()
+            _sample_image().save(input_dir / "a.dds", format="DDS", pixel_format="DXT5")
+            _sample_image().save(input_dir / "b.dds", format="DDS", pixel_format="DXT5")
+            baseline_options = {
+                "include_diffuse": True,
+                "include_normal": False,
+                "include_parallax": False,
+                "include_glow": False,
+                "include_environment_mask": False,
+                "include_complex": False,
+                "batch_workers": 1,
+                "checkpoint_file": checkpoint,
+            }
+            run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                **baseline_options,
+            )
+
+            with self.assertRaisesRegex(ValueError, "generation settings differ"):
+                run_batch_with_options(
+                    input_path=input_dir,
+                    output_dir=output_dir,
+                    **{**baseline_options, "include_normal": True, "resume_from_checkpoint": True},
+                )
+
+            with self.assertRaisesRegex(ValueError, "output folder differs"):
+                run_batch_with_options(
+                    input_path=input_dir,
+                    output_dir=temp_path / "different-output",
+                    **{**baseline_options, "resume_from_checkpoint": True},
+                )
+
+    def test_run_batch_with_options_rejects_corrupt_resume_checkpoint_without_overwriting(self) -> None:
+        malformed_checkpoints = (
+            ("invalid-json", b'{"completed_success_files": ['),
+            ("non-object-json", b"[]"),
+            ("invalid-completed-list", b'{"completed_success_files": ["valid", 3]}'),
+            ("wrong-completed-type", b'{"completed_success_files": "valid"}'),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            input_dir.mkdir()
+            _sample_image().save(input_dir / "a.dds", format="DDS", pixel_format="DXT5")
+            for case_name, checkpoint_contents in malformed_checkpoints:
+                with self.subTest(case=case_name):
+                    checkpoint = temp_path / f"{case_name}.json"
+                    checkpoint.write_bytes(checkpoint_contents)
+                    with mock.patch("generate_textures.run_with_options") as generate_mock:
+                        with self.assertRaisesRegex(ValueError, "Checkpoint"):
+                            run_batch_with_options(
+                                input_path=input_dir,
+                                output_dir=temp_path / "out",
+                                include_diffuse=True,
+                                include_normal=False,
+                                include_parallax=False,
+                                include_glow=False,
+                                include_environment_mask=False,
+                                include_complex=False,
+                                checkpoint_file=checkpoint,
+                                resume_from_checkpoint=True,
+                            )
+                    generate_mock.assert_not_called()
+                    self.assertEqual(checkpoint.read_bytes(), checkpoint_contents)
+
+    def test_run_batch_with_options_resume_checkpoint_skips_completed_successes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            checkpoint = temp_path / "batch_checkpoint.json"
+            input_dir.mkdir()
+            a_path = input_dir / "a.dds"
+            b_path = input_dir / "b.dds"
+            _sample_image().save(a_path, format="DDS", pixel_format="DXT5")
+            _sample_image().save(b_path, format="DDS", pixel_format="DXT5")
+            completed_output = output_dir / "a.dds"
+            completed_output.parent.mkdir(parents=True)
+            completed_output.write_bytes(b"already generated")
+            checkpoint.write_text(
+                json.dumps(
+                    {
+                        "completed_success_files": [str(a_path.resolve())],
+                        "completed_file_outputs": {
+                            str(a_path.resolve()): {"diffuse": str(completed_output.resolve())},
+                        },
+                        "completed_file_fingerprints": _checkpoint_source_file_fingerprints((a_path,)),
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                batch_workers=1,
+                checkpoint_file=checkpoint,
+                resume_from_checkpoint=True,
+            )
+
+            self.assertEqual(sorted(path.name for path in outputs.keys()), ["b.dds"])
+            payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(payload["resumed_completed_count"], 1)
+            self.assertEqual(payload["completed_success_count"], 2)
+
+    def test_run_batch_resume_regenerates_source_when_output_was_deleted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "out"
+            checkpoint = root / "checkpoint.json"
+            input_dir.mkdir()
+            source = input_dir / "source.dds"
+            _sample_image().save(source, format="DDS", pixel_format="DXT5")
+            options = {
+                "input_path": input_dir,
+                "output_dir": output_dir,
+                "include_diffuse": True,
+                "include_normal": False,
+                "include_parallax": False,
+                "include_glow": False,
+                "include_environment_mask": False,
+                "include_complex": False,
+                "batch_workers": 1,
+                "checkpoint_file": checkpoint,
+            }
+
+            run_batch_with_options(**options)
+            generated_output = output_dir / "source.dds"
+            self.assertTrue(generated_output.is_file())
+            generated_output.unlink()
+
+            resumed_outputs = run_batch_with_options(**options, resume_from_checkpoint=True)
+
+            self.assertIn(source, resumed_outputs)
+            self.assertTrue(generated_output.is_file())
+            payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(payload["resumed_completed_count"], 0)
+            self.assertEqual(payload["completed_file_outputs"][str(source.resolve())]["diffuse"], str(generated_output.resolve()))
+
+    def test_run_batch_with_options_resume_reprocesses_sources_changed_since_checkpoint(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            checkpoint = temp_path / "batch_checkpoint.json"
+            input_dir.mkdir()
+            changed_path = input_dir / "changed.dds"
+            unchanged_path = input_dir / "unchanged.dds"
+            _sample_image().save(changed_path, format="DDS", pixel_format="DXT5")
+            _sample_image().save(unchanged_path, format="DDS", pixel_format="DXT5")
+            options = {
+                "include_diffuse": True,
+                "include_normal": False,
+                "include_parallax": False,
+                "include_glow": False,
+                "include_environment_mask": False,
+                "include_complex": False,
+                "batch_workers": 1,
+                "checkpoint_file": checkpoint,
+            }
+            run_batch_with_options(input_path=input_dir, output_dir=output_dir, **options)
+            original_payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            original_changed_fingerprint = original_payload["completed_file_fingerprints"][
+                str(changed_path.resolve())
+            ]
+
+            _sample_image().rotate(20).save(changed_path, format="DDS", pixel_format="DXT5")
+            changed_stat = changed_path.stat()
+            os.utime(
+                changed_path,
+                ns=(changed_stat.st_atime_ns, original_changed_fingerprint["mtime_ns"]),
+            )
+            self.assertEqual(changed_stat.st_size, original_changed_fingerprint["size_bytes"])
+            self.assertEqual(changed_path.stat().st_mtime_ns, original_changed_fingerprint["mtime_ns"])
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                **options,
+                resume_from_checkpoint=True,
+            )
+
+            resumed_payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+
+        self.assertEqual([path.name for path in outputs], ["changed.dds"])
+        self.assertEqual(resumed_payload["resumed_completed_count"], 1)
+        self.assertNotEqual(
+            resumed_payload["completed_file_fingerprints"][str(changed_path.resolve())],
+            original_changed_fingerprint,
+        )
+
+    def test_run_batch_forwards_truepbr_overrides_and_tracks_checkpoint_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            input_dir.mkdir()
+            source_path = input_dir / "skin.dds"
+            _sample_image().save(source_path, format="DDS", pixel_format="DXT5")
+            checkpoint = temp_path / "batch_checkpoint.json"
+            overrides = {
+                "parallax": True,
+                "displacement_scale": 0.35,
+                "specular_level": 0.08,
+                "roughness_scale": 0.7,
+            }
+            options = {
+                "input_path": input_dir,
+                "output_dir": temp_path / "out",
+                "include_diffuse": False,
+                "include_normal": False,
+                "include_parallax": False,
+                "include_glow": False,
+                "include_environment_mask": False,
+                "include_rmaos": True,
+                "include_complex": False,
+                "batch_workers": 1,
+                "checkpoint_file": checkpoint,
+                "truepbr_material_overrides": overrides,
+            }
+
+            outputs = run_batch_with_options(**options)
+            sidecar = outputs[source_path]["rmaos_json"]
+            payload = json.loads(sidecar.read_text(encoding="utf-8"))[0]
+
+            self.assertTrue(payload["parallax"])
+            self.assertAlmostEqual(payload["displacement_scale"], 0.35)
+            self.assertAlmostEqual(payload["specular_level"], 0.08)
+            self.assertAlmostEqual(payload["roughness_scale"], 0.7)
+            checkpoint_payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(checkpoint_payload["generation_options"]["truepbr_material_overrides"], overrides)
+
+            changed_overrides = {**overrides, "specular_level": 0.12}
+            changed_options = {
+                **options,
+                "truepbr_material_overrides": changed_overrides,
+                "resume_from_checkpoint": True,
+            }
+            with self.assertRaisesRegex(ValueError, "generation settings differ"):
+                run_batch_with_options(**changed_options)
+
+    def test_run_batch_without_checkpoint_does_not_hash_source_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            input_dir.mkdir()
+            _sample_image().save(input_dir / "source.dds", format="DDS", pixel_format="DXT5")
+
+            with mock.patch(
+                "generate_textures._checkpoint_source_file_fingerprints",
+                side_effect=AssertionError("Uncheckpointed batches should not hash source files"),
+            ):
+                outputs = run_batch_with_options(
+                    input_path=input_dir,
+                    output_dir=temp_path / "out",
+                    include_diffuse=True,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                )
+
+        self.assertEqual([path.name for path in outputs], ["source.dds"])
+
+    def test_run_batch_with_options_recovers_interrupted_multiresolution_batch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            checkpoint = temp_path / "batch_checkpoint.json"
+            input_dir.mkdir()
+            dimensions = {
+                f"source_{index:02d}": (
+                    8 + (index % 4) * 4,
+                    8 + (index % 3) * 4,
+                )
+                for index in range(12)
+            }
+            for name, size in dimensions.items():
+                Image.new("RGB", size, color=(60, 100, 140)).save(
+                    input_dir / f"{name}.dds",
+                    format="DDS",
+                    pixel_format="DXT5",
+                )
+
+            original_run_with_options = run_with_options
+            first_attempts: list[str] = []
+
+            def interrupt_after_first_success(**kwargs: object) -> dict[str, Path]:
+                input_file = kwargs["input_file"]
+                assert isinstance(input_file, Path)
+                first_attempts.append(input_file.stem)
+                if input_file.stem == "source_04":
+                    raise RuntimeError("synthetic interruption")
+                return original_run_with_options(**kwargs)
+
+            with mock.patch(
+                "generate_textures.run_with_options",
+                side_effect=interrupt_after_first_success,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "synthetic interruption"):
+                    run_batch_with_options(
+                        input_path=input_dir,
+                        output_dir=output_dir,
+                        include_diffuse=True,
+                        include_normal=True,
+                        include_parallax=True,
+                        include_glow=False,
+                        include_environment_mask=False,
+                        include_complex=False,
+                        batch_workers=1,
+                        checkpoint_file=checkpoint,
+                    )
+
+            interrupted_state = json.loads(checkpoint.read_text(encoding="utf-8"))
+            first_completed = [str((input_dir / f"source_{index:02d}.dds").resolve()) for index in range(4)]
+            self.assertEqual(interrupted_state["completed_success_files"], first_completed)
+            self.assertEqual(first_attempts, [f"source_{index:02d}" for index in range(5)])
+
+            second_attempts: list[str] = []
+
+            def interrupt_second_resume(**kwargs: object) -> dict[str, Path]:
+                input_file = kwargs["input_file"]
+                assert isinstance(input_file, Path)
+                second_attempts.append(input_file.stem)
+                if input_file.stem == "source_08":
+                    raise RuntimeError("synthetic second interruption")
+                return original_run_with_options(**kwargs)
+
+            with mock.patch(
+                "generate_textures.run_with_options",
+                side_effect=interrupt_second_resume,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "synthetic second interruption"):
+                    run_batch_with_options(
+                        input_path=input_dir,
+                        output_dir=output_dir,
+                        include_diffuse=True,
+                        include_normal=True,
+                        include_parallax=True,
+                        include_glow=False,
+                        include_environment_mask=False,
+                        include_complex=False,
+                        batch_workers=1,
+                        checkpoint_file=checkpoint,
+                        resume_from_checkpoint=True,
+                    )
+
+            second_state = json.loads(checkpoint.read_text(encoding="utf-8"))
+            all_completed_before_second_interrupt = [
+                str((input_dir / f"source_{index:02d}.dds").resolve())
+                for index in range(8)
+            ]
+            self.assertEqual(second_state["completed_success_files"], all_completed_before_second_interrupt)
+            self.assertEqual(second_state["resumed_completed_count"], 4)
+            self.assertEqual(second_attempts, [f"source_{index:02d}" for index in range(4, 9)])
+
+            final_attempts: list[str] = []
+
+            def record_final_resume(**kwargs: object) -> dict[str, Path]:
+                input_file = kwargs["input_file"]
+                assert isinstance(input_file, Path)
+                final_attempts.append(input_file.stem)
+                return original_run_with_options(**kwargs)
+
+            with mock.patch(
+                "generate_textures.run_with_options",
+                side_effect=record_final_resume,
+            ):
+                resumed_outputs = run_batch_with_options(
+                    input_path=input_dir,
+                    output_dir=output_dir,
+                    include_diffuse=True,
+                    include_normal=True,
+                    include_parallax=True,
+                    include_glow=False,
+                    include_environment_mask=False,
+                    include_complex=False,
+                    batch_workers=1,
+                    checkpoint_file=checkpoint,
+                    resume_from_checkpoint=True,
+                )
+
+            self.assertEqual(final_attempts, [f"source_{index:02d}" for index in range(8, 12)])
+            self.assertEqual(
+                sorted(path.name for path in resumed_outputs),
+                [f"source_{index:02d}.dds" for index in range(8, 12)],
+            )
+            self.assertEqual(
+                sorted(path.name for path in output_dir.iterdir()),
+                sorted(
+                    f"{name}{suffix}.dds"
+                    for name in dimensions
+                    for suffix in ("", "_n", "_p")
+                ),
+            )
+            for name, size in dimensions.items():
+                for suffix in ("", "_n", "_p"):
+                    with Image.open(output_dir / f"{name}{suffix}.dds") as output_image:
+                        self.assertEqual(output_image.size, size)
+            resumed_state = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(resumed_state["resumed_completed_count"], 8)
+            self.assertEqual(resumed_state["completed_success_count"], 12)
+
+    def test_tk_batch_success_is_not_recorded_when_checkpoint_write_fails(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_process_generation_batch"):
+            self.skipTest("Tk batch worker is unavailable in this environment.")
+
+        class _BatchWorker:
+            _record_created_outputs = TextureGeneratorGUI._record_created_outputs
+
+            def __init__(self) -> None:
+                self.cancel_requested = False
+                self.processing_queue = queue.Queue()
+                self.last_generation_backups: dict[Path, Path] = {}
+                self.last_generation_created_files: set[Path] = set()
+
+            def _write_batch_checkpoint_state(self, *_args: object, **_kwargs: object) -> None:
+                raise OSError("checkpoint unavailable")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "out"
+            checkpoint = root / "checkpoint.json"
+            input_dir.mkdir()
+            source = input_dir / "source.dds"
+            _sample_image().save(source, format="DDS", pixel_format="DXT5")
+            worker = _BatchWorker()
+            completed: set[str] = set()
+            output_paths = {"diffuse": output_dir / "source.dds"}
+
+            with mock.patch("generate_textures.run_with_options", return_value=output_paths):
+                TextureGeneratorGUI._process_generation_batch(
+                    worker,
+                    [source],
+                    {
+                        "output_dir": output_dir,
+                        "normal_strength": 1.0,
+                        "include_diffuse": True,
+                    },
+                    input_dir,
+                    checkpoint,
+                    completed,
+                    0,
+                    _checkpoint_source_file_fingerprints((source,)),
+                )
+
+            events = []
+            while not worker.processing_queue.empty():
+                events.append(worker.processing_queue.get_nowait())
+
+        self.assertEqual([event_type for event_type, _payload in events], ["progress", "file_error", "done"])
+        self.assertEqual(completed, set())
+        self.assertEqual(events[1][1][3], "checkpoint unavailable")
+        self.assertEqual(events[2][1][0], {})
+
+    def test_tk_batch_worker_rejects_colliding_outputs_before_generation(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_process_generation_batch"):
+            self.skipTest("Tk batch worker is unavailable in this environment.")
+
+        class _BatchWorker:
+            def __init__(self) -> None:
+                self.cancel_requested = False
+                self.processing_queue = queue.Queue()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            input_dir.mkdir()
+            sources = [input_dir / "stone.dds", input_dir / "stone_d.dds"]
+            for source in sources:
+                _sample_image().save(source, format="DDS", pixel_format="DXT5")
+            worker = _BatchWorker()
+
+            with mock.patch("generate_textures.run_with_options") as generate:
+                TextureGeneratorGUI._process_generation_batch(
+                    worker,
+                    sources,
+                    {
+                        "output_dir": root / "out",
+                        "include_diffuse": True,
+                        "include_normal": False,
+                        "include_parallax": False,
+                    },
+                    input_dir,
+                    root / "checkpoint.json",
+                    set(),
+                    0,
+                    _checkpoint_source_file_fingerprints(sources),
+                    total_files_considered=len(sources),
+                )
+
+            events = []
+            while not worker.processing_queue.empty():
+                events.append(worker.processing_queue.get_nowait())
+            generate.assert_not_called()
+
+        self.assertEqual([event_type for event_type, _payload in events], ["error"])
+        self.assertIn("Conflicting batch output paths", events[0][1])
+
+    def test_tk_batch_worker_requeues_checkpoint_source_if_output_disappears(self) -> None:
+        if not all(
+            hasattr(TextureGeneratorGUI, name)
+            for name in (
+                "_process_generation_batch",
+                "_prepare_generation_snapshot",
+                "_discard_last_generation_snapshot",
+                "_record_created_outputs",
+                "_write_batch_checkpoint_state",
+            )
+        ):
+            self.skipTest("Tk batch worker is unavailable in this environment.")
+
+        class _BatchWorker:
+            _process_generation_batch = TextureGeneratorGUI._process_generation_batch
+            _prepare_generation_snapshot = TextureGeneratorGUI._prepare_generation_snapshot
+            _discard_last_generation_snapshot = TextureGeneratorGUI._discard_last_generation_snapshot
+            _record_created_outputs = TextureGeneratorGUI._record_created_outputs
+            _write_batch_checkpoint_state = TextureGeneratorGUI._write_batch_checkpoint_state
+
+            def __init__(self, all_sources: list[Path]) -> None:
+                self.cancel_requested = False
+                self.processing_queue = queue.Queue()
+                self.checkpoint_source_files = all_sources
+                self.last_generation_backup_dir: Path | None = None
+                self.last_generation_backups: dict[Path, Path] = {}
+                self.last_generation_created_files: set[Path] = set()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "output"
+            input_dir.mkdir()
+            output_dir.mkdir()
+            completed_source = input_dir / "completed.dds"
+            pending_source = input_dir / "pending.dds"
+            for source in (completed_source, pending_source):
+                _sample_image().save(source, format="DDS", pixel_format="DXT5")
+            completed_output = output_dir / "completed.dds"
+            missing_output = output_dir / "completed_n.dds"
+            completed_output.write_bytes(b"prior diffuse")
+            completed_key = str(completed_source.resolve())
+            pending_key = str(pending_source.resolve())
+            fingerprints = _checkpoint_source_file_fingerprints(
+                (completed_source, pending_source)
+            )
+            checkpoint = root / "checkpoint.json"
+            checkpoint.write_text(
+                json.dumps(
+                    {
+                        "completed_file_outputs": {
+                            completed_key: {
+                                "diffuse": str(completed_output.resolve()),
+                                "normal": str(missing_output.resolve()),
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            generation_options = {
+                "output_dir": output_dir,
+                "include_diffuse": True,
+                "include_normal": True,
+                "include_parallax": False,
+                "include_glow": False,
+                "include_environment_mask": False,
+                "include_complex": False,
+                "include_rmaos": False,
+            }
+            worker = _BatchWorker([completed_source, pending_source])
+            worker._prepare_generation_snapshot([pending_source], generation_options)
+            generated_sources: list[str] = []
+
+            def generate(**kwargs: object) -> dict[str, Path]:
+                source = kwargs["input_file"]
+                assert isinstance(source, Path)
+                generated_sources.append(source.name)
+                outputs = {
+                    "diffuse": output_dir / f"{source.stem}.dds",
+                    "normal": output_dir / f"{source.stem}_n.dds",
+                }
+                for output in outputs.values():
+                    output.write_bytes(f"{source.name}:{output.name}".encode())
+                return outputs
+
+            with mock.patch("generate_textures.run_with_options", side_effect=generate):
+                worker._process_generation_batch(
+                    [pending_source],
+                    generation_options,
+                    input_dir,
+                    checkpoint,
+                    {completed_key},
+                    1,
+                    fingerprints,
+                    total_files_considered=2,
+                )
+
+            events = []
+            while not worker.processing_queue.empty():
+                events.append(worker.processing_queue.get_nowait())
+            checkpoint_payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+            backed_up_completed_output = worker.last_generation_backups.get(completed_output)
+
+        self.assertEqual(generated_sources, ["completed.dds", "pending.dds"])
+        self.assertEqual(backed_up_completed_output.read_bytes(), b"prior diffuse")
+        done_payload = next(payload for kind, payload in events if kind == "done")[1]
+        self.assertEqual(done_payload["resumed_completed_count"], 0)
+        self.assertEqual(done_payload["total_files_considered"], 2)
+        self.assertEqual(checkpoint_payload["completed_success_count"], 2)
+        self.assertEqual(checkpoint_payload["resumed_completed_count"], 0)
+        self.assertIn(completed_key, checkpoint_payload["completed_success_files"])
+        self.assertIn(pending_key, checkpoint_payload["completed_success_files"])
+
+    def test_gui_batch_worker_cancellation_checkpoint_resumes_long_run(self) -> None:
+        if not all(
+            hasattr(TextureGeneratorGUI, name)
+            for name in (
+                "_process_generation_batch",
+                "_record_created_outputs",
+                "_write_batch_checkpoint_state",
+            )
+        ):
+            self.skipTest("Tk batch worker is unavailable in this environment.")
+
+        class _BatchWorker:
+            _record_created_outputs = TextureGeneratorGUI._record_created_outputs
+            _write_batch_checkpoint_state = TextureGeneratorGUI._write_batch_checkpoint_state
+
+            def __init__(self) -> None:
+                self.cancel_requested = False
+                self.processing_queue = queue.Queue()
+                self.last_generation_backups: dict[Path, Path] = {}
+                self.last_generation_created_files: set[Path] = set()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "out"
+            checkpoint = root / "batch_checkpoint.json"
+            input_dir.mkdir()
+            dimensions = {
+                f"source_{index:02d}": (8 + (index % 4) * 4, 8 + (index % 3) * 4)
+                for index in range(48)
+            }
+            input_files = []
+            for name, size in dimensions.items():
+                input_file = input_dir / f"{name}.dds"
+                Image.new("RGB", size, color=(60, 100, 140)).save(
+                    input_file,
+                    format="DDS",
+                    pixel_format="DXT5",
+                )
+                input_files.append(input_file)
+
+            output_dir.mkdir()
+            worker = _BatchWorker()
+            worker.checkpoint_source_files = input_files.copy()
+            interrupted_after = 11
+            first_attempts: list[str] = []
+            source_fingerprints = _checkpoint_source_file_fingerprints(input_files)
+
+            def generate_outputs(input_file: Path) -> dict[str, Path]:
+                outputs = {
+                    "diffuse": output_dir / f"{input_file.stem}.dds",
+                    "normal": output_dir / f"{input_file.stem}_n.dds",
+                }
+                for output_name, output_path in outputs.items():
+                    output_path.write_bytes(f"{input_file.name}:{output_name}".encode())
+                return outputs
+
+            def cancel_after_completed_files(**kwargs: object) -> dict[str, Path]:
+                input_file = kwargs["input_file"]
+                assert isinstance(input_file, Path)
+                first_attempts.append(input_file.stem)
+                if len(first_attempts) == interrupted_after:
+                    worker.cancel_requested = True
+                return generate_outputs(input_file)
+
+            with mock.patch(
+                "generate_textures.run_with_options",
+                side_effect=cancel_after_completed_files,
+            ):
+                TextureGeneratorGUI._process_generation_batch(
+                    worker,
+                    input_files,
+                    {
+                        "output_dir": output_dir,
+                        "normal_strength": 1.75,
+                        "include_diffuse": True,
+                    },
+                    input_dir,
+                    checkpoint,
+                    set(),
+                    0,
+                    source_fingerprints,
+                )
+
+            interrupted_events = []
+            while not worker.processing_queue.empty():
+                interrupted_events.append(worker.processing_queue.get_nowait())
+            self.assertEqual(
+                [event_type for event_type, _payload in interrupted_events],
+                ["progress"] * interrupted_after + ["cancelled"],
+            )
+            cancelled_event = interrupted_events[-1]
+            self.assertEqual(cancelled_event[0], "cancelled")
+            cancelled_results, cancellation_telemetry = cancelled_event[1]
+            self.assertEqual(first_attempts, [f"source_{index:02d}" for index in range(interrupted_after)])
+            self.assertEqual(len(cancelled_results), interrupted_after)
+            self.assertEqual(cancellation_telemetry["checkpoint_path"], str(checkpoint))
+            interrupted_state = json.loads(checkpoint.read_text(encoding="utf-8"))
+            completed_before_resume = [
+                str((input_dir / f"source_{index:02d}.dds").resolve())
+                for index in range(interrupted_after)
+            ]
+            self.assertEqual(interrupted_state["completed_success_files"], completed_before_resume)
+            self.assertEqual(
+                set(interrupted_state["completed_file_fingerprints"]),
+                set(completed_before_resume),
+            )
+            self.assertEqual(interrupted_state["output_root"], str(output_dir.resolve()))
+            self.assertEqual(interrupted_state["total_files_considered"], len(input_files))
+            self.assertEqual(
+                interrupted_state["generation_options"],
+                {"normal_strength": 1.75, "include_diffuse": True},
+            )
+
+            remaining_files = [
+                input_file
+                for input_file in input_files
+                if str(input_file.resolve()) not in interrupted_state["completed_success_files"]
+            ]
+            resumed_attempts: list[str] = []
+
+            def complete_remaining_files(**kwargs: object) -> dict[str, Path]:
+                input_file = kwargs["input_file"]
+                assert isinstance(input_file, Path)
+                resumed_attempts.append(input_file.stem)
+                return generate_outputs(input_file)
+
+            worker.cancel_requested = False
+            with mock.patch(
+                "generate_textures.run_with_options",
+                side_effect=complete_remaining_files,
+            ):
+                TextureGeneratorGUI._process_generation_batch(
+                    worker,
+                    remaining_files,
+                    {
+                        "output_dir": output_dir,
+                        "normal_strength": 1.75,
+                        "include_diffuse": True,
+                    },
+                    input_dir,
+                    checkpoint,
+                    set(interrupted_state["completed_success_files"]),
+                    interrupted_after,
+                    source_fingerprints,
+                )
+
+            resumed_events = []
+            while not worker.processing_queue.empty():
+                resumed_events.append(worker.processing_queue.get_nowait())
+            self.assertEqual(
+                [event_type for event_type, _payload in resumed_events],
+                ["progress"] * (len(dimensions) - interrupted_after) + ["done"],
+            )
+            done_event = resumed_events[-1]
+            self.assertEqual(done_event[0], "done")
+            resumed_results, resumed_telemetry = done_event[1]
+            self.assertEqual(
+                resumed_attempts,
+                [f"source_{index:02d}" for index in range(interrupted_after, len(dimensions))],
+            )
+            self.assertEqual(len(resumed_results), len(dimensions) - interrupted_after)
+            self.assertEqual(resumed_telemetry["resumed_completed_count"], interrupted_after)
+            completed_state = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(completed_state["completed_success_count"], len(dimensions))
+            self.assertEqual(completed_state["resumed_completed_count"], interrupted_after)
+            self.assertEqual(
+                set(completed_state["completed_file_fingerprints"]),
+                set(completed_state["completed_success_files"]),
+            )
+
+    def test_run_batch_with_options_recovers_failed_file_under_parallel_queue_pressure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            checkpoint = temp_path / "batch_checkpoint.json"
+            telemetry = temp_path / "batch_telemetry.json"
+            input_dir.mkdir()
+            input_count = 40
+            dimensions = {
+                f"source_{index:02d}": (8 + (index % 4) * 4, 8 + (index % 3) * 4)
+                for index in range(input_count)
+            }
+            for name, size in dimensions.items():
+                Image.new("RGB", size, color=(60, 100, 140)).save(
+                    input_dir / f"{name}.dds",
+                    format="DDS",
+                    pixel_format="DXT5",
+                )
+            failed_source = input_dir / "source_07.dds"
+            failed_source.write_bytes(b"invalid DDS source")
+            first_progress: list[tuple[int, int, str]] = []
+            first_errors: list[str] = []
+
+            first_outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=True,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                continue_on_error=True,
+                batch_workers=4,
+                checkpoint_file=checkpoint,
+                batch_telemetry_file=telemetry,
+                progress_callback=lambda index, total, path: first_progress.append(
+                    (index, total, path.name)
+                ),
+                error_callback=lambda _index, _total, path, _exc: first_errors.append(path.name),
+            )
+
+            self.assertEqual(len(first_outputs), input_count - 1)
+            self.assertEqual(first_errors, [failed_source.name])
+            self.assertEqual(len(first_progress), input_count)
+            self.assertEqual({total for _index, total, _name in first_progress}, {input_count})
+            first_state = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(first_state["completed_success_count"], input_count - 1)
+            self.assertNotIn(str(failed_source.resolve()), first_state["completed_success_files"])
+            first_telemetry = json.loads(telemetry.read_text(encoding="utf-8"))["summary"]
+            self.assertEqual(first_telemetry["processed_files"], input_count)
+            self.assertEqual(first_telemetry["successful_files"], input_count - 1)
+            self.assertEqual(first_telemetry["failed_files"], 1)
+
+            Image.new("RGB", dimensions[failed_source.stem], color=(60, 100, 140)).save(
+                failed_source,
+                format="DDS",
+                pixel_format="DXT5",
+            )
+            resumed_progress: list[tuple[int, int, str]] = []
+            resumed_outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=True,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                batch_workers=4,
+                checkpoint_file=checkpoint,
+                resume_from_checkpoint=True,
+                batch_telemetry_file=telemetry,
+                progress_callback=lambda index, total, path: resumed_progress.append(
+                    (index, total, path.name)
+                ),
+            )
+
+            self.assertEqual([name for _index, _total, name in resumed_progress], [failed_source.name])
+            self.assertEqual({total for _index, total, _name in resumed_progress}, {1})
+            self.assertEqual([path.name for path in resumed_outputs], [failed_source.name])
+            expected_outputs = sorted(
+                output_name
+                for name in dimensions
+                for output_name in (f"{name}.dds", f"{name}_n.dds")
+            )
+            self.assertEqual(sorted(path.name for path in output_dir.iterdir()), expected_outputs)
+            for output_path in output_dir.glob("*.dds"):
+                source_name = output_path.stem.removesuffix("_n")
+                with Image.open(output_path) as output_image:
+                    self.assertEqual(output_image.size, dimensions[source_name])
+            resumed_state = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(resumed_state["resumed_completed_count"], input_count - 1)
+            self.assertEqual(resumed_state["completed_success_count"], input_count)
+            resumed_telemetry = json.loads(telemetry.read_text(encoding="utf-8"))["summary"]
+            self.assertEqual(resumed_telemetry["processed_files"], 1)
+            self.assertEqual(resumed_telemetry["successful_files"], 1)
+            self.assertEqual(resumed_telemetry["failed_files"], 0)
+            self.assertEqual(resumed_telemetry["resumed_completed_count"], input_count - 1)
+
+    def test_run_batch_with_options_resumes_truepbr_feature_map_combination(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "input"
+            output_dir = root / "out"
+            checkpoint = root / "checkpoint.json"
+            input_dir.mkdir()
+            source_sizes = {
+                "01_good": (12, 10),
+                "02_repair": (16, 12),
+            }
+            for stem, size in source_sizes.items():
+                Image.new("RGB", size, color=(60, 100, 140)).save(
+                    input_dir / f"{stem}.dds",
+                    format="DDS",
+                    pixel_format="DXT5",
+                )
+            repair_path = input_dir / "02_repair.dds"
+            repair_path.write_bytes(b"corrupt source DDS")
+            options = {
+                "input_path": input_dir,
+                "output_dir": output_dir,
+                "include_diffuse": True,
+                "include_normal": True,
+                "include_parallax": False,
+                "include_glow": True,
+                "include_environment_mask": False,
+                "include_rmaos": True,
+                "include_complex": False,
+                "render_profile": "truepbr",
+                "include_wetness_mask": True,
+                "include_snow_mask": True,
+                "include_ao": True,
+                "include_roughness": True,
+                "continue_on_error": True,
+                "batch_workers": 1,
+                "checkpoint_file": checkpoint,
+            }
+            errors: list[str] = []
+            initial_outputs = run_batch_with_options(
+                **options,
+                error_callback=lambda _index, _total, path, _error: errors.append(path.name),
+            )
+            self.assertEqual(errors, [repair_path.name])
+            self.assertEqual([path.name for path in initial_outputs], ["01_good.dds"])
+            initial_maps = initial_outputs[input_dir / "01_good.dds"]
+            self.assertEqual(
+                set(initial_maps),
+                {
+                    "diffuse",
+                    "normal",
+                    "glow",
+                    "rmaos",
+                    "rmaos_json",
+                    "wetness_mask",
+                    "snow_mask",
+                    "ao",
+                    "roughness",
+                },
+            )
+            checkpoint_after_failure = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(checkpoint_after_failure["completed_success_count"], 1)
+            self.assertEqual(
+                checkpoint_after_failure["generation_options"]["include_rmaos"],
+                True,
+            )
+            self.assertEqual(
+                checkpoint_after_failure["generation_options"]["include_wetness_mask"],
+                True,
+            )
+            self.assertNotIn(str(repair_path.resolve()), checkpoint_after_failure["completed_success_files"])
+
+            Image.new("RGB", source_sizes["02_repair"], color=(60, 100, 140)).save(
+                repair_path,
+                format="DDS",
+                pixel_format="DXT5",
+            )
+            resumed_outputs = run_batch_with_options(
+                **options,
+                resume_from_checkpoint=True,
+            )
+            self.assertEqual([path.name for path in resumed_outputs], ["02_repair.dds"])
+            resumed_maps = resumed_outputs[repair_path]
+            self.assertEqual(set(resumed_maps), set(initial_maps))
+            self.assertEqual(
+                {key: Path(path).name for key, path in resumed_maps.items()},
+                {
+                    "diffuse": "02_repair.dds",
+                    "normal": "02_repair_n.dds",
+                    "glow": "02_repair_g.dds",
+                    "rmaos": "02_repair_rmaos.dds",
+                    "rmaos_json": "02_repair_rmaos.json",
+                    "wetness_mask": "02_repair_wt.dds",
+                    "snow_mask": "02_repair_sm.dds",
+                    "ao": "02_repair_ao.dds",
+                    "roughness": "02_repair_rough.dds",
+                },
+            )
+            self.assertTrue(Path(resumed_maps["rmaos_json"]).is_file())
+            final_checkpoint = json.loads(checkpoint.read_text(encoding="utf-8"))
+            self.assertEqual(final_checkpoint["resumed_completed_count"], 1)
+            self.assertEqual(final_checkpoint["completed_success_count"], 2)
+
+    def test_run_batch_with_options_writes_batch_telemetry_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            telemetry = temp_path / "reports" / "batch_telemetry.json"
+            input_dir.mkdir()
+            for name in ("a.dds", "b.dds"):
+                _sample_image().save(input_dir / name, format="DDS", pixel_format="DXT5")
+
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                batch_workers=1,
+                batch_telemetry_file=telemetry,
+            )
+
+            self.assertEqual(len(outputs), 2)
+            payload = json.loads(telemetry.read_text(encoding="utf-8"))
+            self.assertEqual(payload["tool"], "generate_textures")
+            self.assertEqual(payload["version"], APP_VERSION)
+            summary = payload["summary"]
+            self.assertEqual(summary["processed_files"], 2)
+            self.assertEqual(summary["successful_files"], 2)
+            self.assertEqual(summary["failed_files"], 0)
+            self.assertEqual(summary["workers"], 1)
+            self.assertEqual(summary["sampled_resolution_files"], 2)
+            self.assertGreaterEqual(summary["max_source_dimension"], 8)
+            self.assertGreaterEqual(summary["max_source_megapixels"], 0.0)
+            self.assertGreaterEqual(summary["total_duration_seconds"], 0.0)
+            self.assertEqual(len(payload["per_file_duration_seconds"]), 2)
+
+    def test_run_batch_with_options_records_failed_files_in_telemetry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_dir = temp_path / "input"
+            output_dir = temp_path / "out"
+            telemetry = temp_path / "batch_telemetry.json"
+            input_dir.mkdir()
+            _sample_image().save(input_dir / "good.dds", format="DDS", pixel_format="DXT5")
+            (input_dir / "bad.dds").write_bytes(b"this is not a valid dds")
+
+            outputs = run_batch_with_options(
+                input_path=input_dir,
+                output_dir=output_dir,
+                include_diffuse=True,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_complex=False,
+                continue_on_error=True,
+                batch_workers=1,
+                batch_telemetry_file=telemetry,
+            )
+
+            self.assertEqual(sorted(path.name for path in outputs.keys()), ["good.dds"])
+            payload = json.loads(telemetry.read_text(encoding="utf-8"))
+            summary = payload["summary"]
+            self.assertEqual(summary["processed_files"], 2)
+            self.assertEqual(summary["successful_files"], 1)
+            self.assertEqual(summary["failed_files"], 1)
+            self.assertEqual(len(payload["per_file_duration_seconds"]), 2)
+
+    def test_resolve_batch_workers_throttles_for_8k_textures(self) -> None:
+        self.assertEqual(_resolve_batch_workers(None, 10, max_megapixels=64.0), 1)
+        self.assertEqual(_resolve_batch_workers(8, 10, max_megapixels=64.0), 1)
+        self.assertEqual(_resolve_batch_workers(None, 10, max_megapixels=20.0), 2)
+
+    def test_summarize_batch_texture_dimensions_counts_4k_and_8k(self) -> None:
+        paths = [Path("/tmp/a.dds"), Path("/tmp/b.dds")]
+        with mock.patch(
+            "generate_textures._probe_image_dimensions",
+            side_effect=[(4096, 2048), (8192, 4096)],
+        ):
+            summary = _summarize_batch_texture_dimensions(paths)
+        self.assertEqual(int(summary["sampled_files"]), 2)
+        self.assertEqual(int(summary["high_res_4k_count"]), 2)
+        self.assertEqual(int(summary["high_res_8k_count"]), 1)
+        self.assertEqual(int(summary["max_dimension"]), 8192)
+        self.assertGreater(float(summary["max_megapixels"]), 30.0)
+
+    def test_write_batch_failure_artifacts_writes_structured_json_and_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            failures = [
+                (root / "textures" / "b.dds", "decode error"),
+                (root / "textures" / "a.dds", "unsupported format"),
+            ]
+            outputs = {root / "textures" / "ok.dds": {"diffuse": root / "out" / "ok.dds"}}
+            json_path, csv_path = write_batch_failure_artifacts(
+                artifact_dir=root,
+                failures=failures,
+                batch_outputs=outputs,
+            )
+            self.assertTrue(json_path.exists())
+            self.assertTrue(csv_path.exists())
+            payload = json.loads(json_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["version"], APP_VERSION)
+            self.assertEqual(payload["summary"]["failed_files"], 2)
+            self.assertEqual(payload["summary"]["successful_files"], 1)
+            self.assertEqual(payload["summary"]["successful_outputs"], 1)
+            self.assertEqual([Path(row["file"]).name for row in payload["failures"]], ["a.dds", "b.dds"])
+            csv_lines = csv_path.read_text(encoding="utf-8").splitlines()
+            self.assertIn("file,error,action,conflict_code,conflict_action,outputs_generated", csv_lines[0])
+            self.assertTrue(any("a.dds" in line for line in csv_lines[1:]))
+            self.assertTrue(any("b.dds" in line for line in csv_lines[1:]))
+
+    def test_main_writes_failure_artifacts_for_batch_directory_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "textures"
+            input_dir.mkdir()
+            good = input_dir / "good.dds"
+            good.write_bytes(b"dds")
+            args = mock.Mock(
+                gui=False,
+                input_file=input_dir,
+                output_dir=None,
+                diffuse_name=None,
+                normal_name=None,
+                parallax_name=None,
+                glow_name=None,
+                environment_mask_name=None,
+                rmaos_name=None,
+                complex_name=None,
+                normal_strength=None,
+                parallax_strength=None,
+                glow_threshold=None,
+                environment_mask_strength=None,
+                rmaos_strength=None,
+                complex_strength=None,
+                specular_strength=None,
+                complex_format="msn",
+                environment_mask_mode="standard",
+                emboss_mode=False,
+                relief_mode=False,
+                parallax_mode="standard",
+                no_diffuse=False,
+                no_normal=True,
+                no_parallax=True,
+                glow_map=False,
+                environment_mask=False,
+                rmaos=False,
+                wetness_mask=False,
+                wetness_mask_strength=None,
+                snow_mask=False,
+                snow_mask_strength=None,
+                ao_map=False,
+                ao_strength=None,
+                roughness_map=False,
+                roughness_strength=None,
+                complex_material=False,
+                pbr_material=False,
+                pbr_texture_sets=False,
+                render_profile="auto",
+                batch_workers=1,
+            )
+
+            def _fake_run_batch_with_options(**kwargs):
+                kwargs["error_callback"](1, 2, input_dir / "bad.dds", RuntimeError("decode error"))
+                return {good: {"diffuse": root / "out" / "good.dds"}}
+
+            with mock.patch("generate_textures.parse_args", return_value=args):
+                with mock.patch("generate_textures.run_batch_with_options", side_effect=_fake_run_batch_with_options):
+                    exit_code = main()
+
+            self.assertEqual(exit_code, 1)
+            json_report = input_dir / "batch_failure_report.json"
+            csv_report = input_dir / "batch_failure_report.csv"
+            self.assertTrue(json_report.exists())
+            self.assertTrue(csv_report.exists())
+            payload = json.loads(json_report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["summary"]["failed_files"], 1)
+            self.assertEqual(Path(payload["failures"][0]["file"]).name, "bad.dds")
+
+    def test_main_passes_batch_options_to_batch_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            input_dir = root / "textures"
+            input_dir.mkdir()
+            checkpoint = root / "checkpoint.json"
+            args = mock.Mock(
+                gui=False,
+                input_file=input_dir,
+                output_dir=None,
+                diffuse_name=None,
+                normal_name=None,
+                parallax_name=None,
+                glow_name=None,
+                environment_mask_name=None,
+                rmaos_name=None,
+                complex_name=None,
+                normal_strength=None,
+                parallax_strength=None,
+                glow_threshold=None,
+                environment_mask_strength=None,
+                rmaos_strength=None,
+                complex_strength=None,
+                specular_strength=None,
+                complex_format="msn",
+                environment_mask_mode="standard",
+                emboss_mode=False,
+                relief_mode=False,
+                parallax_mode="standard",
+                no_diffuse=False,
+                no_normal=True,
+                no_parallax=True,
+                glow_map=False,
+                environment_mask=False,
+                rmaos=False,
+                wetness_mask=False,
+                wetness_mask_strength=None,
+                snow_mask=False,
+                snow_mask_strength=None,
+                ao_map=False,
+                ao_strength=None,
+                roughness_map=False,
+                roughness_strength=None,
+                complex_material=False,
+                pbr_material=False,
+                pbr_texture_sets=True,
+                render_profile="auto",
+                batch_workers=2,
+                checkpoint_file=checkpoint,
+                resume_checkpoint=True,
+            )
+            with mock.patch("generate_textures.parse_args", return_value=args):
+                with mock.patch("generate_textures.run_batch_with_options", return_value={}) as batch_mock:
+                    exit_code = main()
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(batch_mock.call_args.kwargs["checkpoint_file"], checkpoint)
+            self.assertTrue(batch_mock.call_args.kwargs["resume_from_checkpoint"])
+            self.assertTrue(batch_mock.call_args.kwargs["include_pbr_texture_sets"])
+
+    def test_generation_api_preserves_legacy_positional_parameter_order(self) -> None:
+        run_parameters = tuple(inspect.signature(run_with_options).parameters)
+        batch_parameters = tuple(inspect.signature(run_batch_with_options).parameters)
+
+        self.assertEqual(
+            run_parameters[run_parameters.index("render_profile") + 1],
+            "include_wetness_mask",
+        )
+        self.assertEqual(
+            batch_parameters[batch_parameters.index("render_profile") + 1],
+            "include_wetness_mask",
+        )
+        self.assertEqual(
+            batch_parameters[batch_parameters.index("roughness_name") + 1],
+            "progress_callback",
+        )
+
     def test_create_panda_icon_image_returns_rgba_square(self) -> None:
         for size in (16, 32, 64, 128, 256):
             icon = _create_panda_icon_image(size=size)
@@ -3419,6 +9759,25 @@ class GenerateTexturesTests(unittest.TestCase):
                     opaque_count += 1
         self.assertGreater(opaque_count, 0)
 
+    def test_create_panda_icon_image_uses_bundled_source_art(self) -> None:
+        source_path = _resolve_app_icon_source_path()
+        self.assertTrue(source_path.is_file(), source_path)
+        with Image.open(source_path) as source:
+            expected = source.convert("RGBA")
+            if expected.width == expected.height:
+                expected = expected.resize((64, 64), Image.Resampling.LANCZOS)
+            else:
+                fitted = ImageOps.contain(expected, (64, 64), method=Image.Resampling.LANCZOS)
+                canvas = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+                canvas.paste(
+                    fitted,
+                    ((64 - fitted.width) // 2, (64 - fitted.height) // 2),
+                    fitted if fitted.mode == "RGBA" else None,
+                )
+                expected = canvas
+        icon = _create_panda_icon_image(size=64)
+        self.assertEqual(icon.tobytes(), expected.tobytes())
+
     def test_patreon_url_is_correct(self) -> None:
         self.assertEqual(PATREON_URL, "https://www.patreon.com/cw/DeadOnTheInside")
 
@@ -3432,6 +9791,14 @@ class GenerateTexturesTests(unittest.TestCase):
             with mock.patch("sys.argv", ["generate_textures.py", str(input_file), "--pbr-material"]):
                 args = parse_args()
         self.assertTrue(args.pbr_material)
+
+    def test_parse_args_accepts_pbr_texture_sets_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_file = Path(temp_dir) / "landscape.dds"
+            input_file.write_bytes(b"dds")
+            with mock.patch("sys.argv", ["generate_textures.py", str(input_file), "--pbr-texture-sets"]):
+                args = parse_args()
+        self.assertTrue(args.pbr_texture_sets)
 
     def test_parse_args_accepts_render_profile_flag(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3448,6 +9815,154 @@ class GenerateTexturesTests(unittest.TestCase):
             with mock.patch("sys.argv", ["generate_textures.py", str(input_file), "--render-profile", "architecture"]):
                 args = parse_args()
         self.assertEqual(str(args.render_profile), "architecture")
+
+    def test_parse_args_accepts_checkpoint_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_dir = Path(temp_dir) / "textures"
+            input_dir.mkdir()
+            checkpoint = Path(temp_dir) / "checkpoint.json"
+            with mock.patch(
+                "sys.argv",
+                [
+                    "generate_textures.py",
+                    str(input_dir),
+                    "--checkpoint-file",
+                    str(checkpoint),
+                    "--resume-checkpoint",
+                ],
+            ):
+                args = parse_args()
+        self.assertEqual(args.checkpoint_file, checkpoint)
+        self.assertTrue(args.resume_checkpoint)
+
+    def test_parse_args_accepts_project_settings_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_file = Path(temp_dir) / "brick.dds"
+            input_file.write_bytes(b"dds")
+            import_path = Path(temp_dir) / "import.json"
+            export_path = Path(temp_dir) / "export.json"
+            with mock.patch(
+                "sys.argv",
+                [
+                    "generate_textures.py",
+                    str(input_file),
+                    "--import-project-settings",
+                    str(import_path),
+                    "--export-project-settings",
+                    str(export_path),
+                ],
+            ):
+                args = parse_args()
+        self.assertEqual(args.import_project_settings, import_path)
+        self.assertEqual(args.export_project_settings, export_path)
+
+    def test_parse_args_accepts_gui_backend_qt(self) -> None:
+        with mock.patch("sys.argv", ["generate_textures.py", "--gui", "--gui-backend", "qt"]):
+            args = parse_args()
+        self.assertEqual(str(args.gui_backend), "qt")
+
+    def test_main_routes_to_qt_backend_when_requested(self) -> None:
+        args = mock.Mock(gui=True, input_file=None, gui_backend="qt", pbr_texture_sets=False)
+        with mock.patch("generate_textures.parse_args", return_value=args):
+            with mock.patch("generate_textures._launch_qt_migration_gui") as qt_launch:
+                with mock.patch("generate_textures._launch_tk_gui") as tk_launch:
+                    exit_code = main()
+        self.assertEqual(exit_code, 0)
+        qt_launch.assert_called_once()
+        tk_launch.assert_not_called()
+
+    def test_main_exports_project_settings_without_launching_gui(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            source_input = temp_path / "source.dds"
+            source_input.write_bytes(b"fake")
+            source_state = temp_path / "gui-state.json"
+            export_state = temp_path / "exported-settings.json"
+            save_gui_state(
+                {
+                    "input_path": str(source_input),
+                    "dark_mode": True,
+                    "show_advanced_workflow_outputs": True,
+                    "render_profile": "community_shaders",
+                },
+                source_state,
+            )
+            args = SimpleNamespace(
+                gui=False,
+                input_file=None,
+                gui_backend="auto",
+                pbr_material=False,
+                pbr_texture_sets=False,
+                import_project_settings=None,
+                export_project_settings=export_state,
+            )
+            with mock.patch("generate_textures.parse_args", return_value=args), \
+                 mock.patch("generate_textures.GUI_STATE_FILE", source_state), \
+                 mock.patch("generate_textures._launch_qt_migration_gui") as qt_launch, \
+                 mock.patch("generate_textures._launch_tk_gui") as tk_launch:
+                self.assertEqual(main(), 0)
+            exported = load_gui_state(export_state)
+            self.assertEqual(exported["input_path"], str(source_input))
+            self.assertTrue(bool(exported["dark_mode"]))
+            self.assertTrue(bool(exported["show_advanced_workflow_outputs"]))
+            qt_launch.assert_not_called()
+            tk_launch.assert_not_called()
+
+    def test_main_auto_prefers_qt_when_tk_unavailable(self) -> None:
+        args = mock.Mock(gui=True, input_file=None, gui_backend="auto", pbr_texture_sets=False)
+        with mock.patch("generate_textures.parse_args", return_value=args):
+            with mock.patch("generate_textures.GUI_AVAILABLE", False):
+                with mock.patch("generate_textures.QT_GUI_AVAILABLE", True):
+                    with mock.patch("generate_textures._launch_qt_migration_gui") as qt_launch:
+                        exit_code = main()
+        self.assertEqual(exit_code, 0)
+        qt_launch.assert_called_once()
+
+    def test_main_frozen_qt_executable_defaults_to_qt_on_double_click(self) -> None:
+        args = SimpleNamespace(gui=False, input_file=None, gui_backend="auto", pbr_material=False, pbr_texture_sets=False)
+        with mock.patch("generate_textures.parse_args", return_value=args), \
+             mock.patch.object(sys, "frozen", True, create=True), \
+             mock.patch.object(sys, "executable", "/packaged/generate_textures_qt.exe"), \
+             mock.patch("generate_textures.GUI_AVAILABLE", True), \
+             mock.patch("generate_textures.QT_GUI_AVAILABLE", True), \
+             mock.patch("generate_textures._launch_qt_migration_gui") as qt_launch, \
+             mock.patch("generate_textures._launch_tk_gui") as tk_launch:
+            self.assertEqual(main(), 0)
+        qt_launch.assert_called_once()
+        tk_launch.assert_not_called()
+
+    def test_main_frozen_qt_executable_honors_explicit_backend_overrides(self) -> None:
+        for backend in ("tk", "qt"):
+            with self.subTest(backend=backend):
+                args = SimpleNamespace(gui=True, input_file=None, gui_backend=backend, pbr_material=False, pbr_texture_sets=False)
+                with mock.patch("generate_textures.parse_args", return_value=args), \
+                     mock.patch.object(sys, "frozen", True, create=True), \
+                     mock.patch.object(sys, "executable", "/packaged/generate_textures_qt.exe"), \
+                     mock.patch("generate_textures.GUI_AVAILABLE", True), \
+                     mock.patch("generate_textures.QT_GUI_AVAILABLE", True), \
+                     mock.patch("generate_textures._launch_qt_migration_gui") as qt_launch, \
+                     mock.patch("generate_textures._launch_tk_gui") as tk_launch:
+                    self.assertEqual(main(), 0)
+                self.assertEqual(qt_launch.call_count, int(backend == "qt"))
+                self.assertEqual(tk_launch.call_count, int(backend == "tk"))
+
+    def test_main_normal_and_source_auto_backend_still_prefer_tk(self) -> None:
+        for frozen, executable in (
+            (True, "/packaged/generate_textures.exe"),
+            (False, "/source/generate_textures_qt.exe"),
+        ):
+            with self.subTest(frozen=frozen, executable=executable):
+                args = SimpleNamespace(gui=False, input_file=None, gui_backend="auto", pbr_material=False, pbr_texture_sets=False)
+                with mock.patch("generate_textures.parse_args", return_value=args), \
+                     mock.patch.object(sys, "frozen", frozen, create=True), \
+                     mock.patch.object(sys, "executable", executable), \
+                     mock.patch("generate_textures.GUI_AVAILABLE", True), \
+                     mock.patch("generate_textures.QT_GUI_AVAILABLE", True), \
+                     mock.patch("generate_textures._launch_qt_migration_gui") as qt_launch, \
+                     mock.patch("generate_textures._launch_tk_gui") as tk_launch:
+                    self.assertEqual(main(), 0)
+                tk_launch.assert_called_once()
+                qt_launch.assert_not_called()
 
     def test_main_pbr_material_forces_complex_material_cm_output(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3481,6 +9996,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 environment_mask=False,
                 complex_material=False,
                 pbr_material=True,
+                pbr_texture_sets=False,
                 render_profile="auto",
             )
             with mock.patch("generate_textures.parse_args", return_value=args):
@@ -3531,6 +10047,7 @@ class GenerateTexturesTests(unittest.TestCase):
                 rmaos=False,
                 complex_material=False,
                 pbr_material=False,
+                pbr_texture_sets=False,
                 render_profile="enb",
             )
             with mock.patch("generate_textures.parse_args", return_value=args):
@@ -3542,6 +10059,117 @@ class GenerateTexturesTests(unittest.TestCase):
         self.assertEqual(str(run_with_options_mock.call_args.kwargs["complex_format"]), "msn")
         self.assertEqual(str(run_with_options_mock.call_args.kwargs["env_mask_mode"]), "complex")
         self.assertEqual(str(run_with_options_mock.call_args.kwargs["parallax_mode"]), "occlusion")
+
+    def test_main_auto_render_profile_uses_mod_manager_context_from_input_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            instance_root = temp_path / "MO2"
+            input_file = instance_root / "overwrite" / "textures" / "brick.dds"
+            (instance_root / "mods").mkdir(parents=True)
+            profile_dir = instance_root / "profiles" / "Default"
+            profile_dir.mkdir(parents=True)
+            input_file.parent.mkdir(parents=True, exist_ok=True)
+            input_file.write_bytes(b"dds")
+            (profile_dir / "modlist.txt").write_text("+Community Shaders\n", encoding="utf-8")
+            (profile_dir / "plugins.txt").write_text("*Skyrim.esm\n", encoding="utf-8")
+            (profile_dir / "loadorder.txt").write_text("Skyrim.esm\n", encoding="utf-8")
+            args = mock.Mock(
+                gui=False,
+                input_file=input_file,
+                output_dir=None,
+                diffuse_name=None,
+                normal_name=None,
+                parallax_name=None,
+                glow_name=None,
+                environment_mask_name=None,
+                rmaos_name=None,
+                complex_name=None,
+                normal_strength=None,
+                parallax_strength=None,
+                glow_threshold=None,
+                environment_mask_strength=None,
+                rmaos_strength=None,
+                complex_strength=None,
+                specular_strength=None,
+                complex_format="msn",
+                environment_mask_mode="standard",
+                emboss_mode=False,
+                relief_mode=False,
+                parallax_mode="standard",
+                no_diffuse=False,
+                no_normal=False,
+                no_parallax=False,
+                glow_map=False,
+                environment_mask=False,
+                rmaos=False,
+                complex_material=False,
+                pbr_material=False,
+                pbr_texture_sets=False,
+                render_profile="auto",
+            )
+            stderr = io.StringIO()
+            with mock.patch("generate_textures.parse_args", return_value=args), \
+                 mock.patch("generate_textures.run_with_options", return_value={}) as run_with_options_mock, \
+                 mock.patch("sys.stderr", stderr):
+                exit_code = main()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Detected Mod (Hint): detected Mod Organizer 2 context", stderr.getvalue())
+        self.assertIn("advisory only", stderr.getvalue())
+        run_with_options_mock.assert_called_once()
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["render_profile"]), "auto")
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["complex_format"]), "cm")
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["env_mask_mode"]), "standard")
+
+    def test_main_auto_render_profile_keeps_vanilla_defaults_without_mod_manager_context(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_file = temp_path / "brick.dds"
+            input_file.write_bytes(b"dds")
+            args = mock.Mock(
+                gui=False,
+                input_file=input_file,
+                output_dir=None,
+                diffuse_name=None,
+                normal_name=None,
+                parallax_name=None,
+                glow_name=None,
+                environment_mask_name=None,
+                rmaos_name=None,
+                complex_name=None,
+                normal_strength=None,
+                parallax_strength=None,
+                glow_threshold=None,
+                environment_mask_strength=None,
+                rmaos_strength=None,
+                complex_strength=None,
+                specular_strength=None,
+                complex_format="msn",
+                environment_mask_mode="standard",
+                emboss_mode=False,
+                relief_mode=False,
+                parallax_mode="standard",
+                no_diffuse=False,
+                no_normal=False,
+                no_parallax=False,
+                glow_map=False,
+                environment_mask=False,
+                rmaos=False,
+                complex_material=False,
+                pbr_material=False,
+                pbr_texture_sets=False,
+                render_profile="auto",
+            )
+            stderr = io.StringIO()
+            with mock.patch("generate_textures.parse_args", return_value=args), \
+                 mock.patch("generate_textures.detect_mod_manager_context", return_value=ModManagerContext()), \
+                 mock.patch("generate_textures.run_with_options", return_value={}) as run_with_options_mock, \
+                 mock.patch("sys.stderr", stderr):
+                exit_code = main()
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stderr.getvalue(), "")
+        run_with_options_mock.assert_called_once()
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["render_profile"]), "auto")
+        self.assertEqual(str(run_with_options_mock.call_args.kwargs["complex_format"]), "msn")
 
     def test_run_cli_handles_missing_gui_dependencies_without_traceback(self) -> None:
         with mock.patch("generate_textures.main", side_effect=RuntimeError("GUI dependencies are unavailable in this environment.")):
@@ -3561,7 +10189,7 @@ class GenerateTexturesTests(unittest.TestCase):
         class FakeTclError(Exception):
             pass
 
-        args = mock.Mock(gui=True, input_file=None)
+        args = mock.Mock(gui=True, input_file=None, pbr_texture_sets=False)
         with mock.patch("generate_textures.parse_args", return_value=args):
             with mock.patch("generate_textures.GUI_AVAILABLE", True):
                 with mock.patch("generate_textures.tk", mock.Mock(TclError=FakeTclError)):
@@ -3570,6 +10198,357 @@ class GenerateTexturesTests(unittest.TestCase):
                             exit_code = _run_cli()
         self.assertEqual(exit_code, 1)
         self.assertIn("no desktop display", "".join(call.args[0] for call in mock_stderr.write.call_args_list))
+
+    def _build_fake_gui_for_queue_smoke(
+        self,
+        *,
+        show_batch_preview: bool = False,
+        is_processing: bool = True,
+    ) -> object:
+        class _Var:
+            def __init__(self, value=None) -> None:
+                self._value = value
+
+            def get(self):
+                return self._value
+
+            def set(self, value) -> None:
+                self._value = value
+
+        class _Root:
+            def __init__(self) -> None:
+                self.after_calls: list[tuple[int, object]] = []
+
+            def after(self, delay: int, callback) -> None:
+                self.after_calls.append((delay, callback))
+
+        fake_gui = mock.Mock(spec=TextureGeneratorGUI)
+        fake_gui.is_processing = is_processing
+        fake_gui.processing_queue = queue.Queue()
+        fake_gui.status_var = _Var("")
+        fake_gui.batch_perf_hint_var = _Var("")
+        fake_gui.show_batch_preview_var = _Var(show_batch_preview)
+        fake_gui.show_advanced_workflow_outputs_var = _Var(False)
+        fake_gui.batch_nif_patch_results = []
+        fake_gui.batch_failures = []
+        fake_gui.root = _Root()
+        fake_gui._set_preview_source_by_path = mock.Mock()
+        fake_gui._set_processing_state = mock.Mock(
+            side_effect=lambda active: setattr(fake_gui, "is_processing", bool(active))
+        )
+        fake_gui._refresh_preview = mock.Mock()
+        fake_gui._tr = lambda text: text
+        return fake_gui
+
+    def test_gui_processing_queue_smoke_done_event_reports_outputs_failures_and_autopatch(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False)
+        fake_gui.batch_nif_patch_results = [("stone.dds", 2, 1)]
+        fake_gui.batch_failures = [("broken.dds", "decode error")]
+        fake_gui.processing_queue.put((
+            "done",
+            (
+                {Path("stone.dds"): {"diffuse": Path("stone_out.dds")}},
+                {
+                    "folder_summary_lines": [
+                        "Folder summary: 1 source texture(s) across 1 top-level folder(s).",
+                        "Top folders: (root) (1).",
+                    ],
+                    "elapsed_seconds": 1.2,
+                    "avg_file_seconds": 1.2,
+                    "max_file_seconds": 1.2,
+                    "high_res_4k_count": 0,
+                    "high_res_8k_count": 0,
+                    "max_source_dimension": 0,
+                    "max_source_megapixels": 0.0,
+                    "resumed_completed_count": 0,
+                    "checkpoint_path": "",
+                },
+            ),
+        ))
+
+        with mock.patch("generate_textures.messagebox.showinfo") as showinfo:
+            TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        self.assertFalse(fake_gui.is_processing)
+        self.assertIn("processed 1/1, generated 1", fake_gui.status_var.get())
+        self.assertIn("failed 1", fake_gui.status_var.get())
+        showinfo.assert_called_once()
+        shown_message = showinfo.call_args.args[1]
+        self.assertIn("Automatic NIF patching: 2 succeeded, 1 failed.", shown_message)
+        self.assertIn("broken.dds: decode error", shown_message)
+        self.assertIn("Folder summary: 1 source texture(s) across 1 top-level folder(s).", shown_message)
+        fake_gui._refresh_preview.assert_called_once()
+
+    def test_batch_source_helpers_report_relative_labels_and_folder_summary(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            architecture = root / "architecture"
+            clutter = root / "clutter"
+            architecture.mkdir()
+            clutter.mkdir()
+            source_paths = [
+                architecture / "stone.dds",
+                architecture / "trim.dds",
+                clutter / "barrel.dds",
+                root / "root_file.dds",
+            ]
+            for path in source_paths:
+                path.write_text("x", encoding="utf-8")
+
+            self.assertEqual(
+                Path(_batch_source_display_label(root, source_paths[0])),
+                Path("architecture") / "stone.dds",
+            )
+
+            summary_lines = _summarize_batch_source_folders(source_paths, root)
+            self.assertEqual(
+                summary_lines[0],
+                "Folder summary: 4 source texture(s) across 3 top-level folder(s).",
+            )
+            self.assertIn("architecture (2)", summary_lines[1])
+            self.assertIn("clutter (1)", summary_lines[1])
+            self.assertIn("(root) (1)", summary_lines[1])
+
+    def test_gui_processing_queue_progress_and_failure_labels_prefer_relative_paths(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False)
+        fake_gui.processing_queue.put(
+            ("file_error", (2, 3, "broken.dds", "decode error", "textures/architecture/broken.dds"))
+        )
+
+        TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        self.assertEqual(
+            fake_gui.batch_failures,
+            [("textures/architecture/broken.dds", "decode error")],
+        )
+        self.assertIn("Skipped failed file 2/3: textures/architecture/broken.dds", fake_gui.status_var.get())
+        self.assertEqual(fake_gui.root.after_calls[0][0], 100)
+
+    def test_gui_processing_queue_smoke_progress_event_updates_status_and_preview(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=True)
+        current = Path("textures/stone.dds")
+        fake_gui.processing_queue.put(("progress", (1, 3, current, 0.5, 1.0, "textures/stone.dds")))
+
+        TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        self.assertIn("Processing 1/3: textures/stone.dds", fake_gui.status_var.get())
+        fake_gui._set_preview_source_by_path.assert_called_once_with(current)
+        self.assertEqual(fake_gui.root.after_calls[0][0], 100)
+
+    def test_gui_processing_queue_reports_recovery_after_high_backlog_drains(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False, is_processing=True)
+        fake_gui._queue_high_backlog_seen = True
+        fake_gui.processing_queue.put(("progress", (10, 100, Path("test.dds"))))
+
+        TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        self.assertIn("Queue recovered to normal", fake_gui.batch_perf_hint_var.get())
+        self.assertFalse(fake_gui._queue_high_backlog_seen)
+        self.assertEqual(fake_gui.root.after_calls[0][0], 100)
+
+    def test_gui_processing_queue_smoke_nif_patch_event_updates_status_and_counts(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False)
+        fake_gui.processing_queue.put(("nif_patch", ("stone.dds", 3, 1)))
+
+        TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        self.assertEqual(fake_gui.batch_nif_patch_results, [("stone.dds", 3, 1)])
+        self.assertIn("Patched related NIFs for stone.dds: 3 succeeded, 1 failed.", fake_gui.status_var.get())
+        self.assertEqual(fake_gui.root.after_calls[0][0], 100)
+
+    def test_gui_processing_queue_smoke_file_error_event_tracks_failure(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False)
+        fake_gui.processing_queue.put(("file_error", (2, 4, "broken.dds", "decode error")))
+
+        TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        self.assertEqual(fake_gui.batch_failures, [("broken.dds", "decode error")])
+        self.assertIn("Skipped failed file 2/4: broken.dds", fake_gui.status_var.get())
+        self.assertEqual(fake_gui.root.after_calls[0][0], 100)
+
+    def test_gui_processing_queue_smoke_cancelled_event_stops_polling(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False, is_processing=True)
+        fake_gui.processing_queue.put(("cancelled", {Path("stone.dds"): {"diffuse": Path("stone_out.dds")}}))
+
+        with mock.patch("generate_textures.messagebox.showinfo") as showinfo:
+            TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        fake_gui._set_processing_state.assert_called_once_with(False)
+        showinfo.assert_called_once()
+        self.assertFalse(fake_gui.root.after_calls)
+
+    def test_gui_processing_queue_smoke_error_event_stops_polling_and_shows_error(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False, is_processing=True)
+        fake_gui.processing_queue.put(("error", "boom"))
+
+        with mock.patch("generate_textures.messagebox.showerror") as showerror:
+            TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        fake_gui._set_processing_state.assert_called_once_with(False)
+        showerror.assert_called_once()
+        self.assertFalse(fake_gui.root.after_calls)
+
+    def test_gui_processing_queue_smoke_terminal_done_event_short_circuits_remaining_events(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False, is_processing=True)
+        fake_gui.processing_queue.put(("done", {Path("stone.dds"): {"diffuse": Path("stone_out.dds")}}))
+        fake_gui.processing_queue.put(("error", "should-not-run"))
+
+        with mock.patch("generate_textures.messagebox.showinfo") as showinfo:
+            with mock.patch("generate_textures.messagebox.showerror") as showerror:
+                TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        showinfo.assert_called_once()
+        showerror.assert_not_called()
+        self.assertEqual(fake_gui.processing_queue.qsize(), 1)
+        self.assertFalse(fake_gui.root.after_calls)
+
+    def test_gui_processing_queue_smoke_terminal_error_event_short_circuits_remaining_events(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_poll_processing_queue"):
+            self.skipTest("GUI queue polling is unavailable in this environment.")
+        fake_gui = self._build_fake_gui_for_queue_smoke(show_batch_preview=False, is_processing=True)
+        fake_gui.processing_queue.put(("error", "boom"))
+        fake_gui.processing_queue.put(("progress", (1, 1, Path("textures/stone.dds"))))
+
+        with mock.patch("generate_textures.messagebox.showerror") as showerror:
+            TextureGeneratorGUI._poll_processing_queue(fake_gui)
+
+        showerror.assert_called_once()
+        fake_gui._set_preview_source_by_path.assert_not_called()
+        self.assertEqual(fake_gui.processing_queue.qsize(), 1)
+        self.assertFalse(fake_gui.root.after_calls)
+
+    def test_revert_last_generation_removes_created_and_restores_backups(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_revert_last_generation"):
+            self.skipTest("GUI revert workflow is unavailable in this environment.")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            created = root / "created.dds"
+            created.write_text("new", encoding="utf-8")
+            original = root / "original.dds"
+            original.write_text("modified", encoding="utf-8")
+            backup_dir = root / "backup"
+            backup_dir.mkdir()
+            backup_copy = backup_dir / "original.dds"
+            backup_copy.write_text("original", encoding="utf-8")
+
+            class _Button:
+                def __init__(self) -> None:
+                    self.configure = mock.Mock()
+
+            class _FakeGui:
+                def __init__(self) -> None:
+                    self.is_processing = False
+                    self.revert_button = _Button()
+                    self.last_generation_backup_dir = backup_dir
+                    self.last_generation_backups = {original: backup_copy}
+                    self.last_generation_created_files = {created}
+                    self.status_var = mock.Mock()
+
+                def _has_revert_snapshot(self) -> bool:
+                    return bool(self.last_generation_backups or self.last_generation_created_files)
+
+                def _discard_last_generation_snapshot(self) -> None:
+                    TextureGeneratorGUI._discard_last_generation_snapshot(self)
+
+                def _set_processing_state(self, _processing: bool) -> None:
+                    return None
+
+                def _refresh_preview(self) -> None:
+                    return None
+
+            fake_gui = _FakeGui()
+            with mock.patch("generate_textures.messagebox.askyesno", return_value=True):
+                with mock.patch("generate_textures.messagebox.showinfo") as showinfo:
+                    with mock.patch("generate_textures.messagebox.showerror") as showerror:
+                        TextureGeneratorGUI._revert_last_generation(fake_gui)
+            self.assertFalse(created.exists())
+            self.assertEqual(original.read_text(encoding="utf-8"), "original")
+            self.assertFalse(fake_gui.last_generation_backups)
+            self.assertFalse(fake_gui.last_generation_created_files)
+            self.assertIsNone(fake_gui.last_generation_backup_dir)
+            showinfo.assert_called_once()
+            showerror.assert_not_called()
+
+    def test_revert_last_generation_reports_partial_failures_but_restores_remaining_files(self) -> None:
+        if not hasattr(TextureGeneratorGUI, "_revert_last_generation"):
+            self.skipTest("GUI revert workflow is unavailable in this environment.")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            keep_created = root / "created_keep.dds"
+            fail_created = root / "created_fail.dds"
+            keep_created.write_text("new-a", encoding="utf-8")
+            fail_created.write_text("new-b", encoding="utf-8")
+            original = root / "original.dds"
+            original.write_text("modified", encoding="utf-8")
+            backup_dir = root / "backup"
+            backup_dir.mkdir()
+            backup_copy = backup_dir / "original.dds"
+            backup_copy.write_text("original", encoding="utf-8")
+
+            class _Button:
+                def __init__(self) -> None:
+                    self.configure = mock.Mock()
+
+            class _FakeGui:
+                def __init__(self) -> None:
+                    self.is_processing = False
+                    self.revert_button = _Button()
+                    self.last_generation_backup_dir = backup_dir
+                    self.last_generation_backups = {original: backup_copy}
+                    self.last_generation_created_files = {keep_created, fail_created}
+                    self.status_var = mock.Mock()
+
+                def _has_revert_snapshot(self) -> bool:
+                    return bool(self.last_generation_backups or self.last_generation_created_files)
+
+                def _discard_last_generation_snapshot(self) -> None:
+                    TextureGeneratorGUI._discard_last_generation_snapshot(self)
+
+                def _set_processing_state(self, _processing: bool) -> None:
+                    return None
+
+                def _refresh_preview(self) -> None:
+                    return None
+
+            fake_gui = _FakeGui()
+            original_unlink = Path.unlink
+
+            def _unlink_with_failure(path: Path, *args, **kwargs):
+                if path == fail_created:
+                    raise PermissionError("locked")
+                return original_unlink(path, *args, **kwargs)
+
+            with mock.patch("pathlib.Path.unlink", autospec=True, side_effect=_unlink_with_failure):
+                with mock.patch("generate_textures.messagebox.askyesno", return_value=True):
+                    with mock.patch("generate_textures.messagebox.showinfo") as showinfo:
+                        with mock.patch("generate_textures.messagebox.showerror") as showerror:
+                            TextureGeneratorGUI._revert_last_generation(fake_gui)
+            self.assertFalse(keep_created.exists())
+            self.assertTrue(fail_created.exists())
+            self.assertEqual(original.read_text(encoding="utf-8"), "original")
+            self.assertFalse(fake_gui.last_generation_backups)
+            self.assertFalse(fake_gui.last_generation_created_files)
+            self.assertIsNone(fake_gui.last_generation_backup_dir)
+            showinfo.assert_not_called()
+            showerror.assert_called_once()
 
     def test_generate_normal_raises_clear_error_for_buffer_size_mismatch(self) -> None:
         with mock.patch("generate_textures.np.frombuffer", return_value=np.zeros(1, dtype=np.uint8)):
@@ -3988,6 +10967,115 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(save_mock.call_args.kwargs["preferred_pixel_formats"], ("BC7", "DXT5", "DXT3"))
             self.assertEqual(save_mock.call_args.args[1].name, "brick_rmaos.dds")
 
+    def test_run_with_options_renderer_output_matrix_has_exact_keys_and_paths(self) -> None:
+        cases = (
+            (
+                "vanilla-core",
+                {
+                    "include_diffuse": True,
+                    "include_normal": True,
+                    "include_parallax": True,
+                    "render_profile": "vanilla",
+                },
+                {
+                    "diffuse": "brick.dds",
+                    "normal": "brick_n.dds",
+                    "parallax": "brick_p.dds",
+                },
+            ),
+            (
+                "enb-complex",
+                {
+                    "include_diffuse": False,
+                    "include_normal": False,
+                    "include_parallax": False,
+                    "include_environment_mask": True,
+                    "include_complex": True,
+                    "env_mask_mode": "complex",
+                    "complex_format": "msn",
+                    "render_profile": "enb",
+                },
+                {
+                    "environment_mask": "brick_m.dds",
+                    "complex_material": "brick_msn.dds",
+                },
+            ),
+            (
+                "truepbr-plus-core-and-ao",
+                {
+                    "include_diffuse": True,
+                    "include_normal": True,
+                    "include_parallax": False,
+                    "include_glow": True,
+                    "include_rmaos": True,
+                    "include_ao": True,
+                    "render_profile": "truepbr",
+                },
+                {
+                    "diffuse": "brick.dds",
+                    "normal": "brick_n.dds",
+                    "glow": "brick_g.dds",
+                    "rmaos": "brick_rmaos.dds",
+                    "ao": "brick_ao.dds",
+                    "rmaos_json": "brick_rmaos.json",
+                },
+            ),
+            (
+                "optional-feature-maps",
+                {
+                    "include_diffuse": False,
+                    "include_normal": False,
+                    "include_parallax": False,
+                    "include_wetness_mask": True,
+                    "include_snow_mask": True,
+                    "include_ao": True,
+                    "include_roughness": True,
+                },
+                {
+                    "wetness_mask": "brick_wt.dds",
+                    "snow_mask": "brick_sm.dds",
+                    "ao": "brick_ao.dds",
+                    "roughness": "brick_rough.dds",
+                },
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "brick.png"
+            for source_size in ((1, 1), (4, 4), (16, 8), (17, 9), (32, 32)):
+                Image.new("RGB", source_size, color=(60, 100, 140)).save(input_path)
+                for case_name, options, expected_names in cases:
+                    saved_image_sizes: dict[str, tuple[int, int]] = {}
+
+                    def record_saved_image(image: Image.Image, path: Path, **_kwargs: object) -> Path:
+                        saved_image_sizes[path.name] = image.size
+                        return path
+
+                    with self.subTest(case=case_name, size=source_size), mock.patch(
+                        "generate_textures._save_with_dds_fallback",
+                        side_effect=record_saved_image,
+                    ):
+                        outputs = run_with_options(
+                            input_file=input_path,
+                            output_dir=temp_path / f"{case_name}-{source_size[0]}x{source_size[1]}",
+                            **options,
+                        )
+                    label = f"{case_name} at {source_size}"
+                    self.assertEqual(set(outputs), set(expected_names), label)
+                    self.assertEqual(
+                        {key: Path(path).name for key, path in outputs.items()},
+                        expected_names,
+                        label,
+                    )
+                    expected_image_names = {
+                        name for name in expected_names.values() if name.endswith(".dds")
+                    }
+                    self.assertEqual(set(saved_image_sizes), expected_image_names, label)
+                    self.assertTrue(
+                        all(size == source_size for size in saved_image_sizes.values()),
+                        f"{label}: {saved_image_sizes}",
+                    )
+
     def test_run_with_options_rejects_env_mask_with_rmaos_combination(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
@@ -4041,6 +11129,68 @@ class GenerateTexturesTests(unittest.TestCase):
             self.assertEqual(payload[0]["subsurface_color"], [1.0, 1.0, 1.0])
             self.assertAlmostEqual(float(payload[0]["subsurface_opacity"]), 1.0)
             self.assertAlmostEqual(float(payload[0]["specular_level"]), 0.04)
+
+    def test_run_with_options_applies_explicit_truepbr_sidecar_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            input_path = temp_path / "skin.png"
+            _sample_image().save(input_path)
+            outputs = run_with_options(
+                input_file=input_path,
+                output_dir=temp_path / "out",
+                include_diffuse=False,
+                include_normal=False,
+                include_parallax=False,
+                include_glow=False,
+                include_environment_mask=False,
+                include_rmaos=True,
+                include_complex=False,
+                truepbr_material_overrides={
+                    "parallax": True,
+                    "displacement_scale": 0.35,
+                    "specular_level": 0.08,
+                    "roughness_scale": 0.7,
+                },
+            )
+            payload = json.loads(outputs["rmaos_json"].read_text(encoding="utf-8"))[0]
+            self.assertTrue(payload["parallax"])
+            self.assertAlmostEqual(payload["displacement_scale"], 0.35)
+            self.assertAlmostEqual(payload["specular_level"], 0.08)
+            self.assertAlmostEqual(payload["roughness_scale"], 0.7)
+
+    def test_run_with_options_routes_optional_map_strengths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            input_path = Path(temp_dir) / "stone.png"
+            _sample_image().save(input_path)
+            generated_map = Image.new("L", (8, 8), color=127)
+            with (
+                mock.patch("generate_textures.generate_wetness_mask", return_value=generated_map) as wetness,
+                mock.patch("generate_textures.generate_snow_mask", return_value=generated_map) as snow,
+                mock.patch("generate_textures.generate_ambient_occlusion", return_value=generated_map) as ao,
+                mock.patch("generate_textures.generate_roughness", return_value=generated_map) as roughness,
+                mock.patch(
+                    "generate_textures._save_with_dds_fallback",
+                    side_effect=lambda _image, path, **_kwargs: path,
+                ),
+            ):
+                run_with_options(
+                    input_file=input_path,
+                    include_diffuse=False,
+                    include_normal=False,
+                    include_parallax=False,
+                    include_wetness_mask=True,
+                    include_snow_mask=True,
+                    include_ao=True,
+                    include_roughness=True,
+                    wetness_mask_strength=1.3,
+                    snow_mask_strength=0.8,
+                    ao_strength=2.2,
+                    roughness_strength=1.4,
+                )
+            self.assertEqual(wetness.call_args.kwargs["strength"], 1.3)
+            self.assertEqual(snow.call_args.kwargs["strength"], 0.8)
+            self.assertEqual(ao.call_args.kwargs["strength"], 2.2)
+            self.assertEqual(roughness.call_args.kwargs["strength"], 1.4)
 
     def test_run_with_options_rmaos_writes_sidecar_next_to_textures_root(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -4399,7 +11549,7 @@ class ParallaxOcclusionTests(unittest.TestCase):
     def test_generate_parallax_occlusion_strength_slider_has_stronger_min_max_separation(self) -> None:
         source = _detailed_bright_image()
         low = generate_parallax_occlusion(source, strength=0.2)
-        high = generate_parallax_occlusion(source, strength=6.0)
+        high = generate_parallax_occlusion(source, strength=10.0)
         low_range = low.getextrema()[1] - low.getextrema()[0]
         high_range = high.getextrema()[1] - high.getextrema()[0]
         self.assertGreater(high_range, low_range + 18)
@@ -4407,7 +11557,7 @@ class ParallaxOcclusionTests(unittest.TestCase):
     def test_map_parallax_strength_to_nif_scale_boosts_in_game_depth(self) -> None:
         self.assertAlmostEqual(float(_map_parallax_strength_to_nif_scale(0.1) or 0.0), 0.34, places=2)
         self.assertGreater(float(_map_parallax_strength_to_nif_scale(1.35) or 0.0), 2.0)
-        self.assertAlmostEqual(float(_map_parallax_strength_to_nif_scale(6.0) or 0.0), 10.0, places=3)
+        self.assertAlmostEqual(float(_map_parallax_strength_to_nif_scale(10.0) or 0.0), 10.0, places=3)
 
     def test_parallax_occlusion_flat_input_returns_mid_gray(self) -> None:
         flat = Image.new("RGB", (16, 16), color=(128, 128, 128))
@@ -4934,6 +12084,38 @@ class ParallaxOcclusionTests(unittest.TestCase):
         for warning_id in env_mask_specific:
             self.assertNotIn(warning_id, ids, f"False-positive: {warning_id} fired with RMAOS only")
 
+    def test_get_generation_warnings_pbr_texture_sets_non_terrain_warns(self) -> None:
+        warnings = get_generation_warnings(
+            "stone",
+            include_normal=True,
+            include_pbr_texture_sets=True,
+            include_environment_mask=False,
+            include_complex=False,
+            include_glow=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            render_profile="truepbr",
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("truepbr_landscape_non_terrain", ids)
+
+    def test_get_generation_warnings_pbr_texture_sets_profile_mismatch_warns(self) -> None:
+        warnings = get_generation_warnings(
+            "terrain",
+            include_normal=True,
+            include_pbr_texture_sets=True,
+            include_environment_mask=False,
+            include_complex=False,
+            include_glow=False,
+            env_mask_mode="standard",
+            env_mask_strength=1.0,
+            include_parallax=False,
+            render_profile="enb",
+        )
+        ids = [w[0] for w in warnings]
+        self.assertIn("truepbr_landscape_family_mismatch", ids)
+
     def test_msn_with_normal_output_triggers_warning(self) -> None:
         warnings = get_generation_warnings(
             "stone",
@@ -4987,7 +12169,7 @@ class ParallaxOcclusionTests(unittest.TestCase):
                 temp_path, include_complex=True, complex_format="cm"
             )
             ids = [w[0] for w in warnings]
-            self.assertIn("output_folder_has_msn_files", ids)
+            self.assertIn("output_folder_has_enb_files", ids)
 
     def test_get_output_folder_format_warnings_cm_vs_msn_conflict(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -4997,7 +12179,7 @@ class ParallaxOcclusionTests(unittest.TestCase):
                 temp_path, include_complex=True, complex_format="msn"
             )
             ids = [w[0] for w in warnings]
-            self.assertIn("output_folder_has_cm_files", ids)
+            self.assertIn("output_folder_has_community_shaders_files", ids)
 
     def test_get_output_folder_format_warnings_c_vs_msn_conflict(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -5007,7 +12189,7 @@ class ParallaxOcclusionTests(unittest.TestCase):
                 temp_path, include_complex=True, complex_format="msn"
             )
             ids = [w[0] for w in warnings]
-            self.assertIn("output_folder_has_cm_files", ids)
+            self.assertIn("output_folder_has_community_shaders_files", ids)
 
     def test_get_output_folder_format_warnings_uppercase_C_vs_msn_conflict(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -5017,7 +12199,7 @@ class ParallaxOcclusionTests(unittest.TestCase):
                 temp_path, include_complex=True, complex_format="msn"
             )
             ids = [w[0] for w in warnings]
-            self.assertIn("output_folder_has_cm_files", ids)
+            self.assertIn("output_folder_has_community_shaders_files", ids)
 
     def test_get_output_folder_format_warnings_matching_format_no_warning(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -5033,9 +12215,57 @@ class ParallaxOcclusionTests(unittest.TestCase):
             temp_path = Path(temp_dir)
             (temp_path / "stone_msn.dds").write_bytes(b"fake")
             warnings = get_output_folder_format_warnings(
-                temp_path, include_complex=False, complex_format="cm"
+                temp_path, include_complex=False, complex_format="cm", render_profile="enb"
             )
             self.assertEqual(warnings, [])
+
+    def test_get_output_folder_format_warnings_truepbr_files_conflict_with_enb_family(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            (temp_path / "stone_rmaos.dds").write_bytes(b"fake")
+            warnings = get_output_folder_format_warnings(
+                temp_path, include_complex=False, complex_format="msn", render_profile="enb"
+            )
+            ids = [w[0] for w in warnings]
+            self.assertIn("output_folder_has_truepbr_files", ids)
+
+    def test_get_output_folder_format_warnings_cs_aux_files_conflict_with_truepbr_family(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            (temp_path / "stone_wt.dds").write_bytes(b"fake")
+            warnings = get_output_folder_format_warnings(
+                temp_path, include_complex=False, complex_format="msn", render_profile="truepbr"
+            )
+            ids = [w[0] for w in warnings]
+            self.assertIn("output_folder_has_community_shaders_files", ids)
+
+    def test_get_output_folder_format_warnings_complex_env_mask_mode_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            Image.new("RGBA", (4, 4), color=(10, 20, 30, 255)).save(temp_path / "stone_m.png")
+            warnings = get_output_folder_format_warnings(
+                temp_path,
+                include_complex=False,
+                complex_format="msn",
+                include_environment_mask=True,
+                env_mask_mode="standard",
+            )
+            ids = [w[0] for w in warnings]
+            self.assertIn("output_folder_has_complex_env_mask_files", ids)
+
+    def test_get_output_folder_format_warnings_standard_env_mask_mode_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            Image.new("L", (4, 4), color=128).save(temp_path / "stone_m.png")
+            warnings = get_output_folder_format_warnings(
+                temp_path,
+                include_complex=False,
+                complex_format="msn",
+                include_environment_mask=True,
+                env_mask_mode="complex",
+            )
+            ids = [w[0] for w in warnings]
+            self.assertIn("output_folder_has_standard_env_mask_files", ids)
 
     def test_get_output_folder_format_warnings_empty_folder_no_warning(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -5424,18 +12654,66 @@ class RmaosJsonMaterialTypeTests(unittest.TestCase):
         import shutil
         shutil.rmtree(self._tmpdir, ignore_errors=True)
 
-    def _write_and_read(self, material_type: str) -> dict:
+    def _write_and_read(
+        self,
+        material_type: str,
+        material_overrides: dict[str, object] | None = None,
+    ) -> dict:
         import json
         from pathlib import Path
 
         rmaos_path = Path(self._tmpdir) / f"test_{material_type}_rmaos.dds"
-        write_rmaos_json_sidecar(rmaos_path, parallax_enabled=False, material_type=material_type)
+        write_rmaos_json_sidecar(
+            rmaos_path,
+            parallax_enabled=False,
+            material_type=material_type,
+            material_overrides=material_overrides,
+        )
         # The function writes into a PBRNifPatcher sub-directory.
         json_path = Path(self._tmpdir) / "PBRNifPatcher" / f"{rmaos_path.stem}.json"
         with open(json_path) as f:
             raw = json.load(f)
         # Payload is a list; return the first (and only) entry for convenience.
         return raw[0] if isinstance(raw, list) else raw
+
+    def test_sidecar_uses_separate_truepbr_material_parameters(self) -> None:
+        data = self._write_and_read("general")
+        schema_fields = {
+            "texture",
+            "emissive",
+            "emissive_scale",
+            "parallax",
+            "displacement_scale",
+            "specular_level",
+            "roughness_scale",
+            "smooth_angle",
+            "subsurface",
+            "subsurface_foliage",
+            "subsurface_color",
+            "subsurface_opacity",
+            "vertex_color_lum_mult",
+        }
+        self.assertTrue(schema_fields.issubset(data))
+        self.assertIsInstance(data["parallax"], bool)
+
+    def test_explicit_sidecar_overrides_replace_material_defaults(self) -> None:
+        data = self._write_and_read(
+            "skin",
+            {
+                "parallax": True,
+                "displacement_scale": 0.35,
+                "specular_level": 0.08,
+                "roughness_scale": 0.7,
+            },
+        )
+        self.assertTrue(data["parallax"])
+        self.assertAlmostEqual(data["displacement_scale"], 0.35)
+        self.assertAlmostEqual(data["specular_level"], 0.08)
+        self.assertAlmostEqual(data["roughness_scale"], 0.7)
+
+    def test_sidecar_rejects_invalid_material_override(self) -> None:
+        with self.assertRaisesRegex(ValueError, "between 0.0 and 1.0"):
+            self._write_and_read("general", {"specular_level": 2.0})
 
     def test_general_uses_defaults(self) -> None:
         data = self._write_and_read("general")
@@ -6024,6 +13302,1518 @@ class RmaosJsonParallaxVsDisplacementTests(unittest.TestCase):
         self.assertIn("texture", data)
         self.assertIsInstance(data["texture"], str)
         self.assertTrue(len(data["texture"]) > 0)
+
+
+class TestPackagedStartupErrorReporting(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name)
+        self.log = self.home / ".skyrim_texture_generator_startup_error.log"
+
+    def test_frozen_windowed_errors_append_original_traceback_and_guidance(self) -> None:
+        startup_error = RuntimeError("GUI could not start")
+        startup_error.__cause__ = ValueError("original Tcl initialization detail")
+        errors = [
+            startup_error, OSError("startup resource unavailable"),
+            RuntimeError("GUI dependencies are unavailable in this environment."),
+        ]
+        for error in errors:
+            with mock.patch("generate_textures.main", side_effect=error), \
+                 mock.patch.object(sys, "frozen", True, create=True), \
+                 mock.patch.object(sys, "stderr", None), \
+                 mock.patch("generate_textures.Path.home", return_value=self.home):
+                self.assertEqual(_run_cli(), 1)
+        content = self.log.read_text(encoding="utf-8")
+        self.assertEqual(content.count("] Error:"), 3)
+        self.assertIn("Traceback (most recent call last)", content)
+        self.assertIn("ValueError: original Tcl initialization detail", content)
+        self.assertIn("RuntimeError: GUI could not start", content)
+        self.assertIn("OSError: startup resource unavailable", content)
+        self.assertIn("Install tkinter/PySide6 support", content)
+
+    def test_frozen_console_errors_use_stderr_without_creating_log(self) -> None:
+        stderr = io.StringIO()
+        with mock.patch("generate_textures.main", side_effect=RuntimeError("console detail")), \
+             mock.patch.object(sys, "frozen", True, create=True), \
+             mock.patch.object(sys, "stderr", stderr), \
+             mock.patch("generate_textures.Path.home", return_value=self.home):
+            self.assertEqual(_run_cli(), 1)
+        self.assertIn("Error: console detail", stderr.getvalue())
+        self.assertFalse(self.log.exists())
+
+    def test_non_frozen_missing_stderr_does_not_create_packaged_log(self) -> None:
+        with mock.patch("generate_textures.main", side_effect=RuntimeError("source detail")), \
+             mock.patch.object(sys, "frozen", False, create=True), \
+             mock.patch.object(sys, "stderr", None), \
+             mock.patch.object(sys, "stdout", io.StringIO()), \
+             mock.patch("generate_textures.Path.home", return_value=self.home):
+            self.assertEqual(_run_cli(), 1)
+        self.assertFalse(self.log.exists())
+
+    def test_unwritable_packaged_error_log_does_not_mask_original_failure(self) -> None:
+        with mock.patch("generate_textures.main", side_effect=RuntimeError("startup failed")), \
+             mock.patch.object(sys, "frozen", True, create=True), \
+             mock.patch.object(sys, "stderr", None), \
+             mock.patch("generate_textures.Path.home", return_value=self.home), \
+             mock.patch.object(Path, "open", side_effect=PermissionError("Home is read-only")):
+            self.assertEqual(_run_cli(), 1)
+        self.assertFalse(self.log.exists())
+
+
+class TestQtNifEditorRunner(unittest.TestCase):
+    def setUp(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+        self.build_nif = _build_minimal_nif
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+
+    def make_nif(self, name="mesh.nif", **kwargs):
+        path = self.root / name
+        path.write_bytes(self.build_nif(**kwargs))
+        return path
+
+    def options(self, **kwargs):
+        from generate_textures import NifPatchOptions
+        return NifPatchOptions(**kwargs)
+
+    def run_operation(self, paths, options, **kwargs):
+        from generate_textures import run_nif_editor_operation
+        return run_nif_editor_operation(paths, options, **kwargs)
+
+    def test_qt_editor_retries_transient_patch_exception(self) -> None:
+        path = self.make_nif()
+        options = self.options()
+        patch_result = SimpleNamespace(
+            success=True, message="Patched.", warnings=(), errors=(), already_up_to_date=False,
+        )
+        with mock.patch(
+            "generate_textures.resolve_nif_editor_patch_options_for_target",
+            side_effect=[OSError("temporary file lock"), (options, ())],
+        ) as resolve_options, mock.patch(
+            "generate_textures.patch_nif",
+            return_value=patch_result,
+        ):
+            summary = self.run_operation([path], options, retries_per_file=1)
+
+        self.assertEqual(summary["success"], 1, summary)
+        self.assertEqual(resolve_options.call_count, 2)
+        self.assertIn("succeeded after retry 1/1", summary["results"][0]["message"])
+
+    def test_skyrim_dry_run_write_type3_slots_and_restore(self) -> None:
+        from nif_patcher import scan_nif
+        path = self.make_nif(texture_paths=["textures\\stone.dds", "textures\\stone_n.dds"] + [""] * 7)
+        original = path.read_bytes()
+        options = self.options(
+            enable_parallax=True, force_shader_type_3=True, parallax_scale=2.0,
+            parallax_texture_path="textures\\stone_p.dds", diffuse_texture_path="textures\\new.dds",
+            clear_normal_texture_path=True, backup=False, dry_run=True,
+        )
+        self.assertEqual(self.run_operation([path], options)["success"], 1)
+        self.assertEqual(path.read_bytes(), original)
+        self.assertFalse(path.with_suffix(".nif.bak").exists())
+        options.dry_run = False
+        summary = self.run_operation([path], options)
+        self.assertEqual(summary["failed"], 0, summary)
+        self.assertEqual(path.with_suffix(".nif.bak").read_bytes(), original)
+        info = scan_nif(path)[0]
+        self.assertEqual(info.shader_type, 3)
+        self.assertAlmostEqual(info.parallax_scale, 2.0)
+        self.assertEqual(info.texture_paths[0], "textures\\new.dds")
+        self.assertEqual(info.texture_paths.get(1, ""), "")
+        patched = path.read_bytes()
+        self.run_operation([path], self.options(dry_run=True), operation="restore")
+        self.assertEqual(path.read_bytes(), patched)
+        self.assertEqual(self.run_operation([path], self.options(), operation="restore")["success"], 1)
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_compare_operation_reports_matching_backup_without_writing(self) -> None:
+        path = self.make_nif()
+        original = path.read_bytes()
+        path.with_suffix(".nif.bak").write_bytes(original)
+
+        summary = self.run_operation([path], self.options(dry_run=False), operation="compare")
+
+        self.assertTrue(summary["dry_run"])
+        self.assertEqual(summary["operation"], "compare")
+        self.assertEqual(summary["success"], 1)
+        self.assertEqual(summary["warnings"], 0)
+        self.assertEqual(summary["results"][0]["status"], "OK")
+        self.assertIn("restore would be a no-op", summary["results"][0]["message"])
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_tristate_keep_enable_disable_and_all_texture_slots(self) -> None:
+        from nif_patcher import scan_nif
+        path = self.make_nif()
+        options = build_nif_patch_options_for_nif_editor(
+            enable_parallax=True, enable_pom=True, enable_env_mapping=True,
+            enable_glow_map=True, enable_pbr=True, parallax_scale=1.5, force_shader_type_3=True,
+            **{f"{slot}_texture_path": f"textures\\{slot}.dds" for slot in
+               ("diffuse", "normal", "parallax", "glow", "env_mask", "cubemap")},
+        )
+        summary = self.run_operation([path], options)
+        self.assertEqual(summary["success"], 1, summary)
+        info = scan_nif(path)[0]
+        self.assertTrue(info.has_parallax_flag and info.has_pom_flag and info.has_env_mapping_flag and info.has_glow_map_flag)
+        before = path.read_bytes()
+        self.run_operation([path], self.options())
+        self.assertEqual(path.read_bytes(), before)
+        options = self.options(**{f"disable_{flag}": True for flag in
+                                  ("parallax", "pom", "env_mapping", "glow_map", "pbr")},
+                               **{f"clear_{slot}_texture_path": True for slot in
+                                  ("diffuse", "normal", "parallax", "glow", "env_mask", "cubemap")})
+        summary = self.run_operation([path], options)
+        self.assertEqual(summary["success"], 1, summary)
+        info = scan_nif(path)[0]
+        self.assertFalse(info.has_parallax_flag or info.has_pom_flag or info.has_env_mapping_flag or info.has_glow_map_flag)
+        self.assertEqual(info.flags2 & (1 << 31), 0)
+        self.assertTrue(all(info.texture_paths.get(slot, "") == "" for slot in range(6)))
+
+    def test_fallout_opt_in_operation_gates_write_and_restore(self) -> None:
+        from tests.test_nif_patcher import _rewrite_user_version
+        from nif_patcher import scan_nif
+        path = self.make_nif(user_ver2=130, shader_layout="real", shader_type=3, parallax_scale=1.0)
+        _rewrite_user_version(path, 11)
+        original = path.read_bytes()
+        options = self.options(
+            target_game="fallout", enable_parallax=True, parallax_scale=2.0,
+            parallax_texture_path="textures\\fallout_p.dds",
+        )
+        for dry_run in (True, False):
+            options.dry_run = dry_run
+            self.assertEqual(self.run_operation([path], options)["failed"], 1)
+            self.assertEqual(path.read_bytes(), original)
+        options.experimental_fallout_write = True
+        self.assertEqual(self.run_operation([path], options)["failed"], 1)
+        self.assertEqual(path.read_bytes(), original)
+        options.fallout_allow_parallax_scale = True
+        options.dry_run = True
+        self.assertEqual(self.run_operation([path], options)["success"], 1)
+        self.assertEqual(path.read_bytes(), original)
+        options.dry_run = False
+        summary = self.run_operation([path], options)
+        self.assertEqual(summary["success"], 1, summary)
+        self.assertAlmostEqual(scan_nif(path)[0].parallax_scale, 2.0)
+        self.assertEqual(path.with_suffix(".nif.bak").read_bytes(), original)
+        options.force_shader_type_3 = True
+        self.assertEqual(self.run_operation([path], options)["failed"], 1)
+        self.run_operation([path], self.options(), operation="restore")
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_safe_remediation_dry_run_and_backup(self) -> None:
+        from nif_patcher import scan_nif
+        path = self.make_nif(texture_paths=["textures\\stone.dds", "", "textures\\stone_g.dds",
+                                                       "textures\\stone_p.dds", "", "textures\\stone_m.dds"] + [""] * 3)
+        original = path.read_bytes()
+        summary = self.run_operation([path], self.options(dry_run=True), operation="remediate")
+        self.assertEqual(summary["success"], 1, summary)
+        self.assertEqual(path.read_bytes(), original)
+        summary = self.run_operation([path], self.options(backup=False), operation="remediate")
+        self.assertEqual(summary["success"], 1, summary)
+        self.assertTrue(scan_nif(path)[0].has_parallax_flag)
+        self.assertEqual(path.with_suffix(".nif.bak").read_bytes(), original)
+
+    def test_backup_failures_refuse_actual_runner_writes_and_continue(self) -> None:
+        denied = self.make_nif("denied.nif")
+        directory = self.make_nif("directory.nif")
+        corrupt = self.make_nif("corrupt.nif")
+        good = self.make_nif("good.nif")
+        originals = {path: path.read_bytes() for path in (denied, directory, corrupt, good)}
+        directory.with_suffix(".nif.bak").mkdir()
+        corrupt.with_suffix(".nif.bak").write_bytes(b"invalid backup")
+        denied_backup = denied.with_suffix(".nif.bak")
+        real_open = Path.open
+
+        def failing_open(path, *args, **kwargs):
+            if path == denied_backup:
+                raise PermissionError("Backup cannot be created")
+            return real_open(path, *args, **kwargs)
+
+        options = self.options(diffuse_texture_path="textures\\edited.dds", backup=False, dry_run=True)
+        with mock.patch.object(Path, "open", failing_open):
+            dry_summary = self.run_operation([denied, directory, corrupt, good], options)
+            self.assertEqual(dry_summary["success"], 4, dry_summary)
+            self.assertTrue(all(path.read_bytes() == data for path, data in originals.items()))
+            options.dry_run = False
+            summary = self.run_operation([denied, directory, corrupt, good], options)
+        self.assertEqual((summary["failed"], summary["success"]), (3, 1), summary)
+        for path in (denied, directory, corrupt):
+            self.assertEqual(path.read_bytes(), originals[path])
+        self.assertTrue(directory.with_suffix(".nif.bak").is_dir())
+        self.assertEqual(corrupt.with_suffix(".nif.bak").read_bytes(), b"invalid backup")
+        self.assertFalse(denied_backup.exists())
+        self.assertNotEqual(good.read_bytes(), originals[good])
+        self.assertEqual(good.with_suffix(".nif.bak").read_bytes(), originals[good])
+
+    def test_per_file_failure_continue_and_between_file_cancellation(self) -> None:
+        bad = self.root / "broken.nif"
+        bad.write_bytes(b"broken")
+        good = self.make_nif("good.nif")
+        summary = self.run_operation([bad, good], self.options(enable_glow_map=True))
+        self.assertEqual((summary["failed"], summary["success"]), (1, 1), summary)
+        untouched = self.make_nif("untouched.nif")
+        original = untouched.read_bytes()
+        rows = []
+        summary = self.run_operation(
+            [good, untouched], self.options(enable_pbr=True),
+            is_cancelled=lambda: bool(rows), on_result=rows.append,
+        )
+        self.assertTrue(summary["cancelled"])
+        self.assertEqual(summary["processed"], 1)
+        self.assertEqual(untouched.read_bytes(), original)
+        self.assertEqual(self.run_operation([untouched], self.options(), operation="restore")["skipped"], 1)
+        with self.assertRaises(ValueError):
+            self.run_operation([], self.options(), operation="invalid")
+
+
+class TestQtNifEditorEventLoop(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        import generate_textures as gt
+        if not gt.QT_GUI_AVAILABLE:
+            raise unittest.SkipTest("Optional PySide6 unavailable")
+        cls.qt = gt
+        cls.app = gt.QtWidgets.QApplication.instance() or gt.QtWidgets.QApplication([])
+        gt._qt_application = cls.app
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.messages = []
+        old_handler = self.qt.QtCore.qInstallMessageHandler(
+            lambda kind, context, message: self.messages.append(message)
+        )
+        self.addCleanup(lambda: self.qt.QtCore.qInstallMessageHandler(old_handler))
+
+    def widget(self, window, name):
+        widget = window.findChild(self.qt.QtCore.QObject, name)
+        self.assertIsNotNone(widget, name)
+        return widget
+
+    def run_window(self, scenario, *, load_state=None, save_side_effect=None, extra_patches=()):
+        from contextlib import ExitStack, redirect_stderr
+        failures = []
+        windows = []
+        stderr = io.StringIO()
+        started = time.monotonic()
+        finished = False
+
+        def ready(window):
+            windows.append(window)
+            timer = self.qt.QtCore.QTimer(window)
+            timer.setInterval(5)
+
+            def tick():
+                nonlocal finished
+                try:
+                    if failures:
+                        finished = True
+                    if not finished:
+                        finished = bool(scenario(window))
+                    if time.monotonic() - started > 30:
+                        raise AssertionError(
+                            f"Qt scenario timed out: {window.property('generation_summary')}; "
+                            f"editor={window.property('nif_editor_summary')}"
+                        )
+                except BaseException as exc:
+                    failures.append(exc)
+                    finished = True
+                    window.close()
+                if finished and self.widget(window, "generate").isEnabled():
+                    timer.stop()
+                    window.close()
+                    self.app.quit()
+
+            timer.timeout.connect(tick)
+            timer.start()
+
+        def unexpected_dialog(*args):
+            failures.append(AssertionError(f"Unexpected Qt dialog: {args[1:]}"))
+            return self.qt.QtWidgets.QMessageBox.StandardButton.Ok
+
+        load_state_value = dict(self.qt._GUI_STATE_DEFAULTS) if load_state is None else load_state
+        with ExitStack() as stack, redirect_stderr(stderr):
+            stack.enter_context(mock.patch("generate_textures.load_gui_state", return_value=load_state_value))
+            stack.enter_context(mock.patch("generate_textures.save_gui_state", side_effect=save_side_effect))
+            stack.enter_context(mock.patch.object(self.qt.QtWidgets.QMessageBox, "critical", side_effect=unexpected_dialog))
+            stack.enter_context(mock.patch.object(self.qt.QtWidgets.QMessageBox, "warning", side_effect=unexpected_dialog))
+            for patcher in extra_patches:
+                stack.enter_context(patcher)
+            self.qt._launch_qt_migration_gui(on_ready=ready)
+        for window in windows:
+            window.deleteLater()
+        self.qt.QtCore.QCoreApplication.sendPostedEvents(None, self.qt.QtCore.QEvent.Type.DeferredDelete)
+        self.app.processEvents()
+        if failures:
+            raise failures[0]
+        self.assertEqual(stderr.getvalue(), "", "Qt callback errors must not be silently ignored")
+        bad_messages = [message for message in self.messages if any(
+            term in message.lower() for term in ("different thread", "cannot create children", "qthread: destroyed", "callback", "exception")
+        )]
+        self.assertEqual(bad_messages, [])
+
+    def test_actual_editor_dry_run_write_confirmation_scan_and_restore(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+        path = self.root / "mesh.nif"
+        original = _build_minimal_nif()
+        path.write_bytes(original)
+        path.with_suffix(".nif.bak").write_bytes(original)
+        state = {"step": 0}
+        confirmations = []
+
+        def confirm(*args):
+            confirmations.append(args[-1])
+            return self.qt.QtWidgets.QMessageBox.StandardButton.No if len(confirmations) == 1 else self.qt.QtWidgets.QMessageBox.StandardButton.Yes
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                self.assertTrue(w("nif_dry_run").isChecked())
+                self.assertFalse(w("nif_dry_run_diff").isChecked())
+                self.assertTrue(w("nif_scan_include_conflict_report").isChecked())
+                self.assertTrue(w("nif_scan_include_conflict_examples").isChecked())
+                banner = w("nif_editor_safety_banner").text().lower()
+                self.assertIn("dry-run is on", banner)
+                self.assertIn("compare against .bak first", banner)
+                self.assertIn("fallout writes stay off unless you opt in", banner)
+                self.assertIn("experimental fallout writes", w("nif_experimental").toolTip().lower())
+                self.assertIn("dry-run", w("nif_dry_run").toolTip().lower())
+                self.assertIn("experimental fallout parallax scale", w("nif_fallout_allow_parallax_scale").toolTip().lower())
+                self.assertIn("qt migration preview scope", self.widget(window, "qt_migration_status").toPlainText().lower())
+                self.assertIsNotNone(self.widget(window, "generation_log"))
+                self.assertIsNotNone(self.widget(window, "generation_log_copy"))
+                self.assertIsNotNone(self.widget(window, "generation_log_export"))
+                self.assertIsNotNone(self.widget(window, "generation_log_bundle_export"))
+                self.assertIn("dry-run first", w("nif_editor_patch").text().lower())
+                self.assertIn("read-only", w("nif_editor_compare").text().lower())
+                self.assertIn("restore", w("nif_editor_restore").text().lower())
+                for theme_mode, scale, size in (
+                    ("light", "0.9", (640, 480)),
+                    ("dark", "1.5", (1100, 760)),
+                    ("high_contrast", "1.15", (800, 600)),
+                ):
+                    w("theme_mode").setCurrentText(_THEME_MODE_LABELS[theme_mode])
+                    self.assertEqual(w("theme").isChecked(), theme_mode != "light")
+                    w("ui_scale").setCurrentText(scale)
+                    window.resize(*size)
+                    self.app.processEvents()
+                w("nif_scan_path").setText(str(path))
+                w("nif_texture_diffuse").setText("textures\\edited.dds")
+                w("nif_editor_compare").click()
+                self.assertFalse(w("generate").isEnabled())
+                self.assertFalse(w("nif_scan_start").isEnabled())
+                state["step"] = 0.5
+            elif step == 0.5 and w("generate").isEnabled():
+                self.assertEqual(window.property("nif_editor_summary")["operation"], "compare")
+                self.assertEqual(window.property("nif_editor_summary")["results"][0]["status"], "OK")
+                self.assertIn("restore would be a no-op", w("nif_editor_results").toPlainText())
+                w("nif_dry_run_diff").setChecked(True)
+                self.assertTrue(w("nif_dry_run").isChecked())
+                w("nif_editor_patch").click()
+                self.assertFalse(w("generate").isEnabled())
+                self.assertFalse(w("nif_scan_start").isEnabled())
+                state["step"] = 1
+            elif step == 1 and w("generate").isEnabled():
+                self.assertEqual(path.read_bytes(), original)
+                self.assertEqual(window.property("nif_editor_summary")["success"], 1)
+                self.assertIn("Diff:", w("nif_editor_results").toPlainText())
+                w("nif_dry_run").setChecked(False)
+                w("nif_editor_patch").click()
+                self.assertEqual(path.read_bytes(), original)
+                self.assertTrue(w("generate").isEnabled())
+                w("nif_editor_patch").click()
+                state["step"] = 2
+            elif step == 2 and w("generate").isEnabled():
+                self.assertNotEqual(path.read_bytes(), original)
+                self.assertEqual(path.with_suffix(".nif.bak").read_bytes(), original)
+                w("nif_scan_start").click()
+                state["step"] = 3
+            elif step == 3 and w("generate").isEnabled():
+                self.assertEqual(w("nif_scan_results").topLevelItemCount(), 1)
+                w("nif_scan_results").setCurrentItem(w("nif_scan_results").topLevelItem(0))
+                w("nif_scan_preview").click()
+                self.assertFalse(w("generate").isEnabled())
+                self.assertFalse(w("nif_editor_patch").isEnabled())
+                state["step"] = 4
+            elif step == 4 and w("generate").isEnabled():
+                w("nif_editor_restore").click()
+                state["step"] = 5
+            elif step == 5 and w("generate").isEnabled():
+                self.assertEqual(path.read_bytes(), original)
+                self.assertTrue(all(value == self.qt.QtWidgets.QMessageBox.StandardButton.No for value in confirmations))
+                return True
+            return False
+
+        with mock.patch.object(self.qt.QtWidgets.QMessageBox, "question", side_effect=confirm):
+            self.run_window(scenario)
+
+    def test_qt_nif_retry_count_uses_and_persists_shared_setting(self) -> None:
+        saved_states = []
+        saved_state = dict(self.qt._GUI_STATE_DEFAULTS)
+        saved_state["nif_retry_count"] = 2
+
+        def scenario(window):
+            retry_count = self.widget(window, "nif_retry_count")
+            self.assertEqual((retry_count.minimum(), retry_count.maximum()), (0, 3))
+            self.assertEqual(retry_count.value(), 2)
+            retry_count.setValue(3)
+            self.assertTrue(saved_states)
+            self.assertEqual(saved_states[-1]["nif_retry_count"], 3)
+            return True
+
+        self.run_window(
+            scenario,
+            load_state=saved_state,
+            save_side_effect=lambda state: saved_states.append(dict(state)),
+        )
+
+    def test_qt_detected_mod_hint_and_profile_restore(self) -> None:
+        detected_mod_dir = self.root / "mods" / "Detected Mod" / "textures"
+        detected_mod_dir.mkdir(parents=True)
+        output_dir = self.root / "output"
+        output_dir.mkdir()
+        manager = "Mod Organizer 2"
+        profile = "Main"
+        profile_key = self.qt._profile_setup_memory_key(manager, profile)
+        saved_state = dict(self.qt._GUI_STATE_DEFAULTS)
+        saved_state.update(
+            {
+                "last_mod_manager": manager,
+                "last_mod_profile": profile,
+                "profile_setup_memory": {
+                    profile_key: {
+                        "render_profile": "truepbr",
+                        "use_custom_output": True,
+                        "output_target": str(output_dir),
+                        "workflow_mode": "advanced",
+                        "target_game": "fallout4",
+                    }
+                },
+            }
+        )
+        saved_states = []
+        context = self.qt.ModManagerContext(
+            manager=manager,
+            profile_name=profile,
+            loaded_texture_dirs=(detected_mod_dir,),
+        )
+
+        def capture_state(state):
+            saved_states.append(json.loads(json.dumps(state)))
+
+        state = {"step": 0}
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                self.assertTrue(w("detected_mod").isEnabled())
+                self.assertTrue(w("restore_profile_setup").isEnabled())
+                w("detected_mod").click()
+                self.assertEqual(w("input_path").text(), str(detected_mod_dir))
+                self.assertIn("Loaded detected mod texture folder", w("generation_status").text())
+                state["step"] = 1
+            elif step == 1:
+                w("restore_profile_setup").click()
+                state["step"] = 2
+            elif step == 2 and w("generate").isEnabled():
+                self.assertEqual(w("render_profile").currentText(), "truepbr")
+                self.assertEqual(w("target_game").currentText(), "fallout4")
+                self.assertEqual(w("workflow_mode").currentText(), self.qt._WORKFLOW_MODE_LABELS["advanced"])
+                self.assertEqual(w("output_dir").text(), str(output_dir))
+                self.assertIn("target game fallout4", w("generation_status").text())
+                self.assertTrue(saved_states)
+                restored_entry = saved_states[-1]["profile_setup_memory"][profile_key]
+                self.assertEqual(restored_entry["render_profile"], "truepbr")
+                self.assertEqual(restored_entry["output_target"], str(output_dir))
+                self.assertEqual(restored_entry["workflow_mode"], "advanced")
+                self.assertEqual(restored_entry["target_game"], "fallout4")
+                return True
+            return False
+
+        self.run_window(
+            scenario,
+            load_state=saved_state,
+            save_side_effect=capture_state,
+            extra_patches=(mock.patch("generate_textures.detect_mod_manager_context", return_value=context),),
+        )
+
+    def test_qt_profile_setup_switcher_restores_selected_saved_setup(self) -> None:
+        manager = "Mod Organizer 2"
+        profile = "Main"
+        current_key = self.qt._profile_setup_memory_key(manager, profile)
+        alternate_key = self.qt._profile_setup_memory_key(manager, "Alt")
+        saved_state = dict(self.qt._GUI_STATE_DEFAULTS)
+        saved_state.update(
+            {
+                "last_mod_manager": manager,
+                "last_mod_profile": profile,
+                "profile_setup_memory": {
+                    current_key: {
+                        "render_profile": "truepbr",
+                        "use_custom_output": True,
+                        "output_target": "/tmp/output",
+                        "workflow_mode": "advanced",
+                        "target_game": "fallout4",
+                    },
+                    alternate_key: {
+                        "render_profile": "community_shaders",
+                        "use_custom_output": False,
+                        "output_target": "",
+                        "workflow_mode": "standard",
+                        "target_game": "skyrim",
+                    },
+                },
+            }
+        )
+        saved_states = []
+        context = self.qt.ModManagerContext(manager=manager, profile_name=profile, loaded_texture_dirs=())
+        state = {"step": 0}
+
+        def capture_state(state_data):
+            saved_states.append(json.loads(json.dumps(state_data)))
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            combo = w("profile_setup_choice")
+            step = state["step"]
+            if step == 0:
+                self.assertGreaterEqual(combo.count(), 2)
+                labels = [combo.itemText(i) for i in range(combo.count())]
+                self.assertTrue(any("renderer Community Shaders" in label for label in labels))
+                alternate_index = combo.findData(alternate_key)
+                self.assertGreaterEqual(alternate_index, 0)
+                combo.setCurrentIndex(alternate_index)
+                self.assertTrue(w("restore_profile_setup").isEnabled())
+                w("restore_profile_setup").click()
+                state["step"] = 1
+            elif step == 1 and w("generate").isEnabled():
+                self.assertEqual(w("render_profile").currentText(), "community_shaders")
+                self.assertEqual(w("workflow_mode").currentText(), self.qt._WORKFLOW_MODE_LABELS["standard"])
+                self.assertEqual(w("target_game").currentText(), "skyrim")
+                self.assertEqual(w("output_dir").text(), "")
+                self.assertIn("Restored remembered setup for", w("generation_status").text())
+                self.assertIn("Mod Organizer 2 / Alt", w("generation_status").text())
+                self.assertTrue(saved_states)
+                restored_entry = saved_states[-1]["profile_setup_memory"][current_key]
+                self.assertEqual(restored_entry["render_profile"], "community_shaders")
+                self.assertEqual(restored_entry["workflow_mode"], "standard")
+                self.assertFalse(restored_entry["use_custom_output"])
+                self.assertEqual(restored_entry["output_target"], "next to input")
+                self.assertEqual(restored_entry["target_game"], "skyrim")
+                return True
+            return False
+
+        self.run_window(
+            scenario,
+            load_state=saved_state,
+            save_side_effect=capture_state,
+            extra_patches=(mock.patch("generate_textures.detect_mod_manager_context", return_value=context),),
+        )
+
+    def test_qt_profile_setup_switcher_restores_named_preset_for_same_profile(self) -> None:
+        manager = "Mod Organizer 2"
+        profile = "Main"
+        current_key = self.qt._profile_setup_memory_key(manager, profile)
+        named_key = self.qt._profile_setup_memory_key(manager, profile, "Architecture")
+        output_dir = self.root / "output"
+        output_dir.mkdir(exist_ok=True)
+        saved_state = dict(self.qt._GUI_STATE_DEFAULTS)
+        saved_state.update(
+            {
+                "last_mod_manager": manager,
+                "last_mod_profile": profile,
+                "profile_setup_memory": {
+                    current_key: {
+                        "render_profile": "vanilla",
+                        "use_custom_output": False,
+                        "output_target": "",
+                        "workflow_mode": "standard",
+                        "target_game": "skyrim",
+                    },
+                    named_key: {
+                        "render_profile": "community_shaders",
+                        "use_custom_output": True,
+                        "output_target": str(output_dir),
+                        "workflow_mode": "advanced",
+                        "target_game": "fallout4",
+                    },
+                },
+            }
+        )
+        saved_states = []
+        context = self.qt.ModManagerContext(manager=manager, profile_name=profile, loaded_texture_dirs=())
+        state = {"step": 0}
+
+        def capture_state(state_data):
+            saved_states.append(json.loads(json.dumps(state_data)))
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            combo = w("profile_setup_choice")
+            step = state["step"]
+            if step == 0:
+                self.assertGreaterEqual(combo.count(), 2)
+                labels = [combo.itemText(i) for i in range(combo.count())]
+                self.assertTrue(any("current setup" in label for label in labels))
+                self.assertTrue(any("preset Architecture" in label for label in labels))
+                named_index = combo.findData(named_key)
+                self.assertGreaterEqual(named_index, 0)
+                combo.setCurrentIndex(named_index)
+                self.assertTrue(w("restore_profile_setup").isEnabled())
+                w("restore_profile_setup").click()
+                state["step"] = 1
+            elif step == 1 and w("generate").isEnabled():
+                self.assertEqual(w("render_profile").currentText(), "community_shaders")
+                self.assertEqual(w("workflow_mode").currentText(), self.qt._WORKFLOW_MODE_LABELS["advanced"])
+                self.assertEqual(w("target_game").currentText(), "fallout4")
+                self.assertEqual(w("output_dir").text(), str(output_dir))
+                self.assertIn("preset Architecture", w("generation_status").text())
+                self.assertTrue(saved_states)
+                self.assertEqual(saved_states[-1]["last_profile_setup_key"], named_key)
+                return True
+            return False
+
+        self.run_window(
+            scenario,
+            load_state=saved_state,
+            save_side_effect=capture_state,
+            extra_patches=(mock.patch("generate_textures.detect_mod_manager_context", return_value=context),),
+        )
+
+    def test_qt_startup_quick_start_banner_applies_safe_preset_and_hides(self) -> None:
+        saved_states = []
+        state = {"step": 0}
+
+        def capture_state(state_data):
+            saved_states.append(json.loads(json.dumps(state_data)))
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                self.assertTrue(w("startup_onboarding").isVisible())
+                self.assertIn("If you're unsure", w("startup_onboarding_text").text())
+                self.assertIn("Recommended next step:", w("startup_onboarding_guidance").text())
+                self.assertIn("choose an input file or folder", w("startup_onboarding_guidance").text())
+                self.assertIn("Step 1:", w("startup_onboarding_text").text())
+                self.assertIn("Step 4:", w("startup_onboarding_text").text())
+                self.assertIn("Step 5:", w("startup_onboarding_text").text())
+                self.assertEqual(w("render_profile").currentText(), "custom")
+                w("startup_onboarding_vanilla").click()
+                self.app.processEvents()
+                self.assertEqual(w("render_profile").currentText(), "vanilla")
+                self.assertFalse(w("startup_onboarding").isVisible())
+                self.assertTrue(w("startup_onboarding_show").isVisible())
+                self.assertEqual(w("tabs").tabText(w("tabs").currentIndex()), "Generation")
+                self.assertEqual(w("generation_status").text(), "Quick start applied: Vanilla.")
+                state["step"] = 1
+                return False
+            if step == 1 and w("generate").isEnabled():
+                self.assertFalse(w("startup_onboarding").isVisible())
+                w("startup_onboarding_show").click()
+                self.app.processEvents()
+                self.assertTrue(w("startup_onboarding").isVisible())
+                self.assertFalse(w("startup_onboarding_show").isVisible())
+                self.assertEqual(w("generation_status").text(), "Quick start reopened.")
+                state["step"] = 2
+                return False
+            if step == 2 and w("generate").isEnabled():
+                self.assertTrue(saved_states)
+                self.assertTrue(saved_states[-1]["show_startup_onboarding"])
+                self.assertEqual(saved_states[-1]["qt_render_profile"], "vanilla")
+                return True
+            return False
+
+        self.run_window(scenario, save_side_effect=capture_state)
+
+    def test_qt_startup_quick_start_suggested_button_uses_context(self) -> None:
+        saved_states = []
+        state = {"step": 0}
+        context = ModManagerContext(manager="Mod Organizer 2", loaded_mods=("ENBSeries",))
+
+        def capture_state(state_data):
+            saved_states.append(json.loads(json.dumps(state_data)))
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                self.assertTrue(w("startup_onboarding").isVisible())
+                self.assertIn("If you're unsure", w("startup_onboarding_text").text())
+                self.assertIn("Step 3:", w("startup_onboarding_text").text())
+                self.assertIn("Step 4:", w("startup_onboarding_text").text())
+                self.assertIn("Step 5:", w("startup_onboarding_text").text())
+                w("startup_onboarding_suggested").click()
+                self.app.processEvents()
+                self.assertEqual(w("render_profile").currentText(), "enb")
+                self.assertFalse(w("startup_onboarding").isVisible())
+                self.assertEqual(w("generation_status").text(), "Quick start applied: ENB.")
+                state["step"] = 1
+                return False
+            if step == 1 and w("generate").isEnabled():
+                self.assertTrue(saved_states)
+                self.assertFalse(saved_states[-1]["show_startup_onboarding"])
+                self.assertEqual(saved_states[-1]["qt_render_profile"], "enb")
+                return True
+            return False
+
+        self.run_window(
+            scenario,
+            save_side_effect=capture_state,
+            extra_patches=(mock.patch("generate_textures.detect_mod_manager_context", return_value=context),),
+        )
+
+    def test_qt_startup_quick_start_guided_button_restores_saved_setup_before_detected_folder(self) -> None:
+        saved_states = []
+        state = {"step": 0}
+        manager = "Mod Organizer 2"
+        profile = "Main"
+        profile_key = self.qt._profile_setup_memory_key(manager, profile)
+        context = ModManagerContext(
+            manager=manager,
+            profile_name=profile,
+            loaded_texture_dirs=(self.root / "mods" / "Texture Pack" / "textures",),
+        )
+        saved_state = dict(self.qt._GUI_STATE_DEFAULTS)
+        saved_state.update(
+            {
+                "last_mod_manager": manager,
+                "last_mod_profile": profile,
+                "profile_setup_memory": {
+                    profile_key: {
+                        "render_profile": "truepbr",
+                        "use_custom_output": True,
+                        "output_target": "/tmp/output",
+                        "workflow_mode": "advanced",
+                        "target_game": "fallout4",
+                    }
+                },
+            }
+        )
+
+        def capture_state(state_data):
+            saved_states.append(json.loads(json.dumps(state_data)))
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                self.assertTrue(w("startup_onboarding").isVisible())
+                self.assertIn("restore the remembered setup", w("startup_onboarding_guidance").text())
+                w("startup_onboarding_guided").click()
+                self.app.processEvents()
+                self.assertEqual(w("render_profile").currentText(), "truepbr")
+                self.assertEqual(w("target_game").currentText(), "fallout4")
+                self.assertEqual(w("workflow_mode").currentText(), self.qt._WORKFLOW_MODE_LABELS["advanced"])
+                self.assertEqual(w("output_dir").text(), "/tmp/output")
+                self.assertIn("use the detected mod folder first", w("startup_onboarding_guidance").text())
+                self.assertTrue(w("startup_onboarding").isVisible())
+                state["step"] = 1
+                return False
+            if step == 1 and w("generate").isEnabled():
+                self.assertTrue(saved_states)
+                self.assertEqual(saved_states[-1]["qt_render_profile"], "truepbr")
+                self.assertEqual(saved_states[-1]["output_path"], "/tmp/output")
+                return True
+            return False
+
+        self.run_window(
+            scenario,
+            load_state=saved_state,
+            save_side_effect=capture_state,
+            extra_patches=(mock.patch("generate_textures.detect_mod_manager_context", return_value=context),),
+        )
+
+    def test_qt_startup_wizard_shows_rationale_and_applies_safe_family(self) -> None:
+        saved_states = []
+        state = {"step": 0}
+
+        def capture_state(state_data):
+            saved_states.append(json.loads(json.dumps(state_data)))
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                w("startup_onboarding_wizard").click()
+                self.app.processEvents()
+                wizard = w("startup_wizard")
+                self.assertTrue(wizard.isVisible())
+                summary = w("startup_wizard_summary").text()
+                steps = w("startup_wizard_steps").text()
+                self.assertIn("Confidence:", summary)
+                self.assertIn("Why not the others:", summary)
+                self.assertIn("Probably incompatible", summary)
+                self.assertIn("Recommended next step:", steps)
+                w("startup_wizard_use_safe_family").click()
+                self.app.processEvents()
+                self.assertEqual(w("render_profile").currentText(), "vanilla")
+                self.assertIsNone(window.findChild(self.qt.QtCore.QObject, "startup_wizard"))
+                self.assertFalse(w("startup_onboarding").isVisible())
+                self.assertTrue(saved_states)
+                self.assertFalse(saved_states[-1]["show_startup_onboarding"])
+                self.assertEqual(saved_states[-1]["qt_render_profile"], "vanilla")
+                state["step"] = 1
+                return True
+            return False
+
+        self.run_window(
+            scenario,
+            save_side_effect=capture_state,
+            extra_patches=(mock.patch("generate_textures.detect_mod_manager_context", return_value=ModManagerContext()),),
+        )
+
+    def test_actual_fallout_editor_opt_in_and_scale_gate(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif, _rewrite_user_version
+        from nif_patcher import scan_nif
+        path = self.root / "fallout.nif"
+        path.write_bytes(_build_minimal_nif(user_ver2=130, shader_layout="real", shader_type=3, parallax_scale=1.0))
+        _rewrite_user_version(path, 11)
+        original = path.read_bytes()
+        state = {"step": 0}
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                w("nif_scan_path").setText(str(path))
+                w("nif_profile").setCurrentText("fallout")
+                w("nif_flag_parallax").setCurrentText("Enable")
+                w("nif_scale_enabled").setChecked(True)
+                w("nif_scale").setValue(2.0)
+                self.assertFalse(w("nif_fallout_allow_parallax_scale").isEnabled())
+                w("nif_editor_patch").click()
+                state["step"] = 1
+            elif step == 1 and w("generate").isEnabled():
+                self.assertEqual(window.property("nif_editor_summary")["failed"], 1)
+                self.assertEqual(path.read_bytes(), original)
+                w("nif_experimental").setChecked(True)
+                self.assertTrue(w("nif_fallout_allow_parallax_scale").isEnabled())
+                w("nif_editor_patch").click()
+                state["step"] = 2
+            elif step == 2 and w("generate").isEnabled():
+                self.assertEqual(window.property("nif_editor_summary")["failed"], 1)
+                self.assertEqual(path.read_bytes(), original)
+                w("nif_fallout_allow_parallax_scale").setChecked(True)
+                w("nif_dry_run").setChecked(False)
+                w("nif_editor_patch").click()
+                state["step"] = 3
+            elif step == 3 and w("generate").isEnabled():
+                self.assertEqual(window.property("nif_editor_summary")["success"], 1)
+                self.assertAlmostEqual(scan_nif(path)[0].parallax_scale, 2.0)
+                self.assertEqual(path.with_suffix(".nif.bak").read_bytes(), original)
+                return True
+            return False
+
+        with mock.patch.object(self.qt.QtWidgets.QMessageBox, "question", return_value=self.qt.QtWidgets.QMessageBox.StandardButton.Yes):
+            self.run_window(scenario)
+
+    def test_qt_nif_editor_autofills_texture_paths_and_preserves_cleared_slots(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        nif_path = self.root / "stone.nif"
+        nif_path.write_bytes(
+            _build_minimal_nif(texture_paths=[r"textures\architecture\stone.dds"] + [""] * 8)
+        )
+        completed = {"value": False}
+
+        def scenario(window):
+            if completed["value"]:
+                return False
+            w = lambda name: self.widget(window, name)
+            w("nif_scan_path").setText(str(nif_path))
+            w("nif_texture_normal").setText(r"textures\manual\keep_n.dds")
+            w("nif_clear_normal").setChecked(True)
+            w("nif_autofill_paths").click()
+            self.assertEqual(w("nif_texture_diffuse").text(), r"textures\architecture\stone.dds")
+            self.assertEqual(w("nif_texture_parallax").text(), r"textures\architecture\stone_p.dds")
+            self.assertEqual(w("nif_texture_normal").text(), r"textures\manual\keep_n.dds")
+            self.assertEqual(w("nif_texture_glow").text(), r"textures\architecture\stone_g.dds")
+            self.assertEqual(w("nif_texture_env_mask").text(), r"textures\architecture\stone_m.dds")
+            self.assertEqual(w("nif_texture_cubemap").text(), r"textures\architecture\stone_e.dds")
+            self.assertIn("Auto-filled 5 texture path(s)", w("nif_editor_status").text())
+            completed["value"] = True
+            return True
+
+        self.run_window(scenario)
+
+    def test_qt_conflict_only_scan_reruns_current_conflict_paths(self) -> None:
+        from types import SimpleNamespace
+
+        folder = self.root / "meshes"
+        folder.mkdir()
+        conflict_path = folder / "conflict.nif"
+        clear_path = folder / "clear.nif"
+        conflict_path.write_bytes(b"conflict fixture")
+        clear_path.write_bytes(b"clear fixture")
+        conflict_group = SimpleNamespace(
+            code="shader_state.envmap_missing_slot5",
+            count=1,
+            game_profile="skyrim",
+            shader_layout="real",
+            examples=("Slot 5 is unresolved.",),
+            suggested_actions=("Add a matching environment mask.",),
+        )
+        conflicted = SimpleNamespace(
+            shader_count=1,
+            ready_count=0,
+            skip_count=0,
+            detected_game_profile="skyrim",
+            has_havok=False,
+            skip_reasons=[],
+            issues=[],
+            suggestions=[],
+            renderer_verdicts={},
+            conflict_report=[conflict_group],
+        )
+        ready = SimpleNamespace(
+            shader_count=1,
+            ready_count=1,
+            skip_count=0,
+            detected_game_profile="skyrim",
+            has_havok=False,
+            skip_reasons=[],
+            issues=[],
+            suggestions=[],
+            renderer_verdicts={},
+            conflict_report=[],
+        )
+        validation_calls = []
+
+        def validate(path):
+            path = Path(path)
+            validation_calls.append(path.name)
+            if path == conflict_path and validation_calls.count(path.name) == 1:
+                return conflicted
+            return ready
+
+        state = {"step": 0}
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            if state["step"] == 0:
+                self.assertFalse(w("nif_scan_conflicts").isEnabled())
+                w("nif_scan_mode").setCurrentIndex(1)
+                w("nif_scan_path").setText(str(folder))
+                w("nif_scan_start").click()
+                state["step"] = 1
+            elif state["step"] == 1 and w("generate").isEnabled():
+                self.assertEqual(w("nif_scan_results").topLevelItemCount(), 2)
+                self.assertTrue(w("nif_scan_conflicts").isEnabled())
+                w("nif_scan_conflicts").click()
+                self.assertFalse(w("nif_scan_conflicts").isEnabled())
+                state["step"] = 2
+            elif state["step"] == 2 and w("generate").isEnabled():
+                self.assertEqual(w("nif_scan_results").topLevelItemCount(), 1)
+                result = w("nif_scan_results").topLevelItem(0).data(
+                    0, self.qt.QtCore.Qt.ItemDataRole.UserRole
+                )
+                self.assertEqual(result["preview"], str(conflict_path))
+                self.assertEqual(validation_calls.count("conflict.nif"), 2)
+                self.assertEqual(validation_calls.count("clear.nif"), 1)
+                self.assertFalse(w("nif_scan_conflicts").isEnabled())
+                return True
+            return False
+
+        with mock.patch("generate_textures.validate_nif_for_parallax", side_effect=validate):
+            self.run_window(scenario)
+
+    def test_qt_conflict_patch_and_remediation_exclude_scan_failures(self) -> None:
+        from types import SimpleNamespace
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        folder = self.root / "meshes"
+        folder.mkdir()
+        conflict_path = folder / "conflict.nif"
+        failure_path = folder / "failure.nif"
+        clear_path = folder / "clear.nif"
+        for path in (conflict_path, failure_path, clear_path):
+            path.write_bytes(_build_minimal_nif())
+
+        conflict_group = SimpleNamespace(
+            code="shader_state.envmap_missing_slot5",
+            count=1,
+            game_profile="skyrim",
+            shader_layout="real",
+            examples=("Slot 5 is unresolved.",),
+            suggested_actions=("Add a matching environment mask.",),
+        )
+        conflicted = SimpleNamespace(
+            shader_count=1,
+            ready_count=0,
+            skip_count=0,
+            detected_game_profile="skyrim",
+            has_havok=False,
+            skip_reasons=[],
+            issues=[],
+            suggestions=[],
+            renderer_notes={},
+            renderer_verdicts={},
+            conflict_report=[conflict_group],
+        )
+        ready = SimpleNamespace(
+            shader_count=1,
+            ready_count=1,
+            skip_count=0,
+            detected_game_profile="skyrim",
+            has_havok=False,
+            skip_reasons=[],
+            issues=[],
+            suggestions=[],
+            renderer_notes={},
+            renderer_verdicts={},
+            conflict_report=[],
+        )
+
+        def validate(path):
+            path = Path(path)
+            if path == failure_path:
+                raise RuntimeError("simulated scan failure")
+            return conflicted if path == conflict_path else ready
+
+        patch_result = SimpleNamespace(
+            success=True,
+            message="Would patch.",
+            warnings=[],
+            errors=[],
+        )
+        remediation_result = SimpleNamespace(
+            success=True,
+            message="Would safely remediate.",
+            warnings=[],
+            errors=[],
+        )
+        state = {"step": 0}
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            if state["step"] == 0:
+                self.assertFalse(w("nif_scan_patch_conflicts").isEnabled())
+                w("nif_scan_mode").setCurrentIndex(1)
+                w("nif_scan_path").setText(str(folder))
+                w("nif_scan_start").click()
+                state["step"] = 1
+            elif state["step"] == 1 and w("generate").isEnabled():
+                self.assertTrue(w("nif_scan_conflicts").isEnabled())
+                self.assertTrue(w("nif_scan_patch_conflicts").isEnabled())
+                self.assertTrue(w("nif_scan_remediate_conflicts").isEnabled())
+                w("nif_scan_patch_conflicts").click()
+                state["step"] = 2
+            elif state["step"] == 2 and w("generate").isEnabled():
+                summary = window.property("nif_editor_summary")
+                self.assertEqual(summary["total"], 1)
+                self.assertEqual(summary["results"][0]["path"], str(conflict_path))
+                self.assertTrue(w("nif_scan_patch_conflicts").isEnabled())
+                self.assertTrue(w("nif_scan_remediate_conflicts").isEnabled())
+                w("nif_scan_remediate_conflicts").click()
+                state["step"] = 3
+            elif state["step"] == 3 and w("generate").isEnabled():
+                summary = window.property("nif_editor_summary")
+                self.assertEqual(summary["total"], 1)
+                self.assertEqual(summary["results"][0]["path"], str(conflict_path))
+                return True
+            return False
+
+        with mock.patch(
+            "generate_textures.validate_nif_for_parallax",
+            side_effect=validate,
+        ), mock.patch(
+            "generate_textures.resolve_nif_editor_patch_options_for_target",
+            side_effect=lambda _path, options: (options, ()),
+        ), mock.patch(
+            "generate_textures.patch_nif",
+            return_value=patch_result,
+        ) as patch_nif_mock, mock.patch(
+            "generate_textures.auto_remediate_nif_conflicts",
+            return_value=(remediation_result, ("safe_fix",)),
+        ) as remediate_mock:
+            self.run_window(scenario)
+
+        self.assertEqual([call.args[0] for call in patch_nif_mock.call_args_list], [conflict_path])
+        self.assertEqual(
+            [call.args[0] for call in remediate_mock.call_args_list],
+            [conflict_path],
+        )
+
+    def test_qt_conflict_write_invalidates_scan_actions(self) -> None:
+        from types import SimpleNamespace
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        path = self.root / "conflict.nif"
+        path.write_bytes(_build_minimal_nif())
+        conflict_group = SimpleNamespace(
+            code="shader_state.envmap_missing_slot5",
+            count=1,
+            game_profile="skyrim",
+            shader_layout="real",
+            examples=("Slot 5 is unresolved.",),
+            suggested_actions=("Add a matching environment mask.",),
+        )
+        conflicted = SimpleNamespace(
+            shader_count=1,
+            ready_count=0,
+            skip_count=0,
+            detected_game_profile="skyrim",
+            has_havok=False,
+            skip_reasons=[],
+            issues=[],
+            suggestions=[],
+            renderer_notes={},
+            renderer_verdicts={},
+            conflict_report=[conflict_group],
+        )
+        patch_result = SimpleNamespace(
+            success=True,
+            message="Patched.",
+            warnings=[],
+            errors=[],
+        )
+        state = {"step": 0}
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            if state["step"] == 0:
+                w("nif_scan_path").setText(str(path))
+                w("nif_scan_start").click()
+                state["step"] = 1
+            elif state["step"] == 1 and w("generate").isEnabled():
+                self.assertTrue(w("nif_scan_conflicts").isEnabled())
+                self.assertTrue(w("nif_scan_patch_conflicts").isEnabled())
+                w("nif_dry_run").setChecked(False)
+                w("nif_scan_patch_conflicts").click()
+                state["step"] = 2
+            elif state["step"] == 2 and w("generate").isEnabled():
+                summary = window.property("nif_editor_summary")
+                self.assertEqual(summary["total"], 1)
+                self.assertFalse(w("nif_scan_conflicts").isEnabled())
+                self.assertFalse(w("nif_scan_patch_conflicts").isEnabled())
+                self.assertFalse(w("nif_scan_remediate_conflicts").isEnabled())
+                self.assertIn("stale", w("nif_scan_status").text().lower())
+                self.assertIn("new nif scan", w("nif_scan_status").text().lower())
+                w("nif_scan_start").click()
+                state["step"] = 3
+            elif state["step"] == 3 and w("generate").isEnabled():
+                self.assertTrue(w("nif_scan_conflicts").isEnabled())
+                self.assertTrue(w("nif_scan_patch_conflicts").isEnabled())
+                w("nif_editor_patch").click()
+                state["step"] = 4
+            elif state["step"] == 4 and w("generate").isEnabled():
+                summary = window.property("nif_editor_summary")
+                self.assertEqual(summary["total"], 1)
+                self.assertFalse(w("nif_scan_conflicts").isEnabled())
+                self.assertFalse(w("nif_scan_patch_conflicts").isEnabled())
+                self.assertFalse(w("nif_scan_remediate_conflicts").isEnabled())
+                self.assertIn("stale", w("nif_scan_status").text().lower())
+                w("nif_scan_start").click()
+                state["step"] = 5
+            elif state["step"] == 5 and w("generate").isEnabled():
+                self.assertTrue(w("nif_scan_patch_conflicts").isEnabled())
+                w("nif_editor_remediate").click()
+                state["step"] = 6
+            elif state["step"] == 6 and w("generate").isEnabled():
+                summary = window.property("nif_editor_summary")
+                self.assertEqual(summary["operation"], "remediate")
+                self.assertFalse(w("nif_scan_conflicts").isEnabled())
+                self.assertFalse(w("nif_scan_patch_conflicts").isEnabled())
+                self.assertIn("stale", w("nif_scan_status").text().lower())
+                w("nif_scan_start").click()
+                state["step"] = 7
+            elif state["step"] == 7 and w("generate").isEnabled():
+                self.assertTrue(w("nif_scan_patch_conflicts").isEnabled())
+                w("nif_editor_restore").click()
+                state["step"] = 8
+            elif state["step"] == 8 and w("generate").isEnabled():
+                summary = window.property("nif_editor_summary")
+                self.assertEqual(summary["operation"], "restore")
+                self.assertFalse(w("nif_scan_conflicts").isEnabled())
+                self.assertFalse(w("nif_scan_patch_conflicts").isEnabled())
+                self.assertFalse(w("nif_scan_remediate_conflicts").isEnabled())
+                self.assertIn("stale", w("nif_scan_status").text().lower())
+                return True
+            return False
+
+        with mock.patch(
+            "generate_textures.validate_nif_for_parallax",
+            return_value=conflicted,
+        ), mock.patch(
+            "generate_textures.resolve_nif_editor_patch_options_for_target",
+            side_effect=lambda _path, options: (options, ()),
+        ), mock.patch(
+            "generate_textures.patch_nif",
+            return_value=patch_result,
+        ) as patch_nif_mock, mock.patch.object(
+            self.qt.QtWidgets.QMessageBox,
+            "question",
+            return_value=self.qt.QtWidgets.QMessageBox.StandardButton.Yes,
+        ), mock.patch(
+            "generate_textures.auto_remediate_nif_conflicts",
+            return_value=(patch_result, ()),
+        ) as remediate_mock, mock.patch(
+            "generate_textures.restore_nif_backups",
+            return_value=[("OK", path.with_suffix(".nif.bak"), "Restored backup.")],
+        ) as restore_mock:
+            self.run_window(scenario)
+        self.assertEqual(
+            [call.args[0] for call in patch_nif_mock.call_args_list],
+            [path, path],
+        )
+        self.assertEqual(
+            [call.args[0] for call in remediate_mock.call_args_list],
+            [path],
+        )
+        self.assertEqual(
+            [call.args[0] for call in restore_mock.call_args_list],
+            [[path]],
+        )
+
+    def test_qt_nif_scan_handoff_prefills_renderer_and_warns_on_mismatch(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+
+        path = self.root / "mods" / "enbseries" / "stone.nif"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(_build_minimal_nif())
+        saved_states = []
+        state = {"step": 0}
+
+        def capture_state(state_data):
+            saved_states.append(json.loads(json.dumps(state_data)))
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                w("nif_scan_path").setText(str(path))
+                w("nif_scan_start").click()
+                state["step"] = 1
+                return False
+            if step == 1 and w("generate").isEnabled():
+                self.assertGreaterEqual(w("nif_scan_results").topLevelItemCount(), 1)
+                w("nif_scan_results").setCurrentItem(w("nif_scan_results").topLevelItem(0))
+                w("nif_scan_open_editor").click()
+                state["step"] = 2
+                return False
+            if step == 2 and w("generate").isEnabled():
+                self.assertEqual(w("tabs").tabText(w("tabs").currentIndex()), "NIF Editor")
+                self.assertEqual(w("nif_scan_path").text(), str(path))
+                self.assertEqual(w("nif_render_profile").currentText(), "enb")
+                self.assertIn("safe patch path", w("nif_editor_guidance").text())
+                self.assertIn("ENB POM", w("nif_editor_guidance").text())
+                self.assertTrue(saved_states)
+                self.assertEqual(saved_states[-1]["nif_render_profile"], "enb")
+                w("nif_render_profile").setCurrentText("vanilla")
+                self.app.processEvents()
+                self.assertIn("Probably incompatible", w("nif_editor_option_warning").text())
+                self.assertIn("ENB", w("nif_editor_option_warning").text())
+                self.assertEqual(saved_states[-1]["nif_render_profile"], "vanilla")
+                return True
+            return False
+
+        self.run_window(scenario, save_side_effect=capture_state)
+
+    def test_actual_editor_close_cancels_folder_between_files(self) -> None:
+        from tests.test_nif_patcher import _build_minimal_nif
+        original = _build_minimal_nif()
+        for index in range(6):
+            (self.root / f"{index}.nif").write_bytes(original)
+        state = {"step": 0}
+        real_patch = self.qt.patch_nif
+
+        def slow_patch(*args, **kwargs):
+            time.sleep(0.05)
+            return real_patch(*args, **kwargs)
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            if state["step"] == 0:
+                w("nif_scan_mode").setCurrentIndex(1)
+                w("nif_scan_path").setText(str(self.root))
+                w("nif_texture_diffuse").setText("textures\\edited.dds")
+                w("nif_editor_patch").click()
+                self.assertTrue(w("nif_editor_cancel").isEnabled())
+                self.assertFalse(window.close())
+                self.assertTrue(window.isVisible())
+                state["step"] = 1
+            elif w("generate").isEnabled():
+                summary = window.property("nif_editor_summary")
+                self.assertTrue(summary["cancelled"])
+                self.assertLess(summary["processed"], 6)
+                self.assertTrue(all(path.read_bytes() == original for path in self.root.glob("*.nif")))
+                return True
+            return False
+
+        with mock.patch("generate_textures.patch_nif", side_effect=slow_patch):
+            self.run_window(scenario)
+
+    def test_actual_six_file_generation_cancel_and_checkpoint_resume(self) -> None:
+        sources = self.root / "source"
+        outputs = self.root / "output"
+        sources.mkdir()
+        checkpoint = self.root / "checkpoint.json"
+        for index in range(6):
+            Image.new("RGB", (8, 8), (index * 30, 80, 120)).save(sources / f"stone{index}.dds")
+        state = {"step": 0}
+        real_generate = self.qt.run_with_options
+
+        def slow_generate(*args, **kwargs):
+            time.sleep(0.05)
+            return real_generate(*args, **kwargs)
+
+        def scenario(window):
+            w = lambda name: self.widget(window, name)
+            step = state["step"]
+            if step == 0:
+                w("input_path").setText(str(sources))
+                w("output_dir").setText(str(outputs))
+                w("checkpoint_path").setText(str(checkpoint))
+                w("generate").click()
+                self.assertFalse(w("nif_editor_patch").isEnabled())
+                self.assertFalse(w("nif_scan_start").isEnabled())
+                state["step"] = 1
+            elif step == 1 and checkpoint.exists():
+                w("cancel_generation").click()
+                self.assertFalse(window.close())
+                self.assertTrue(window.isVisible())
+                state["step"] = 2
+            elif step == 2 and w("generate").isEnabled():
+                summary = window.property("generation_summary")
+                self.assertTrue(summary["cancelled"], summary)
+                self.assertGreater(summary["success"], 0)
+                self.assertLess(summary["success"], 6)
+                state["completed"] = summary["success"]
+                state["checkpoint"] = json.loads(checkpoint.read_text())
+                self.assertTrue(list(outputs.rglob("*.dds")))
+                w("resume_mode").setCurrentText("resume")
+                w("generate").click()
+                state["step"] = 3
+            elif step == 3 and w("generate").isEnabled():
+                summary = window.property("generation_summary")
+                self.assertFalse(summary["cancelled"])
+                self.assertEqual(summary["failed"], 0, summary)
+                self.assertEqual(summary["resumed_completed"], state["completed"])
+                self.assertEqual(summary["success"] + summary["resumed_completed"], 6)
+                self.assertEqual(len(json.loads(checkpoint.read_text())["completed_success_files"]), 6)
+                return True
+            return False
+
+        with mock.patch("generate_textures.run_with_options", side_effect=slow_generate):
+            self.run_window(scenario)
+
+    def test_qt_dismissible_warning_dialog_remembers_and_skips_repeats(self) -> None:
+        parent = self.qt.QtWidgets.QWidget()
+        self.addCleanup(parent.deleteLater)
+        dismissed_warnings: set[str] = set()
+        persisted: list[list[str]] = []
+
+        def persist() -> None:
+            persisted.append(sorted(dismissed_warnings))
+
+        with mock.patch.object(
+            self.qt.QtWidgets.QDialog,
+            "exec",
+            return_value=self.qt.QtWidgets.QDialog.DialogCode.Accepted,
+        ), mock.patch.object(self.qt.QtWidgets.QCheckBox, "isChecked", return_value=True):
+            self.assertTrue(
+                self.qt._show_qt_dismissible_warning_dialog(
+                    parent,
+                    "Generation Warning",
+                    "glow_non_magical",
+                    "Glow map enabled for a stone texture.",
+                    dismissed_warnings,
+                    persist,
+                )
+            )
+
+        self.assertIn("glow_non_magical", dismissed_warnings)
+        self.assertEqual(persisted, [["glow_non_magical"]])
+        with mock.patch.object(
+            self.qt.QtWidgets.QDialog,
+            "exec",
+            side_effect=AssertionError("dismissed warnings should not show the dialog again"),
+        ):
+            self.assertTrue(
+                self.qt._show_qt_dismissible_warning_dialog(
+                    parent,
+                    "Generation Warning",
+                    "glow_non_magical",
+                    "Glow map enabled for a stone texture.",
+                    dismissed_warnings,
+                    persist,
+                )
+            )
+
+    def test_qt_generation_sanity_warning_blocks_before_worker_start(self) -> None:
+        recorded_warnings: list[tuple[str, str, str]] = []
+
+        def capture_warning(parent, title, warning_id, message, dismissed_warnings, persist):
+            recorded_warnings.append((title, warning_id, message))
+            return False
+
+        state = dict(self.qt._GUI_STATE_DEFAULTS)
+        state.update(
+            {
+                "input_path": str(self.root / "stone_wall.dds"),
+                "include_glow": True,
+                "qt_render_profile": "custom",
+            }
+        )
+
+        def scenario(window):
+            widget = lambda name: self.widget(window, name)
+            widget("generate").click()
+            self.assertEqual(len(recorded_warnings), 1)
+            self.assertEqual(recorded_warnings[0][0], "Generation Warning")
+            self.assertEqual(recorded_warnings[0][1], "glow_non_magical")
+            self.assertIn("stone", recorded_warnings[0][2].lower())
+            self.assertTrue(widget("generate").isEnabled())
+            return True
+
+        self.run_window(
+            scenario,
+            load_state=state,
+            extra_patches=(mock.patch("generate_textures._show_qt_dismissible_warning_dialog", side_effect=capture_warning),),
+        )
+
+    def test_qt_generation_output_folder_warning_blocks_before_worker_start(self) -> None:
+        output_dir = self.root / "output"
+        output_dir.mkdir()
+        (output_dir / "legacy_msn.dds").write_bytes(b"")
+        recorded_warnings: list[tuple[str, str, str]] = []
+
+        def capture_warning(parent, title, warning_id, message, dismissed_warnings, persist):
+            recorded_warnings.append((title, warning_id, message))
+            return False
+
+        state = dict(self.qt._GUI_STATE_DEFAULTS)
+        state.update(
+            {
+                "input_path": str(self.root / "plain_source.dds"),
+                "output_path": str(output_dir),
+                "include_complex": True,
+                "include_normal": True,
+                "complex_format": "cm",
+                "qt_render_profile": "custom",
+            }
+        )
+
+        def scenario(window):
+            widget = lambda name: self.widget(window, name)
+            widget("generate").click()
+            self.assertEqual(len(recorded_warnings), 1)
+            self.assertEqual(recorded_warnings[0][0], "Output Folder Warning")
+            self.assertEqual(recorded_warnings[0][1], "output_folder_has_enb_files")
+            self.assertIn("ENB `_msn`", recorded_warnings[0][2])
+            self.assertTrue(widget("generate").isEnabled())
+            return True
+
+        self.run_window(
+            scenario,
+            load_state=state,
+            extra_patches=(mock.patch("generate_textures._show_qt_dismissible_warning_dialog", side_effect=capture_warning),),
+        )
 
 
 if __name__ == "__main__":

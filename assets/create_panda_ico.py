@@ -1,4 +1,4 @@
-"""Generate assets/panda.ico for use as the PyInstaller application icon."""
+"""Generate assets/panda.ico from the bundled source artwork."""
 from __future__ import annotations
 
 import sys
